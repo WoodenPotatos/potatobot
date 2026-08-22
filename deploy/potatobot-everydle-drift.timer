@@ -1,0 +1,15 @@
+# Weekly schedule for the Everydle drift check. See the matching .service unit.
+
+[Unit]
+Description=Weekly PotatoBot Everydle data drift check
+Documentation=https://github.com/WoodenPotatos/potatobotbeta
+
+[Timer]
+OnCalendar=Mon 05:30
+# A missed run (host was off) happens on the next boot rather than being skipped.
+Persistent=true
+# Community APIs should not see a thundering herd on the hour.
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

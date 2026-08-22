@@ -1,0 +1,3957 @@
+{
+  "schema_version": 1,
+  "dataset": "champions",
+  "entities": {
+    "aatrox": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_f96e61964a",
+        "species_bc716ba3f6"
+      ],
+      "resource": [
+        "resource_d01469d0db"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_1336a98079"
+      ],
+      "year": 2013
+    },
+    "ahri": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_098d74f594",
+        "species_00f9fad2c7"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_aae14b8880"
+      ],
+      "year": 2011
+    },
+    "akali": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_cf9e7b8c16",
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_2b7266025f"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880"
+      ],
+      "year": 2010
+    },
+    "akshan": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_033507d560"
+      ],
+      "year": 2021
+    },
+    "alistar": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_b1c2535769"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c",
+        "region_1336a98079"
+      ],
+      "year": 2009
+    },
+    "ambessa": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_cf9e7b8c16",
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_2b7266025f"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c"
+      ],
+      "year": 2024
+    },
+    "amumu": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_8a9dba00fb"
+      ],
+      "year": 2009
+    },
+    "anivia": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_c7ef884000"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_f3def7ab9d"
+      ],
+      "year": 2009
+    },
+    "annie": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_c525a21c6c",
+        "region_bf9d571888"
+      ],
+      "year": 2009
+    },
+    "aphelios": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_bae882d342"
+      ],
+      "year": 2019
+    },
+    "ashe": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080",
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_aead7ce634"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_f3def7ab9d",
+        "region_09855f4f19"
+      ],
+      "year": 2009
+    },
+    "aurelion_sol": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_6f8bdf2746"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_3a6afde176",
+        "region_1336a98079",
+        "region_bae882d342"
+      ],
+      "year": 2016
+    },
+    "aurora": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0",
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_3bcd3ff003"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_f3def7ab9d",
+        "region_39ea218798"
+      ],
+      "year": 2024
+    },
+    "azir": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_9d95703e69",
+        "species_f96e61964a"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_ed4f4c7fbd"
+      ],
+      "year": 2014
+    },
+    "bard": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_e9df4f7c20"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_3a6afde176",
+        "region_1336a98079"
+      ],
+      "year": 2015
+    },
+    "bel_veth": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_a7416a2280"
+      ],
+      "resource": [
+        "resource_d01469d0db"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_dfd6d34cc0",
+        "region_8a9dba00fb",
+        "region_78b21a03d4"
+      ],
+      "year": 2022
+    },
+    "blitzcrank": {
+      "gender": [
+        "gender_172ebf16dc"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_a0d3dca90a"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_ccf067b1c6"
+      ],
+      "year": 2009
+    },
+    "brand": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4",
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_f3def7ab9d",
+        "region_6d556e9139",
+        "region_1336a98079"
+      ],
+      "year": 2011
+    },
+    "braum": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_aead7ce634"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_f3def7ab9d"
+      ],
+      "year": 2014
+    },
+    "briar": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_f31c07139b"
+      ],
+      "resource": [
+        "resource_96f09e815f"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c"
+      ],
+      "year": 2023
+    },
+    "caitlyn": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fd75eb450b"
+      ],
+      "year": 2011
+    },
+    "camille": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_e26013fa9e"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_fd75eb450b"
+      ],
+      "year": 2016
+    },
+    "cassiopeia": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_c525a21c6c"
+      ],
+      "year": 2010
+    },
+    "cho_gath": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_a7416a2280"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_dfd6d34cc0"
+      ],
+      "year": 2009
+    },
+    "corki": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fdf77afa5d"
+      ],
+      "year": 2009
+    },
+    "darius": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c",
+        "region_720048cd8b"
+      ],
+      "year": 2012
+    },
+    "diana": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4",
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_9996f288f7"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_bae882d342"
+      ],
+      "year": 2012
+    },
+    "dr_mundo": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16",
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_1fc6605e76"
+      ],
+      "resource": [
+        "resource_6c07143e9a"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_ccf067b1c6"
+      ],
+      "year": 2009
+    },
+    "draven": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_c525a21c6c",
+        "region_720048cd8b"
+      ],
+      "year": 2012
+    },
+    "ekko": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4",
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_ccf067b1c6"
+      ],
+      "year": 2015
+    },
+    "elise": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170",
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c",
+        "region_ce2805f4b7"
+      ],
+      "year": 2012
+    },
+    "evelynn": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_92a8327aab"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_1336a98079"
+      ],
+      "year": 2009
+    },
+    "ezreal": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fd75eb450b"
+      ],
+      "year": 2010
+    },
+    "fiddlesticks": {
+      "gender": [
+        "gender_94c829cc9f"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_1854ad01f0"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_2e63ad9dc7",
+        "region_1336a98079"
+      ],
+      "year": 2009
+    },
+    "fiora": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_24613a7c5c",
+        "region_0b6b728816"
+      ],
+      "year": 2012
+    },
+    "fizz": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_fdf77afa5d",
+        "region_b5f0fce7a5"
+      ],
+      "year": 2011
+    },
+    "galio": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_9bbdc3fd6c"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_24613a7c5c",
+        "region_0b6b728816"
+      ],
+      "year": 2010
+    },
+    "gangplank": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_e26013fa9e"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_b5f0fce7a5",
+        "region_b4de20baf4"
+      ],
+      "year": 2009
+    },
+    "garen": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_d01469d0db"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_24613a7c5c",
+        "region_b1516f188d"
+      ],
+      "year": 2010
+    },
+    "gnar": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_c9debc3572"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fdf77afa5d",
+        "region_f3def7ab9d",
+        "region_15bf70bd27"
+      ],
+      "year": 2014
+    },
+    "gragas": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4",
+        "role_cf9e7b8c16",
+        "role_49d8ffa38d"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_aead7ce634"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_f3def7ab9d"
+      ],
+      "year": 2010
+    },
+    "graves": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_b5f0fce7a5",
+        "region_b4de20baf4"
+      ],
+      "year": 2011
+    },
+    "gwen": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_14d9a23ef6",
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_ad85a72055",
+        "region_ce2805f4b7"
+      ],
+      "year": 2021
+    },
+    "hecarim": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_88672d5056",
+        "species_81ee80f235"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_ad85a72055",
+        "region_ce2805f4b7"
+      ],
+      "year": 2012
+    },
+    "heimerdinger": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fdf77afa5d",
+        "region_fd75eb450b"
+      ],
+      "year": 2009
+    },
+    "hwei": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0",
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_ab6dda1aaf"
+      ],
+      "year": 2023
+    },
+    "illaoi": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_b5f0fce7a5",
+        "region_b4de20baf4",
+        "region_3753e645e7"
+      ],
+      "year": 2015
+    },
+    "irelia": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_cf9e7b8c16",
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_9496574edd"
+      ],
+      "year": 2010
+    },
+    "ivern": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_f3def7ab9d",
+        "region_aae14b8880"
+      ],
+      "year": 2016
+    },
+    "janna": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_c7ef884000"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_ccf067b1c6"
+      ],
+      "year": 2009
+    },
+    "jarvan_iv": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_24613a7c5c",
+        "region_0b6b728816"
+      ],
+      "year": 2011
+    },
+    "jax": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16",
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_a336ff6d72"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_194ffe145b",
+        "region_1336a98079"
+      ],
+      "year": 2009
+    },
+    "jayce": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170",
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_fd75eb450b"
+      ],
+      "year": 2012
+    },
+    "jhin": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_aae14b8880"
+      ],
+      "year": 2016
+    },
+    "jinx": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_1fc6605e76"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_ccf067b1c6"
+      ],
+      "year": 2013
+    },
+    "k_sante": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_781b011d96"
+      ],
+      "year": 2022
+    },
+    "kai_sa": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_e12f591612"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_ef7063fb91",
+        "region_dfd6d34cc0"
+      ],
+      "year": 2018
+    },
+    "kalista": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_81ee80f235"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_ad85a72055",
+        "region_ce2805f4b7"
+      ],
+      "year": 2014
+    },
+    "karma": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0",
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915",
+        "species_5551ce1335"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_72d6c14a71"
+      ],
+      "year": 2011
+    },
+    "karthus": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_81ee80f235"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_c525a21c6c",
+        "region_ce2805f4b7"
+      ],
+      "year": 2009
+    },
+    "kassadin": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_e12f591612"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_ef7063fb91",
+        "region_dfd6d34cc0"
+      ],
+      "year": 2009
+    },
+    "katarina": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_d01469d0db"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c"
+      ],
+      "year": 2009
+    },
+    "kayle": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d",
+        "species_9996f288f7"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4",
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_bae882d342",
+        "region_24613a7c5c"
+      ],
+      "year": 2009
+    },
+    "kayn": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c",
+        "region_aae14b8880"
+      ],
+      "year": 2017
+    },
+    "kennen": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_2b7266025f"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fdf77afa5d",
+        "region_aae14b8880"
+      ],
+      "year": 2010
+    },
+    "kha_zix": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_a7416a2280"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_dfd6d34cc0"
+      ],
+      "year": 2012
+    },
+    "kindred": {
+      "gender": [
+        "gender_77c5e66692",
+        "gender_5767625f95",
+        "gender_172ebf16dc"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_c7ef884000"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_2e63ad9dc7",
+        "region_1336a98079"
+      ],
+      "year": 2015
+    },
+    "kled": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_78bb3a1f34",
+        "species_4f9cf3c575"
+      ],
+      "resource": [
+        "resource_3a743da85a"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_fdf77afa5d",
+        "region_c525a21c6c"
+      ],
+      "year": 2016
+    },
+    "kog_maw": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_a7416a2280"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_dfd6d34cc0",
+        "region_8a9dba00fb",
+        "region_194ffe145b",
+        "region_1336a98079"
+      ],
+      "year": 2010
+    },
+    "leblanc": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_c525a21c6c"
+      ],
+      "year": 2010
+    },
+    "lee_sin": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_2b7266025f"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880"
+      ],
+      "year": 2011
+    },
+    "leona": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_9996f288f7"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_bae882d342",
+        "region_f32c3c01cf"
+      ],
+      "year": 2011
+    },
+    "lillia": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_ccd90c5fd4"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_9496574edd",
+        "region_4e99201bfc"
+      ],
+      "year": 2020
+    },
+    "lissandra": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_aead7ce634"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_f3def7ab9d"
+      ],
+      "year": 2013
+    },
+    "lucian": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_24613a7c5c"
+      ],
+      "year": 2013
+    },
+    "lulu": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fdf77afa5d"
+      ],
+      "year": 2012
+    },
+    "lux": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0",
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_24613a7c5c",
+        "region_b1516f188d"
+      ],
+      "year": 2010
+    },
+    "malphite": {
+      "gender": [
+        "gender_94c829cc9f"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_38855061f8"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_d729102c45",
+        "region_f4bcec9b44",
+        "region_8a9dba00fb",
+        "region_74ac644af6"
+      ],
+      "year": 2009
+    },
+    "malzahar": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915",
+        "species_e12f591612"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_d114f4c4cd",
+        "region_dfd6d34cc0"
+      ],
+      "year": 2010
+    },
+    "maokai": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a",
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_3f97a34935"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_72c0d40e1b",
+        "region_ce2805f4b7"
+      ],
+      "year": 2011
+    },
+    "master_yi": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_c3e8028b31"
+      ],
+      "year": 2009
+    },
+    "mel": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0",
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_c525a21c6c",
+        "region_fd75eb450b"
+      ],
+      "year": 2025
+    },
+    "milio": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_d729102c45"
+      ],
+      "year": 2023
+    },
+    "miss_fortune": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_b5f0fce7a5",
+        "region_b4de20baf4"
+      ],
+      "year": 2010
+    },
+    "mordekaiser": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_9d95703e69"
+      ],
+      "resource": [
+        "resource_4152596f54"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c",
+        "region_8c0be97f9c"
+      ],
+      "year": 2010
+    },
+    "morgana": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_f6c3d4d56a",
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d",
+        "species_9996f288f7"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_bae882d342",
+        "region_24613a7c5c",
+        "region_e5a8ce7947"
+      ],
+      "year": 2009
+    },
+    "naafiri": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_f96e61964a",
+        "species_6879b90df7",
+        "species_bc716ba3f6"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_1336a98079"
+      ],
+      "year": 2023
+    },
+    "nami": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_f20fc1a660"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_1336a98079",
+        "region_e58859d226",
+        "region_74c176b975"
+      ],
+      "year": 2012
+    },
+    "nasus": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_f96e61964a"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_ed4f4c7fbd"
+      ],
+      "year": 2009
+    },
+    "nautilus": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_9d95703e69"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_b5f0fce7a5",
+        "region_b4de20baf4"
+      ],
+      "year": 2012
+    },
+    "neeko": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0",
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_92834b0740"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_0fe1471f4b",
+        "region_cc75ce5375",
+        "region_d729102c45"
+      ],
+      "year": 2018
+    },
+    "nidalee": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915",
+        "species_0e9978a919"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170",
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_d729102c45"
+      ],
+      "year": 2009
+    },
+    "nilah": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_81b70326ac",
+        "region_b5f0fce7a5"
+      ],
+      "year": 2022
+    },
+    "nocturne": {
+      "gender": [
+        "gender_94c829cc9f"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_92a8327aab"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_2e63ad9dc7",
+        "region_24613a7c5c",
+        "region_e3787e07ec",
+        "region_1336a98079"
+      ],
+      "year": 2011
+    },
+    "nunu_willump": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d",
+        "species_68ee13776b"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_f3def7ab9d",
+        "region_f57ea8f85c",
+        "region_15bf70bd27"
+      ],
+      "year": 2009
+    },
+    "olaf": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_aead7ce634"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_f3def7ab9d",
+        "region_963b73b455"
+      ],
+      "year": 2010
+    },
+    "orianna": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_a0d3dca90a"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fd75eb450b"
+      ],
+      "year": 2011
+    },
+    "ornn": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_c7ef884000"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_f3def7ab9d"
+      ],
+      "year": 2017
+    },
+    "pantheon": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16",
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_9996f288f7",
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_bae882d342",
+        "region_f32c3c01cf"
+      ],
+      "year": 2010
+    },
+    "poppy": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_cf9e7b8c16",
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_fdf77afa5d",
+        "region_24613a7c5c"
+      ],
+      "year": 2010
+    },
+    "pyke": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_9d95703e69"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_b5f0fce7a5",
+        "region_b4de20baf4"
+      ],
+      "year": 2018
+    },
+    "qiyana": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_d729102c45",
+        "region_7a88ae21b7"
+      ],
+      "year": 2019
+    },
+    "quinn": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_24613a7c5c",
+        "region_0b6b728816"
+      ],
+      "year": 2013
+    },
+    "rakan": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_a66f3aa8d1"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_d499497d91",
+        "region_d464155ce6"
+      ],
+      "year": 2017
+    },
+    "rammus": {
+      "gender": [
+        "gender_aeead915a8"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_a336ff6d72"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_8a9dba00fb"
+      ],
+      "year": 2009
+    },
+    "rek_sai": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_ee73cc539e"
+      ],
+      "resource": [
+        "resource_446da68cae"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_dfd6d34cc0",
+        "region_1336a98079",
+        "region_8a9dba00fb"
+      ],
+      "year": 2014
+    },
+    "rell": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c"
+      ],
+      "year": 2020
+    },
+    "renata_glasc": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_1fc6605e76"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_ccf067b1c6"
+      ],
+      "year": 2022
+    },
+    "renekton": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_f96e61964a"
+      ],
+      "resource": [
+        "resource_446da68cae"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_ed4f4c7fbd"
+      ],
+      "year": 2011
+    },
+    "rengar": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_4ac73883ee"
+      ],
+      "resource": [
+        "resource_a3337d761f"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_74ac644af6",
+        "region_84d83e2ba7",
+        "region_d729102c45"
+      ],
+      "year": 2012
+    },
+    "riven": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_d01469d0db"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c",
+        "region_a3fc369c27",
+        "region_aae14b8880"
+      ],
+      "year": 2011
+    },
+    "rumble": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_d2e100a8ce"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_fdf77afa5d"
+      ],
+      "year": 2011
+    },
+    "ryze": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_1336a98079",
+        "region_86501a03f2"
+      ],
+      "year": 2009
+    },
+    "samira": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_d114f4c4cd",
+        "region_c525a21c6c"
+      ],
+      "year": 2020
+    },
+    "sejuani": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_aead7ce634"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_f3def7ab9d"
+      ],
+      "year": 2012
+    },
+    "senna": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080",
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_81ee80f235"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_24613a7c5c",
+        "region_72c0d40e1b"
+      ],
+      "year": 2019
+    },
+    "seraphine": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080",
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fd75eb450b",
+        "region_ccf067b1c6"
+      ],
+      "year": 2020
+    },
+    "sett": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915",
+        "species_0e9978a919"
+      ],
+      "resource": [
+        "resource_bebad9c748"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_9496574edd"
+      ],
+      "year": 2020
+    },
+    "shaco": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_a336ff6d72"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_1336a98079"
+      ],
+      "year": 2009
+    },
+    "shen": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_2b7266025f"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_214495a761"
+      ],
+      "year": 2010
+    },
+    "shyvana": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_c54b925ecd",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_446da68cae"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_fd75eb450b",
+        "region_24613a7c5c"
+      ],
+      "year": 2011
+    },
+    "singed": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_1fc6605e76"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_fd75eb450b",
+        "region_ccf067b1c6"
+      ],
+      "year": 2009
+    },
+    "sion": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_9d95703e69"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c"
+      ],
+      "year": 2009
+    },
+    "sivir": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_8a9dba00fb"
+      ],
+      "year": 2009
+    },
+    "skarner": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4",
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_48617efa63"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_d729102c45"
+      ],
+      "year": 2011
+    },
+    "smolder": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7c58823cb8"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_ad85a72055"
+      ],
+      "year": 2024
+    },
+    "sona": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_24613a7c5c",
+        "region_0b6b728816"
+      ],
+      "year": 2010
+    },
+    "soraka": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_e9df4f7c20"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_0f256ecb83",
+        "region_aae14b8880",
+        "region_bae882d342"
+      ],
+      "year": 2009
+    },
+    "swain": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_c525a21c6c"
+      ],
+      "year": 2010
+    },
+    "sylas": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_24613a7c5c",
+        "region_909303aa53",
+        "region_f3def7ab9d"
+      ],
+      "year": 2019
+    },
+    "syndra": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_9496574edd"
+      ],
+      "year": 2012
+    },
+    "tahm_kench": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_92a8327aab"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_1336a98079",
+        "region_74ac644af6",
+        "region_5585640659",
+        "region_b5f0fce7a5"
+      ],
+      "year": 2015
+    },
+    "taliyah": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4",
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_cb2e9a363c"
+      ],
+      "year": 2016
+    },
+    "talon": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_c525a21c6c"
+      ],
+      "year": 2011
+    },
+    "taric": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_9996f288f7"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_24613a7c5c",
+        "region_bae882d342"
+      ],
+      "year": 2009
+    },
+    "teemo": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fdf77afa5d"
+      ],
+      "year": 2009
+    },
+    "thresh": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_81ee80f235"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_72c0d40e1b",
+        "region_ce2805f4b7"
+      ],
+      "year": 2013
+    },
+    "tristana": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fdf77afa5d"
+      ],
+      "year": 2009
+    },
+    "trundle": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_2e24d14423",
+        "species_aead7ce634"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_f3def7ab9d"
+      ],
+      "year": 2010
+    },
+    "tryndamere": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_446da68cae"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_f3def7ab9d"
+      ],
+      "year": 2009
+    },
+    "twisted_fate": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0",
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_ecf85abe5b",
+        "region_5585640659",
+        "region_b5f0fce7a5"
+      ],
+      "year": 2009
+    },
+    "twitch": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_6e0ed99d03",
+        "species_1fc6605e76"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_ccf067b1c6"
+      ],
+      "year": 2009
+    },
+    "udyr": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16",
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915",
+        "species_0e9978a919"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_f3def7ab9d",
+        "region_aae14b8880"
+      ],
+      "year": 2009
+    },
+    "urgot": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_1fc6605e76",
+        "species_e26013fa9e"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_c525a21c6c",
+        "region_ccf067b1c6"
+      ],
+      "year": 2010
+    },
+    "varus": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_f96e61964a",
+        "species_bc716ba3f6"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_aae14b8880",
+        "region_e8f3679ae7",
+        "region_9496574edd"
+      ],
+      "year": 2012
+    },
+    "vayne": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_24613a7c5c",
+        "region_0b6b728816"
+      ],
+      "year": 2011
+    },
+    "veigar": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fdf77afa5d",
+        "region_1336a98079"
+      ],
+      "year": 2009
+    },
+    "vel_koz": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_a7416a2280"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_dfd6d34cc0",
+        "region_1336a98079"
+      ],
+      "year": 2014
+    },
+    "vex": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fdf77afa5d",
+        "region_ce2805f4b7"
+      ],
+      "year": 2021
+    },
+    "vi": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_ccf067b1c6",
+        "region_fd75eb450b"
+      ],
+      "year": 2012
+    },
+    "viego": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915",
+        "species_81ee80f235"
+      ],
+      "resource": [
+        "resource_d01469d0db"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_ad85a72055",
+        "region_c67dcf5c52",
+        "region_ce2805f4b7"
+      ],
+      "year": 2021
+    },
+    "viktor": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_ccf067b1c6",
+        "region_fd75eb450b"
+      ],
+      "year": 2011
+    },
+    "vladimir": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_2341b40dcc"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_ad85a72055",
+        "region_c67dcf5c52",
+        "region_72c0d40e1b",
+        "region_c525a21c6c"
+      ],
+      "year": 2010
+    },
+    "volibear": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_c7ef884000"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_f3def7ab9d"
+      ],
+      "year": 2011
+    },
+    "warwick": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_1fc6605e76",
+        "species_e26013fa9e"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_ccf067b1c6"
+      ],
+      "year": 2009
+    },
+    "wukong": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_def15e073b"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_f70657f862"
+      ],
+      "year": 2011
+    },
+    "xayah": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_a66f3aa8d1"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_d499497d91",
+        "region_d464155ce6"
+      ],
+      "year": 2017
+    },
+    "xerath": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0",
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_47b3963560"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_74ff0a2990"
+      ],
+      "year": 2011
+    },
+    "xin_zhao": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_de78fe5740",
+        "region_c525a21c6c",
+        "region_24613a7c5c"
+      ],
+      "year": 2010
+    },
+    "yasuo": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16",
+        "role_788b3badc0",
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_1c12f30e2f"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_9496574edd"
+      ],
+      "year": 2013
+    },
+    "yone": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16",
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d",
+        "species_bb9f7c8f70"
+      ],
+      "resource": [
+        "resource_1c12f30e2f"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_9496574edd"
+      ],
+      "year": 2020
+    },
+    "yorick": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_72c0d40e1b",
+        "region_ce2805f4b7"
+      ],
+      "year": 2011
+    },
+    "yunara": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_aae14b8880",
+        "region_2e63ad9dc7"
+      ],
+      "year": 2025
+    },
+    "yuumi": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_6302c01d8a",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fdf77afa5d"
+      ],
+      "year": 2019
+    },
+    "zaahen": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_cf9e7b8c16",
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_f96e61964a",
+        "species_bc716ba3f6"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_aae14b8880",
+        "region_2e63ad9dc7",
+        "region_1336a98079"
+      ],
+      "year": 2025
+    },
+    "zac": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4"
+      ],
+      "species": [
+        "species_baa29c80e3"
+      ],
+      "resource": [
+        "resource_6c07143e9a"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_ccf067b1c6"
+      ],
+      "year": 2013
+    },
+    "zed": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_94df49dba4",
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_8842330a8d"
+      ],
+      "resource": [
+        "resource_2b7266025f"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_aae14b8880"
+      ],
+      "year": 2012
+    },
+    "zeri": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_ccf067b1c6",
+        "region_2d6017974b"
+      ],
+      "year": 2022
+    },
+    "ziggs": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_4ba20ad080"
+      ],
+      "species": [
+        "species_78bb3a1f34"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_fdf77afa5d",
+        "region_fd75eb450b",
+        "region_ccf067b1c6"
+      ],
+      "year": 2012
+    },
+    "zilean": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_0a475e4915"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_8a9dba00fb",
+        "region_194ffe145b",
+        "region_1336a98079"
+      ],
+      "year": 2009
+    },
+    "zoe": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_9996f288f7"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_bae882d342"
+      ],
+      "year": 2017
+    },
+    "zyra": {
+      "gender": [
+        "gender_77c5e66692"
+      ],
+      "role": [
+        "role_f6c3d4d56a"
+      ],
+      "species": [
+        "species_e91effb16f",
+        "species_389b360925"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_e3b1240170"
+      ],
+      "region": [
+        "region_74ac644af6",
+        "region_1b82c1d3f6",
+        "region_d729102c45"
+      ],
+      "year": 2012
+    },
+    "romeo": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_338f65107a"
+      ],
+      "species": [
+        "species_7b36953446",
+        "species_5853915223"
+      ],
+      "resource": [
+        "resource_30a54fed97"
+      ],
+      "range": [
+        "range_326be5a00d"
+      ],
+      "region": [
+        "region_333bc54927"
+      ],
+      "year": 2003
+    }
+  }
+}

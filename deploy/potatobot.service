@@ -1,0 +1,56 @@
+# PotatoBot Discord bot.
+#
+# Install:
+#   sudo cp deploy/potatobot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now potatobot
+#
+# This unit owns schema creation, so start it before the dashboard on a fresh
+# database. Set POTATOBOT_DASHBOARD_ENABLED=false in the environment file when
+# running the dashboard as its own service.
+
+[Unit]
+Description=PotatoBot Discord bot
+Documentation=https://github.com/WoodenPotatos/potatobotbeta
+After=network-online.target
+Wants=network-online.target
+# Discord outages and DNS problems can flap; back off rather than hammer.
+# These are [Unit] keys: systemd moved them out of [Service] in v230 and
+# silently ignores them there, which reverts the backoff to 5-in-10s.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=potatobot
+Group=potatobot
+WorkingDirectory=/opt/potatobot
+EnvironmentFile=/opt/potatobot/.env
+ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/main.py
+
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=30
+
+# The August 2026 incident was host DNS, so keep the journal identifiable.
+SyslogIdentifier=potatobot
+
+# Hardening. The service needs the working directory writable for the database
+# and its WAL sidecars, and nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/potatobot
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

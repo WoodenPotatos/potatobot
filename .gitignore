@@ -1,0 +1,43 @@
+# Secrets. Never commit these.
+.env
+.dashboard_session_secret
+
+# Databases, including the timestamped pre-migration backups that
+# initialize_database() writes and the WAL sidecars beside them.
+*.db*
+*.sqlite3
+backups/
+
+# Runtime state the bot writes into the tree. Everydle persists its daily deck
+# here so the answer survives a restart; committing it would ship one
+# installation's answers to every copy. `requirements.txt` is a stray pip freeze
+# that contradicts requirements.lock and must never be mistaken for the source.
+data/everydle_state.json
+requirements.txt
+
+# Working copies made by scripts/local_dashboard.py: a throwaway database and a
+# throwaway config.json, so a local click can never rewrite the tracked one.
+.local-dev/
+
+# Python virtual environment and bytecode cache
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# Local operator scripts
+backup.sh
+
+# Assistant working files. `todo.md` is the one tracked backlog.
+# `.claude/` itself stays tracked: project instructions, skills and hooks belong
+# in the repository. Only the per-machine override is local.
+.aider*
+.claude/settings.local.json
+todo*
+!todo.md
+
+# Dashboard design reference: local screenshots, several megabytes each.
+dashboard-reference/

@@ -1,0 +1,1223 @@
+{
+  "schema_version": 1,
+  "datasets": {
+    "champions": {
+      "entities": {
+        "aatrox": {
+          "name": "Aatrox",
+          "aliases": [
+            "Aatrox"
+          ]
+        },
+        "ahri": {
+          "name": "Ahri",
+          "aliases": [
+            "Ahri"
+          ]
+        },
+        "akali": {
+          "name": "Akali",
+          "aliases": [
+            "Akali"
+          ]
+        },
+        "akshan": {
+          "name": "Akshan",
+          "aliases": [
+            "Akshan"
+          ]
+        },
+        "alistar": {
+          "name": "Alistar",
+          "aliases": [
+            "Alistar"
+          ]
+        },
+        "ambessa": {
+          "name": "Ambessa",
+          "aliases": [
+            "Ambessa"
+          ]
+        },
+        "amumu": {
+          "name": "Amumu",
+          "aliases": [
+            "Amumu"
+          ]
+        },
+        "anivia": {
+          "name": "Anivia",
+          "aliases": [
+            "Anivia"
+          ]
+        },
+        "annie": {
+          "name": "Annie",
+          "aliases": [
+            "Annie"
+          ]
+        },
+        "aphelios": {
+          "name": "Aphelios",
+          "aliases": [
+            "Aphelios"
+          ]
+        },
+        "ashe": {
+          "name": "Ashe",
+          "aliases": [
+            "Ashe"
+          ]
+        },
+        "aurelion_sol": {
+          "name": "Aurelion Sol",
+          "aliases": [
+            "Aurelion Sol"
+          ]
+        },
+        "aurora": {
+          "name": "Aurora",
+          "aliases": [
+            "Aurora"
+          ]
+        },
+        "azir": {
+          "name": "Azir",
+          "aliases": [
+            "Azir"
+          ]
+        },
+        "bard": {
+          "name": "Bard",
+          "aliases": [
+            "Bard"
+          ]
+        },
+        "bel_veth": {
+          "name": "Bel'Veth",
+          "aliases": [
+            "Bel'Veth"
+          ]
+        },
+        "blitzcrank": {
+          "name": "Blitzcrank",
+          "aliases": [
+            "Blitzcrank"
+          ]
+        },
+        "brand": {
+          "name": "Brand",
+          "aliases": [
+            "Brand"
+          ]
+        },
+        "braum": {
+          "name": "Braum",
+          "aliases": [
+            "Braum"
+          ]
+        },
+        "briar": {
+          "name": "Briar",
+          "aliases": [
+            "Briar"
+          ]
+        },
+        "caitlyn": {
+          "name": "Caitlyn",
+          "aliases": [
+            "Caitlyn"
+          ]
+        },
+        "camille": {
+          "name": "Camille",
+          "aliases": [
+            "Camille"
+          ]
+        },
+        "cassiopeia": {
+          "name": "Cassiopeia",
+          "aliases": [
+            "Cassiopeia"
+          ]
+        },
+        "cho_gath": {
+          "name": "Cho'Gath",
+          "aliases": [
+            "Cho'Gath"
+          ]
+        },
+        "corki": {
+          "name": "Corki",
+          "aliases": [
+            "Corki"
+          ]
+        },
+        "darius": {
+          "name": "Darius",
+          "aliases": [
+            "Darius"
+          ]
+        },
+        "diana": {
+          "name": "Diana",
+          "aliases": [
+            "Diana"
+          ]
+        },
+        "dr_mundo": {
+          "name": "Dr.Mundo",
+          "aliases": [
+            "Dr.Mundo"
+          ]
+        },
+        "draven": {
+          "name": "Draven",
+          "aliases": [
+            "Draven"
+          ]
+        },
+        "ekko": {
+          "name": "Ekko",
+          "aliases": [
+            "Ekko"
+          ]
+        },
+        "elise": {
+          "name": "Elise",
+          "aliases": [
+            "Elise"
+          ]
+        },
+        "evelynn": {
+          "name": "Evelynn",
+          "aliases": [
+            "Evelynn"
+          ]
+        },
+        "ezreal": {
+          "name": "Ezreal",
+          "aliases": [
+            "Ezreal"
+          ]
+        },
+        "fiddlesticks": {
+          "name": "Fiddlesticks",
+          "aliases": [
+            "Fiddlesticks"
+          ]
+        },
+        "fiora": {
+          "name": "Fiora",
+          "aliases": [
+            "Fiora"
+          ]
+        },
+        "fizz": {
+          "name": "Fizz",
+          "aliases": [
+            "Fizz"
+          ]
+        },
+        "galio": {
+          "name": "Galio",
+          "aliases": [
+            "Galio"
+          ]
+        },
+        "gangplank": {
+          "name": "Gangplank",
+          "aliases": [
+            "Gangplank"
+          ]
+        },
+        "garen": {
+          "name": "Garen",
+          "aliases": [
+            "Garen"
+          ]
+        },
+        "gnar": {
+          "name": "Gnar",
+          "aliases": [
+            "Gnar"
+          ]
+        },
+        "gragas": {
+          "name": "Gragas",
+          "aliases": [
+            "Gragas"
+          ]
+        },
+        "graves": {
+          "name": "Graves",
+          "aliases": [
+            "Graves"
+          ]
+        },
+        "gwen": {
+          "name": "Gwen",
+          "aliases": [
+            "Gwen"
+          ]
+        },
+        "hecarim": {
+          "name": "Hecarim",
+          "aliases": [
+            "Hecarim"
+          ]
+        },
+        "heimerdinger": {
+          "name": "Heimerdinger",
+          "aliases": [
+            "Heimerdinger"
+          ]
+        },
+        "hwei": {
+          "name": "Hwei",
+          "aliases": [
+            "Hwei"
+          ]
+        },
+        "illaoi": {
+          "name": "Illaoi",
+          "aliases": [
+            "Illaoi"
+          ]
+        },
+        "irelia": {
+          "name": "Irelia",
+          "aliases": [
+            "Irelia"
+          ]
+        },
+        "ivern": {
+          "name": "Ivern",
+          "aliases": [
+            "Ivern"
+          ]
+        },
+        "janna": {
+          "name": "Janna",
+          "aliases": [
+            "Janna"
+          ]
+        },
+        "jarvan_iv": {
+          "name": "Jarvan IV",
+          "aliases": [
+            "Jarvan IV"
+          ]
+        },
+        "jax": {
+          "name": "Jax",
+          "aliases": [
+            "Jax"
+          ]
+        },
+        "jayce": {
+          "name": "Jayce",
+          "aliases": [
+            "Jayce"
+          ]
+        },
+        "jhin": {
+          "name": "Jhin",
+          "aliases": [
+            "Jhin"
+          ]
+        },
+        "jinx": {
+          "name": "Jinx",
+          "aliases": [
+            "Jinx"
+          ]
+        },
+        "k_sante": {
+          "name": "K'Sante",
+          "aliases": [
+            "K'Sante"
+          ]
+        },
+        "kai_sa": {
+          "name": "Kai'Sa",
+          "aliases": [
+            "Kai'Sa"
+          ]
+        },
+        "kalista": {
+          "name": "Kalista",
+          "aliases": [
+            "Kalista"
+          ]
+        },
+        "karma": {
+          "name": "Karma",
+          "aliases": [
+            "Karma"
+          ]
+        },
+        "karthus": {
+          "name": "Karthus",
+          "aliases": [
+            "Karthus"
+          ]
+        },
+        "kassadin": {
+          "name": "Kassadin",
+          "aliases": [
+            "Kassadin"
+          ]
+        },
+        "katarina": {
+          "name": "Katarina",
+          "aliases": [
+            "Katarina"
+          ]
+        },
+        "kayle": {
+          "name": "Kayle",
+          "aliases": [
+            "Kayle"
+          ]
+        },
+        "kayn": {
+          "name": "Kayn",
+          "aliases": [
+            "Kayn"
+          ]
+        },
+        "kennen": {
+          "name": "Kennen",
+          "aliases": [
+            "Kennen"
+          ]
+        },
+        "kha_zix": {
+          "name": "Kha'Zix",
+          "aliases": [
+            "Kha'Zix"
+          ]
+        },
+        "kindred": {
+          "name": "Kindred",
+          "aliases": [
+            "Kindred"
+          ]
+        },
+        "kled": {
+          "name": "Kled",
+          "aliases": [
+            "Kled"
+          ]
+        },
+        "kog_maw": {
+          "name": "Kog'Maw",
+          "aliases": [
+            "Kog'Maw"
+          ]
+        },
+        "leblanc": {
+          "name": "LeBlanc",
+          "aliases": [
+            "LeBlanc"
+          ]
+        },
+        "lee_sin": {
+          "name": "Lee Sin",
+          "aliases": [
+            "Lee Sin"
+          ]
+        },
+        "leona": {
+          "name": "Leona",
+          "aliases": [
+            "Leona"
+          ]
+        },
+        "lillia": {
+          "name": "Lillia",
+          "aliases": [
+            "Lillia"
+          ]
+        },
+        "lissandra": {
+          "name": "Lissandra",
+          "aliases": [
+            "Lissandra"
+          ]
+        },
+        "lucian": {
+          "name": "Lucian",
+          "aliases": [
+            "Lucian"
+          ]
+        },
+        "lulu": {
+          "name": "Lulu",
+          "aliases": [
+            "Lulu"
+          ]
+        },
+        "lux": {
+          "name": "Lux",
+          "aliases": [
+            "Lux"
+          ]
+        },
+        "malphite": {
+          "name": "Malphite",
+          "aliases": [
+            "Malphite"
+          ]
+        },
+        "malzahar": {
+          "name": "Malzahar",
+          "aliases": [
+            "Malzahar"
+          ]
+        },
+        "maokai": {
+          "name": "Maokai",
+          "aliases": [
+            "Maokai"
+          ]
+        },
+        "master_yi": {
+          "name": "Master Yi",
+          "aliases": [
+            "Master Yi"
+          ]
+        },
+        "mel": {
+          "name": "Mel",
+          "aliases": [
+            "Mel"
+          ]
+        },
+        "milio": {
+          "name": "Milio",
+          "aliases": [
+            "Milio"
+          ]
+        },
+        "miss_fortune": {
+          "name": "Miss Fortune",
+          "aliases": [
+            "Miss Fortune"
+          ]
+        },
+        "mordekaiser": {
+          "name": "Mordekaiser",
+          "aliases": [
+            "Mordekaiser"
+          ]
+        },
+        "morgana": {
+          "name": "Morgana",
+          "aliases": [
+            "Morgana"
+          ]
+        },
+        "naafiri": {
+          "name": "Naafiri",
+          "aliases": [
+            "Naafiri"
+          ]
+        },
+        "nami": {
+          "name": "Nami",
+          "aliases": [
+            "Nami"
+          ]
+        },
+        "nasus": {
+          "name": "Nasus",
+          "aliases": [
+            "Nasus"
+          ]
+        },
+        "nautilus": {
+          "name": "Nautilus",
+          "aliases": [
+            "Nautilus"
+          ]
+        },
+        "neeko": {
+          "name": "Neeko",
+          "aliases": [
+            "Neeko"
+          ]
+        },
+        "nidalee": {
+          "name": "Nidalee",
+          "aliases": [
+            "Nidalee"
+          ]
+        },
+        "nilah": {
+          "name": "Nilah",
+          "aliases": [
+            "Nilah"
+          ]
+        },
+        "nocturne": {
+          "name": "Nocturne",
+          "aliases": [
+            "Nocturne"
+          ]
+        },
+        "nunu_willump": {
+          "name": "Nunu & Willump",
+          "aliases": [
+            "Nunu & Willump"
+          ]
+        },
+        "olaf": {
+          "name": "Olaf",
+          "aliases": [
+            "Olaf"
+          ]
+        },
+        "orianna": {
+          "name": "Orianna",
+          "aliases": [
+            "Orianna"
+          ]
+        },
+        "ornn": {
+          "name": "Ornn",
+          "aliases": [
+            "Ornn"
+          ]
+        },
+        "pantheon": {
+          "name": "Pantheon",
+          "aliases": [
+            "Pantheon"
+          ]
+        },
+        "poppy": {
+          "name": "Poppy",
+          "aliases": [
+            "Poppy"
+          ]
+        },
+        "pyke": {
+          "name": "Pyke",
+          "aliases": [
+            "Pyke"
+          ]
+        },
+        "qiyana": {
+          "name": "Qiyana",
+          "aliases": [
+            "Qiyana"
+          ]
+        },
+        "quinn": {
+          "name": "Quinn",
+          "aliases": [
+            "Quinn"
+          ]
+        },
+        "rakan": {
+          "name": "Rakan",
+          "aliases": [
+            "Rakan"
+          ]
+        },
+        "rammus": {
+          "name": "Rammus",
+          "aliases": [
+            "Rammus"
+          ]
+        },
+        "rek_sai": {
+          "name": "Rek'Sai",
+          "aliases": [
+            "Rek'Sai"
+          ]
+        },
+        "rell": {
+          "name": "Rell",
+          "aliases": [
+            "Rell"
+          ]
+        },
+        "renata_glasc": {
+          "name": "Renata Glasc",
+          "aliases": [
+            "Renata Glasc"
+          ]
+        },
+        "renekton": {
+          "name": "Renekton",
+          "aliases": [
+            "Renekton"
+          ]
+        },
+        "rengar": {
+          "name": "Rengar",
+          "aliases": [
+            "Rengar"
+          ]
+        },
+        "riven": {
+          "name": "Riven",
+          "aliases": [
+            "Riven"
+          ]
+        },
+        "rumble": {
+          "name": "Rumble",
+          "aliases": [
+            "Rumble"
+          ]
+        },
+        "ryze": {
+          "name": "Ryze",
+          "aliases": [
+            "Ryze"
+          ]
+        },
+        "samira": {
+          "name": "Samira",
+          "aliases": [
+            "Samira"
+          ]
+        },
+        "sejuani": {
+          "name": "Sejuani",
+          "aliases": [
+            "Sejuani"
+          ]
+        },
+        "senna": {
+          "name": "Senna",
+          "aliases": [
+            "Senna"
+          ]
+        },
+        "seraphine": {
+          "name": "Seraphine",
+          "aliases": [
+            "Seraphine"
+          ]
+        },
+        "sett": {
+          "name": "Sett",
+          "aliases": [
+            "Sett"
+          ]
+        },
+        "shaco": {
+          "name": "Shaco",
+          "aliases": [
+            "Shaco"
+          ]
+        },
+        "shen": {
+          "name": "Shen",
+          "aliases": [
+            "Shen"
+          ]
+        },
+        "shyvana": {
+          "name": "Shyvana",
+          "aliases": [
+            "Shyvana"
+          ]
+        },
+        "singed": {
+          "name": "Singed",
+          "aliases": [
+            "Singed"
+          ]
+        },
+        "sion": {
+          "name": "Sion",
+          "aliases": [
+            "Sion"
+          ]
+        },
+        "sivir": {
+          "name": "Sivir",
+          "aliases": [
+            "Sivir"
+          ]
+        },
+        "skarner": {
+          "name": "Skarner",
+          "aliases": [
+            "Skarner"
+          ]
+        },
+        "smolder": {
+          "name": "Smolder",
+          "aliases": [
+            "Smolder"
+          ]
+        },
+        "sona": {
+          "name": "Sona",
+          "aliases": [
+            "Sona"
+          ]
+        },
+        "soraka": {
+          "name": "Soraka",
+          "aliases": [
+            "Soraka"
+          ]
+        },
+        "swain": {
+          "name": "Swain",
+          "aliases": [
+            "Swain"
+          ]
+        },
+        "sylas": {
+          "name": "Sylas",
+          "aliases": [
+            "Sylas"
+          ]
+        },
+        "syndra": {
+          "name": "Syndra",
+          "aliases": [
+            "Syndra"
+          ]
+        },
+        "tahm_kench": {
+          "name": "Tahm Kench",
+          "aliases": [
+            "Tahm Kench"
+          ]
+        },
+        "taliyah": {
+          "name": "Taliyah",
+          "aliases": [
+            "Taliyah"
+          ]
+        },
+        "talon": {
+          "name": "Talon",
+          "aliases": [
+            "Talon"
+          ]
+        },
+        "taric": {
+          "name": "Taric",
+          "aliases": [
+            "Taric"
+          ]
+        },
+        "teemo": {
+          "name": "Teemo",
+          "aliases": [
+            "Teemo"
+          ]
+        },
+        "thresh": {
+          "name": "Thresh",
+          "aliases": [
+            "Thresh"
+          ]
+        },
+        "tristana": {
+          "name": "Tristana",
+          "aliases": [
+            "Tristana"
+          ]
+        },
+        "trundle": {
+          "name": "Trundle",
+          "aliases": [
+            "Trundle"
+          ]
+        },
+        "tryndamere": {
+          "name": "Tryndamere",
+          "aliases": [
+            "Tryndamere"
+          ]
+        },
+        "twisted_fate": {
+          "name": "Twisted Fate",
+          "aliases": [
+            "Twisted Fate"
+          ]
+        },
+        "twitch": {
+          "name": "Twitch",
+          "aliases": [
+            "Twitch"
+          ]
+        },
+        "udyr": {
+          "name": "Udyr",
+          "aliases": [
+            "Udyr"
+          ]
+        },
+        "urgot": {
+          "name": "Urgot",
+          "aliases": [
+            "Urgot"
+          ]
+        },
+        "varus": {
+          "name": "Varus",
+          "aliases": [
+            "Varus"
+          ]
+        },
+        "vayne": {
+          "name": "Vayne",
+          "aliases": [
+            "Vayne"
+          ]
+        },
+        "veigar": {
+          "name": "Veigar",
+          "aliases": [
+            "Veigar"
+          ]
+        },
+        "vel_koz": {
+          "name": "Vel'Koz",
+          "aliases": [
+            "Vel'Koz"
+          ]
+        },
+        "vex": {
+          "name": "Vex",
+          "aliases": [
+            "Vex"
+          ]
+        },
+        "vi": {
+          "name": "Vi",
+          "aliases": [
+            "Vi"
+          ]
+        },
+        "viego": {
+          "name": "Viego",
+          "aliases": [
+            "Viego"
+          ]
+        },
+        "viktor": {
+          "name": "Viktor",
+          "aliases": [
+            "Viktor"
+          ]
+        },
+        "vladimir": {
+          "name": "Vladimir",
+          "aliases": [
+            "Vladimir"
+          ]
+        },
+        "volibear": {
+          "name": "Volibear",
+          "aliases": [
+            "Volibear"
+          ]
+        },
+        "warwick": {
+          "name": "Warwick",
+          "aliases": [
+            "Warwick"
+          ]
+        },
+        "wukong": {
+          "name": "Wukong",
+          "aliases": [
+            "Wukong"
+          ]
+        },
+        "xayah": {
+          "name": "Xayah",
+          "aliases": [
+            "Xayah"
+          ]
+        },
+        "xerath": {
+          "name": "Xerath",
+          "aliases": [
+            "Xerath"
+          ]
+        },
+        "xin_zhao": {
+          "name": "Xin Zhao",
+          "aliases": [
+            "Xin Zhao"
+          ]
+        },
+        "yasuo": {
+          "name": "Yasuo",
+          "aliases": [
+            "Yasuo"
+          ]
+        },
+        "yone": {
+          "name": "Yone",
+          "aliases": [
+            "Yone"
+          ]
+        },
+        "yorick": {
+          "name": "Yorick",
+          "aliases": [
+            "Yorick"
+          ]
+        },
+        "yunara": {
+          "name": "Yunara",
+          "aliases": [
+            "Yunara"
+          ]
+        },
+        "yuumi": {
+          "name": "Yuumi",
+          "aliases": [
+            "Yuumi"
+          ]
+        },
+        "zaahen": {
+          "name": "Zaahen",
+          "aliases": [
+            "Zaahen"
+          ]
+        },
+        "zac": {
+          "name": "Zac",
+          "aliases": [
+            "Zac"
+          ]
+        },
+        "zed": {
+          "name": "Zed",
+          "aliases": [
+            "Zed"
+          ]
+        },
+        "zeri": {
+          "name": "Zeri",
+          "aliases": [
+            "Zeri"
+          ]
+        },
+        "ziggs": {
+          "name": "Ziggs",
+          "aliases": [
+            "Ziggs"
+          ]
+        },
+        "zilean": {
+          "name": "Zilean",
+          "aliases": [
+            "Zilean"
+          ]
+        },
+        "zoe": {
+          "name": "Zoe",
+          "aliases": [
+            "Zoe"
+          ]
+        },
+        "zyra": {
+          "name": "Zyra",
+          "aliases": [
+            "Zyra"
+          ]
+        },
+        "romeo": {
+          "name": "Rómeó",
+          "aliases": [
+            "Rómeó"
+          ]
+        }
+      },
+      "attributes": {
+        "gender": {
+          "gender_5767625f95": "Férfi",
+          "gender_77c5e66692": "Nő",
+          "gender_172ebf16dc": "Egyéb",
+          "gender_94c829cc9f": "Az",
+          "gender_aeead915a8": "Gördülő"
+        },
+        "role": {
+          "role_cf9e7b8c16": "Top",
+          "role_788b3badc0": "Middle",
+          "role_f6c3d4d56a": "Support",
+          "role_94df49dba4": "Jungle",
+          "role_4ba20ad080": "Bottom",
+          "role_49d8ffa38d": "Mid",
+          "role_338f65107a": "All-Rounder"
+        },
+        "species": {
+          "species_7b36953446": "Ember",
+          "species_f96e61964a": "Isten Harcos",
+          "species_bc716ba3f6": "Darkin",
+          "species_098d74f594": "Vastayashai'rei",
+          "species_00f9fad2c7": "Vesani",
+          "species_b1c2535769": "Minotaurusz",
+          "species_78bb3a1f34": "Yordle",
+          "species_c7ef884000": "Lélek Isten",
+          "species_0a475e4915": "Mágikus",
+          "species_aead7ce634": "Jégszülött",
+          "species_6f8bdf2746": "Égi Sárkány",
+          "species_3bcd3ff003": "Bryni",
+          "species_9d95703e69": "Visszatérő",
+          "species_e9df4f7c20": "Égi",
+          "species_a7416a2280": "Ürességszülött",
+          "species_a0d3dca90a": "Techmaturgiai Gólem",
+          "species_8842330a8d": "Mágikusan átformált",
+          "species_f31c07139b": "Vérgólem",
+          "species_e26013fa9e": "Kiborg",
+          "species_9996f288f7": "Aspektus gazda",
+          "species_1fc6605e76": "Vegyileg átformált",
+          "species_92a8327aab": "Kisebb Démon",
+          "species_1854ad01f0": "Ősi Démon",
+          "species_9bbdc3fd6c": "Petricit Gólem",
+          "species_14d9a23ef6": "Baba",
+          "species_88672d5056": "Ló",
+          "species_81ee80f235": "Lidérc",
+          "species_a336ff6d72": "Ismeretlen",
+          "species_e12f591612": "Ürességérintett",
+          "species_5551ce1335": "Reinkarnált Lélek",
+          "species_4f9cf3c575": "Drakalops",
+          "species_ccd90c5fd4": "Tündér őz",
+          "species_38855061f8": "Elementális Gólem",
+          "species_3f97a34935": "Ent",
+          "species_6879b90df7": "Dűne Vadászkutyák",
+          "species_f20fc1a660": "Marai",
+          "species_92834b0740": "Oovi-Kat",
+          "species_0e9978a919": "Vastayah",
+          "species_68ee13776b": "Yeti",
+          "species_a66f3aa8d1": "Lhotlan",
+          "species_ee73cc539e": "Xer'Sai",
+          "species_4ac73883ee": "Kiilash",
+          "species_c54b925ecd": "Földi Sárkány",
+          "species_48617efa63": "Brackern",
+          "species_7c58823cb8": "Sárkány",
+          "species_2e24d14423": "Troll",
+          "species_6e0ed99d03": "Pestis Patkány",
+          "species_def15e073b": "Shimon",
+          "species_47b3963560": "Baccai",
+          "species_bb9f7c8f70": "Azakana",
+          "species_6302c01d8a": "Macska",
+          "species_baa29c80e3": "Szivárgás Gólem",
+          "species_e91effb16f": "Növény",
+          "species_389b360925": "Ember hibrid",
+          "species_5853915223": "Isten"
+        },
+        "resource": {
+          "resource_d01469d0db": "Mananélküli",
+          "resource_ea8c99f7d1": "Mana",
+          "resource_2b7266025f": "Energia",
+          "resource_96f09e815f": "Őrjöngés",
+          "resource_6c07143e9a": "Életerő költség",
+          "resource_c9debc3572": "Harag",
+          "resource_3a743da85a": "Bátorság",
+          "resource_4152596f54": "Pajzs",
+          "resource_446da68cae": "Düh",
+          "resource_a3337d761f": "Vadság",
+          "resource_d2e100a8ce": "Hőség",
+          "resource_bebad9c748": "Szívósság",
+          "resource_2341b40dcc": "Karmazsin Roham",
+          "resource_1c12f30e2f": "Áramlás",
+          "resource_30a54fed97": "Tápanyag"
+        },
+        "range": {
+          "range_cd8df7b3e4": "Közelharci",
+          "range_e3b1240170": "Távolsági",
+          "range_326be5a00d": "Mindenhol"
+        },
+        "region": {
+          "region_8a9dba00fb": "Shurima",
+          "region_1336a98079": "Runeterra",
+          "region_aae14b8880": "Ionia",
+          "region_033507d560": "Vekaura",
+          "region_c525a21c6c": "Noxus",
+          "region_f3def7ab9d": "Freljord",
+          "region_bf9d571888": "Vastüske Hegység",
+          "region_bae882d342": "Targon",
+          "region_09855f4f19": "Vathcaer",
+          "region_3a6afde176": "Égi Birodalom",
+          "region_39ea218798": "Aamu",
+          "region_ed4f4c7fbd": "Shurima város",
+          "region_dfd6d34cc0": "Üresség",
+          "region_78b21a03d4": "Belveth",
+          "region_ccf067b1c6": "Zaun",
+          "region_6d556e9139": "Rygann kanyarulata",
+          "region_fd75eb450b": "Piltover",
+          "region_fdf77afa5d": "Bandle város",
+          "region_720048cd8b": "Basilich",
+          "region_ce2805f4b7": "Árny-szigetek",
+          "region_2e63ad9dc7": "Lélek Birodalom",
+          "region_24613a7c5c": "Demacia",
+          "region_0b6b728816": "Demacia város",
+          "region_b5f0fce7a5": "Bilgewater",
+          "region_b4de20baf4": "Kígyó-szigetek",
+          "region_b1516f188d": "Magas Ezüstpuszta",
+          "region_15bf70bd27": "Ramshara",
+          "region_ad85a72055": "Camavor",
+          "region_ab6dda1aaf": "Koyehn",
+          "region_3753e645e7": "Buhru",
+          "region_9496574edd": "Navori",
+          "region_194ffe145b": "Icathia",
+          "region_781b011d96": "Nazumah",
+          "region_ef7063fb91": "Sai",
+          "region_72d6c14a71": "Északi Magasföldek",
+          "region_f32c3c01cf": "Rakkor Barlangok",
+          "region_4e99201bfc": "A Felejtés Kertje",
+          "region_d729102c45": "Ixtal",
+          "region_f4bcec9b44": "Monolith",
+          "region_74ac644af6": "Shurimai Dzsungel",
+          "region_d114f4c4cd": "Amakra",
+          "region_72c0d40e1b": "Áldott-szigetek",
+          "region_c3e8028b31": "Wuju",
+          "region_8c0be97f9c": "Mitna Rachnun",
+          "region_e5a8ce7947": "Szent erdő",
+          "region_e58859d226": "Marai Terület",
+          "region_74c176b975": "Marai falu",
+          "region_0fe1471f4b": "Végtelen Óceán",
+          "region_cc75ce5375": "Oovi-Kat sziget",
+          "region_81b70326ac": "Kathkan",
+          "region_e3787e07ec": "Sziklás Magasföldek",
+          "region_f57ea8f85c": "Notai törzs",
+          "region_963b73b455": "Lokfar",
+          "region_7a88ae21b7": "Ixaocan",
+          "region_d499497d91": "Qaelin",
+          "region_d464155ce6": "Lhotlan falu",
+          "region_84d83e2ba7": "Kiilash falu",
+          "region_a3fc369c27": "Trevale",
+          "region_86501a03f2": "Khom",
+          "region_214495a761": "Thanjuul Temploma",
+          "region_0f256ecb83": "A Mennyek",
+          "region_909303aa53": "Dregbourne",
+          "region_5585640659": "Kígyózó folyó",
+          "region_cb2e9a363c": "Nasaaj falu",
+          "region_ecf85abe5b": "A Dzsungel",
+          "region_e8f3679ae7": "Pallas",
+          "region_c67dcf5c52": "Alovédra",
+          "region_f70657f862": "Shimon falu",
+          "region_74ff0a2990": "Saikhal",
+          "region_de78fe5740": "Raikkon",
+          "region_2d6017974b": "Entresol szintek",
+          "region_1b82c1d3f6": "Zyr Kertje",
+          "region_333bc54927": "Kenya"
+        }
+      }
+    },
+    "hard_mode": {
+      "entities": {},
+      "attributes": {}
+    }
+  }
+}

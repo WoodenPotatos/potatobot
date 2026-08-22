@@ -1,0 +1,1223 @@
+{
+  "schema_version": 1,
+  "datasets": {
+    "champions": {
+      "entities": {
+        "aatrox": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "ahri": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "akali": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "akshan": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "alistar": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "ambessa": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "amumu": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "anivia": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "annie": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "aphelios": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "ashe": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "aurelion_sol": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "aurora": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "azir": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "bard": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "bel_veth": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "blitzcrank": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "brand": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "braum": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "briar": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "caitlyn": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "camille": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "cassiopeia": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "cho_gath": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "corki": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "darius": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "diana": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "dr_mundo": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "draven": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "ekko": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "elise": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "evelynn": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "ezreal": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "fiddlesticks": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "fiora": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "fizz": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "galio": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "gangplank": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "garen": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "gnar": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "gragas": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "graves": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "gwen": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "hecarim": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "heimerdinger": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "hwei": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "illaoi": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "irelia": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "ivern": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "janna": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "jarvan_iv": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "jax": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "jayce": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "jhin": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "jinx": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "k_sante": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "kai_sa": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "kalista": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "karma": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "karthus": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "kassadin": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "katarina": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "kayle": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "kayn": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "kennen": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "kha_zix": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "kindred": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "kled": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "kog_maw": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "leblanc": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "lee_sin": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "leona": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "lillia": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "lissandra": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "lucian": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "lulu": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "lux": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "malphite": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "malzahar": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "maokai": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "master_yi": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "mel": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "milio": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "miss_fortune": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "mordekaiser": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "morgana": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "naafiri": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "nami": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "nasus": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "nautilus": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "neeko": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "nidalee": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "nilah": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "nocturne": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "nunu_willump": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "olaf": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "orianna": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "ornn": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "pantheon": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "poppy": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "pyke": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "qiyana": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "quinn": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "rakan": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "rammus": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "rek_sai": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "rell": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "renata_glasc": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "renekton": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "rengar": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "riven": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "rumble": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "ryze": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "samira": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "sejuani": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "senna": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "seraphine": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "sett": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "shaco": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "shen": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "shyvana": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "singed": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "sion": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "sivir": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "skarner": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "smolder": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "sona": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "soraka": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "swain": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "sylas": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "syndra": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "tahm_kench": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "taliyah": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "talon": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "taric": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "teemo": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "thresh": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "tristana": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "trundle": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "tryndamere": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "twisted_fate": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "twitch": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "udyr": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "urgot": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "varus": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "vayne": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "veigar": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "vel_koz": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "vex": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "vi": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "viego": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "viktor": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "vladimir": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "volibear": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "warwick": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "wukong": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "xayah": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "xerath": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "xin_zhao": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "yasuo": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "yone": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "yorick": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "yunara": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "yuumi": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "zaahen": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "zac": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "zed": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "zeri": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "ziggs": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "zilean": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "zoe": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "zyra": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        },
+        "romeo": {
+          "name": "",
+          "aliases": [
+            ""
+          ]
+        }
+      },
+      "attributes": {
+        "gender": {
+          "gender_5767625f95": "",
+          "gender_77c5e66692": "",
+          "gender_172ebf16dc": "",
+          "gender_94c829cc9f": "",
+          "gender_aeead915a8": ""
+        },
+        "role": {
+          "role_cf9e7b8c16": "",
+          "role_788b3badc0": "",
+          "role_f6c3d4d56a": "",
+          "role_94df49dba4": "",
+          "role_4ba20ad080": "",
+          "role_49d8ffa38d": "",
+          "role_338f65107a": ""
+        },
+        "species": {
+          "species_7b36953446": "",
+          "species_f96e61964a": "",
+          "species_bc716ba3f6": "",
+          "species_098d74f594": "",
+          "species_00f9fad2c7": "",
+          "species_b1c2535769": "",
+          "species_78bb3a1f34": "",
+          "species_c7ef884000": "",
+          "species_0a475e4915": "",
+          "species_aead7ce634": "",
+          "species_6f8bdf2746": "",
+          "species_3bcd3ff003": "",
+          "species_9d95703e69": "",
+          "species_e9df4f7c20": "",
+          "species_a7416a2280": "",
+          "species_a0d3dca90a": "",
+          "species_8842330a8d": "",
+          "species_f31c07139b": "",
+          "species_e26013fa9e": "",
+          "species_9996f288f7": "",
+          "species_1fc6605e76": "",
+          "species_92a8327aab": "",
+          "species_1854ad01f0": "",
+          "species_9bbdc3fd6c": "",
+          "species_14d9a23ef6": "",
+          "species_88672d5056": "",
+          "species_81ee80f235": "",
+          "species_a336ff6d72": "",
+          "species_e12f591612": "",
+          "species_5551ce1335": "",
+          "species_4f9cf3c575": "",
+          "species_ccd90c5fd4": "",
+          "species_38855061f8": "",
+          "species_3f97a34935": "",
+          "species_6879b90df7": "",
+          "species_f20fc1a660": "",
+          "species_92834b0740": "",
+          "species_0e9978a919": "",
+          "species_68ee13776b": "",
+          "species_a66f3aa8d1": "",
+          "species_ee73cc539e": "",
+          "species_4ac73883ee": "",
+          "species_c54b925ecd": "",
+          "species_48617efa63": "",
+          "species_7c58823cb8": "",
+          "species_2e24d14423": "",
+          "species_6e0ed99d03": "",
+          "species_def15e073b": "",
+          "species_47b3963560": "",
+          "species_bb9f7c8f70": "",
+          "species_6302c01d8a": "",
+          "species_baa29c80e3": "",
+          "species_e91effb16f": "",
+          "species_389b360925": "",
+          "species_5853915223": ""
+        },
+        "resource": {
+          "resource_d01469d0db": "",
+          "resource_ea8c99f7d1": "",
+          "resource_2b7266025f": "",
+          "resource_96f09e815f": "",
+          "resource_6c07143e9a": "",
+          "resource_c9debc3572": "",
+          "resource_3a743da85a": "",
+          "resource_4152596f54": "",
+          "resource_446da68cae": "",
+          "resource_a3337d761f": "",
+          "resource_d2e100a8ce": "",
+          "resource_bebad9c748": "",
+          "resource_2341b40dcc": "",
+          "resource_1c12f30e2f": "",
+          "resource_30a54fed97": ""
+        },
+        "range": {
+          "range_cd8df7b3e4": "",
+          "range_e3b1240170": "",
+          "range_326be5a00d": ""
+        },
+        "region": {
+          "region_8a9dba00fb": "",
+          "region_1336a98079": "",
+          "region_aae14b8880": "",
+          "region_033507d560": "",
+          "region_c525a21c6c": "",
+          "region_f3def7ab9d": "",
+          "region_bf9d571888": "",
+          "region_bae882d342": "",
+          "region_09855f4f19": "",
+          "region_3a6afde176": "",
+          "region_39ea218798": "",
+          "region_ed4f4c7fbd": "",
+          "region_dfd6d34cc0": "",
+          "region_78b21a03d4": "",
+          "region_ccf067b1c6": "",
+          "region_6d556e9139": "",
+          "region_fd75eb450b": "",
+          "region_fdf77afa5d": "",
+          "region_720048cd8b": "",
+          "region_ce2805f4b7": "",
+          "region_2e63ad9dc7": "",
+          "region_24613a7c5c": "",
+          "region_0b6b728816": "",
+          "region_b5f0fce7a5": "",
+          "region_b4de20baf4": "",
+          "region_b1516f188d": "",
+          "region_15bf70bd27": "",
+          "region_ad85a72055": "",
+          "region_ab6dda1aaf": "",
+          "region_3753e645e7": "",
+          "region_9496574edd": "",
+          "region_194ffe145b": "",
+          "region_781b011d96": "",
+          "region_ef7063fb91": "",
+          "region_72d6c14a71": "",
+          "region_f32c3c01cf": "",
+          "region_4e99201bfc": "",
+          "region_d729102c45": "",
+          "region_f4bcec9b44": "",
+          "region_74ac644af6": "",
+          "region_d114f4c4cd": "",
+          "region_72c0d40e1b": "",
+          "region_c3e8028b31": "",
+          "region_8c0be97f9c": "",
+          "region_e5a8ce7947": "",
+          "region_e58859d226": "",
+          "region_74c176b975": "",
+          "region_0fe1471f4b": "",
+          "region_cc75ce5375": "",
+          "region_81b70326ac": "",
+          "region_e3787e07ec": "",
+          "region_f57ea8f85c": "",
+          "region_963b73b455": "",
+          "region_7a88ae21b7": "",
+          "region_d499497d91": "",
+          "region_d464155ce6": "",
+          "region_84d83e2ba7": "",
+          "region_a3fc369c27": "",
+          "region_86501a03f2": "",
+          "region_214495a761": "",
+          "region_0f256ecb83": "",
+          "region_909303aa53": "",
+          "region_5585640659": "",
+          "region_cb2e9a363c": "",
+          "region_ecf85abe5b": "",
+          "region_e8f3679ae7": "",
+          "region_c67dcf5c52": "",
+          "region_f70657f862": "",
+          "region_74ff0a2990": "",
+          "region_de78fe5740": "",
+          "region_2d6017974b": "",
+          "region_1b82c1d3f6": "",
+          "region_333bc54927": ""
+        }
+      }
+    },
+    "hard_mode": {
+      "entities": {},
+      "attributes": {}
+    }
+  }
+}

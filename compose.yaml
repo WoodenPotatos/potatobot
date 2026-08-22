@@ -1,0 +1,59 @@
+# PotatoBot as two supervised services sharing one database volume.
+#
+# Splitting them means a dashboard restart never interrupts the bot, and a
+# dashboard crash cannot take Discord connectivity with it. They coordinate
+# entirely through SQLite: feature changes converge by revision polling, and
+# queued Discord publishes travel through the control_actions outbox, which only
+# the bot executes.
+#
+#   podman-compose up -d      (or: docker compose up -d)
+#
+# Run migrations once, before first start:
+#   podman-compose run --rm bot python update_db.py
+
+name: potatobot
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: potatobot:2.0.0-rc.1
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POTATOBOT_DB_PATH: /data/economy.db
+      # The bot owns schema creation, so it must not also serve the dashboard.
+      POTATOBOT_DASHBOARD_ENABLED: "false"
+    volumes:
+      - data:/data
+    # WAL needs the writers to see one filesystem; both services mount the same
+    # volume rather than copying the database.
+    stop_grace_period: 30s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: potatobot:2.0.0-rc.1
+    command: ["python", "dashboard_api.py"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POTATOBOT_DB_PATH: /data/economy.db
+      POTATOBOT_DASHBOARD_ENABLED: "true"
+      POTATOBOT_DASHBOARD_HOST: 0.0.0.0
+      POTATOBOT_DASHBOARD_PORT: "5000"
+      # One reverse proxy in front, so exactly one forwarded hop is trusted.
+      POTATOBOT_TRUSTED_PROXY_HOPS: "1"
+    volumes:
+      - data:/data
+    ports:
+      # Loopback only. Terminate HTTPS with Tailscale Serve or nginx in front;
+      # never publish this port to an untrusted network.
+      - "127.0.0.1:5000:5000"
+    depends_on:
+      - bot
+
+volumes:
+  data:

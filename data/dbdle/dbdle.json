@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "dataset": "roster",
+  "entities": {
+    "trapper": {
+      "role": "role_b0bd006f9a",
+      "gender": "gender_1282126270",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "dlc": "dlc_9321c7e4e9"
+    },
+    "dwight_fairfield": {
+      "role": "role_a7575d4a8e",
+      "gender": "gender_1282126270",
+      "movement_speed": "movement_speed_f67225f64d",
+      "terror_radius": "terror_radius_ce8edf56d7",
+      "dlc": "dlc_9321c7e4e9"
+    }
+  }
+}

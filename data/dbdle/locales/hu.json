@@ -1,0 +1,454 @@
+{
+  "schema_version": 1,
+  "datasets": {
+    "killers": {
+      "entities": {
+        "the_trapper": {
+          "name": "The Trapper",
+          "aliases": [
+            "The Trapper"
+          ]
+        },
+        "the_wraith": {
+          "name": "The Wraith",
+          "aliases": [
+            "The Wraith"
+          ]
+        },
+        "the_hillbilly": {
+          "name": "The Hillbilly",
+          "aliases": [
+            "The Hillbilly"
+          ]
+        },
+        "the_nurse": {
+          "name": "The Nurse",
+          "aliases": [
+            "The Nurse"
+          ]
+        },
+        "the_shape": {
+          "name": "The Shape",
+          "aliases": [
+            "The Shape"
+          ]
+        },
+        "the_hag": {
+          "name": "The Hag",
+          "aliases": [
+            "The Hag"
+          ]
+        },
+        "the_doctor": {
+          "name": "The Doctor",
+          "aliases": [
+            "The Doctor"
+          ]
+        },
+        "the_huntress": {
+          "name": "The Huntress",
+          "aliases": [
+            "The Huntress"
+          ]
+        },
+        "the_cannibal": {
+          "name": "The Cannibal",
+          "aliases": [
+            "The Cannibal"
+          ]
+        },
+        "the_nightmare": {
+          "name": "The Nightmare",
+          "aliases": [
+            "The Nightmare"
+          ]
+        },
+        "the_pig": {
+          "name": "The Pig",
+          "aliases": [
+            "The Pig"
+          ]
+        },
+        "the_clown": {
+          "name": "The Clown",
+          "aliases": [
+            "The Clown"
+          ]
+        },
+        "the_spirit": {
+          "name": "The Spirit",
+          "aliases": [
+            "The Spirit"
+          ]
+        },
+        "the_legion": {
+          "name": "The Legion",
+          "aliases": [
+            "The Legion"
+          ]
+        },
+        "the_plague": {
+          "name": "The Plague",
+          "aliases": [
+            "The Plague"
+          ]
+        },
+        "the_ghost_face": {
+          "name": "The Ghost Face",
+          "aliases": [
+            "The Ghost Face"
+          ]
+        },
+        "the_demogorgon": {
+          "name": "The Demogorgon",
+          "aliases": [
+            "The Demogorgon"
+          ]
+        },
+        "the_oni": {
+          "name": "The Oni",
+          "aliases": [
+            "The Oni"
+          ]
+        },
+        "the_deathslinger": {
+          "name": "The Deathslinger",
+          "aliases": [
+            "The Deathslinger"
+          ]
+        },
+        "the_executioner": {
+          "name": "The Executioner",
+          "aliases": [
+            "The Executioner"
+          ]
+        },
+        "the_blight": {
+          "name": "The Blight",
+          "aliases": [
+            "The Blight"
+          ]
+        },
+        "the_twins": {
+          "name": "The Twins",
+          "aliases": [
+            "The Twins"
+          ]
+        },
+        "the_trickster": {
+          "name": "The Trickster",
+          "aliases": [
+            "The Trickster"
+          ]
+        },
+        "the_nemesis": {
+          "name": "The Nemesis",
+          "aliases": [
+            "The Nemesis"
+          ]
+        },
+        "the_cenobite": {
+          "name": "The Cenobite",
+          "aliases": [
+            "The Cenobite"
+          ]
+        },
+        "the_artist": {
+          "name": "The Artist",
+          "aliases": [
+            "The Artist"
+          ]
+        },
+        "the_onryo": {
+          "name": "The Onryo",
+          "aliases": [
+            "The Onryo",
+            "The Onryō"
+          ]
+        },
+        "the_dredge": {
+          "name": "The Dredge",
+          "aliases": [
+            "The Dredge"
+          ]
+        },
+        "the_mastermind": {
+          "name": "The Mastermind",
+          "aliases": [
+            "The Mastermind"
+          ]
+        },
+        "the_knight": {
+          "name": "The Knight",
+          "aliases": [
+            "The Knight"
+          ]
+        },
+        "the_skull_merchant": {
+          "name": "The Skull Merchant",
+          "aliases": [
+            "The Skull Merchant"
+          ]
+        },
+        "the_singularity": {
+          "name": "The Singularity",
+          "aliases": [
+            "The Singularity"
+          ]
+        },
+        "the_xenomorph": {
+          "name": "The Xenomorph",
+          "aliases": [
+            "The Xenomorph"
+          ]
+        },
+        "the_good_guy": {
+          "name": "The Good Guy",
+          "aliases": [
+            "The Good Guy"
+          ]
+        },
+        "the_unknown": {
+          "name": "The Unknown",
+          "aliases": [
+            "The Unknown"
+          ]
+        },
+        "the_lich": {
+          "name": "The Lich",
+          "aliases": [
+            "The Lich"
+          ]
+        },
+        "the_dark_lord": {
+          "name": "The Dark Lord",
+          "aliases": [
+            "The Dark Lord"
+          ]
+        },
+        "the_houndmaster": {
+          "name": "The Houndmaster",
+          "aliases": [
+            "The Houndmaster"
+          ]
+        },
+        "the_ghoul": {
+          "name": "The Ghoul",
+          "aliases": [
+            "The Ghoul"
+          ]
+        },
+        "the_animatronic": {
+          "name": "The Animatronic",
+          "aliases": [
+            "The Animatronic"
+          ]
+        },
+        "the_krasue": {
+          "name": "The Krasue",
+          "aliases": [
+            "The Krasue"
+          ]
+        },
+        "the_first": {
+          "name": "The First",
+          "aliases": [
+            "The First"
+          ]
+        },
+        "the_slasher": {
+          "name": "The Slasher",
+          "aliases": [
+            "The Slasher"
+          ]
+        }
+      },
+      "attributes": {
+        "gender": {
+          "gender_5767625f95": "Férfi",
+          "gender_77c5e66692": "Nő",
+          "gender_592fdec95f": "Mindkettő",
+          "gender_025e7dd288": "Nem megállapítható"
+        },
+        "movement_speed": {
+          "movement_speed_2c314c7c6c": "4.6 m/s",
+          "movement_speed_08d988c456": "4.6 m/s, 6 m/s",
+          "movement_speed_1dd4cfe2a3": "4.6 m/s, 10.12 m/s",
+          "movement_speed_fcd4ead703": "3.85 m/s, 13.33 m/s",
+          "movement_speed_88072a6744": "4.4 m/s",
+          "movement_speed_1813e32e1c": "4.6 m/s, 3.08 m/s, 2.99 m/s",
+          "movement_speed_54a7ff3ab6": "4.4 m/s, 3.08 m/s",
+          "movement_speed_efdac8fb29": "4.6 m/s, 5.35 m/s",
+          "movement_speed_ea902a477a": "4.6 m/s, 4 m/s",
+          "movement_speed_6ffe01d5bc": "4.6 m/s, 2.3 m/s",
+          "movement_speed_f13a959cba": "4.4 m/s, 7.04 m/s",
+          "movement_speed_d3ea409da8": "4.6 m/s, 5.2 m/s",
+          "movement_speed_4c76d9e35e": "4.6 m/s, 3.8 m/s",
+          "movement_speed_054cba0029": "4.6 m/s, 3.86 m/s",
+          "movement_speed_0e8f2cdfea": "4.6 m/s, 7.82 m/s",
+          "movement_speed_e1fea74cdf": "4.6 m/s, 4.2 m/s",
+          "movement_speed_4624d8a145": "4.4 m/s, 9.2 m/s",
+          "movement_speed_7e90d16c87": "4.4 m/s, 3.86 m/s",
+          "movement_speed_4b4b65faa2": "4.6 m/s, 3.8 m/s, 4 m/s",
+          "movement_speed_25277ea8e6": "4.6 m/s, 15 m/s",
+          "movement_speed_a2c9be985d": "4.6 m/s, 4.6 m/s",
+          "movement_speed_a131f3404e": "4.6 m/s, 8 m/s",
+          "movement_speed_47ff731678": "4.6 m/s, 6.5 m/s",
+          "movement_speed_e894d02897": "4.4 m/s, 4.6 m/s",
+          "movement_speed_bf4ab5e0f5": "4.6 m/s, 4.8 m/s, 7 m/s"
+        },
+        "terror_radius": {
+          "terror_radius_ea0237b08f": "32m",
+          "terror_radius_752afbc43a": "40m",
+          "terror_radius_c397e5a173": "16m, 32m",
+          "terror_radius_ef2a0a94d3": "24m",
+          "terror_radius_8dc76ae5d7": "20m, 45m",
+          "terror_radius_74fabfea5c": "32m, 32m",
+          "terror_radius_9549000904": "32m, 40m",
+          "terror_radius_c8f7742d43": "32m, 12m, 14m, 18m",
+          "terror_radius_e0dabaeee4": "24m, 44m",
+          "terror_radius_9862a16ee2": "24m, 24m",
+          "terror_radius_8ecf671982": "32m, 24m",
+          "terror_radius_92c507875e": "32m, 48m"
+        },
+        "height": {
+          "height_5fc45ec05a": "Magas",
+          "height_8a89c4c827": "Átlagos",
+          "height_d5fe14fa2e": "Alacsony"
+        },
+        "country": {
+          "country_ac869626a2": "Amerikai",
+          "country_2f22dc7436": "Nigériai",
+          "country_8674c73c06": "Amerikai Angol felmenőkkel",
+          "country_596b65dd3e": "Afro Amerikai",
+          "country_07d99ff5f5": "Orosz",
+          "country_5ada1ac603": "Japán",
+          "country_06e7f41ce8": "Kanadai",
+          "country_173144c846": "Babilóniai",
+          "country_784205ad50": "Nem megállapítható",
+          "country_0a52455ae7": "Amerikai Ír felmenőkkel",
+          "country_78723037a0": "Skót",
+          "country_9e63e005cd": "Francia",
+          "country_75531605e0": "Dél Kóreai",
+          "country_f7ba6737e7": "Angol",
+          "country_cebfe9c382": "Chílei",
+          "country_a9a0a767de": "Magyar",
+          "country_867c835e44": "Brazil Japán felmenőkkel",
+          "country_c6f51c2fc3": "Oerth",
+          "country_b0df902eee": "Romániai",
+          "country_133a3ac7c5": "Karib-Térségi",
+          "country_5813dbb674": "Thai"
+        }
+      }
+    },
+    "survivors": {
+      "entities": {
+        "dwight_fairfield": {
+          "name": "Dwight Fairfield",
+          "aliases": [
+            "Dwight Fairfield"
+          ]
+        },
+        "meg_thomas": {
+          "name": "Meg Thomas",
+          "aliases": [
+            "Meg Thomas"
+          ]
+        },
+        "leon_s_kennedy": {
+          "name": "Leon S. Kennedy",
+          "aliases": [
+            "Leon S. Kennedy"
+          ]
+        }
+      },
+      "attributes": {
+        "gender": {
+          "gender_1282126270": "Férfi",
+          "gender_ea773a4fad": "Nő"
+        },
+        "dlc": {
+          "dlc_9321c7e4e9": "Alapjáték",
+          "dlc_0c6145f6ac": "Resident Evil"
+        }
+      }
+    },
+    "perks": {
+      "entities": {
+        "sprint_burst": {
+          "name": "Sprint Burst",
+          "aliases": [
+            "Sprint Burst"
+          ]
+        },
+        "hex_ruin": {
+          "name": "Hex: Ruin",
+          "aliases": [
+            "Hex: Ruin"
+          ]
+        },
+        "sloppy_butcher": {
+          "name": "Sloppy Butcher",
+          "aliases": [
+            "Sloppy Butcher"
+          ]
+        },
+        "lithe": {
+          "name": "Lithe",
+          "aliases": [
+            "Lithe"
+          ]
+        }
+      },
+      "attributes": {
+        "type": {
+          "type_1ba80178f6": "Kimerülés",
+          "type_a71276fd1b": "Átok",
+          "type_78a6c52b66": "Alap"
+        },
+        "owner": {
+          "owner_db9eddd247": "Meg Thomas",
+          "owner_19d6776256": "Hag",
+          "owner_37ee9bcc44": "Általános",
+          "owner_c243953733": "Feng Min"
+        }
+      }
+    },
+    "roster": {
+      "entities": {
+        "trapper": {
+          "name": "Trapper",
+          "aliases": [
+            "Trapper"
+          ]
+        },
+        "dwight_fairfield": {
+          "name": "Dwight Fairfield",
+          "aliases": [
+            "Dwight Fairfield"
+          ]
+        }
+      },
+      "attributes": {
+        "role": {
+          "role_b0bd006f9a": "Gyilkos",
+          "role_a7575d4a8e": "Túlélő"
+        },
+        "gender": {
+          "gender_1282126270": "Férfi"
+        },
+        "movement_speed": {
+          "movement_speed_2c314c7c6c": "4.6 m/s",
+          "movement_speed_f67225f64d": "4.0 m/s"
+        },
+        "terror_radius": {
+          "terror_radius_ea0237b08f": "32m",
+          "terror_radius_ce8edf56d7": "Nincs"
+        },
+        "dlc": {
+          "dlc_9321c7e4e9": "Alapjáték"
+        }
+      }
+    }
+  }
+}

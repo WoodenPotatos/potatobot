@@ -1,0 +1,350 @@
+{
+  "schema_version": 1,
+  "dataset": "killers",
+  "entities": {
+    "the_trapper": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_ac869626a2",
+      "release": 2016
+    },
+    "the_wraith": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_08d988c456",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_2f22dc7436",
+      "release": 2016
+    },
+    "the_hillbilly": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_1dd4cfe2a3",
+      "terror_radius": "terror_radius_752afbc43a",
+      "height": "height_5fc45ec05a",
+      "country": "country_ac869626a2",
+      "release": 2016
+    },
+    "the_nurse": {
+      "gender": "gender_77c5e66692",
+      "movement_speed": "movement_speed_fcd4ead703",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_8a89c4c827",
+      "country": "country_8674c73c06",
+      "release": 2016
+    },
+    "the_shape": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_e1fea74cdf",
+      "terror_radius": "terror_radius_c397e5a173",
+      "height": "height_5fc45ec05a",
+      "country": "country_ac869626a2",
+      "release": 2016
+    },
+    "the_hag": {
+      "gender": "gender_77c5e66692",
+      "movement_speed": "movement_speed_88072a6744",
+      "terror_radius": "terror_radius_ef2a0a94d3",
+      "height": "height_8a89c4c827",
+      "country": "country_596b65dd3e",
+      "release": 2016
+    },
+    "the_doctor": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_1813e32e1c",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_596b65dd3e",
+      "release": 2017
+    },
+    "the_huntress": {
+      "gender": "gender_77c5e66692",
+      "movement_speed": "movement_speed_54a7ff3ab6",
+      "terror_radius": "terror_radius_8dc76ae5d7",
+      "height": "height_5fc45ec05a",
+      "country": "country_07d99ff5f5",
+      "release": 2017
+    },
+    "the_cannibal": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_efdac8fb29",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_ac869626a2",
+      "release": 2017
+    },
+    "the_nightmare": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_ea902a477a",
+      "terror_radius": "terror_radius_74fabfea5c",
+      "height": "height_8a89c4c827",
+      "country": "country_ac869626a2",
+      "release": 2017
+    },
+    "the_pig": {
+      "gender": "gender_77c5e66692",
+      "movement_speed": "movement_speed_ea902a477a",
+      "terror_radius": "terror_radius_ef2a0a94d3",
+      "height": "height_8a89c4c827",
+      "country": "country_ac869626a2",
+      "release": 2018
+    },
+    "the_clown": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_6ffe01d5bc",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_ac869626a2",
+      "release": 2018
+    },
+    "the_spirit": {
+      "gender": "gender_77c5e66692",
+      "movement_speed": "movement_speed_f13a959cba",
+      "terror_radius": "terror_radius_ef2a0a94d3",
+      "height": "height_8a89c4c827",
+      "country": "country_5ada1ac603",
+      "release": 2018
+    },
+    "the_legion": {
+      "gender": "gender_592fdec95f",
+      "movement_speed": "movement_speed_d3ea409da8",
+      "terror_radius": "terror_radius_9549000904",
+      "height": "height_8a89c4c827",
+      "country": "country_06e7f41ce8",
+      "release": 2018
+    },
+    "the_plague": {
+      "gender": "gender_77c5e66692",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_173144c846",
+      "release": 2019
+    },
+    "the_ghost_face": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_4c76d9e35e",
+      "terror_radius": "terror_radius_ef2a0a94d3",
+      "height": "height_8a89c4c827",
+      "country": "country_ac869626a2",
+      "release": 2019
+    },
+    "the_demogorgon": {
+      "gender": "gender_025e7dd288",
+      "movement_speed": "movement_speed_054cba0029",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_784205ad50",
+      "release": 2019
+    },
+    "the_oni": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_0e8f2cdfea",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_5ada1ac603",
+      "release": 2019
+    },
+    "the_deathslinger": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_88072a6744",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_0a52455ae7",
+      "release": 2020
+    },
+    "the_executioner": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_e1fea74cdf",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_784205ad50",
+      "release": 2020
+    },
+    "the_blight": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_4624d8a145",
+      "terror_radius": "terror_radius_752afbc43a",
+      "height": "height_8a89c4c827",
+      "country": "country_78723037a0",
+      "release": 2020
+    },
+    "the_twins": {
+      "gender": "gender_592fdec95f",
+      "movement_speed": "movement_speed_08d988c456",
+      "terror_radius": "terror_radius_c8f7742d43",
+      "height": "height_5fc45ec05a",
+      "country": "country_9e63e005cd",
+      "release": 2020
+    },
+    "the_trickster": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_7e90d16c87",
+      "terror_radius": "terror_radius_e0dabaeee4",
+      "height": "height_8a89c4c827",
+      "country": "country_75531605e0",
+      "release": 2021
+    },
+    "the_nemesis": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_4b4b65faa2",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_784205ad50",
+      "release": 2021
+    },
+    "the_cenobite": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_f7ba6737e7",
+      "release": 2021
+    },
+    "the_artist": {
+      "gender": "gender_77c5e66692",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_8a89c4c827",
+      "country": "country_cebfe9c382",
+      "release": 2021
+    },
+    "the_onryo": {
+      "gender": "gender_77c5e66692",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_9862a16ee2",
+      "height": "height_d5fe14fa2e",
+      "country": "country_5ada1ac603",
+      "release": 2022
+    },
+    "the_dredge": {
+      "gender": "gender_025e7dd288",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_5fc45ec05a",
+      "country": "country_784205ad50",
+      "release": 2022
+    },
+    "the_mastermind": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_752afbc43a",
+      "country": "country_ac869626a2",
+      "release": 2022,
+      "height": "height_8a89c4c827"
+    },
+    "the_knight": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_25277ea8e6",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_8a89c4c827",
+      "country": "country_a9a0a767de",
+      "release": 2022
+    },
+    "the_skull_merchant": {
+      "gender": "gender_77c5e66692",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_ef2a0a94d3",
+      "height": "height_8a89c4c827",
+      "country": "country_867c835e44",
+      "release": 2023
+    },
+    "the_singularity": {
+      "gender": "gender_025e7dd288",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_8a89c4c827",
+      "country": "country_784205ad50",
+      "release": 2023
+    },
+    "the_xenomorph": {
+      "gender": "gender_025e7dd288",
+      "movement_speed": "movement_speed_a2c9be985d",
+      "terror_radius": "terror_radius_8ecf671982",
+      "height": "height_8a89c4c827",
+      "country": "country_784205ad50",
+      "release": 2023
+    },
+    "the_good_guy": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_88072a6744",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_d5fe14fa2e",
+      "country": "country_ac869626a2",
+      "release": 2023
+    },
+    "the_unknown": {
+      "gender": "gender_025e7dd288",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_8a89c4c827",
+      "country": "country_784205ad50",
+      "release": 2024
+    },
+    "the_lich": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_a131f3404e",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_8a89c4c827",
+      "country": "country_c6f51c2fc3",
+      "release": 2024
+    },
+    "the_dark_lord": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_47ff731678",
+      "terror_radius": "terror_radius_92c507875e",
+      "height": "height_5fc45ec05a",
+      "country": "country_b0df902eee",
+      "release": 2024
+    },
+    "the_houndmaster": {
+      "gender": "gender_77c5e66692",
+      "movement_speed": "movement_speed_08d988c456",
+      "terror_radius": "terror_radius_74fabfea5c",
+      "height": "height_8a89c4c827",
+      "country": "country_133a3ac7c5",
+      "release": 2024
+    },
+    "the_ghoul": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_2c314c7c6c",
+      "terror_radius": "terror_radius_752afbc43a",
+      "height": "height_8a89c4c827",
+      "country": "country_5ada1ac603",
+      "release": 2025
+    },
+    "the_animatronic": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_e894d02897",
+      "terror_radius": "terror_radius_ef2a0a94d3",
+      "height": "height_8a89c4c827",
+      "country": "country_8674c73c06",
+      "release": 2025
+    },
+    "the_krasue": {
+      "gender": "gender_77c5e66692",
+      "movement_speed": "movement_speed_bf4ab5e0f5",
+      "terror_radius": "terror_radius_9549000904",
+      "height": "height_8a89c4c827",
+      "country": "country_5813dbb674",
+      "release": 2025
+    },
+    "the_first": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_88072a6744",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_8a89c4c827",
+      "country": "country_ac869626a2",
+      "release": 2026
+    },
+    "the_slasher": {
+      "gender": "gender_5767625f95",
+      "movement_speed": "movement_speed_88072a6744",
+      "terror_radius": "terror_radius_ea0237b08f",
+      "height": "height_8a89c4c827",
+      "country": "country_ac869626a2",
+      "release": 2026
+    }
+  }
+}

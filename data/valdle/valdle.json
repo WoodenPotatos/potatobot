@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "dataset": "agents",
+  "entities": {
+    "astra": {
+      "gender": "gender_77c5e66692",
+      "role": "role_b9be7dce4f",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_8562c7a6cd",
+      "year": 2021
+    },
+    "breach": {
+      "gender": "gender_5767625f95",
+      "role": "role_d6e000d650",
+      "species": "species_7b36953446",
+      "origin": "origin_511d46d329",
+      "year": 2020
+    },
+    "brimstone": {
+      "gender": "gender_5767625f95",
+      "role": "role_b9be7dce4f",
+      "species": "species_7b36953446",
+      "origin": "origin_0fa2b56d68",
+      "year": 2020
+    },
+    "chamber": {
+      "gender": "gender_5767625f95",
+      "role": "role_b22abc154b",
+      "species": "species_7b36953446",
+      "origin": "origin_c0ff5a4725",
+      "year": 2021
+    },
+    "clove": {
+      "gender": "gender_105e6a1d6a",
+      "role": "role_b9be7dce4f",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_be368c764f",
+      "year": 2024
+    },
+    "cypher": {
+      "gender": "gender_5767625f95",
+      "role": "role_b22abc154b",
+      "species": "species_7b36953446",
+      "origin": "origin_95f3e627bc",
+      "year": 2020
+    },
+    "deadlock": {
+      "gender": "gender_77c5e66692",
+      "role": "role_b22abc154b",
+      "species": "species_7b36953446",
+      "origin": "origin_89768ca6e5",
+      "year": 2023
+    },
+    "fade": {
+      "gender": "gender_77c5e66692",
+      "role": "role_d6e000d650",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_fdd57f66e0",
+      "year": 2022
+    },
+    "gekko": {
+      "gender": "gender_5767625f95",
+      "role": "role_d6e000d650",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_0fa2b56d68",
+      "year": 2023
+    },
+    "harbor": {
+      "gender": "gender_5767625f95",
+      "role": "role_b9be7dce4f",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_a5f89d3d85",
+      "year": 2022
+    },
+    "iso": {
+      "gender": "gender_5767625f95",
+      "role": "role_9355add79b",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_e007cba87a",
+      "year": 2023
+    },
+    "jett": {
+      "gender": "gender_77c5e66692",
+      "role": "role_9355add79b",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_7593f0bccc",
+      "year": 2020
+    },
+    "kay_o": {
+      "gender": "gender_93dd33ca0f",
+      "role": "role_d6e000d650",
+      "species": "species_9bca3ce796",
+      "origin": "origin_e82e3250ae",
+      "year": 2021
+    },
+    "killjoy": {
+      "gender": "gender_77c5e66692",
+      "role": "role_b22abc154b",
+      "species": "species_7b36953446",
+      "origin": "origin_3683f9f1ec",
+      "year": 2020
+    },
+    "neon": {
+      "gender": "gender_77c5e66692",
+      "role": "role_9355add79b",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_bbfdaf8503",
+      "year": 2022
+    },
+    "omen": {
+      "gender": "gender_5767625f95",
+      "role": "role_b9be7dce4f",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_195da944de",
+      "year": 2020
+    },
+    "phoenix": {
+      "gender": "gender_5767625f95",
+      "role": "role_9355add79b",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_48a33c695d",
+      "year": 2020
+    },
+    "raze": {
+      "gender": "gender_77c5e66692",
+      "role": "role_9355add79b",
+      "species": "species_7b36953446",
+      "origin": "origin_4e7f8281f2",
+      "year": 2020
+    },
+    "reyna": {
+      "gender": "gender_77c5e66692",
+      "role": "role_9355add79b",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_e14aa98a6e",
+      "year": 2020
+    },
+    "sage": {
+      "gender": "gender_77c5e66692",
+      "role": "role_b22abc154b",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_e007cba87a",
+      "year": 2020
+    },
+    "skye": {
+      "gender": "gender_77c5e66692",
+      "role": "role_d6e000d650",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_5ad468b278",
+      "year": 2020
+    },
+    "sova": {
+      "gender": "gender_5767625f95",
+      "role": "role_d6e000d650",
+      "species": "species_7b36953446",
+      "origin": "origin_fdc7276c8c",
+      "year": 2020
+    },
+    "tejo": {
+      "gender": "gender_5767625f95",
+      "role": "role_d6e000d650",
+      "species": "species_7b36953446",
+      "origin": "origin_7133bc7b50",
+      "year": 2025
+    },
+    "veto": {
+      "gender": "gender_5767625f95",
+      "role": "role_b22abc154b",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_451f153d89",
+      "year": 2025
+    },
+    "viper": {
+      "gender": "gender_77c5e66692",
+      "role": "role_b9be7dce4f",
+      "species": "species_7b36953446",
+      "origin": "origin_0fa2b56d68",
+      "year": 2020
+    },
+    "vyse": {
+      "gender": "gender_77c5e66692",
+      "role": "role_b22abc154b",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_195da944de",
+      "year": 2024
+    },
+    "waylay": {
+      "gender": "gender_77c5e66692",
+      "role": "role_9355add79b",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_41002e8b8b",
+      "year": 2025
+    },
+    "yoru": {
+      "gender": "gender_5767625f95",
+      "role": "role_9355add79b",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_bc4dff7555",
+      "year": 2021
+    },
+    "miks": {
+      "gender": "gender_5767625f95",
+      "role": "role_b9be7dce4f",
+      "species": "species_4bf6d8a7b2",
+      "origin": "origin_b40617c834",
+      "year": 2026
+    }
+  }
+}

@@ -1,0 +1,33 @@
+# Gitleaks configuration for PotatoBot.
+#
+# Extends the upstream rule set rather than replacing it, so new upstream rules
+# are picked up automatically. Only one narrowly scoped allowlist is added.
+#
+# Known-secret exceptions that genuinely exist in this repository's immutable
+# history live in .gitleaksignore as per-finding fingerprints, not here, so that
+# each one stays individually auditable.
+
+title = "PotatoBot"
+
+[extend]
+useDefault = true
+
+# Potato Gacha reward pools are declared as dictionaries whose identifier field
+# is literally named "key" (database.py DEFAULT_GACHA_CONFIG). The upstream
+# generic-api-key rule therefore matches `key": "<value>"`, and reward names such
+# as "sticker_180d" score just above its 3.5 entropy threshold.
+#
+# These are item identifiers persisted inside every banner's config_json and
+# required verbatim by _validated_gacha_config, so renaming the field would need
+# a schema migration to rewrite stored banners. The allowlist enumerates the
+# actual reward-name shapes instead, which no real credential can match, and it
+# survives the lines moving between commits.
+#
+# Adding a reward whose name does not fit these shapes will fail the scan until
+# the pattern below is extended. That is deliberate: the list stays explicit.
+[allowlist]
+description = "Gacha reward identifiers are item names, not credentials"
+regexTarget = "match"
+regexes = [
+    '''key":\s*"(loaded_die|lockpick|coins_\d+|emoji_\d+d|sticker_\d+d|sound_\d+d|vault_\w+|(small|med|big)_vault|premium_\d+d)"''',
+]

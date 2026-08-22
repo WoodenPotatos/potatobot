@@ -1,0 +1,179 @@
+{
+    "bot_settings": {
+        "prefix": "?",
+        "currency_emoji": "🥔",
+        "maintenance": false,
+        "language": "hu"
+    },
+    "channels": {
+        "economy": [
+            0
+        ],
+        "levels": [
+            0
+        ],
+        "general": [
+            0
+        ],
+        "join": 0,
+        "leave": 0,
+        "booster": 0,
+        "other_games_channel": 0,
+        "join_to_create": [
+            0
+        ],
+        "ticket_category": 0,
+        "ticket_logs": 0,
+        "admin_category": 0,
+        "bot_log": 0,
+        "everydle": 0
+    },
+    "roles": {
+        "admin": [
+            0
+        ],
+        "premium": [
+            0
+        ],
+        "member": 0,
+        "autoroles": [
+            0
+        ],
+        "premium_role": 0,
+        "onboarding": 0,
+        "ignored_users": [
+            0
+        ]
+    },
+    "game_roles": {
+        "League of Legends": {
+            "id": 0,
+            "emoji": "<:lolicon:0>"
+        },
+        "Valorant": {
+            "id": 0,
+            "emoji": "<:vaicon:0>"
+        },
+        "Counter-Strike 2": {
+            "id": 0,
+            "emoji": "<:cs2icon:0>"
+        },
+        "Minecraft": {
+            "id": 0,
+            "emoji": "<:minecrafticon:0>"
+        },
+        "Phasmophobia": {
+            "id": 0,
+            "emoji": "<:phasmoicon:0>"
+        },
+        "Dead by Daylight": {
+            "id": 0,
+            "emoji": "<:dbdicon:0>"
+        },
+        "Gacha Gamer": {
+            "id": 0,
+            "emoji": "<:genshinicon:0>"
+        },
+        "Rainbow Six": {
+            "id": 0,
+            "emoji": "<:r6icon:0>"
+        }
+    },
+    "news_roles": {
+        "Hírek": {
+            "id": 0,
+            "emoji": "📰"
+        },
+        "Események": {
+            "id": 0,
+            "emoji": "🗓️"
+        },
+        "Twitch": {
+            "id": 0,
+            "emoji": "<:twitchicon:0>"
+        },
+        "Youtube": {
+            "id": 0,
+            "emoji": "<:yticon:0>"
+        },
+        "Ingyenes Játékok": {
+            "id": 0,
+            "emoji": "🕹️"
+        }
+    },
+    "themes_roles": {
+        "Mémek": {
+            "id": 0,
+            "emoji": "😂"
+        },
+        "Foodporn": {
+            "id": 0,
+            "emoji": "🍗"
+        },
+        "Cukiságok": {
+            "id": 0,
+            "emoji": "🐈"
+        },
+        "Zene": {
+            "id": 0,
+            "emoji": "🎶"
+        },
+        "Anime": {
+            "id": 0,
+            "emoji": "🎬"
+        },
+        "Művészetek": {
+            "id": 0,
+            "emoji": "🎨"
+        }
+    },
+    "factions": {
+        "tst": {
+            "leader_role_id": 0,
+            "manageable_ids": [
+                0
+            ]
+        },
+        "rba": {
+            "leader_role_id": 0,
+            "manageable_ids": [
+                0
+            ]
+        },
+        "nhh": {
+            "leader_role_id": 0,
+            "manageable_ids": [
+                0
+            ]
+        }
+    },
+    "lfg_channels": {
+        "channel_id_1": 0,
+        "channel_id_2": 0,
+        "channel_id_3": 0,
+        "channel_id_4": 0,
+        "channel_id_5": 0,
+        "channel_id_6": 0,
+        "channel_id_7": 0,
+        "channel_id_8": 0
+    },
+    "socials": {
+        "notification_channel": 0,
+        "twitch_role_id": 0,
+        "youtube_role_id": 0,
+        "twitch_streamers": [
+            ""
+        ]
+    },
+    "level_roles": {
+        "5": 0,
+        "10": 0,
+        "15": 0,
+        "25": 0,
+        "50": 0,
+        "100": 0,
+        "150": 0,
+        "200": 0,
+        "250": 0
+    }
+}

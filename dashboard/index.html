@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="dashboard.document_title"></title>
+    <!-- Served from botdata/pfp by the API, so swapping that one file changes
+         the tab icon and the sidebar mark together. -->
+    <link rel="icon" type="image/png" href="brand-avatar.png">
+    <link rel="stylesheet" href="style.css">
+    <!-- Loaded before the shell so the stored theme is applied before first paint. -->
+    <script src="theme.js"></script>
+</head>
+<body>
+    <!--
+      Icon sprite. The page is served under `default-src 'self'` with no
+      `font-src`, so icons must be inline SVG rather than a webfont or CDN pack.
+    -->
+    <svg xmlns="http://www.w3.org/2000/svg" hidden aria-hidden="true">
+        <symbol id="ic-overview" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+        <symbol id="ic-features" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></symbol>
+        <symbol id="ic-community" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19a6 6 0 0 1 12 0"/><path d="M16 6.5a3 3 0 0 1 0 5.8M17 19a5.6 5.6 0 0 0-2-4.3"/></symbol>
+        <symbol id="ic-economy" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v10M14.7 9.4c-.5-.8-1.5-1.3-2.7-1.3-1.6 0-2.7.8-2.7 2s1 1.7 2.7 2 2.9.7 2.9 2.1-1.2 2.1-2.9 2.1c-1.3 0-2.3-.5-2.8-1.4"/></symbol>
+        <symbol id="ic-gacha" viewBox="0 0 24 24"><path d="m12 3 2.5 5.6 6.1.7-4.5 4.2 1.2 6-5.3-3-5.3 3 1.2-6L3.4 9.3l6.1-.7z"/></symbol>
+        <symbol id="ic-shop" viewBox="0 0 24 24"><path d="M4 8h16l-1.2 11.2a1.5 1.5 0 0 1-1.5 1.3H6.7a1.5 1.5 0 0 1-1.5-1.3z"/><path d="M8.5 8V6a3.5 3.5 0 0 1 7 0v2"/></symbol>
+        <symbol id="ic-games" viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="10.5" rx="4"/><path d="M7 10.5v3M5.5 12h3M15.5 11.2h.01M18 13.6h.01"/></symbol>
+        <symbol id="ic-moderation" viewBox="0 0 24 24"><path d="M12 3 5 6v5.5c0 4.3 2.9 8.3 7 9.5 4.1-1.2 7-5.2 7-9.5V6z"/><path d="m9.3 12 1.9 1.9 3.5-3.6"/></symbol>
+        <symbol id="ic-music" viewBox="0 0 24 24"><path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></symbol>
+        <symbol id="ic-builders" viewBox="0 0 24 24"><path d="M14.5 5.5 18.5 9.5M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z"/></symbol>
+        <symbol id="ic-administration" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 14.5a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-3-1.2l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0-1.2-2.9h-.2a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-3l-.1-.1A2 2 0 1 1 6.6 3.6l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5v-.2a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+        <symbol id="ic-audit" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
+        <symbol id="ic-work" viewBox="0 0 24 24"><rect x="3" y="7.5" width="18" height="12" rx="2"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5M3 12h18"/></symbol>
+        <symbol id="ic-shield-check" viewBox="0 0 24 24"><path d="M12 3.2 5.5 5.6v5.7c0 4 2.7 7.7 6.5 8.9 3.8-1.2 6.5-4.9 6.5-8.9V5.6z"/><path d="m9.2 12.1 2 2 3.6-3.7"/></symbol>
+        <symbol id="ic-changelog" viewBox="0 0 24 24"><path d="M6 3.5h9.5L19 7v13.5H6z"/><path d="M9 8h5M9 12h7M9 16h4"/></symbol>
+        <symbol id="ic-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+        <symbol id="ic-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+        <symbol id="ic-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+        <symbol id="ic-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/></symbol>
+        <symbol id="ic-language" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.2 9h17.6M3.2 15h17.6M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></symbol>
+        <symbol id="ic-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></symbol>
+        <symbol id="ic-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.3h.01"/></symbol>
+        <symbol id="ic-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+        <symbol id="ic-inbox" viewBox="0 0 24 24"><path d="M3.5 13.5h5l1.5 2.5h4l1.5-2.5h5"/><path d="M5.6 5h12.8l2.1 8.5v4a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2v-4z"/></symbol>
+        <symbol id="ic-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <!-- Channel kinds. A listbox row can hold an SVG where an <option> could not,
+             so the picker draws these instead of the old text glyph. -->
+        <symbol id="ic-ch-text" viewBox="0 0 24 24"><path d="M9.5 3.5 7.5 20.5M16.5 3.5l-2 17M4 8.5h16M3 15.5h16"/></symbol>
+        <symbol id="ic-ch-news" viewBox="0 0 24 24"><path d="M4 9.5v5a1.5 1.5 0 0 0 1.5 1.5H8l6 4.5V5L8 9.5H5.5A1.5 1.5 0 0 0 4 11z"/><path d="M17.5 9a4 4 0 0 1 0 6"/></symbol>
+        <symbol id="ic-ch-voice" viewBox="0 0 24 24"><path d="M4 9.5v5a1.5 1.5 0 0 0 1.5 1.5H8l5 4V4L8 8.5H5.5A1.5 1.5 0 0 0 4 10z"/><path d="M16.5 9.5a3.5 3.5 0 0 1 0 5M19 7a7 7 0 0 1 0 10"/></symbol>
+        <symbol id="ic-ch-stage" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5.5 19a6.5 6.5 0 0 1 13 0"/><path d="M3 12a9 9 0 0 1 2.5-6M21 12a9 9 0 0 0-2.5-6"/></symbol>
+        <symbol id="ic-ch-forum" viewBox="0 0 24 24"><path d="M20 13.5a2 2 0 0 1-2 2h-7l-4 3v-3H6a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/><path d="M8.5 8.5h7M8.5 11.5h4"/></symbol>
+        <symbol id="ic-ch-category" viewBox="0 0 24 24"><path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4l2 2.5h8A1.5 1.5 0 0 1 20.5 9v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z"/></symbol>
+        <symbol id="ic-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4 4"/></symbol>
+        <symbol id="ic-trash" viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.8a.8.8 0 0 1 .8-.8h3.4a.8.8 0 0 1 .8.8V7"/><path d="M6.2 7l.9 12a1.6 1.6 0 0 0 1.6 1.5h6.6a1.6 1.6 0 0 0 1.6-1.5l.9-12"/><path d="M10.3 11v6M13.7 11v6"/></symbol>
+        <symbol id="ic-send" viewBox="0 0 24 24"><path d="M21 3 10.5 13.5M21 3l-6.8 18-3.7-7.5L3 9.8z"/></symbol>
+        <symbol id="ic-logout" viewBox="0 0 24 24"><path d="M14.5 16.5 19 12l-4.5-4.5M19 12H8"/><path d="M11 4H6.5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2H11"/></symbol>
+        <symbol id="ic-potato" viewBox="0 0 24 24"><path d="M16.8 4.4c2.8 1.6 3.6 5.6 1.9 9-1.8 3.4-5.4 6.1-9 6.4-3.4.3-5.9-2-6.2-5.2-.3-3.4 2-7.4 5.3-9.4 2.6-1.6 5.4-2.2 8-.8z"/><path d="M9.2 9.6h.01M13.6 8.2h.01M11.4 13.6h.01M15.4 12.4h.01"/></symbol>
+    </svg>
+
+    <div id="fatal-screen" class="fatal-screen hidden">
+        <div class="card accented">
+            <h1 class="display" data-i18n="dashboard.brand"></h1>
+            <p class="notice error"><span id="fatal-message"></span></p>
+            <div class="form-footer">
+                <button type="button" id="fatal-retry" class="btn btn-primary" data-i18n="dashboard.retry"></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="login-screen" class="login-container hidden">
+        <div class="login-card">
+            <span class="brand-mark"><svg class="ic ic-lg" aria-hidden="true"><use href="#ic-potato"></use></svg><img class="brand-avatar" src="brand-avatar.png" alt="" aria-hidden="true"></span>
+            <h1 class="display" data-i18n="dashboard.brand"></h1>
+            <p data-i18n="dashboard.login_prompt"></p>
+            <a href="/api/auth/login" class="discord-btn" data-i18n="dashboard.login_button"></a>
+        </div>
+    </div>
+
+    <div id="main-dashboard" class="dashboard-layout hidden">
+        <button type="button" id="mobile-menu-btn" class="mobile-toggle" data-i18n-aria-label="dashboard.mobile_menu_label">
+            <svg class="ic ic-lg" aria-hidden="true"><use href="#ic-menu"></use></svg>
+        </button>
+
+        <nav class="sidebar" id="sidebar" data-i18n-aria-label="dashboard.nav_label">
+            <div class="brand">
+                <span class="brand-mark"><svg class="ic ic-lg" aria-hidden="true"><use href="#ic-potato"></use></svg><img class="brand-avatar" src="brand-avatar.png" alt="" aria-hidden="true"></span>
+                <span class="brand-text">
+                    <span class="brand-name" data-i18n="dashboard.brand"></span>
+                    <span class="brand-version" id="brand-version"></span>
+                </span>
+            </div>
+
+            <div id="nav-links" class="nav-links">
+                <div class="nav-group">
+                    <button type="button" class="nav-item active" data-page="overview">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-overview"></use></svg>
+                        <span data-i18n="dashboard.nav_overview"></span>
+                    </button>
+                    <button type="button" class="nav-item" data-page="features">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-features"></use></svg>
+                        <span data-i18n="dashboard.nav_features"></span>
+                    </button>
+                </div>
+
+                <div class="nav-group" data-group="community">
+                    <button type="button" class="nav-category" aria-expanded="true" data-toggle-group="community">
+                        <span data-i18n="dashboard.category_community"></span>
+                        <svg class="ic ic-sm chevron" aria-hidden="true"><use href="#ic-chevron-down"></use></svg>
+                    </button>
+                    <button type="button" class="nav-item" data-page="community" data-category="community">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-community"></use></svg>
+                        <span data-i18n="dashboard.nav_community"></span>
+                    </button>
+                </div>
+
+                <div class="nav-group" data-group="economy">
+                    <button type="button" class="nav-category" aria-expanded="true" data-toggle-group="economy">
+                        <span data-i18n="dashboard.category_economy"></span>
+                        <svg class="ic ic-sm chevron" aria-hidden="true"><use href="#ic-chevron-down"></use></svg>
+                    </button>
+                    <button type="button" class="nav-item" data-page="economy" data-category="economy">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-economy"></use></svg>
+                        <span data-i18n="dashboard.nav_economy"></span>
+                    </button>
+                    <button type="button" class="nav-item feature-page" data-feature="shop_gacha" data-page="gacha">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-gacha"></use></svg>
+                        <span data-i18n="dashboard.nav_gacha"></span>
+                    </button>
+                    <button type="button" class="nav-item feature-page" data-feature="economy" data-page="work-responses">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-work"></use></svg>
+                        <span data-i18n="dashboard.nav_work_responses"></span>
+                    </button>
+                    <button type="button" class="nav-item feature-page" data-feature="shop" data-page="shop-builder">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-shop"></use></svg>
+                        <span data-i18n="dashboard.nav_shop_builder"></span>
+                    </button>
+                </div>
+
+                <div class="nav-group" data-group="games">
+                    <button type="button" class="nav-category" aria-expanded="true" data-toggle-group="games">
+                        <span data-i18n="dashboard.category_games"></span>
+                        <svg class="ic ic-sm chevron" aria-hidden="true"><use href="#ic-chevron-down"></use></svg>
+                    </button>
+                    <button type="button" class="nav-item" data-page="games" data-category="games">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-games"></use></svg>
+                        <span data-i18n="dashboard.nav_games"></span>
+                    </button>
+                </div>
+
+                <div class="nav-group" data-group="moderation">
+                    <button type="button" class="nav-category" aria-expanded="true" data-toggle-group="moderation">
+                        <span data-i18n="dashboard.category_moderation"></span>
+                        <svg class="ic ic-sm chevron" aria-hidden="true"><use href="#ic-chevron-down"></use></svg>
+                    </button>
+                    <button type="button" class="nav-item" data-page="moderation" data-category="moderation">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-moderation"></use></svg>
+                        <span data-i18n="dashboard.nav_moderation"></span>
+                    </button>
+                    <button type="button" class="nav-item" data-page="music" data-category="music">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-music"></use></svg>
+                        <span data-i18n="dashboard.nav_music"></span>
+                    </button>
+                </div>
+
+                <div class="nav-group" data-group="administration">
+                    <button type="button" class="nav-category" aria-expanded="true" data-toggle-group="administration">
+                        <span data-i18n="dashboard.category_administration"></span>
+                        <svg class="ic ic-sm chevron" aria-hidden="true"><use href="#ic-chevron-down"></use></svg>
+                    </button>
+                    <button type="button" class="nav-item" data-page="builders" data-category="builders">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-builders"></use></svg>
+                        <span data-i18n="dashboard.nav_builders"></span>
+                    </button>
+                    <button type="button" class="nav-item" data-page="administration" data-category="administration">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-administration"></use></svg>
+                        <span data-i18n="dashboard.nav_administration"></span>
+                    </button>
+                    <button type="button" class="nav-item" data-page="audit">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-audit"></use></svg>
+                        <span data-i18n="dashboard.nav_audit"></span>
+                    </button>
+                    <button type="button" class="nav-item" data-page="permissions">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-shield-check"></use></svg>
+                        <span data-i18n="dashboard.nav_permissions"></span>
+                    </button>
+                    <button type="button" class="nav-item" data-page="changelog">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-changelog"></use></svg>
+                        <span data-i18n="dashboard.nav_changelog"></span>
+                    </button>
+                </div>
+            </div>
+
+        </nav>
+        <div class="sidebar-scrim" id="sidebar-scrim"></div>
+
+        <main class="content">
+            <header class="topbar">
+                <div class="topbar-heading">
+                    <h1 id="page-title" class="display"></h1>
+                    <p id="page-subtitle" class="page-subtitle"></p>
+                </div>
+                <div class="topbar-controls">
+                    <!-- Filled by the client; the idle timeout is the cookie's own
+                         lifetime and any request slides it forward. -->
+                    <span id="session-timer" class="session-timer hidden"
+                          data-i18n-title="dashboard.session_timer_hint"></span>
+                    <div id="page-actions" class="page-actions"></div>
+                    <button type="button" id="guild-trigger" class="guild-trigger"
+                            aria-haspopup="menu" aria-expanded="false"
+                            data-i18n-aria-label="dashboard.guild_menu"></button>
+                    <button type="button" id="account-trigger" class="account-trigger"
+                            aria-haspopup="menu" aria-expanded="false"
+                            data-i18n-aria-label="dashboard.account_menu"></button>
+                </div>
+            </header>
+
+            <div class="page-body">
+                <section id="overview" class="page">
+                    <div class="quick-actions" id="overview-actions"></div>
+                    <div class="stat-grid" id="overview-stats"></div>
+                </section>
+
+                <section id="features" class="page hidden">
+                    <div class="card">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.features_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.features_hint"></p>
+                            </div>
+                        </div>
+                        <div class="feature-groups" id="feature-grid"></div>
+                    </div>
+                </section>
+
+                <section id="settings-page" class="page hidden">
+                    <div class="card accented">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" id="settings-heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.settings_apply_hint"></p>
+                            </div>
+                        </div>
+                        <form id="settings-form">
+                            <div id="settings-grid"></div>
+                            <div class="form-footer">
+                                <button type="reset" class="btn btn-ghost" data-i18n="dashboard.discard"></button>
+                                <button type="submit" class="btn btn-primary" data-i18n="dashboard.save_settings"></button>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+
+                <section id="gacha" class="page hidden">
+                    <div class="card accented">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.gacha_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.gacha_hint"></p>
+                            </div>
+                            <!-- Banner picker and per-banner controls. Filled by
+                                 renderGachaBannerBar so the option labels stay
+                                 text nodes. -->
+                            <div id="gacha-banner-bar" class="chip-row"></div>
+                        </div>
+                        <form id="gacha-form">
+                            <div id="gacha-total" class="total-readout"></div>
+                            <div id="gacha-grid" class="form-grid"></div>
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-primary" data-i18n="dashboard.save_gacha"></button>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="card">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.gacha_banner_create_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.gacha_banner_create_hint"></p>
+                            </div>
+                        </div>
+                        <form id="gacha-banner-form">
+                            <div class="form-grid">
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.gacha_banner_key"></span>
+                                    <input name="banner_key" type="text" required
+                                           pattern="[a-z0-9][a-z0-9_]*" maxlength="64">
+                                </label>
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.gacha_banner_name"></span>
+                                    <input name="display_name" type="text" required maxlength="64">
+                                </label>
+                            </div>
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-primary"
+                                        data-i18n="dashboard.gacha_banner_create_submit"></button>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+
+                <section id="work-responses" class="page hidden">
+                    <div class="card">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.work_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.work_hint"></p>
+                            </div>
+                        </div>
+                        <div class="table-wrap" id="work-response-list"></div>
+                    </div>
+                    <div class="card accented">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.work_new_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.work_new_hint"></p>
+                            </div>
+                        </div>
+                        <form id="work-response-form">
+                            <div class="form-grid">
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.work_tier"></span>
+                                    <select name="tier">
+                                        <option value="normal" data-i18n="dashboard.work_tier_normal"></option>
+                                        <option value="free" data-i18n="dashboard.work_tier_free"></option>
+                                        <option value="high" data-i18n="dashboard.work_tier_high"></option>
+                                    </select>
+                                </label>
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.column_reward_weight"></span>
+                                    <input name="weight" type="number" min="1" value="1" required>
+                                </label>
+                                <label class="input-group wide">
+                                    <span class="field-label" data-i18n="dashboard.work_message"></span>
+                                    <textarea name="message" maxlength="500" required></textarea>
+                                    <span class="field-hint" data-i18n="dashboard.work_message_hint"></span>
+                                </label>
+                            </div>
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-primary"
+                                        data-i18n="dashboard.work_create"></button>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+
+                <section id="shop-builder" class="page hidden">
+                    <div class="card">
+                        <div class="card-head">
+                            <div><h2 class="display" data-i18n="dashboard.shop_items_heading"></h2></div>
+                        </div>
+                        <div class="table-wrap" id="shop-items"></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-head">
+                            <div><h2 class="display" data-i18n="dashboard.fulfillment_heading"></h2></div>
+                        </div>
+                        <div class="table-wrap" id="fulfillment-list"></div>
+                    </div>
+                    <div class="card accented">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.shop_builder_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.shop_builder_hint"></p>
+                            </div>
+                        </div>
+                        <form id="shop-item-form">
+                            <div class="form-grid">
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.item_key"></span>
+                                    <input name="item_key" type="text" required>
+                                </label>
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.template_type"></span>
+                                    <select name="template_type">
+                                        <option value="fixed_role" data-i18n="dashboard.template_fixed_role"></option>
+                                        <option value="timed_role" data-i18n="dashboard.template_timed_role"></option>
+                                        <option value="vault" data-i18n="dashboard.template_vault"></option>
+                                        <option value="consumable" data-i18n="dashboard.template_consumable"></option>
+                                        <option value="coin_bundle" data-i18n="dashboard.template_coin_bundle"></option>
+                                        <option value="fulfillment_voucher" data-i18n="dashboard.template_fulfillment_voucher"></option>
+                                    </select>
+                                </label>
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.price"></span>
+                                    <input name="price" type="number" min="0" required>
+                                </label>
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.item_name_hu"></span>
+                                    <input name="name" type="text" required>
+                                </label>
+                                <label class="input-group wide">
+                                    <span class="field-label" data-i18n="dashboard.item_description_hu"></span>
+                                    <textarea name="description" required></textarea>
+                                </label>
+                                <label class="input-group wide" id="shop-item-picker" hidden>
+                                    <span class="field-label" data-i18n="dashboard.item_config_item"></span>
+                                    <select name="catalog_item"></select>
+                                    <span class="field-hint" data-i18n="dashboard.item_config_item_hint"></span>
+                                </label>
+                                <label class="input-group wide" id="shop-item-config">
+                                    <span class="field-label" data-i18n="dashboard.item_config"></span>
+                                    <textarea name="config" required>{}</textarea>
+                                </label>
+                            </div>
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-primary" data-i18n="dashboard.create_shop_item"></button>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+
+                <section id="builders" class="page hidden">
+                    <div class="card">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.builders_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.builders_description"></p>
+                            </div>
+                        </div>
+                        <div class="table-wrap" id="builder-list"></div>
+                    </div>
+                    <div class="card accented">
+                        <div class="card-head">
+                            <div><h2 class="display" data-i18n="dashboard.builder_new_heading"></h2></div>
+                        </div>
+                        <div class="chip-row builder-tabs">
+                            <span class="eyebrow" data-i18n="dashboard.builder_type_label"></span>
+                            <button type="button" class="chip active" data-builder="embed" data-i18n="dashboard.builder_embed"></button>
+                            <button type="button" class="chip" data-builder="rules" data-i18n="dashboard.builder_rules"></button>
+                            <button type="button" class="chip" data-builder="panel" data-i18n="dashboard.builder_panel"></button>
+                        </div>
+                        <form id="builder-form">
+                            <div class="form-grid">
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.builder_name"></span>
+                                    <input name="name" type="text" required>
+                                </label>
+                                <label class="input-group wide">
+                                    <span class="field-label" data-i18n="dashboard.builder_content"></span>
+                                    <textarea name="content" required></textarea>
+                                </label>
+                            </div>
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-primary" data-i18n="dashboard.save_draft"></button>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+
+                <section id="audit" class="page hidden">
+                    <div class="card">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.privacy_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.privacy_sub"></p>
+                            </div>
+                        </div>
+                        <!-- Host only: erasure spans the installation, so it is
+                             hidden rather than merely rejected for a guild admin. -->
+                        <form id="erasure-form" class="hidden">
+                            <div class="form-grid">
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.erasure_subject"></span>
+                                    <input name="user_id" type="text" inputmode="numeric"
+                                           pattern="[0-9]+" required>
+                                </label>
+                            </div>
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-outline danger"
+                                        data-i18n="dashboard.erasure_submit"></button>
+                            </div>
+                        </form>
+                        <div class="table-wrap" id="privacy-list"></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-head">
+                            <div><h2 class="display" data-i18n="dashboard.audit_heading"></h2></div>
+                        </div>
+                        <div class="table-wrap" id="audit-list"></div>
+                    </div>
+                </section>
+
+                <section id="permissions" class="page hidden">
+                    <div class="card accented">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.permissions_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.permissions_hint"></p>
+                            </div>
+                        </div>
+                        <div id="permission-summary" class="stat-grid"></div>
+                        <div class="table-wrap" id="permission-findings"></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-head">
+                            <div><h2 class="display" data-i18n="dashboard.permissions_features_heading"></h2></div>
+                        </div>
+                        <div class="table-wrap" id="permission-features"></div>
+                    </div>
+                </section>
+
+                <section id="changelog" class="page hidden">
+                    <div class="card">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.changelog_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.changelog_hint"></p>
+                            </div>
+                        </div>
+                        <div id="changelog-list" class="changelog"></div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Menus render here so they escape the sticky topbar's stacking context. -->
+    <div id="popover-root"></div>
+    <div id="modal-root"></div>
+    <div id="toast-container" class="toast-container" role="status" aria-live="polite"></div>
+    <script src="script.js"></script>
+</body>
+</html>

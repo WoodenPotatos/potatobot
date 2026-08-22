@@ -1,0 +1,61 @@
+# PotatoBot dashboard, supervised separately from the bot.
+#
+# Install:
+#   sudo cp deploy/potatobot-dashboard.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now potatobot-dashboard
+#
+# Running the dashboard as its own service means restarting it never interrupts
+# Discord, and a dashboard fault cannot take the bot down. The two coordinate
+# only through SQLite: feature changes converge by revision polling within about
+# two seconds, and queued Discord publishes travel through the control_actions
+# outbox, which only the bot process executes.
+#
+# Set POTATOBOT_DASHBOARD_ENABLED=false in the shared environment file so the
+# bot does not also start an in-process dashboard thread.
+#
+# Note the dashboard needs DISCORD_TOKEN as well as the OAuth values: without an
+# in-process bot it reads guild channels and roles over the Discord REST API.
+
+[Unit]
+Description=PotatoBot dashboard
+Documentation=https://github.com/WoodenPotatos/potatobotbeta
+After=network-online.target potatobot.service
+Wants=network-online.target
+# The bot owns schema creation; start after it so a fresh database is migrated.
+After=potatobot.service
+# [Unit] keys since systemd v230; ignored if placed in [Service].
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=potatobot
+Group=potatobot
+WorkingDirectory=/opt/potatobot
+EnvironmentFile=/opt/potatobot/.env
+Environment=POTATOBOT_DASHBOARD_ENABLED=true
+ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/dashboard_api.py
+
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=15
+
+SyslogIdentifier=potatobot-dashboard
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/potatobot
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "dataset": "perks",
+  "entities": {
+    "sprint_burst": {
+      "type": "type_1ba80178f6",
+      "owner": "owner_db9eddd247"
+    },
+    "hex_ruin": {
+      "type": "type_a71276fd1b",
+      "owner": "owner_19d6776256"
+    },
+    "sloppy_butcher": {
+      "type": "type_78a6c52b66",
+      "owner": "owner_37ee9bcc44"
+    },
+    "lithe": {
+      "type": "type_1ba80178f6",
+      "owner": "owner_c243953733"
+    }
+  }
+}

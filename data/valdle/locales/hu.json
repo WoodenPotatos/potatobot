@@ -1,0 +1,229 @@
+{
+  "schema_version": 1,
+  "datasets": {
+    "agents": {
+      "entities": {
+        "astra": {
+          "name": "Astra",
+          "aliases": [
+            "Astra"
+          ]
+        },
+        "breach": {
+          "name": "Breach",
+          "aliases": [
+            "Breach"
+          ]
+        },
+        "brimstone": {
+          "name": "Brimstone",
+          "aliases": [
+            "Brimstone"
+          ]
+        },
+        "chamber": {
+          "name": "Chamber",
+          "aliases": [
+            "Chamber"
+          ]
+        },
+        "clove": {
+          "name": "Clove",
+          "aliases": [
+            "Clove"
+          ]
+        },
+        "cypher": {
+          "name": "Cypher",
+          "aliases": [
+            "Cypher"
+          ]
+        },
+        "deadlock": {
+          "name": "Deadlock",
+          "aliases": [
+            "Deadlock"
+          ]
+        },
+        "fade": {
+          "name": "Fade",
+          "aliases": [
+            "Fade"
+          ]
+        },
+        "gekko": {
+          "name": "Gekko",
+          "aliases": [
+            "Gekko"
+          ]
+        },
+        "harbor": {
+          "name": "Harbor",
+          "aliases": [
+            "Harbor"
+          ]
+        },
+        "iso": {
+          "name": "Iso",
+          "aliases": [
+            "Iso"
+          ]
+        },
+        "jett": {
+          "name": "Jett",
+          "aliases": [
+            "Jett"
+          ]
+        },
+        "kay_o": {
+          "name": "KAY/O",
+          "aliases": [
+            "KAY/O"
+          ]
+        },
+        "killjoy": {
+          "name": "Killjoy",
+          "aliases": [
+            "Killjoy"
+          ]
+        },
+        "neon": {
+          "name": "Neon",
+          "aliases": [
+            "Neon"
+          ]
+        },
+        "omen": {
+          "name": "Omen",
+          "aliases": [
+            "Omen"
+          ]
+        },
+        "phoenix": {
+          "name": "Phoenix",
+          "aliases": [
+            "Phoenix"
+          ]
+        },
+        "raze": {
+          "name": "Raze",
+          "aliases": [
+            "Raze"
+          ]
+        },
+        "reyna": {
+          "name": "Reyna",
+          "aliases": [
+            "Reyna"
+          ]
+        },
+        "sage": {
+          "name": "Sage",
+          "aliases": [
+            "Sage"
+          ]
+        },
+        "skye": {
+          "name": "Skye",
+          "aliases": [
+            "Skye"
+          ]
+        },
+        "sova": {
+          "name": "Sova",
+          "aliases": [
+            "Sova"
+          ]
+        },
+        "tejo": {
+          "name": "Tejo",
+          "aliases": [
+            "Tejo"
+          ]
+        },
+        "veto": {
+          "name": "Veto",
+          "aliases": [
+            "Veto"
+          ]
+        },
+        "viper": {
+          "name": "Viper",
+          "aliases": [
+            "Viper"
+          ]
+        },
+        "vyse": {
+          "name": "Vyse",
+          "aliases": [
+            "Vyse"
+          ]
+        },
+        "waylay": {
+          "name": "Waylay",
+          "aliases": [
+            "Waylay"
+          ]
+        },
+        "yoru": {
+          "name": "Yoru",
+          "aliases": [
+            "Yoru"
+          ]
+        },
+        "miks": {
+          "name": "Miks",
+          "aliases": [
+            "Miks"
+          ]
+        }
+      },
+      "attributes": {
+        "gender": {
+          "gender_77c5e66692": "Nő",
+          "gender_5767625f95": "Férfi",
+          "gender_105e6a1d6a": "Non-bináris",
+          "gender_93dd33ca0f": "Gép"
+        },
+        "role": {
+          "role_b9be7dce4f": "Controller",
+          "role_d6e000d650": "Initiator",
+          "role_b22abc154b": "Sentinel",
+          "role_9355add79b": "Duelist"
+        },
+        "species": {
+          "species_4bf6d8a7b2": "Radiant",
+          "species_7b36953446": "Ember",
+          "species_9bca3ce796": "Robot"
+        },
+        "origin": {
+          "origin_8562c7a6cd": "Ghána",
+          "origin_511d46d329": "Svédország",
+          "origin_0fa2b56d68": "USA",
+          "origin_c0ff5a4725": "Franciaország",
+          "origin_be368c764f": "Skócia",
+          "origin_95f3e627bc": "Marokkó",
+          "origin_89768ca6e5": "Norvégia",
+          "origin_fdd57f66e0": "Törökország",
+          "origin_a5f89d3d85": "India",
+          "origin_e007cba87a": "Kína",
+          "origin_7593f0bccc": "Dél-Korea",
+          "origin_e82e3250ae": "Alternatív Föld",
+          "origin_3683f9f1ec": "Németország",
+          "origin_bbfdaf8503": "Fülöp-szigetek",
+          "origin_195da944de": "Ismeretlen",
+          "origin_48a33c695d": "Egyesült Királyság",
+          "origin_4e7f8281f2": "Brazília",
+          "origin_e14aa98a6e": "Mexikó",
+          "origin_5ad468b278": "Ausztrália",
+          "origin_fdc7276c8c": "Oroszország",
+          "origin_7133bc7b50": "Kolumbia",
+          "origin_451f153d89": "Szenegál",
+          "origin_41002e8b8b": "Thaiföld",
+          "origin_bc4dff7555": "Japán",
+          "origin_b40617c834": "Horvátország"
+        }
+      }
+    }
+  }
+}

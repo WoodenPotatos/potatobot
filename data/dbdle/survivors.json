@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "dataset": "survivors",
+  "entities": {
+    "dwight_fairfield": {
+      "gender": "gender_1282126270",
+      "dlc": "dlc_9321c7e4e9"
+    },
+    "meg_thomas": {
+      "gender": "gender_ea773a4fad",
+      "dlc": "dlc_9321c7e4e9"
+    },
+    "leon_s_kennedy": {
+      "gender": "gender_1282126270",
+      "dlc": "dlc_0c6145f6ac"
+    }
+  }
+}

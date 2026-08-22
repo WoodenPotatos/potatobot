@@ -1,0 +1,51 @@
+# Weekly check for Everydle data drift.
+#
+# Install:
+#   sudo cp deploy/potatobot-everydle-drift.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now potatobot-everydle-drift.timer
+#
+# This runs `scripts/everydle_drift.py`, which is read-only: it compares the
+# Valdle and DbDle datasets with their upstream sources and reports what changed.
+# It never edits `data/`, so a bad or missing upstream response can only produce
+# a noisy journal entry.
+#
+# Deliberately a timer rather than a task inside the bot. The check is worth
+# running weekly at most, and keeping it out of the bot means no third-party HTTP
+# dependency on the event loop that has to meet Discord's interaction deadline.
+#
+# Read the result with:
+#   journalctl -u potatobot-everydle-drift --since '2 weeks ago'
+#
+# Exit codes: 0 in step with upstream, 1 drift found, 2 a source was unreachable.
+
+[Unit]
+Description=PotatoBot Everydle data drift check
+Documentation=https://github.com/WoodenPotatos/potatobotbeta
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=potatobot
+Group=potatobot
+WorkingDirectory=/opt/potatobot
+ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/scripts/everydle_drift.py
+# Drift is the expected finding, not a failure, so neither 1 nor 2 should mark
+# the unit failed and start alerting.
+SuccessExitStatus=1 2
+SyslogIdentifier=potatobot-everydle-drift
+
+# Read-only: this unit has no reason to write anything at all.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  # A push or pull_request scan only covers that event's commit range. These two
+  # give the secret scan a periodic and an on-demand pass over the whole history,
+  # where the accepted findings in .gitleaksignore apply.
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --requirement requirements-dev.lock
+      - run: python -m compileall -q . -x './\.git|./venv|./\.venv'
+      - run: python -m unittest discover -s tests -v
+      # Exits non-zero only on a key something references but no catalog has,
+      # which is the one class of localization finding that is a defect rather
+      # than a number to read. The rest of the report is informational.
+      - run: python scripts/locale_audit.py --brief
+      - run: python -m pip_audit -r requirements.lock
+      - run: bandit -r . -c pyproject.toml --severity-level high
+
+  # Separate from the Python matrix so the secret scan runs once rather than
+  # three times, and so a Python failure cannot mask it or the reverse.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The action scans a commit range, so the base commit must exist
+          # locally; a shallow clone breaks it. Full depth also lets the
+          # scheduled run cover the whole history.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pinned so a new upstream rule cannot turn a green build red without
+          # a deliberate change here. Verified locally against this version.
+          GITLEAKS_VERSION: 8.30.1
+          # GITLEAKS_LICENSE is required only for organization accounts, and
+          # this repository belongs to a user account.
+          #
+          # .gitleaks.toml and .gitleaksignore are discovered automatically from
+          # the repository root; the action passes no --config of its own.
