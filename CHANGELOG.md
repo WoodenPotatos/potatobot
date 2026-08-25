@@ -1,6 +1,163 @@
 # Changelog
 
-## 2.3.0-beta.1
+## 2.4.0-beta.1
+
+- **Five public betas shipped with a private heading on the front page.**
+  `README.md` renders the three most recent changelog sections, and promotion
+  renamed only the top one, so a stale `2.0.0-rc.1 - Unreleased` sat under every
+  release and 2.1 and 2.2 were never mentioned at all. Promotion now merges the
+  whole leading run of unreleased sections, and the publisher refuses a snapshot
+  where an `Unreleased` survives, where the README does not name the release, or
+  where it has lost one of its generated blocks.
+
+- **The plain embed sender is a creator like the others.** It was the last thing
+  still writing drafts: a name and a JSON textarea, posted and then unreachable
+  forever. It is now a list and a creator with 1–10 numbered embeds, a colour, a
+  banner image and a live preview — and no buttons, no drafts and nothing else
+  around it, because an embed is the message itself. Post it, and it stays
+  editable; press Update and the same message changes. It carries **no feature
+  toggle**, since there is nothing there anybody would switch off.
+- Schema 13 rebuilds `managed_messages` so it can hold an embed. SQLite cannot
+  alter a CHECK constraint, so this is a create-copy-drop-rename of the kind
+  schema 8 used, gated on the table's own SQL: re-running is a no-op and an
+  interrupted upgrade repairs itself. Rehearsed against a copy of the live
+  database — every row, every column and every id survives.
+- `dashboard_documents` keeps no reader. Dropping the table is a destructive
+  migration with nothing to gain, so it stays the way `server_config` does.
+
+- CI installs Node. Four tests drive the dashboard's JavaScript through it and
+  skip themselves without a runtime, so all four had been reporting green while
+  running nothing — and they are the checks guarding the defects that reached the
+  deployment. A test asserts both halves now, because the failure mode of a guard
+  is silence.
+
+- **You can take over the panels you have already posted** instead of
+  recreating them. Paste a message link into a creator and the bot reads that
+  message, fills the form from it and records the link, so Update edits that
+  exact message from then on — your rules panel, ticket launcher and entry gate
+  stay where they are, with their pins and their place in the channel. The
+  schema-12 migration always left this half undone: it says a menu already
+  posted keeps working "until it is re-posted **or told which message it is**",
+  and only the re-posting half existed.
+  Your three role menus need only the link: their content — all 19 role and
+  emoji pairs — was already imported by that migration, and a role menu's
+  buttons are deliberately *not* read back from the message, because a button
+  carries no role id and the database is the only place those live.
+  It refuses a message the bot did not post rather than accepting it and failing
+  on every Update, refuses a link from another server, and refuses a message
+  another item already owns.
+- The rules panel takes a **banner image**, which is what `/rules_verify` posts.
+  Without it, adopting one of those messages would have stripped the banner on
+  the first Update, silently.
+
+- **The `/work` editor says what you may type.** There are two tokens,
+  `{earnings}` and `{coin}`, and the hints named only the first, so the currency
+  symbol was undiscoverable. The page now lists both with the rules that apply —
+  500 characters, line breaks and formatting work, mentions cannot ping anyone,
+  and any other braced text stays exactly as written. The hint claiming the
+  shipped responses are "not editable" was also out of date; editing one adopts
+  that tier into your server.
+
+- **The content builders' Edit buttons did nothing and no creator ever
+  appeared** — and it was one missing property, not a missing feature. Every
+  picker on the settings form is built from a registry definition; the two in
+  the builder editor were written by hand and omitted the locale key the picker
+  reads, so building one threw. The throw landed after the card had been emptied
+  and before the form was attached, which is why the card looked blank, and it
+  aborted the rest of the page load, which is why the New button was missing and
+  every Edit click did nothing. `tr` no longer throws on an absent key name, and
+  a test walks every hand-written picker definition for what the picker reads.
+
+- **Four content pages, each named for what it makes**: Rules panel, Role menus,
+  Ticket launcher, Entry gate. "Panels" held two unrelated systems in one page,
+  which is exactly why it read as the same thing as role menus — the real
+  difference is that a role menu is the only one whose buttons you write. The
+  ticket launcher and the entry gate each get their own menu, and each page says
+  in one sentence what pressing its button does.
+- **New and Edit open a creator in place of the list**, laid out as numbered
+  steps: the message, then the sections or the buttons, then the button. Rules
+  sections are numbered blocks you add and remove rather than a count you keep in
+  sync. Every field has a hint. Back returns to the list, and asks first if you
+  have unsaved text.
+- **A preview beside the form**, redrawn as you type: the embeds, the colour, the
+  server icon and the buttons with their real labels. It tells you what it cannot
+  show — markdown and emoji from another server appear as typed — rather than
+  letting you find out after posting. A rules panel also shows a running
+  character count, because passing Discord's 6000 fails the whole send.
+- **You can write the button text.** All three one-button panels hardcoded their
+  label, and the dashboard had been collecting a rules accept-label for a while
+  and throwing it away. Leave it empty for the bot's own wording.
+- `/setup_tickets` and `/setup_enter` now record what they posted, so a panel put
+  up from Discord is visible and editable in the dashboard instead of invisible
+  to it — and `/update_enter` stops asking you to copy a message id by hand.
+- Fixed a dashboard-published role menu, and the "New" button multiplying: every
+  save added another one.
+
+- **Schema 12** gives a posted message an identity. `message_id` appeared
+  nowhere in the schema before, so everything the dashboard published was
+  fire-and-forget: a draft could be posted a second time but never updated, and
+  the bot's own `/update_games` worked only because you typed the id by hand.
+  `managed_messages` and `managed_message_entries` record what was posted, where,
+  and the buttons it carries. Purely additive — the upgrade adds two tables and
+  moves no row — and the three existing role menus are seeded from their settings
+  with every pair intact.
+
+- Fixed the settings form reporting three changes nobody made, every single time
+  the Role menus page loaded — and still reporting them after a save. Flask sets
+  `app.json.sort_keys`, so an entry reaches the browser with its fields in
+  alphabetical order, while a row editor rebuilds them in the order its columns
+  are declared. For a role menu that is `{emoji, id}` against `{id, emoji}`:
+  identical values, different text, and the dirty check compared the text. Every
+  Community save therefore also wrote three phantom audit rows and bumped three
+  revisions for settings nobody had touched. The comparison is canonical now —
+  key order and number-versus-string can no longer manufacture a difference for
+  any shape — and when two values still differ the console names which setting
+  and shows both sides.
+- **Content builders that can edit what they posted.** They were a name and one
+  JSON textarea, and the rules type could not express a button at all: its
+  validator demanded exactly `{"sections": [...]}` and the worker sent one bare
+  embed per section with no view, so it was strictly less capable than
+  `/rules_group`. There is a **Content** group now with four pages — Embeds,
+  Rules panel, Role menus, Panels — and the last three list what exists with
+  Save, Post/Update and Delete. Update edits the message that is already up
+  instead of posting a second one, and Delete removes the message with the row.
+- The rules panel takes 1–10 sections rather than a hard-coded seven, which is
+  Discord's embeds-per-message limit, and carries its colour, the guild-icon
+  thumbnail and the accept button as toggles. The 256, 4096 and 6000-character
+  limits are checked before you press Post rather than surfacing as a send that
+  failed.
+- Role menus are the flow you asked for: create one, add rows of label, role and
+  emoji, post it, and later add a role and press update. The three menus that
+  shipped as fixed settings are ordinary menus now, so a guild may have as many
+  as it wants; `/setup_games` and friends still work and write through the same
+  row, and `/update_games` and `/update_rules_group` no longer ask you to copy a
+  message id out of Discord.
+- Fixed a dashboard-published role menu showing **every guild's** buttons. The
+  view was built without a guild id, which is the routing constructor, so a
+  click on a foreign button answered "role not found".
+- **"Games and prices" is gone.** It priced nothing — every price in the registry
+  is a shop item price under Economy — and owned one channel, which was the LFG
+  channel with no role. That channel is `lfg_default_channel` in a new **LFG**
+  category now, and it finally respects the LFG toggle, which it did not before.
+  Your stored value moves with the rename.
+- Removed the Music page from the sidebar. It owns no settings and no
+  sub-toggles, so it has always been hidden — an empty page pretending to be a
+  destination. The music switch is on the Features page like every other one. A
+  new test walks the sidebar and fails on an entry that cannot render anything,
+  which is exactly how the Builders page went missing.
+- The published snapshot no longer carries the game icons. `botdata/` holds
+  eleven icons uploaded to Discord by hand and read by no code; they are other
+  people's artwork and every public release shipped them. The bot's own avatar
+  moved to the repository root so it still ships.
+
+## 2.1.0-beta.1 to 2.3.0-beta.1
+
+- These notes cover five public betas — `v2.1.0b1` through `v2.3.0b1` — as one
+  block. The changelog was a single running section then and the publisher
+  renamed only its top heading, so the per-release boundaries were never
+  recorded and inventing them now would be a guess; the tags are the authority
+  on what each build contained. The 2.4.0 boundary below it *is* exact, because
+  `git blame` can place every line against the commit that wrote it.
 
 - The README is an overview and a quick start again. The verification commands
   and the local-dashboard walkthrough moved to `docs/development.md`, which
@@ -274,7 +431,7 @@
 - Added `docs/installation.md` and `docs/level_setup.md`, and stopped shipping
   one guild's role ids as the `level_roles` default.
 
-## 2.0.0-rc.1 - Unreleased
+## 2.0.0-rc.1
 
 - Added transactional schema-4 wager recovery and atomic booster reward claims.
 - Made feature policy fail closed until its guild cache is ready.
@@ -555,4 +712,3 @@
   now skipped with a warning instead of raising inside the level-up path.
 - Gave `level_roles` the deployment's own nine role ids as its default, so the
   level milestones resolve by id instead of by role name and survive a rename.
-

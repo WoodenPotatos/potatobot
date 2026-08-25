@@ -57,6 +57,7 @@ READ_ONLY_OPERATIONS = {
     "get_user_inventory",
     "get_user_vouchers",
     "get_guild_settings", "get_instance_settings", "get_schema_version",
+    "list_managed_messages", "get_managed_message",
     "get_settings_revision",
     "get_settings_audit", "get_shop_item_definitions",
     "list_dashboard_documents", "get_control_action",
@@ -159,7 +160,7 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 11
+LATEST_SCHEMA_VERSION = 13
 
 # A claimed control action is re-queued only once its lease expires. The worker
 # renews the lease as it runs, so slowness never causes a duplicate Discord post.
@@ -811,6 +812,57 @@ def _create_control_plane_v5_schema(conn):
             completed_at TEXT,
             completed_by INTEGER
         );
+        -- Schema 12. A message the dashboard posted and can edit again.
+        --
+        -- `message_id` is the whole point. Nothing published from the dashboard
+        -- was ever tracked — every `channel.send(...)` return value was
+        -- discarded — so a published draft could only ever be posted a second
+        -- time, never updated. The bot's own `/update_games` worked solely
+        -- because the operator typed the message id by hand.
+        --
+        -- One table for every kind of managed message rather than one per kind:
+        -- a role menu, a rules panel and a ticket launcher differ in what they
+        -- render, not in what has to be remembered about them.
+        CREATE TABLE IF NOT EXISTS managed_messages (
+            guild_id INTEGER NOT NULL,
+            kind TEXT NOT NULL
+                CHECK (kind IN ('role_menu', 'rules', 'ticket', 'airlock',
+                               'embed')),
+            menu_key TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            -- NULL until posted, and NULL again once the message is gone.
+            channel_id INTEGER,
+            message_id INTEGER,
+            title TEXT,
+            body TEXT,
+            colour INTEGER,
+            options_json TEXT NOT NULL DEFAULT '{}',
+            revision INTEGER NOT NULL DEFAULT 1,
+            updated_by INTEGER,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, kind, menu_key)
+        );
+        -- A role menu's buttons. A child table rather than a JSON column so a
+        -- role can be added without rewriting the row, and so `position` can
+        -- carry the button order Discord will render.
+        CREATE TABLE IF NOT EXISTS managed_message_entries (
+            entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            menu_key TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            role_id INTEGER,
+            emoji TEXT NOT NULL DEFAULT '',
+            UNIQUE (guild_id, kind, menu_key, label)
+        );
+        CREATE INDEX IF NOT EXISTS idx_managed_entries_menu
+            ON managed_message_entries(guild_id, kind, menu_key, position);
+        -- Retired at schema 13: the plain embed sender became a managed
+        -- message, and nothing reads or writes this table any more. It is kept
+        -- rather than dropped for the same reason `server_config` is — dropping
+        -- a table is a destructive migration with nothing to gain — and can go
+        -- in a later cleanup.
         CREATE TABLE IF NOT EXISTS dashboard_documents (
             document_id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER NOT NULL,
@@ -890,6 +942,204 @@ def _create_control_plane_v5_schema(conn):
             "ALTER TABLE reward_vouchers ADD COLUMN source_type TEXT "
             "NOT NULL DEFAULT 'gacha' CHECK (source_type IN ('gacha', 'shop'))"
         )
+
+
+# The three role menus that shipped as typed settings, and the key each becomes.
+# `menu_key` is what a posted message's buttons are addressed by, so it is stable
+# and never derived from the operator-facing name.
+SEEDED_ROLE_MENUS = (
+    ("game_roles", "games"),
+    ("news_roles", "news"),
+    ("theme_roles", "themes"),
+)
+
+
+# Settings that changed key rather than meaning. A rename has to move the stored
+# row or the guild silently reverts to the default: the old key stops being read
+# on the same day the new one starts being written.
+RENAMED_SETTINGS = (
+    # "Games and prices" priced nothing and owned this one channel; it is the
+    # LFG channel with no role, which is what `/search` has always used it as.
+    ("other_games_channel", "lfg_default_channel"),
+)
+
+
+def widen_managed_message_kinds(conn) -> bool:
+    """Schema 13: let `managed_messages` hold an `embed` row.
+
+    The plain embed sender was the last builder still writing fire-and-forget
+    drafts, so an embed could be posted and never edited. Making it a managed
+    message means widening a CHECK constraint, and SQLite cannot alter one — so
+    this is a **rebuild** (create, copy, drop, rename), the same shape schema 8
+    used for the six tables that gained a guild dimension.
+
+    Gated on the table's own SQL rather than on a version, so re-running is a
+    no-op and an interrupted upgrade repairs itself. Nothing references this
+    table by foreign key, and `initialize_database` opens its connection without
+    `PRAGMA foreign_keys`, which is what makes the rename safe.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' "
+        "AND name = 'managed_messages'").fetchone()
+    if row is None or "'embed'" in (row[0] or ""):
+        return False
+    conn.execute("""
+        CREATE TABLE managed_messages_rebuilt (
+            guild_id INTEGER NOT NULL,
+            kind TEXT NOT NULL
+                CHECK (kind IN ('role_menu', 'rules', 'ticket', 'airlock',
+                               'embed')),
+            menu_key TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            channel_id INTEGER,
+            message_id INTEGER,
+            title TEXT,
+            body TEXT,
+            colour INTEGER,
+            options_json TEXT NOT NULL DEFAULT '{}',
+            revision INTEGER NOT NULL DEFAULT 1,
+            updated_by INTEGER,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, kind, menu_key)
+        )
+    """)
+    conn.execute("""
+        INSERT INTO managed_messages_rebuilt
+            (guild_id, kind, menu_key, display_name, channel_id, message_id,
+             title, body, colour, options_json, revision, updated_by, updated_at)
+        SELECT guild_id, kind, menu_key, display_name, channel_id, message_id,
+               title, body, colour, options_json, revision, updated_by, updated_at
+        FROM managed_messages
+    """)
+    conn.execute("DROP TABLE managed_messages")
+    conn.execute("ALTER TABLE managed_messages_rebuilt RENAME TO managed_messages")
+    return True
+
+
+def rename_managed_option_keys(conn) -> int:
+    """Move a rules panel's `accept_label` to `button_label`, once.
+
+    The rules panel stored an accept-button label under its own name while the
+    ticket launcher and the entry gate had none. All three take an operator's
+    label now, and one concept with two names would mean every reader
+    remembering which kind spells it which way — the same argument the settings
+    rename makes, one level down inside a JSON blob.
+
+    Gated on the old key being present and the new one absent, so re-running is
+    a no-op. No DDL: `options_json` is a TEXT column.
+    """
+    moved = 0
+    rows = conn.execute(
+        "SELECT guild_id, menu_key, options_json FROM managed_messages "
+        "WHERE kind = 'rules'").fetchall()
+    for guild_id, menu_key, options_json in rows:
+        try:
+            options = json.loads(options_json)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(options, dict) or "accept_label" not in options:
+            continue
+        options.setdefault("button_label", options.pop("accept_label"))
+        options.pop("accept_label", None)
+        conn.execute(
+            "UPDATE managed_messages SET options_json = ? "
+            "WHERE guild_id = ? AND kind = 'rules' AND menu_key = ?",
+            (json.dumps(options, sort_keys=True), guild_id, menu_key))
+        moved += 1
+    return moved
+
+
+def rename_setting_rows(conn) -> int:
+    """Move a stored setting to its new key, once.
+
+    Gated on the old key being present and the new one absent, so re-running is
+    a no-op and a guild that has already saved under the new name keeps what it
+    saved rather than having it overwritten by a stale row.
+    """
+    moved = 0
+    for old_key, new_key in RENAMED_SETTINGS:
+        moved += conn.execute(
+            "UPDATE guild_settings SET setting_key = ? "
+            "WHERE setting_key = ? AND guild_id NOT IN "
+            "(SELECT guild_id FROM guild_settings WHERE setting_key = ?)",
+            (new_key, old_key, new_key),
+        ).rowcount
+        # Anything left is a guild that has both: the old row is stale.
+        conn.execute("DELETE FROM guild_settings WHERE setting_key = ?", (old_key,))
+    return moved
+
+
+def seed_role_menus_from_settings(conn) -> int:
+    """Turn the three role-menu settings into managed messages, once.
+
+    Schema 12. Gated on absence in `managed_messages` rather than on a version,
+    so re-running is a no-op and an interrupted upgrade repairs itself.
+
+    `message_id` is deliberately left NULL. A menu already posted stays posted
+    and keeps working — the buttons route by `custom_id` and the roles still
+    resolve — but the dashboard cannot edit that message until it is either
+    re-posted or told which message it is. Guessing an id is not available to us,
+    and posting a second copy on upgrade would be worse than asking.
+
+    Only a guild's **stored** setting seeds a menu, never the `config.json`
+    fallback the runtime readers use: that file is single-tenant and names one
+    installation's roles with no guild attached, so seeding from it would hand a
+    second guild the legacy guild's role ids.
+
+    The settings rows are left in place. They stop being read in the same change
+    that moves the readers over, and leaving them until then means an upgrade
+    that is interrupted between the two has not lost anything.
+    """
+    seeded = 0
+    timestamp = datetime.now(timezone.utc).isoformat()
+    guild_ids = [row[0] for row in conn.execute(
+        "SELECT guild_id FROM guilds WHERE active = 1")]
+    for guild_id in guild_ids:
+        for setting_key, menu_key in SEEDED_ROLE_MENUS:
+            existing = conn.execute(
+                "SELECT 1 FROM managed_messages "
+                "WHERE guild_id = ? AND kind = 'role_menu' AND menu_key = ?",
+                (guild_id, menu_key),
+            ).fetchone()
+            if existing:
+                continue
+            stored = conn.execute(
+                "SELECT value_json FROM guild_settings "
+                "WHERE guild_id = ? AND setting_key = ?",
+                (guild_id, setting_key),
+            ).fetchone()
+            # Only a stored row seeds a menu. The `config.json` fallback every
+            # other reader has is single-tenant — it names one installation's
+            # roles with no guild attached — so using it here would give a
+            # second guild the legacy guild's role ids. A guild that never saved
+            # the setting starts with no menu and creates one, which is the
+            # honest answer rather than a guessed one.
+            if stored is None:
+                continue
+            entries = json.loads(stored[0])
+            if not isinstance(entries, dict) or not entries:
+                continue
+            conn.execute(
+                "INSERT INTO managed_messages (guild_id, kind, menu_key, "
+                "display_name, options_json, revision, updated_at) "
+                "VALUES (?, 'role_menu', ?, ?, '{}', 1, ?)",
+                (guild_id, menu_key, menu_key, timestamp),
+            )
+            for position, (label, entry) in enumerate(entries.items()):
+                if isinstance(entry, dict):
+                    role_id, emoji = entry.get("id"), entry.get("emoji") or ""
+                else:
+                    # The legacy bare-id form the role menu shape still accepts.
+                    role_id, emoji = entry, ""
+                conn.execute(
+                    "INSERT INTO managed_message_entries (guild_id, kind, "
+                    "menu_key, position, label, role_id, emoji) "
+                    "VALUES (?, 'role_menu', ?, ?, ?, ?, ?)",
+                    (guild_id, menu_key, position, str(label),
+                     int(role_id) if role_id else None, str(emoji)),
+                )
+            seeded += 1
+    return seeded
 
 
 def _promote_instance_settings(conn) -> int:
@@ -1004,6 +1254,21 @@ def initialize_database():
                         "WHERE guild_id = ? AND banner_key = ?",
                         (json.dumps(banner_config, sort_keys=True), guild_id, banner_key),
                     )
+            renamed = rename_setting_rows(conn)
+            if renamed:
+                db_logger.info("Moved %s setting row(s) to a new key.", renamed)
+            if widen_managed_message_kinds(conn):
+                db_logger.info(
+                    "Rebuilt managed_messages so it can hold an embed.")
+            relabelled = rename_managed_option_keys(conn)
+            if relabelled:
+                db_logger.info(
+                    "Moved %s managed message option(s) to a new key.",
+                    relabelled)
+            menus = seed_role_menus_from_settings(conn)
+            if menus:
+                db_logger.info("Seeded %s role menu(s) into managed_messages.",
+                               menus)
             moved = _promote_instance_settings(conn)
             if moved:
                 db_logger.info(
@@ -4815,6 +5080,195 @@ def rollback_custom_role_purchase(guild_id: int, user_id: int, charged_price: in
         conn.commit()
 
 
+MANAGED_MESSAGE_KINDS = ("role_menu", "rules", "ticket", "airlock", "embed")
+
+# Discord renders at most 25 components on one message, so a role menu cannot
+# hold more buttons than that. Derived from the platform, not chosen.
+MANAGED_ENTRY_LIMIT = 25
+
+
+def _managed_row(row, entries) -> dict:
+    return {"kind": row[0], "menu_key": row[1], "display_name": row[2],
+            "channel_id": str(row[3]) if row[3] else None,
+            "message_id": str(row[4]) if row[4] else None,
+            "title": row[5], "body": row[6], "colour": row[7],
+            "options": json.loads(row[8]), "revision": row[9],
+            "updated_at": row[10], "entries": entries,
+            "posted": row[4] is not None}
+
+
+def list_managed_messages(guild_id: int, kind: str = None) -> list[dict]:
+    """Every managed message a guild has, with its entries.
+
+    Ids are strings for the same reason every other id is: a snowflake is 64-bit
+    and a browser number holds 53 bits exactly.
+    """
+    with get_connection() as conn:
+        if kind is None:
+            rows = conn.execute(
+                "SELECT kind, menu_key, display_name, channel_id, message_id, "
+                "title, body, colour, options_json, revision, updated_at "
+                "FROM managed_messages WHERE guild_id = ? ORDER BY kind, menu_key",
+                (int(guild_id),)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT kind, menu_key, display_name, channel_id, message_id, "
+                "title, body, colour, options_json, revision, updated_at "
+                "FROM managed_messages WHERE guild_id = ? AND kind = ? "
+                "ORDER BY menu_key", (int(guild_id), kind)).fetchall()
+        entries = {}
+        for row in conn.execute(
+            "SELECT kind, menu_key, label, role_id, emoji FROM "
+            "managed_message_entries WHERE guild_id = ? ORDER BY position",
+            (int(guild_id),),
+        ):
+            entries.setdefault((row[0], row[1]), []).append(
+                {"label": row[2],
+                 "role_id": str(row[3]) if row[3] else None,
+                 "emoji": row[4]})
+    return [_managed_row(row, entries.get((row[0], row[1]), [])) for row in rows]
+
+
+def get_managed_message(guild_id: int, kind: str, menu_key: str) -> dict | None:
+    for message in list_managed_messages(guild_id, kind):
+        if message["menu_key"] == menu_key:
+            return message
+    return None
+
+
+def save_managed_message(guild_id: int, actor_id: int, kind: str, menu_key: str,
+                         display_name: str, expected_revision: int, *,
+                         title: str = None, body: str = None,
+                         colour: int = None, options: dict = None,
+                         entries: list = None) -> dict:
+    """Create or update one managed message and its entries in one transaction.
+
+    The entries are replaced wholesale rather than diffed: a role menu is a short
+    ordered list, and rewriting it is what makes `position` mean the button order
+    without a reordering protocol. `message_id` and `channel_id` are **not**
+    touched here — where a message was posted is a fact about Discord, recorded
+    by `record_managed_post` when a post actually succeeds, and an edit to the
+    content must not silently claim the message moved.
+    """
+    if kind not in MANAGED_MESSAGE_KINDS:
+        raise ValidationError("managed_kind_invalid", "unknown managed message kind")
+    if not isinstance(menu_key, str) or not _GACHA_BANNER_KEY.fullmatch(menu_key):
+        raise ValidationError("managed_key_invalid", "managed message key is invalid")
+    if not isinstance(display_name, str) or not display_name.strip():
+        raise ValidationError("managed_name_invalid", "a managed message needs a name")
+    entries = list(entries or [])
+    if len(entries) > MANAGED_ENTRY_LIMIT:
+        raise ValidationError("managed_entry_limit",
+                              "too many entries for one message")
+    timestamp = datetime.now(timezone.utc).isoformat()
+    try:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT revision FROM managed_messages "
+                "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+                (int(guild_id), kind, menu_key)).fetchone()
+            if row:
+                if int(expected_revision) != row[0]:
+                    conn.rollback()
+                    raise RevisionConflictError("managed message revision conflict")
+                revision = row[0] + 1
+                conn.execute(
+                    "UPDATE managed_messages SET display_name = ?, title = ?, "
+                    "body = ?, colour = ?, options_json = ?, revision = ?, "
+                    "updated_by = ?, updated_at = ? "
+                    "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+                    (display_name.strip(), title, body, colour,
+                     json.dumps(options or {}, sort_keys=True), revision,
+                     int(actor_id), timestamp, int(guild_id), kind, menu_key))
+            else:
+                if expected_revision not in (None, 0):
+                    conn.rollback()
+                    raise RevisionConflictError("managed message revision conflict")
+                revision = 1
+                conn.execute(
+                    "INSERT INTO managed_messages (guild_id, kind, menu_key, "
+                    "display_name, title, body, colour, options_json, revision, "
+                    "updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                    (int(guild_id), kind, menu_key, display_name.strip(), title,
+                     body, colour, json.dumps(options or {}, sort_keys=True),
+                     int(actor_id), timestamp))
+            conn.execute(
+                "DELETE FROM managed_message_entries "
+                "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+                (int(guild_id), kind, menu_key))
+            for position, entry in enumerate(entries):
+                label = str(entry.get("label", "")).strip()
+                if not label:
+                    conn.rollback()
+                    raise ValidationError("managed_entry_label",
+                                          "every entry needs a label")
+                role_id = entry.get("role_id")
+                conn.execute(
+                    "INSERT INTO managed_message_entries (guild_id, kind, "
+                    "menu_key, position, label, role_id, emoji) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (int(guild_id), kind, menu_key, position, label,
+                     int(role_id) if role_id else None,
+                     str(entry.get("emoji") or "")))
+            write_settings_audit(conn, int(guild_id), actor_id,
+                                 "managed_message.save", f"{kind}:{menu_key}",
+                                 None, {"entries": len(entries)})
+            conn.commit()
+            return {"revision": revision}
+    except (DatabaseOperationError, RevisionConflictError, ValidationError):
+        raise
+    except sqlite3.Error as exc:
+        db_logger.exception("Managed message save failed (guild=%s)", guild_id)
+        raise DatabaseOperationError("managed message save failed") from exc
+
+
+def record_managed_post(guild_id: int, kind: str, menu_key: str,
+                        channel_id, message_id) -> None:
+    """Remember where a managed message was posted.
+
+    Separate from the content save because it records what Discord did, not what
+    an operator typed — and because both the dashboard's publish worker and the
+    bot's own `/setup_*` commands call it, which is what stops the two paths from
+    disagreeing about which message is the live one.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE managed_messages SET channel_id = ?, message_id = ? "
+            "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+            (int(channel_id) if channel_id else None,
+             int(message_id) if message_id else None,
+             int(guild_id), kind, menu_key))
+
+
+def delete_managed_message(guild_id: int, actor_id: int, kind: str,
+                           menu_key: str, expected_revision: int) -> dict | None:
+    with get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT revision, channel_id, message_id FROM managed_messages "
+            "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+            (int(guild_id), kind, menu_key)).fetchone()
+        if row is None:
+            conn.rollback()
+            return None
+        if int(expected_revision) != row[0]:
+            conn.rollback()
+            raise RevisionConflictError("managed message revision conflict")
+        conn.execute("DELETE FROM managed_message_entries "
+                     "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+                     (int(guild_id), kind, menu_key))
+        conn.execute("DELETE FROM managed_messages "
+                     "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+                     (int(guild_id), kind, menu_key))
+        write_settings_audit(conn, int(guild_id), actor_id,
+                             "managed_message.delete", f"{kind}:{menu_key}")
+        conn.commit()
+        # The caller deletes the Discord message; it needs to know which.
+        return {"channel_id": str(row[1]) if row[1] else None,
+                "message_id": str(row[2]) if row[2] else None}
+
+
 def save_dashboard_document(guild_id: int, actor_id: int, document_type: str,
                             name: str, content: dict, expected_revision: int = 0) -> dict:
     if document_type not in {"embed", "rules", "panel"} or not name.strip():
@@ -4866,8 +5320,13 @@ def list_dashboard_documents(guild_id: int) -> list[dict]:
 
 def queue_control_action(guild_id: int, actor_id: int, action_type: str,
                          payload: dict) -> int:
-    if action_type not in {"send_embed", "publish_rules", "publish_panel",
-                           "erase_member"}:
+    # `publish_rules`, `publish_panel` and `send_embed` are gone: each published
+    # a `dashboard_documents` draft and discarded the message id, so nothing
+    # could be updated afterwards. `publish_managed` posts *or* edits a
+    # `managed_messages` row, which is what "add a role and press update" needs.
+    # A row of a retired type left in an older queue settles as unsupported
+    # rather than being retried forever.
+    if action_type not in {"publish_managed", "delete_managed", "erase_member"}:
         raise ValueError("unsupported control action")
     with get_connection() as conn:
         action_id = conn.execute(
@@ -5046,6 +5505,7 @@ ERASE_NULL_ACTOR = (
     ("feature_flags", "updated_by"),
     ("guild_settings", "updated_by"),
     ("instance_settings", "updated_by"),
+    ("managed_messages", "updated_by"),
     ("shop_item_definitions", "updated_by"),
     ("gacha_banners", "updated_by"),
     ("work_responses", "updated_by"),

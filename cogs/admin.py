@@ -13,6 +13,7 @@ if ROOT_DIR not in sys.path:
 
 import database
 import permission_audit
+from managed_messages import render_managed_message
 from discord.ext import commands
 from datetime import datetime, timedelta
 from cogs.utils import (
@@ -114,15 +115,97 @@ class EmbedSendModal(discord.ui.Modal, title=t("admin.embed_modal_title")):
         await interaction.channel.send(embed=embed)
         await interaction.response.send_message(t("admin.embed_sent_success"), ephemeral=True)
 
+# The one rules panel the commands address. A guild may have several through the
+# dashboard; `/rules_group` has only ever meant "the" rules message, so it owns
+# this key the way the default gacha banner owns its own.
+RULES_PANEL_KEY = "rules"
+
+
+async def store_rules_panel(ctx, color_hex, add_button, arguments) -> dict:
+    """Save what the command was asked to post, and hand back the stored row.
+
+    The command posts from storage rather than from its own arguments, which is
+    what stops the two paths diverging: whatever `/rules_group` sends is exactly
+    what the dashboard then shows and can edit.
+    """
+    try:
+        colour = discord.Color.from_str(color_hex).value
+    except (ValueError, TypeError):
+        colour = discord.Color.blue().value
+    sections = []
+    for index in range(1, 7):
+        title = arguments.get(f"title{index}")
+        body = arguments.get(f"msg{index}")
+        if index == 1 or (title and body):
+            sections.append({"title": title, "body": body or ""})
+    # The seventh has never had a title; it is the closing paragraph.
+    if arguments.get("msg7"):
+        sections.append({"title": None, "body": arguments["msg7"]})
+
+    existing = await database.run_read(database.get_managed_message,
+                                       ctx.guild.id, "rules", RULES_PANEL_KEY)
+    await database.run_write(
+        database.save_managed_message, ctx.guild.id, ctx.author.id, "rules",
+        RULES_PANEL_KEY, (existing or {}).get("display_name") or RULES_PANEL_KEY,
+        (existing or {}).get("revision", 0), colour=colour,
+        options={"sections": sections, "accept_button": bool(add_button),
+                 "thumbnail": True})
+    return await database.run_read(database.get_managed_message, ctx.guild.id,
+                                   "rules", RULES_PANEL_KEY)
+
+
+# The one entry gate the commands address, the way `RULES_PANEL_KEY` names the
+# one rules panel. A guild may create others from the dashboard.
+ENTRY_GATE_KEY = "airlock"
+
+
+async def store_simple_panel(ctx, kind, menu_key, title, body, colour) -> dict:
+    """Save a one-button panel and hand back the stored row.
+
+    `/setup_enter` and `/setup_tickets` posted and forgot, so a panel put up from
+    Discord was invisible to the dashboard and could never be edited. They write
+    the row first and post *from* it, which is what stops the two paths
+    describing different messages. An existing row keeps its operator-set text:
+    re-running the command must not silently overwrite what somebody typed into
+    the dashboard.
+    """
+    existing = await database.run_read(database.get_managed_message,
+                                       ctx.guild.id, kind, menu_key)
+    if existing:
+        return existing
+    await database.run_write(
+        database.save_managed_message, ctx.guild.id, ctx.author.id, kind,
+        menu_key, menu_key, 0, title=title, body=body, colour=colour)
+    return await database.run_read(database.get_managed_message, ctx.guild.id,
+                                   kind, menu_key)
+
+
 class RuleAcceptView(discord.ui.View):
-    def __init__(self):
+    """The rules panel's accept button, whose label an operator may set.
+
+    The instance handed to `bot.add_view` takes no label and keeps the shipped
+    one: a click routes by `custom_id`, which the label never touches, so the
+    registered view is a routing table whose own labels are never drawn. Only
+    the instance built for one posted message carries the operator's text.
+
+    The button is constructed at runtime rather than by the decorator so the
+    default label is localized when the view is built rather than frozen at
+    import — the same shape `TicketLauncher` already uses.
+    """
+
+    def __init__(self, *, label: str = None):
         super().__init__(timeout=None)
+        button = discord.ui.Button(
+            label=label or t("admin.accept_rules_button"),
+            style=discord.ButtonStyle.green, custom_id="accept_rules_btn",
+            emoji="✅")
+        button.callback = self.accept
+        self.add_item(button)
 
     async def interaction_check(self, interaction):
         return await check_onboarding_interaction(interaction)
 
-    @discord.ui.button(label=t("admin.accept_rules_button"), style=discord.ButtonStyle.green, custom_id="accept_rules_btn", emoji="✅")
-    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def accept(self, interaction: discord.Interaction):
         onboarding_role = interaction.guild.get_role(
             guild_setting_sync(interaction.guild.id, "onboarding_role") or 0)
         member_role = interaction.guild.get_role(
@@ -147,14 +230,26 @@ class RuleAcceptView(discord.ui.View):
         await database.run(database.set_rules_read_time, interaction.user.id, seconds_taken)
         
 class EnterServerView(discord.ui.View):
-    def __init__(self):
+    """The entry gate's button. Same label contract as `RuleAcceptView`.
+
+    It grants the *member* role and takes the onboarding role away, which is the
+    opposite end of the funnel from the rules button — the two are easy to
+    confuse and do different things.
+    """
+
+    def __init__(self, *, label: str = None):
         super().__init__(timeout=None)
+        button = discord.ui.Button(
+            label=label or t("admin.enter_server_button"),
+            style=discord.ButtonStyle.success, custom_id="enter_server_btn",
+            emoji="🚀")
+        button.callback = self.enter_server
+        self.add_item(button)
 
     async def interaction_check(self, interaction):
         return await check_onboarding_interaction(interaction)
 
-    @discord.ui.button(label=t("admin.enter_server_button"), style=discord.ButtonStyle.success, custom_id="enter_server_btn", emoji="🚀")
-    async def enter_server(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def enter_server(self, interaction: discord.Interaction):
         onboarding_role = interaction.guild.get_role(
             guild_setting_sync(interaction.guild.id, "onboarding_role") or 0)
         member_role = interaction.guild.get_role(
@@ -397,23 +492,43 @@ class Admin(commands.Cog):
     @discord.app_commands.default_permissions(administrator=True)
     @commands.has_permissions(administrator=True)
     async def setup_enter(self, ctx):
-        embed = discord.Embed(
-            title=t("admin.airlock_title"),
-            description=t("admin.airlock_desc"),
-            color=discord.Color.green()
-        )
-        await ctx.channel.send(embed=embed, view=EnterServerView())
+        stored = await store_simple_panel(
+            ctx, "airlock", ENTRY_GATE_KEY,
+            t("admin.airlock_title"), t("admin.airlock_desc"),
+            discord.Color.green().value)
+        embeds, view = render_managed_message(ctx.guild, stored)
+        if embeds is None:
+            return await ctx.send(t("admin.operation_failed"), ephemeral=True)
+        message = await ctx.channel.send(embeds=embeds, view=view)
+        await database.run_write(database.record_managed_post, ctx.guild.id,
+                                 "airlock", ENTRY_GATE_KEY, ctx.channel.id,
+                                 message.id)
         if ctx.interaction:
             await ctx.send(t("utils.command_completed"), ephemeral=True)
 
     @commands.hybrid_command(name="update_enter", description=t("general.cmd_update_enter"))
     @discord.app_commands.default_permissions(administrator=True)
     @commands.has_permissions(administrator=True)
-    async def update_enter(self, ctx, message_id: str):
+    async def update_enter(self, ctx):
+        """Re-render the entry gate this guild already posted.
+
+        The message id was an argument until the panel started recording where
+        it went. Nothing stored is a specific answer rather than the generic
+        failure a mistyped id produced.
+        """
+        stored = await database.run_read(database.get_managed_message,
+                                         ctx.guild.id, "airlock", ENTRY_GATE_KEY)
+        if not stored or not stored.get("message_id"):
+            return await ctx.send(t("admin.airlock_not_posted"), ephemeral=True)
         try:
-            message = await ctx.channel.fetch_message(int(message_id.strip()))
-            new_embed = discord.Embed(title=t("admin.airlock_title"), description=t("admin.airlock_desc"), color=discord.Color.green())
-            await message.edit(embed=new_embed, view=EnterServerView())
+            channel = (self.bot.get_channel(int(stored["channel_id"]))
+                       if stored.get("channel_id") else ctx.channel)
+            message = await (channel or ctx.channel).fetch_message(
+                int(stored["message_id"]))
+            embeds, view = render_managed_message(ctx.guild, stored)
+            if embeds is None:
+                return await ctx.send(t("admin.operation_failed"), ephemeral=True)
+            await message.edit(embeds=embeds, view=view)
             await ctx.send(t("admin.airlock_updated"), ephemeral=True)
         except Exception as exc:
             admin_logger.warning(
@@ -425,33 +540,24 @@ class Admin(commands.Cog):
     @commands.hybrid_command(name="rules_group", description=t("general.cmd_rules_group"))
     @discord.app_commands.default_permissions(administrator=True)
     @commands.has_permissions(administrator=True)
-    async def rules_group(self, ctx, color_hex: str, 
-                            title1: str, msg1: str, 
-                            title2: str = None, msg2: str = None, 
+    async def rules_group(self, ctx, color_hex: str,
+                            title1: str, msg1: str,
+                            title2: str = None, msg2: str = None,
                             title3: str = None, msg3: str = None,
                             title4: str = None, msg4: str = None,
                             title5: str = None, msg5: str = None,
                             title6: str = None, msg6: str = None,
-                            msg7: str = None, add_button: bool =False):
-        try:
-            target_color = discord.Color.from_str(color_hex)
-        except:
-            target_color = discord.Color.blue()
-
-        embeds = []
-        e1 = discord.Embed(title=title1, description=msg1.replace("\\n", "\n"), color=target_color)
-        if ctx.guild.icon: e1.set_thumbnail(url=ctx.guild.icon.url)
-        embeds.append(e1)
-
-        if title2 and msg2: embeds.append(discord.Embed(title=title2, description=msg2.replace("\\n", "\n"), color=target_color))
-        if title3 and msg3: embeds.append(discord.Embed(title=title3, description=msg3.replace("\\n", "\n"), color=target_color))
-        if title4 and msg4: embeds.append(discord.Embed(title=title4, description=msg4.replace("\\n", "\n"), color=target_color))
-        if title5 and msg5: embeds.append(discord.Embed(title=title5, description=msg5.replace("\\n", "\n"), color=target_color))
-        if title6 and msg6: embeds.append(discord.Embed(title=title6, description=msg6.replace("\\n", "\n"), color=target_color))
-        if msg7: embeds.append(discord.Embed(description=msg7.replace("\\n", "\n"), color=target_color))
-
-        view = RuleAcceptView() if add_button else None
-        await ctx.channel.send(embeds=embeds, view=view)
+                            msg7: str = None, add_button: bool = False):
+        stored = await store_rules_panel(ctx, color_hex, add_button, locals())
+        embeds, view = render_managed_message(ctx.guild, stored)
+        if embeds is None:
+            return await ctx.send(t("admin.operation_failed"), ephemeral=True)
+        message = await ctx.channel.send(embeds=embeds, view=view)
+        # Remembered, so `/update_rules_group` and the dashboard both know which
+        # message this is without being handed its id.
+        await database.run_write(database.record_managed_post, ctx.guild.id,
+                                 "rules", RULES_PANEL_KEY, ctx.channel.id,
+                                 message.id)
         await ctx.send(t("admin.rules_posted"), ephemeral=True)
 
     @commands.hybrid_command(name="getraw", description=t("general.cmd_getraw"))
@@ -468,37 +574,35 @@ class Admin(commands.Cog):
     @commands.hybrid_command(name="update_rules_group", description=t("general.cmd_update_rules_group"))
     @discord.app_commands.default_permissions(administrator=True)
     @commands.has_permissions(administrator=True)
-    async def update_rules_group(self, ctx, message_id: str, color_hex: str, 
-                            title1: str, msg1: str, 
-                            title2: str = None, msg2: str = None, 
+    async def update_rules_group(self, ctx, color_hex: str,
+                            title1: str, msg1: str,
+                            title2: str = None, msg2: str = None,
                             title3: str = None, msg3: str = None,
                             title4: str = None, msg4: str = None,
                             title5: str = None, msg5: str = None,
                             title6: str = None, msg6: str = None,
                             msg7: str = None, add_button: bool = False):
+        """Edit the rules panel this guild already posted.
+
+        The message id was an argument until schema 12 recorded where the panel
+        went. Nothing stored means nothing to edit, which is a specific answer
+        rather than the generic failure a mistyped id used to produce.
+        """
+        existing = await database.run_read(database.get_managed_message,
+                                           ctx.guild.id, "rules", RULES_PANEL_KEY)
+        if not existing or not existing.get("message_id"):
+            return await ctx.send(t("admin.rules_not_posted"), ephemeral=True)
         try:
-            message = await ctx.channel.fetch_message(int(message_id.strip()))
-            try:
-                target_color = discord.Color.from_str(color_hex)
-            except:
-                target_color = discord.Color.blue()
-
-            embeds = []
-            e1 = discord.Embed(title=title1, description=msg1.replace("\\n", "\n"), color=target_color)
-            if ctx.guild.icon: e1.set_thumbnail(url=ctx.guild.icon.url)
-            embeds.append(e1)
-
-            if title2 and msg2: embeds.append(discord.Embed(title=title2, description=msg2.replace("\\n", "\n"), color=target_color))
-            if title3 and msg3: embeds.append(discord.Embed(title=title3, description=msg3.replace("\\n", "\n"), color=target_color))
-            if title4 and msg4: embeds.append(discord.Embed(title=title4, description=msg4.replace("\\n", "\n"), color=target_color))
-            if title5 and msg5: embeds.append(discord.Embed(title=title5, description=msg5.replace("\\n", "\n"), color=target_color))
-            if title6 and msg6: embeds.append(discord.Embed(title=title6, description=msg6.replace("\\n", "\n"), color=target_color))
-            if msg7: embeds.append(discord.Embed(description=msg7.replace("\\n", "\n"), color=target_color))
-
-            view = RuleAcceptView() if add_button else None
+            channel = (self.bot.get_channel(int(existing["channel_id"]))
+                       if existing.get("channel_id") else ctx.channel)
+            message = await (channel or ctx.channel).fetch_message(
+                int(existing["message_id"]))
+            stored = await store_rules_panel(ctx, color_hex, add_button, locals())
+            embeds, view = render_managed_message(ctx.guild, stored)
+            if embeds is None:
+                return await ctx.send(t("admin.operation_failed"), ephemeral=True)
             await message.edit(embeds=embeds, view=view)
             await ctx.send(t("admin.rules_updated"), ephemeral=True)
-
         except Exception as exc:
             admin_logger.warning(
                 "Rules message update failed (guild_id=%s, error=%s)",

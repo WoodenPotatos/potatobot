@@ -552,3 +552,314 @@ class Schema10WarningTagTests(unittest.TestCase):
         self.assertEqual((3, 1), (other["total"], other["tag_count"]))
         # And a guild sees only its own.
         self.assertEqual(0, database.get_warning_count(7, 999, "spam"))
+
+
+class Schema13EmbedKindTests(unittest.TestCase):
+    """Schema 13 widens a CHECK, which SQLite cannot alter.
+
+    So `managed_messages` is rebuilt — create, copy, drop, rename — the same
+    shape schema 8 used. The risk of a rebuild is losing rows, so that is what
+    these check, against a table populated the way a real one is.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.initialize_database()
+        database.register_guild(42, "Test Guild")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def table_sql(self, conn):
+        return conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'managed_messages'").fetchone()[0]
+
+    def make_schema_12_table(self, conn):
+        """The table as schema 12 created it, populated the way a guild's is."""
+        conn.execute("DROP TABLE managed_messages")
+        conn.execute("""
+            CREATE TABLE managed_messages (
+                guild_id INTEGER NOT NULL,
+                kind TEXT NOT NULL
+                    CHECK (kind IN ('role_menu', 'rules', 'ticket', 'airlock')),
+                menu_key TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                channel_id INTEGER,
+                message_id INTEGER,
+                title TEXT,
+                body TEXT,
+                colour INTEGER,
+                options_json TEXT NOT NULL DEFAULT '{}',
+                revision INTEGER NOT NULL DEFAULT 1,
+                updated_by INTEGER,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, kind, menu_key)
+            )
+        """)
+        for kind, key in (("role_menu", "games"), ("rules", "rules"),
+                          ("ticket", "ticket"), ("airlock", "airlock")):
+            conn.execute(
+                "INSERT INTO managed_messages (guild_id, kind, menu_key, "
+                "display_name, channel_id, message_id, title, body, colour, "
+                "options_json, revision, updated_by, updated_at) VALUES "
+                "(42, ?, ?, ?, 1420070400000000001, 1420070400000000002, 'T', "
+                "'B', 12345, '{\"a\": 1}', 7, 99, 'when')",
+                (kind, key, key.title()))
+
+    def test_a_clean_database_already_accepts_an_embed(self):
+        with database.get_connection() as conn:
+            self.assertIn("'embed'", self.table_sql(conn))
+
+    def test_an_older_table_is_rebuilt_and_loses_no_row(self):
+        with database.get_connection() as conn:
+            self.make_schema_12_table(conn)
+            before = conn.execute(
+                "SELECT guild_id, kind, menu_key, display_name, channel_id, "
+                "message_id, title, body, colour, options_json, revision, "
+                "updated_by, updated_at FROM managed_messages ORDER BY kind"
+            ).fetchall()
+            self.assertTrue(database.widen_managed_message_kinds(conn))
+            after = conn.execute(
+                "SELECT guild_id, kind, menu_key, display_name, channel_id, "
+                "message_id, title, body, colour, options_json, revision, "
+                "updated_by, updated_at FROM managed_messages ORDER BY kind"
+            ).fetchall()
+        self.assertEqual(before, after, "every column of every row must survive")
+        self.assertEqual(4, len(after))
+
+    def test_a_snowflake_survives_the_copy_exactly(self):
+        """A rebuild copies ids through SQLite, and an id is 64-bit."""
+        with database.get_connection() as conn:
+            self.make_schema_12_table(conn)
+            database.widen_managed_message_kinds(conn)
+            stored = conn.execute(
+                "SELECT message_id FROM managed_messages WHERE kind = 'rules'"
+            ).fetchone()[0]
+        self.assertEqual(1420070400000000002, stored)
+        self.assertGreater(stored, 2 ** 53)
+
+    def test_running_it_again_is_a_no_op(self):
+        with database.get_connection() as conn:
+            self.make_schema_12_table(conn)
+            self.assertTrue(database.widen_managed_message_kinds(conn))
+            self.assertFalse(database.widen_managed_message_kinds(conn))
+            self.assertFalse(database.widen_managed_message_kinds(conn))
+
+    def test_the_rebuilt_table_takes_an_embed_and_still_refuses_nonsense(self):
+        with database.get_connection() as conn:
+            self.make_schema_12_table(conn)
+            database.widen_managed_message_kinds(conn)
+            conn.execute(
+                "INSERT INTO managed_messages (guild_id, kind, menu_key, "
+                "display_name, options_json, revision, updated_at) "
+                "VALUES (42, 'embed', 'notice', 'Notice', '{}', 1, 'when')")
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO managed_messages (guild_id, kind, menu_key, "
+                    "display_name, options_json, revision, updated_at) "
+                    "VALUES (42, 'nonsense', 'x', 'X', '{}', 1, 'when')")
+
+    def test_the_primary_key_still_holds(self):
+        with database.get_connection() as conn:
+            self.make_schema_12_table(conn)
+            database.widen_managed_message_kinds(conn)
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO managed_messages (guild_id, kind, menu_key, "
+                    "display_name, options_json, revision, updated_at) "
+                    "VALUES (42, 'rules', 'rules', 'Dup', '{}', 1, 'when')")
+
+
+class RenamedSettingTests(unittest.TestCase):
+    """A setting that changed key has to take its stored row with it.
+
+    Otherwise the guild silently reverts to the default on upgrade: the old key
+    stops being read in the same change the new one starts being written, and
+    nothing about that failure looks like an error.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.initialize_database()
+        # `guild_settings.guild_id` is a foreign key, so the guild has to exist
+        # before a row can name it.
+        database.register_guild(42, "Test Guild")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def stored(self, guild_id, key):
+        with database.get_connection() as conn:
+            row = conn.execute(
+                "SELECT value_json FROM guild_settings "
+                "WHERE guild_id = ? AND setting_key = ?", (guild_id, key)).fetchone()
+        return row[0] if row else None
+
+    def write(self, guild_id, key, value):
+        with database.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO guild_settings (guild_id, setting_key, value_json, "
+                "revision, updated_by, updated_at) VALUES (?, ?, ?, 1, 1, 't')",
+                (guild_id, key, value))
+
+    def test_the_stored_value_moves_to_the_new_key(self):
+        self.write(42, "other_games_channel", "1420070400000000001")
+        with database.get_connection() as conn:
+            self.assertEqual(1, database.rename_setting_rows(conn))
+        self.assertEqual("1420070400000000001",
+                         self.stored(42, "lfg_default_channel"))
+        self.assertIsNone(self.stored(42, "other_games_channel"))
+
+    def test_running_it_again_changes_nothing(self):
+        self.write(42, "other_games_channel", "1420070400000000001")
+        with database.get_connection() as conn:
+            database.rename_setting_rows(conn)
+            self.assertEqual(0, database.rename_setting_rows(conn))
+        self.assertEqual("1420070400000000001",
+                         self.stored(42, "lfg_default_channel"))
+
+    def test_a_value_already_saved_under_the_new_key_wins(self):
+        """The old row is stale by definition — it stopped being written."""
+        self.write(42, "other_games_channel", "1420070400000000001")
+        self.write(42, "lfg_default_channel", "1420070400000000002")
+        with database.get_connection() as conn:
+            database.rename_setting_rows(conn)
+        self.assertEqual("1420070400000000002",
+                         self.stored(42, "lfg_default_channel"))
+        self.assertIsNone(self.stored(42, "other_games_channel"))
+
+    def test_every_rename_names_a_setting_that_exists(self):
+        from settings_registry import SETTING_DEFINITIONS
+        for old_key, new_key in database.RENAMED_SETTINGS:
+            with self.subTest(new_key=new_key):
+                self.assertIn(new_key, SETTING_DEFINITIONS)
+                self.assertNotIn(old_key, SETTING_DEFINITIONS,
+                                 "the old key must be gone, or both are live")
+
+
+class Schema12ManagedMessageTests(unittest.TestCase):
+    """Schema 12 gives a posted message an identity the dashboard can edit.
+
+    `message_id` appeared nowhere in the schema before this, so every publish was
+    fire-and-forget: a draft could be posted a second time but never updated, and
+    the bot's own `/update_games` worked only because the operator typed the id.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.initialize_database()
+        database.register_guild(42, "Guild")
+        self.menu = {
+            "League of Legends": {"id": 1420070400000000001,
+                                  "emoji": "<:lol:1420070400000000002>"},
+            "Valorant": {"id": 1420070400000000003, "emoji": ""},
+        }
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _downgrade_to_11(self, with_settings=True):
+        """Reshape into schema 11: no managed tables, menus as typed settings."""
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("DROP INDEX IF EXISTS idx_managed_entries_menu")
+            conn.execute("DROP TABLE IF EXISTS managed_message_entries")
+            conn.execute("DROP TABLE IF EXISTS managed_messages")
+            conn.execute("DELETE FROM guild_settings WHERE setting_key LIKE '%_roles'")
+            if with_settings:
+                conn.execute(
+                    "INSERT INTO guild_settings (guild_id, setting_key, "
+                    "value_json, revision, updated_by, updated_at) "
+                    "VALUES (42, 'game_roles', ?, 1, 1, 't')",
+                    (json.dumps(self.menu),))
+            conn.execute("PRAGMA user_version = 11")
+            conn.commit()
+
+    def test_clean_database_has_both_tables(self):
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+            self.assertIn("managed_messages", tables)
+            self.assertIn("managed_message_entries", tables)
+
+    def test_the_upgrade_seeds_a_role_menu_from_its_setting(self):
+        self._downgrade_to_11()
+        database.initialize_database()
+
+        seeded = database.get_managed_message(42, "role_menu", "games")
+        self.assertIsNotNone(seeded)
+        rebuilt = {entry["label"]: {"id": int(entry["role_id"]),
+                                    "emoji": entry["emoji"]}
+                   for entry in seeded["entries"]}
+        self.assertEqual(self.menu, rebuilt, "every pair must survive intact")
+
+    def test_a_seeded_menu_is_not_claimed_to_be_posted(self):
+        """Guessing a message id is not available to us, and posting a second
+        copy on upgrade would be worse than asking."""
+        self._downgrade_to_11()
+        database.initialize_database()
+        self.assertFalse(
+            database.get_managed_message(42, "role_menu", "games")["posted"])
+
+    def test_a_guild_with_no_menu_setting_gets_no_empty_menu(self):
+        self._downgrade_to_11(with_settings=False)
+        database.initialize_database()
+        self.assertIsNone(database.get_managed_message(42, "role_menu", "games"))
+
+    def test_re_running_seeds_nothing_and_keeps_edits(self):
+        self._downgrade_to_11()
+        database.initialize_database()
+        menu = database.get_managed_message(42, "role_menu", "games")
+        database.save_managed_message(
+            42, 7, "role_menu", "games", "Renamed", menu["revision"],
+            entries=[{"label": "Only one", "role_id": "1420070400000000004"}])
+
+        database.initialize_database()
+
+        after = database.get_managed_message(42, "role_menu", "games")
+        self.assertEqual("Renamed", after["display_name"])
+        self.assertEqual(1, len(after["entries"]),
+                         "seeding must not restore what an operator removed")
+
+    def test_the_settings_rows_are_left_alone_by_the_seed(self):
+        """They stop being read in the change that moves the readers over, so an
+        upgrade interrupted between the two has lost nothing."""
+        self._downgrade_to_11()
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(1, conn.execute(
+                "SELECT COUNT(*) FROM guild_settings "
+                "WHERE setting_key = 'game_roles'").fetchone()[0])
+
+    def test_a_pre_migration_backup_is_written(self):
+        self._downgrade_to_11()
+        database.initialize_database()
+        self.assertTrue(
+            glob.glob(os.path.join(self.temp_dir.name, "economy.db.backup-v11-*")))
+
+    def test_content_edits_never_move_a_posted_message(self):
+        """Where a message lives is a fact about Discord, recorded when a post
+        succeeds — an edit to the text must not silently claim it moved."""
+        database.save_managed_message(42, 7, "role_menu", "solo", "Solo", 0,
+                                      entries=[{"label": "a", "role_id": "1"}])
+        database.record_managed_post(42, "role_menu", "solo", 111, 222)
+        menu = database.get_managed_message(42, "role_menu", "solo")
+        database.save_managed_message(
+            42, 7, "role_menu", "solo", "Solo", menu["revision"],
+            entries=[{"label": "a", "role_id": "1"},
+                     {"label": "b", "role_id": "2"}])
+        after = database.get_managed_message(42, "role_menu", "solo")
+        self.assertEqual("222", after["message_id"])
+        self.assertEqual("111", after["channel_id"])
+        self.assertEqual(2, len(after["entries"]))

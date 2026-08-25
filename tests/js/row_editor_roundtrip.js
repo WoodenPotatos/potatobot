@@ -9,6 +9,11 @@
    The DOM is not needed: what is under test is the shape spec's unpack/pack
    pair and the required-column rule, which are plain data. */
 
+/* `canonicalValue` is extracted from dashboard/script.js by the Python test and
+   prepended to this file, so what runs here is the dashboard's own comparison.
+   A local copy would have kept passing if that function were removed. */
+const canonical = canonicalValue;
+
 let failures = 0;
 
 function editorOutput(shape, sent) {
@@ -36,7 +41,7 @@ function check(label, shapeName, sent, expected) {
     if (!shape) { console.log(`  MISSING SHAPE ${shapeName}`); failures++; return; }
     const got = editorOutput(shape, sent);
     const want = expected === undefined ? sent : expected;
-    const ok = JSON.stringify(got) === JSON.stringify(want);
+    const ok = canonical(got) === canonical(want);
     if (!ok) {
         failures++;
         console.log(`  FAIL ${label}`);

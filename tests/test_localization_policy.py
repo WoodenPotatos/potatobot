@@ -1,11 +1,20 @@
 import ast
 import json
+import os
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from settings_registry import FEATURE_DEFINITIONS, SETTING_DEFINITIONS  # noqa: E402
 PYTHON_SOURCES = [
     *ROOT.glob("*.py"),
     *(ROOT / "cogs").glob("*.py"),
@@ -127,6 +136,233 @@ class LocalizationPolicyTests(unittest.TestCase):
         hu = json.loads((ROOT / "locales" / "hu.json").read_text(encoding="utf-8"))
         en = json.loads((ROOT / "locales" / "en.json").read_text(encoding="utf-8"))
         self.assertEqual(shape(hu), shape(en))
+
+
+
+
+class NavigationReachabilityTests(unittest.TestCase):
+    """Every sidebar entry must be able to render something.
+
+    The Builders page carried `data-category="builders"`, which no setting
+    declares, so `updateNavigation` hid it on every load and the builders were
+    unreachable for as long as that attribute was there. Nothing failed; the
+    entry simply was not in the sidebar. This is the check that would have said
+    so.
+    """
+
+    def setUp(self):
+        self.html = (ROOT / "dashboard" / "index.html").read_text(encoding="utf-8")
+        self.items = [
+            {"page": re.search(r'data-page="([\w-]+)"', attributes).group(1),
+             "category": (match.group(1) if (match := re.search(
+                 r'data-category="([\w-]+)"', attributes)) else None),
+             "feature": (match.group(1) if (match := re.search(
+                 r'data-feature="([\w-]+)"', attributes)) else None)}
+            for attributes in re.findall(
+                r'<button type="button" class="nav-item[^"]*"([^>]*)>', self.html)
+        ]
+        self.sections = set(re.findall(r'<section id="([\w-]+)" class="page',
+                                       self.html))
+
+    def test_the_items_were_actually_found(self):
+        """Guards the premise: a regex that matches nothing proves nothing."""
+        self.assertGreater(len(self.items), 10)
+        self.assertIn("overview", {item["page"] for item in self.items})
+
+    def test_every_category_entry_owns_settings_or_child_toggles(self):
+        """`categoryHasVisibleSettings` counts both, which is why the Casino and
+        Music pages are legitimate with no settings of their own: they exist to
+        hold the sub-toggles whose `parent` names them."""
+        owning = {definition.category
+                  for definition in SETTING_DEFINITIONS.values()}
+        parents = {definition.parent
+                   for definition in FEATURE_DEFINITIONS.values()
+                   if definition.parent}
+        for item in self.items:
+            if not item["category"]:
+                continue
+            with self.subTest(page=item["page"]):
+                self.assertIn(item["category"], owning | parents,
+                              "nothing renders on this page, so it stays hidden")
+
+    def test_a_page_without_a_category_has_a_section_of_its_own(self):
+        for item in self.items:
+            if item["category"]:
+                continue
+            with self.subTest(page=item["page"]):
+                self.assertIn(item["page"], self.sections)
+
+    def test_no_item_carries_both_hiding_rules(self):
+        """`updateNavigation` runs the two loops in sequence and each `toggle`
+        overwrites the other's decision, so the second one silently wins."""
+        for item in self.items:
+            with self.subTest(page=item["page"]):
+                self.assertFalse(item["category"] and item["feature"])
+
+    def test_every_declared_feature_gate_exists(self):
+        for item in self.items:
+            if not item["feature"]:
+                continue
+            with self.subTest(page=item["page"]):
+                self.assertIn(item["feature"], FEATURE_DEFINITIONS)
+
+    def test_every_page_has_a_title_key(self):
+        catalog = json.loads(
+            (ROOT / "locales" / "hu.json").read_text(encoding="utf-8"))["dashboard"]
+        for item in self.items:
+            key = f"title_{item['page'].replace('-', '_')}"
+            with self.subTest(page=item["page"]):
+                self.assertIn(key, catalog,
+                              "the header would read `[dashboard.title_…]`")
+
+
+class LocaleLookupTests(unittest.TestCase):
+    """`tr` must degrade, never throw.
+
+    A missing key has always rendered as `[key]`. An *absent key name* threw:
+    `tr(undefined)` reached `undefined.split('.')`. That is not a hypothetical —
+    `resourcePicker` passes `definition.locale_key`, one hand-written definition
+    omitted it, and the resulting TypeError killed the whole content-builder
+    editor before it reached the page while looking like an unimplemented
+    feature. A visible `[undefined]` is a defect somebody can see; a TypeError
+    three frames deep is not.
+
+    Driven through Node, because the function under test is JavaScript and a
+    Python re-implementation of it could stay green while the real one broke.
+    """
+
+    def driver(self, body):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        start = source.index("const tr = (path) => {")
+        extracted = source[start:source.index("\n};", start) + 3]
+        script = "\n".join([
+            "const locale = {dashboard: {greeting: 'Hello', blank: ''}};",
+            extracted,
+            body,
+        ])
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                         encoding="utf-8") as handle:
+            handle.write(script)
+            path = handle.name
+        try:
+            return subprocess.run([node, path], capture_output=True, text=True)
+        finally:
+            os.unlink(path)
+
+    def test_an_absent_key_name_does_not_throw(self):
+        result = self.driver("""
+            const cases = [undefined, null, 0, false, {}];
+            for (const value of cases) {
+                let out;
+                try {
+                    out = tr(value);
+                } catch (error) {
+                    console.error(`tr(${String(value)}) threw ${error}`);
+                    process.exit(1);
+                }
+                if (typeof out !== 'string') {
+                    console.error(`tr(${String(value)}) returned ${typeof out}`);
+                    process.exit(1);
+                }
+            }
+        """)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_a_real_key_still_resolves_and_a_missing_one_still_brackets(self):
+        """Guards the premise: a `tr` that returned `[key]` for everything would
+        pass the test above and break every label in the interface."""
+        result = self.driver("""
+            const checks = [
+                ['dashboard.greeting', 'Hello'],
+                ['dashboard.missing', '[dashboard.missing]'],
+                ['dashboard.blank', '[dashboard.blank]'],
+            ];
+            for (const [path, expected] of checks) {
+                const actual = tr(path);
+                if (actual !== expected) {
+                    console.error(`tr(${path}) === ${actual}, wanted ${expected}`);
+                    process.exit(1);
+                }
+            }
+        """)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+
+class JavaScriptIsActuallyRunTests(unittest.TestCase):
+    """A test that skips itself is a test that does not exist.
+
+    Four tests drive `dashboard/script.js` through Node and call `skipTest` when
+    it is missing. CI installed no Node, so all four skipped and reported green —
+    and they are precisely the checks guarding the defects that reached the
+    deployment. This asserts the workflow installs it, because the failure mode
+    of the guard is silence.
+    """
+
+    def test_ci_installs_node(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("actions/setup-node", workflow)
+
+    def test_the_skip_is_the_only_reason_they_would_not_run(self):
+        """If Node is here, none of them may skip — a skip then means the
+        harness broke rather than that the environment lacks a runtime."""
+        if shutil.which("node") is None:
+            self.skipTest("node is not installed")
+        suite = unittest.defaultTestLoader.loadTestsFromNames([
+            "tests.test_settings_cache.RowEditorReportsCleanTests",
+            "tests.test_localization_policy.LocaleLookupTests",
+            "tests.test_managed_messages.CreatorRoundTripTests",
+        ])
+        result = unittest.TestResult()
+        suite.run(result)
+        self.assertEqual([], [str(case) for case, _ in result.skipped])
+        self.assertEqual([], [str(case) for case, _ in result.errors + result.failures])
+
+
+class PickerDefinitionTests(unittest.TestCase):
+    """A picker built from a hand-written definition needs the same fields.
+
+    Every picker on the settings form is built from a registry definition, and
+    `jsonRowEditor` spreads one, so those carry `locale_key` for free. A builder
+    field has no registry definition and must supply one by hand — and the one
+    that did not took its whole page down. This walks the literals instead of
+    trusting that the next author remembers.
+    """
+
+    REQUIRED = ("key", "value_type", "locale_key")
+
+    def literals(self):
+        """Every `resourcePicker({...})` argument written inline in the source."""
+        source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        found = []
+        for match in re.finditer(r"resourcePicker\(\s*\{", source):
+            start = match.end() - 1
+            depth, index = 0, start
+            while index < len(source):
+                if source[index] == "{":
+                    depth += 1
+                elif source[index] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                index += 1
+            found.append((source[:start].count("\n") + 1, source[start:index + 1]))
+        return found
+
+    def test_the_literals_were_found(self):
+        """Guards the premise: a regex that matches nothing proves nothing."""
+        self.assertGreaterEqual(len(self.literals()), 2)
+
+    def test_every_hand_written_definition_carries_what_the_picker_reads(self):
+        for line, literal in self.literals():
+            if literal.lstrip("{").lstrip().startswith("..."):
+                continue  # A spread of a real definition already has the lot.
+            for field in self.REQUIRED:
+                with self.subTest(line=line, field=field):
+                    self.assertIn(f"{field}:", literal,
+                                  f"script.js:{line} omits {field}")
 
 
 if __name__ == "__main__":

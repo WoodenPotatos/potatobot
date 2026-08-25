@@ -266,7 +266,7 @@ class PermissionAuditTests(unittest.TestCase):
                           channels=[channel],
                           roles=[everyone, member_role, game_role])
         report = report_for(guild, {"lfg": {"enabled": True}},
-                            {"other_games_channel": 901, "member_role": 2})
+                            {"lfg_default_channel": 901, "member_role": 2})
         self.assertNotIn("channel_member_missing_permission", codes(report))
 
     def test_a_channel_no_role_can_see_is_a_finding(self):

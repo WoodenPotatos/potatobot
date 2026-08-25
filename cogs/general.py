@@ -323,8 +323,8 @@ class General(commands.Cog):
     @commands.cooldown(1, 120, commands.BucketType.user)
     async def search(self, ctx, needed: int = 0, *, game: str = None):
         lfg_channels = guild_setting_sync(ctx.guild.id, "lfg_channels") or {}
-        other_games = guild_setting_sync(ctx.guild.id, "other_games_channel")
-        other_games_channel_id = str(other_games or "")
+        default_lfg = guild_setting_sync(ctx.guild.id, "lfg_default_channel")
+        default_lfg_channel_id = str(default_lfg or "")
         channel_id_str = str(ctx.channel.id)
 
         if channel_id_str in lfg_channels:
@@ -352,7 +352,7 @@ class General(commands.Cog):
                 ),
             )
 
-        elif channel_id_str == other_games_channel_id:
+        elif channel_id_str == default_lfg_channel_id:
             if not game:
                 return await ctx.send(t("general.search_err_no_game"), ephemeral=True)
 

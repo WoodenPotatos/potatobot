@@ -27,7 +27,6 @@ let activeBannerKey = null;
 // once and reused by the gacha reward picker and the shop item builder.
 let itemCatalog = [];
 let activePage = 'overview';
-let builderType = 'embed';
 let resources = {channels: [], roles: []};
 // The setup report, cached per guild: findings indexed by the setting they
 // concern, plus the counts the overview quotes. null means not loaded yet.
@@ -38,7 +37,6 @@ let permissionFindings = null;
 let sessionIdleSeconds = 0;
 let sessionDeadline = 0;
 let sessionTicker = null;
-let builderDocuments = [];
 let fulfillmentRequests = [];
 let languages = [];
 let activeLanguage = '';
@@ -53,7 +51,6 @@ const CATEGORY_ICONS = {
     casino: 'ic-casino',
     moderation: 'ic-moderation',
     factions: 'ic-factions',
-    music: 'ic-music',
     builders: 'ic-builders',
     administration: 'ic-administration',
 };
@@ -61,6 +58,11 @@ const CATEGORY_ICONS = {
 /* ------------------------------------------------------------ localization */
 
 const tr = (path) => {
+    // A missing key renders as `[key]` rather than throwing, and an *absent* key
+    // name has to do the same: `undefined.split` took a whole page down when one
+    // synthetic definition omitted its `locale_key`, and a bracketed placeholder
+    // is a visible defect where a TypeError is an invisible one.
+    if (typeof path !== 'string') return `[${path}]`;
     const value = path.split('.').reduce((current, key) => current?.[key], locale);
     return typeof value === 'string' && value ? value : `[${path}]`;
 };
@@ -606,17 +608,8 @@ function bindShell() {
     const shopItemForm = document.getElementById('shop-item-form');
     shopItemForm.addEventListener('submit', createShopItem);
     shopItemForm.template_type.addEventListener('change', renderShopItemTemplate);
-    document.getElementById('builder-form').addEventListener('submit', saveBuilder);
     document.getElementById('erasure-form').addEventListener('submit', eraseMember);
 
-    document.querySelectorAll('[data-builder]').forEach((button) => {
-        button.addEventListener('click', () => {
-            builderType = button.dataset.builder;
-            document.querySelectorAll('[data-builder]').forEach((other) => {
-                other.classList.toggle('active', other === button);
-            });
-        });
-    });
 }
 
 /* ------------------------------------------------- account and guild menus */
@@ -888,7 +881,7 @@ async function showPage(page) {
     }
     if (page === 'work-responses') await loadWorkResponses();
     if (page === 'shop-builder') await loadShopItems();
-    if (page === 'builders') await loadBuilders();
+    if (MANAGED_PAGES[page]) await loadManaged(page);
     if (page === 'audit') await loadAudit();
     if (page === 'permissions') await loadPermissionReport();
     if (page === 'changelog') await loadChangelog();
@@ -930,10 +923,15 @@ async function renderOverview() {
     const stats = document.getElementById('overview-stats');
     renderSkeleton(stats, 3);
 
-    // Both extra lists come from endpoints the shop and builder pages already use.
-    const [fulfillment, documents, setup] = await Promise.all([
+    // Both extra lists come from endpoints the shop and content pages already use.
+    // Drafts used to be counted here; there are none any more, so this reports
+    // what is actually posted — the number an operator can act on.
+    const [fulfillment, managed, setup] = await Promise.all([
         api(`/guilds/${guildId}/fulfillment`).then((result) => result.data).catch(() => null),
-        api(`/guilds/${guildId}/builders`).then((result) => result.data).catch(() => null),
+        Promise.all(Object.keys(MANAGED_KINDS).map((kind) =>
+            api(`/guilds/${guildId}/managed/${kind}`)
+                .then((result) => result.data).catch(() => [])))
+            .then((lists) => lists.flat()),
         ensurePermissionFindings(),
     ]);
 
@@ -955,8 +953,8 @@ async function renderOverview() {
         },
         {
             symbol: 'ic-builders',
-            value: documents === null ? '—' : String(documents.length),
-            labelKey: 'dashboard.overview_builder_drafts',
+            value: `${managed.filter((item) => item.posted).length} / ${managed.length}`,
+            labelKey: 'dashboard.overview_managed_messages',
         },
         {
             symbol: 'ic-shield-check',
@@ -1177,7 +1175,14 @@ function renderSettings(category) {
         // Filled in by refreshSettingsDirtyState so a section with unsaved
         // edits says so next to its own title, rather than the operator having
         // to guess whether the one Save button at the bottom applies to it.
-        legend.appendChild(pill('dashboard.unsaved', 'pending'));
+        // Created hidden. It used to be created visible and hidden only by the
+        // dirty check at the end of this function, so anything throwing in
+        // between showed an unsaved marker on every section of every page — the
+        // same symptom as a real phantom change, with no cause to find. Hidden
+        // by default fails quiet instead.
+        const unsavedPill = pill('dashboard.unsaved', 'pending');
+        unsavedPill.classList.add('hidden');
+        legend.appendChild(unsavedPill);
         section.appendChild(legend);
         const grid = element('div', 'form-grid');
 
@@ -1282,6 +1287,37 @@ async function applyPermissionNotes() {
     });
 }
 
+/** One stable text form for a setting value, whatever order its keys arrive in.
+ *
+ *  `JSON.stringify` preserves insertion order, and the two sides of the
+ *  dirty-state comparison do not agree on it: Flask sets `app.json.sort_keys`,
+ *  so an entry reaches the browser with its fields alphabetical, while a row
+ *  editor's `pack()` builds them in the order the columns are declared. For a
+ *  role menu that is `{emoji, id}` against `{id, emoji}` — identical values,
+ *  different text — so all three role menus reported themselves changed on every
+ *  load and the save button offered to save three things nobody had touched.
+ *
+ *  Comparing canonically instead of textually removes the whole class: key order
+ *  and number-versus-string can no longer manufacture a difference. This is the
+ *  fourth instance of that class to be fixed by hand, which is why it is now one
+ *  function used by both sides rather than a fix per shape.
+ */
+function canonicalValue(value) {
+    const walk = (node) => {
+        if (Array.isArray(node)) return node.map(walk);
+        if (node && typeof node === 'object') {
+            return Object.keys(node).sort().reduce((out, key) => {
+                out[key] = walk(node[key]);
+                return out;
+            }, {});
+        }
+        // A Discord id crosses the wire as a string but may still be a number in
+        // a locally built value; those are the same setting.
+        return typeof node === 'number' ? String(node) : node;
+    };
+    return JSON.stringify(walk(value ?? null));
+}
+
 /** The edits the form would submit, or null when one field cannot be parsed. */
 function collectSettingChanges() {
     try {
@@ -1296,8 +1332,15 @@ function collectSettingChanges() {
                     revision: settings[key]?.revision || 0,
                 };
             })
-            .filter((change) => JSON.stringify(change.value)
-                !== JSON.stringify(settings[change.key]?.value ?? null));
+            .filter((change) => {
+                const sent = settings[change.key]?.value ?? null;
+                if (canonicalValue(change.value) === canonicalValue(sent)) return false;
+                // Naming the setting is what was missing when three
+                // identical-looking objects disagreed and nothing said which.
+                console.debug('[settings] differs:', change.key,
+                    {form: change.value, server: sent});
+                return true;
+            });
     } catch (error) {
         return null;
     }
@@ -1829,7 +1872,10 @@ function resourcePicker(definition, value) {
     }
 
     popover(trigger, buildList, {
-        role: 'dialog', itemRole: 'option', ariaLabel: tr(definition.locale_key),
+        // A definition built by hand for a builder field has no registry locale
+        // key; naming the picker after its own key beats naming it `[undefined]`.
+        role: 'dialog', itemRole: 'option',
+        ariaLabel: tr(definition.locale_key || `dashboard.${definition.key}`),
         align: 'left', matchWidth: true, className: 'picker-menu',
     });
 
@@ -2561,7 +2607,9 @@ async function saveGacha(event) {
 
 /* -------------------------------------------------------- work responses */
 
-let workResponses = {responses: [], tiers: [], earnings_placeholder: '{earnings}'};
+let workResponses = {responses: [], tiers: [],
+                     earnings_placeholder: '{earnings}',
+                     coin_placeholder: '{coin}'};
 
 async function loadWorkResponses() {
     const host = document.getElementById('work-response-list');
@@ -2573,8 +2621,44 @@ async function loadWorkResponses() {
         return;
     }
     renderWorkResponseTable(host);
+    renderWorkTokenHelp();
     setSubtitle('dashboard.subtitle_work_responses',
                 {count: workResponses.responses.length});
+}
+
+/** What an operator may type into a work response.
+ *
+ *  The two token strings come from the API, which reads them off
+ *  `database.WORK_EARNINGS_PLACEHOLDER` and `WORK_COIN_PLACEHOLDER`, so this can
+ *  never advertise a token the bot does not substitute. The locale strings use
+ *  their own `{token}` slot rather than naming the token literally — `format`
+ *  splits on `{name}`, so a string containing `{earnings}` and given an
+ *  `earnings` value would substitute itself.
+ */
+function renderWorkTokenHelp() {
+    const host = document.getElementById('work-token-help');
+    if (!host) return;
+
+    const block = element('div', 'token-help');
+    block.appendChild(element('h3', 'token-help-title', tr('dashboard.work_tokens_heading')));
+
+    const list = element('ul', 'token-help-list');
+    [
+        [workResponses.earnings_placeholder, 'dashboard.work_token_earnings'],
+        [workResponses.coin_placeholder, 'dashboard.work_token_coin'],
+    ].forEach(([token, describes]) => {
+        if (!token) return;
+        const row = element('li');
+        row.appendChild(element('code', 'token', token));
+        row.appendChild(document.createTextNode(` ${tr(describes)}`));
+        list.appendChild(row);
+    });
+    block.appendChild(list);
+
+    block.appendChild(element('p', 'token-help-note',
+        format('dashboard.work_tokens_note',
+               {limit: workResponses.message_max_length || 500})));
+    host.replaceChildren(block);
 }
 
 /** Each row is editable in place: the text, its weight and whether it is drawn.
@@ -2979,113 +3063,863 @@ async function createShopItem(event) {
     }
 }
 
-/* ---------------------------------------------------------------- builders */
+/* ------------------------------------------------------- managed messages */
 
-async function loadBuilders() {
-    const host = document.getElementById('builder-list');
+/* The four pages that edit a posted Discord message.
+ *
+ * They are one renderer driven by a declaration rather than four functions,
+ * for the same reason `JSON_ROW_SHAPES` is a declaration: the alternative was
+ * one function full of `if (kind === 'rules')`, and a fifth kind would have made
+ * it unreadable. What a kind cannot declare — how a stored row unpacks and packs
+ * again, and the cross-field rules Discord imposes — stays as functions here,
+ * beside the fields they belong to.
+ */
+
+/* One field descriptor, reused across kinds. `localeKey` matters: a picker names
+ * itself from it, and a definition without one used to throw. */
+const MANAGED_FIELDS = {
+    display_name: {kind: 'text', label: 'dashboard.managed_name', max: 80,
+                   required: true, hint: 'managed_name'},
+    menu_key: {kind: 'text', label: 'dashboard.managed_key', max: 32,
+               required: true, immutableAfterCreate: true, hint: 'managed_key'},
+    colour: {kind: 'colour', label: 'dashboard.managed_colour'},
+    channel: {kind: 'channel', label: 'dashboard.managed_channel',
+              localeKey: 'dashboard.managed_channel',
+              channelTypes: ['text', 'news'], hint: 'managed_channel'},
+    title: {kind: 'text', label: 'dashboard.managed_title', max: 256},
+    body: {kind: 'multiline', label: 'dashboard.managed_body', max: 4096,
+           wide: true, hint: 'managed_body'},
+    accept_button: {kind: 'checkbox', label: 'dashboard.managed_accept_button',
+                    default: true, hint: 'managed_accept_button'},
+    thumbnail: {kind: 'checkbox', label: 'dashboard.managed_thumbnail',
+                default: true},
+    button_label: {kind: 'text', label: 'dashboard.managed_button_label',
+                   max: 80, hint: 'managed_button_label'},
+    image_url: {kind: 'text', label: 'dashboard.managed_image', max: 1024,
+                wide: true, hint: 'managed_image'},
+};
+
+const RULES_SECTION_LIMIT = 10;
+const MANAGED_ENTRY_LIMIT = 25;
+const MESSAGE_TOTAL_LIMIT = 6000;
+
+/* Per kind: which page it owns, which numbered sections its creator has, how a
+ * stored row becomes form values and back, and which preview it draws. */
+const MANAGED_KINDS = {
+    rules: {
+        page: 'rules-panel',
+        buttonStyle: 'success',
+        buttonEmoji: '✅',
+        sections: [
+            {legend: 'dashboard.managed_step_message',
+             fields: ['display_name', 'menu_key', 'colour', 'channel']},
+            {legend: 'dashboard.managed_step_embeds', repeat: 'embeds'},
+            {legend: 'dashboard.managed_step_button',
+             fields: ['accept_button', 'button_label', 'thumbnail',
+                      'image_url']},
+        ],
+        repeat: {
+            name: 'embeds', limit: RULES_SECTION_LIMIT, layout: 'block',
+            addLabel: 'dashboard.managed_add_embed',
+            caption: 'dashboard.managed_embed_index',
+            fields: [
+                {name: 'title', kind: 'text', max: 256,
+                 label: 'dashboard.managed_section_title'},
+                {name: 'body', kind: 'multiline', max: 4096, required: true,
+                 label: 'dashboard.managed_section_body'},
+            ],
+        },
+        unpack: (item) => ({
+            display_name: item?.display_name ?? '',
+            menu_key: item?.menu_key ?? 'rules',
+            colour: item?.colour ?? 0xF5B041,
+            channel: item?.channel_id ?? null,
+            accept_button: item?.options?.accept_button !== false,
+            thumbnail: item?.options?.thumbnail !== false,
+            button_label: item?.options?.button_label ?? '',
+            image_url: item?.options?.image_url ?? '',
+            embeds: (item?.options?.sections ?? []).map((section) => ({
+                title: section.title ?? '', body: section.body ?? '',
+            })),
+        }),
+        pack: (values) => ({
+            title: null, body: null,
+            options: {
+                sections: values.embeds.map((row) => ({
+                    title: row.title || null, body: row.body,
+                })),
+                accept_button: values.accept_button,
+                thumbnail: values.thumbnail,
+                button_label: values.button_label || null,
+                image_url: values.image_url || null,
+            },
+            entries: [],
+        }),
+    },
+    role_menu: {
+        page: 'role-menus',
+        buttonStyle: 'secondary',
+        sections: [
+            {legend: 'dashboard.managed_step_message',
+             fields: ['display_name', 'menu_key', 'colour', 'channel',
+                      'title', 'body']},
+            {legend: 'dashboard.managed_step_roles', repeat: 'entries'},
+        ],
+        repeat: {
+            name: 'entries', limit: MANAGED_ENTRY_LIMIT, layout: 'row',
+            addLabel: 'dashboard.role_menu_add',
+            fields: [
+                {name: 'label', kind: 'text', max: 80, required: true,
+                 label: 'dashboard.role_menu_label'},
+                {name: 'role_id', kind: 'role', required: true,
+                 localeKey: 'dashboard.role_menu_role',
+                 label: 'dashboard.role_menu_role'},
+                {name: 'emoji', kind: 'text', max: 64, narrow: true,
+                 label: 'dashboard.role_menu_emoji'},
+            ],
+        },
+        unpack: (item) => ({
+            display_name: item?.display_name ?? '',
+            menu_key: item?.menu_key ?? '',
+            colour: item?.colour ?? 0xF5B041,
+            channel: item?.channel_id ?? null,
+            title: item?.title ?? '',
+            body: item?.body ?? '',
+            entries: (item?.entries ?? []).map((entry) => ({
+                label: entry.label ?? '', role_id: entry.role_id ?? '',
+                emoji: entry.emoji ?? '',
+            })),
+        }),
+        pack: (values) => ({
+            title: values.title || null, body: values.body || null,
+            options: {}, entries: values.entries,
+        }),
+    },
+    embed: {
+        // The plain sender: a message the bot says, and nothing around it. No
+        // button, no server icon, no drafts — it is posted, and afterwards it is
+        // edited in place like everything else on these pages.
+        page: 'embeds',
+        sections: [
+            {legend: 'dashboard.managed_step_message',
+             fields: ['display_name', 'menu_key', 'colour', 'channel']},
+            {legend: 'dashboard.managed_step_embeds', repeat: 'embeds'},
+            {legend: 'dashboard.managed_step_banner', fields: ['image_url']},
+        ],
+        repeat: {
+            name: 'embeds', limit: RULES_SECTION_LIMIT, layout: 'block',
+            addLabel: 'dashboard.managed_add_embed',
+            caption: 'dashboard.managed_embed_index',
+            fields: [
+                {name: 'title', kind: 'text', max: 256,
+                 label: 'dashboard.managed_section_title'},
+                {name: 'body', kind: 'multiline', max: 4096, required: true,
+                 label: 'dashboard.managed_section_body'},
+            ],
+        },
+        unpack: (item) => ({
+            display_name: item?.display_name ?? '',
+            menu_key: item?.menu_key ?? '',
+            colour: item?.colour ?? 0xF5B041,
+            channel: item?.channel_id ?? null,
+            image_url: item?.options?.image_url ?? '',
+            embeds: (item?.options?.sections ?? []).map((section) => ({
+                title: section.title ?? '', body: section.body ?? '',
+            })),
+        }),
+        pack: (values) => ({
+            title: null, body: null,
+            options: {
+                sections: values.embeds.map((row) => ({
+                    title: row.title || null, body: row.body,
+                })),
+                image_url: values.image_url || null,
+            },
+            entries: [],
+        }),
+    },
+    ticket: {
+        page: 'ticket-launcher',
+        buttonStyle: 'primary',
+        buttonEmoji: '📩',
+        defaultKey: 'ticket',
+        sections: [
+            {legend: 'dashboard.managed_step_message',
+             fields: ['display_name', 'menu_key', 'colour', 'channel',
+                      'title', 'body']},
+            {legend: 'dashboard.managed_step_button', fields: ['button_label']},
+        ],
+        unpack: (item) => simplePanelValues(item, 'ticket'),
+        pack: simplePanelPayload,
+    },
+    airlock: {
+        page: 'entry-gate',
+        buttonStyle: 'success',
+        buttonEmoji: '🚀',
+        defaultKey: 'airlock',
+        sections: [
+            {legend: 'dashboard.managed_step_message',
+             fields: ['display_name', 'menu_key', 'colour', 'channel',
+                      'title', 'body']},
+            {legend: 'dashboard.managed_step_button', fields: ['button_label']},
+        ],
+        unpack: (item) => simplePanelValues(item, 'airlock'),
+        pack: simplePanelPayload,
+    },
+};
+
+/* The two one-button panels differ only in their defaults, so they share these
+ * rather than declaring the same pair twice. */
+function simplePanelValues(item, defaultKey) {
+    return {
+        display_name: item?.display_name ?? '',
+        menu_key: item?.menu_key ?? defaultKey,
+        colour: item?.colour ?? 0xF5B041,
+        channel: item?.channel_id ?? null,
+        title: item?.title ?? '',
+        body: item?.body ?? '',
+        button_label: item?.options?.button_label ?? '',
+    };
+}
+
+function simplePanelPayload(values) {
+    return {
+        title: values.title || null, body: values.body || null,
+        options: values.button_label ? {button_label: values.button_label} : {},
+        entries: [],
+    };
+}
+
+/* Derived, never a second hand-kept list — the same reason `FEATURE_GROUP_ORDER`
+ * reaches the client from the registry instead of being retyped here. */
+const MANAGED_PAGES = Object.fromEntries(
+    Object.entries(MANAGED_KINDS).map(([kind, spec]) => [spec.page, {kind, ...spec}]),
+);
+
+let managedItems = [];
+let managedDirty = false;
+
+async function loadManaged(page) {
+    const spec = MANAGED_PAGES[page];
+    const host = document.getElementById(`${page}-list`);
     renderSkeleton(host, 3);
-
     try {
-        builderDocuments = (await api(`/guilds/${guildId}/builders`)).data;
+        managedItems = (await api(`/guilds/${guildId}/managed/${spec.kind}`)).data;
     } catch (error) {
         handleApiError(error);
         host.replaceChildren(emptyState('dashboard.load_failed', 'ic-alert'));
         return;
     }
+    showManagedList(page);
+}
 
-    setSubtitle('dashboard.subtitle_builders', {count: builderDocuments.length});
+/* One owner of the page-action slot.
+ *
+ * `loadManaged` used to add a "New" action every time it ran, and both saving
+ * and deleting call it again — so the buttons accumulated, one per save, until
+ * you navigated away. Every render clears the slot first and puts exactly one
+ * action in it. */
+function setManagedAction(labelKey, symbol, handler) {
+    document.getElementById('page-actions').replaceChildren();
+    addPageAction(labelKey, symbol, handler);
+}
 
-    const node = table([
-        'dashboard.column_type', 'dashboard.column_name', 'dashboard.column_revision',
-        'dashboard.column_channel', 'dashboard.column_actions',
-    ]);
+function showManagedList(page) {
+    managedDirty = false;
+    document.getElementById(`${page}-list-card`).classList.remove('hidden');
+    document.getElementById(`${page}-editor`).classList.add('hidden');
+    setSubtitle(`dashboard.subtitle_${page.replaceAll('-', '_')}`,
+                {count: managedItems.length});
+    renderManagedList(page);
+    setManagedAction('dashboard.managed_new', 'ic-plus',
+                     () => showManagedEditor(page, null));
+}
+
+function showManagedEditor(page, item) {
+    document.getElementById(`${page}-list-card`).classList.add('hidden');
+    const host = document.getElementById(`${page}-editor`);
+    host.classList.remove('hidden');
+    renderManagedEditor(page, item);
+    setManagedAction('dashboard.managed_back', 'ic-chevron-right', async () => {
+        // Leaving with unsaved text is the one thing this view can lose, so it
+        // is the one thing it asks about.
+        if (managedDirty && !await confirmAction(tr('dashboard.managed_discard_confirm'))) {
+            return;
+        }
+        showManagedList(page);
+    });
+}
+
+function renderManagedList(page) {
+    const host = document.getElementById(`${page}-list`);
+    const node = table(['dashboard.column_name', 'dashboard.column_key',
+                        'dashboard.column_status', 'dashboard.column_channel',
+                        'dashboard.column_actions']);
     const body = node.querySelector('tbody');
+    if (!managedItems.length) emptyRow(body, 5, 'dashboard.managed_empty');
 
-    if (!builderDocuments.length) emptyRow(body, 5, 'dashboard.builders_empty');
-
-    // The parameter is deliberately not named `document`: shadowing the global
-    // used to make this whole table throw before it rendered a single row.
-    builderDocuments.forEach((draft) => {
+    managedItems.forEach((item) => {
         const row = element('tr');
-        row.appendChild(element('td', null, tr(`dashboard.builder_${draft.document_type}`)));
-        row.appendChild(element('td', 'cell-key', draft.name));
-        row.appendChild(element('td', 'cell-mono', `v${draft.revision}`));
+        row.appendChild(element('td', null, item.display_name));
+        row.appendChild(element('td', 'cell-key', item.menu_key));
 
-        const channelCell = element('td');
-        const channel = document.createElement('select');
-        channel.add(new Option(tr('dashboard.publish_channel'), ''));
-        resources.channels
-            .filter((item) => ['text', 'news'].includes(item.type))
-            .forEach((item) => channel.add(new Option(item.name, item.id)));
-        channelCell.appendChild(channel);
-        row.appendChild(channelCell);
+        const status = element('td');
+        status.appendChild(pill(item.posted ? 'dashboard.managed_posted'
+                                            : 'dashboard.managed_draft',
+                                item.posted ? 'on' : 'off'));
+        row.appendChild(status);
 
-        const actionCell = element('td', 'cell-actions');
-        const publish = element('button', 'btn btn-outline', tr('dashboard.publish'));
-        publish.type = 'button';
-        publish.prepend(icon('ic-send', 'ic ic-sm'));
-        publish.addEventListener('click', async () => {
-            if (!channel.value) {
-                toast(tr('dashboard.publish_channel_required'), true);
-                return;
-            }
-            const accepted = await confirmAction(format('dashboard.publish_confirm', {
-                name: draft.name,
-                channel: channel.selectedOptions[0].textContent,
-            }));
-            if (!accepted) return;
+        const channel = resources.channels.find(
+            (entry) => String(entry.id) === String(item.channel_id));
+        row.appendChild(element('td', 'cell-mono', channel ? `#${channel.name}` : '—'));
 
-            publish.disabled = true;
-            try {
-                const queued = await api(`/guilds/${guildId}/builders/${draft.document_id}/publish`, {
-                    method: 'POST', headers: headers(), body: JSON.stringify({channel_id: channel.value}),
-                });
-                toast(queued.message);
-                await followAction(queued.data?.action_id);
-            } catch (error) {
-                handleApiError(error);
-            } finally {
-                publish.disabled = false;
-            }
-        });
-
-        const load = element('button', 'btn-icon', '');
-        load.type = 'button';
-        load.title = tr('dashboard.edit_draft');
-        load.setAttribute('aria-label', tr('dashboard.edit_draft'));
-        load.appendChild(icon('ic-builders', 'ic ic-sm'));
-        load.addEventListener('click', () => loadDraftIntoForm(draft));
-
+        const actions = element('td', 'cell-actions');
+        const edit = element('button', 'btn btn-outline', tr('dashboard.edit'));
+        edit.type = 'button';
+        edit.addEventListener('click', () => showManagedEditor(page, item));
         const remove = element('button', 'btn-icon danger', '');
         remove.type = 'button';
         remove.title = tr('dashboard.delete');
         remove.setAttribute('aria-label', tr('dashboard.delete'));
         remove.appendChild(icon('ic-trash', 'ic ic-sm'));
-        remove.addEventListener('click', async () => {
-            const accepted = await confirmAction(
-                format('dashboard.draft_delete_confirm', {name: draft.name}),
-            );
-            if (!accepted) return;
-            remove.disabled = true;
-            try {
-                const removed = await api(`/guilds/${guildId}/builders/${draft.document_id}`, {
-                    method: 'DELETE', headers: headers(),
-                    body: JSON.stringify({revision: draft.revision}),
-                });
-                toast(removed.message);
-                await loadBuilders();
-            } catch (error) {
-                await handleWriteConflict(error, loadBuilders);
-                remove.disabled = false;
-            }
-        });
-
-        actionCell.append(load, remove, publish);
-        row.appendChild(actionCell);
+        remove.addEventListener('click', () => deleteManaged(page, item, remove));
+        actions.append(edit, remove);
+        row.appendChild(actions);
         body.appendChild(row);
     });
-
     host.replaceChildren(node);
+}
+
+/* ------------------------------------------------------------- the creator */
+
+/** One field, by declared kind. Returns the node and how to read it back. */
+function managedFieldControl(name, spec, value, isNew) {
+    if (spec.kind === 'channel' || spec.kind === 'role') {
+        const picker = resourcePicker({
+            key: `managed.${name}`, value_type: spec.kind,
+            locale_key: spec.localeKey || spec.label,
+            channel_types: spec.channelTypes || [],
+        }, value || null);
+        return {node: picker, read: () => readManagedChannel(picker)};
+    }
+    if (spec.kind === 'checkbox') {
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = value === undefined ? Boolean(spec.default) : Boolean(value);
+        return {node: input, read: () => input.checked};
+    }
+    if (spec.kind === 'colour') {
+        const input = document.createElement('input');
+        input.type = 'color';
+        const numeric = Number.isInteger(value) ? value : 0xF5B041;
+        input.value = `#${numeric.toString(16).padStart(6, '0')}`;
+        return {node: input, read: () => parseInt(input.value.slice(1), 16)};
+    }
+    if (spec.kind === 'multiline') {
+        const input = document.createElement('textarea');
+        input.value = value ?? '';
+        if (spec.max) input.maxLength = spec.max;
+        return {node: input, read: () => input.value};
+    }
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = value ?? '';
+    if (spec.max) input.maxLength = spec.max;
+    if (spec.placeholder) input.placeholder = spec.placeholder;
+    if (spec.required) input.required = true;
+    // The key is the row's primary key and addresses the posted message, so it
+    // is chosen once: renaming it would orphan the message rather than rename it.
+    if (spec.immutableAfterCreate && !isNew) input.disabled = true;
+    return {node: input, read: () => input.value.trim()};
+}
+
+/** A labelled field. Not a `<label>` around a picker: a label forwards its click
+ *  to the labelable control it wraps, and a button is labelable, so the field
+ *  name would close and instantly reopen the menu. */
+function managedFieldWrapper(spec, control) {
+    const isPicker = spec.kind === 'channel' || spec.kind === 'role';
+    const wrapper = element(isPicker ? 'div' : 'label',
+                            `input-group${spec.wide ? ' wide' : ''}`);
+    wrapper.appendChild(element('span', 'field-label', tr(spec.label)));
+    wrapper.appendChild(control);
+    const hint = spec.hint ? fieldHint(spec.hint) : null;
+    if (hint) wrapper.appendChild(hint);
+    return wrapper;
+}
+
+/** The hidden `<select>` a resource picker carries its value in. */
+function readManagedChannel(picker) {
+    const carrier = picker.querySelector('.picker-carrier');
+    return [...carrier.selectedOptions].map((option) => option.value)[0] || '';
+}
+
+function renderManagedEditor(page, item) {
+    const spec = MANAGED_PAGES[page];
+    const host = document.getElementById(`${page}-editor`);
+    const values = spec.unpack(item);
+    const isNew = !item;
+    host.replaceChildren();
+
+    const head = element('div', 'card-head');
+    const headings = element('div');
+    headings.appendChild(element('h2', 'display', item
+        ? format('dashboard.managed_edit_heading', {name: item.display_name})
+        : tr('dashboard.managed_new_heading')));
+    headings.appendChild(element('p', 'card-hint', tr(`dashboard.${page.replaceAll('-', '_')}_hint`)));
+    head.appendChild(headings);
+    host.appendChild(head);
+
+    const layout = element('div', 'managed-creator');
+    const form = document.createElement('form');
+    const readers = {};
+    let repeat = null;
+
+    spec.sections.forEach((section, index) => {
+        const fieldset = document.createElement('fieldset');
+        fieldset.className = 'form-section';
+        const legend = document.createElement('legend');
+        legend.textContent = `${index + 1}. ${tr(section.legend)}`;
+        fieldset.appendChild(legend);
+
+        if (section.repeat) {
+            repeat = managedRepeat(spec.repeat, values[spec.repeat.name] || []);
+            fieldset.appendChild(repeat.node);
+            readers[spec.repeat.name] = repeat.read;
+        } else {
+            const grid = element('div', 'form-grid');
+            section.fields.forEach((name) => {
+                const fieldSpec = MANAGED_FIELDS[name];
+                const control = managedFieldControl(name, fieldSpec,
+                                                    values[name], isNew);
+                grid.appendChild(managedFieldWrapper(fieldSpec, control.node));
+                readers[name] = control.read;
+            });
+            fieldset.appendChild(grid);
+        }
+        form.appendChild(fieldset);
+    });
+
+    const collect = () => Object.fromEntries(
+        Object.entries(readers).map(([name, read]) => [name, read()]));
+
+    const preview = element('div', 'message-preview');
+    const redraw = () => {
+        preview.replaceChildren(messagePreview(spec, collect()));
+    };
+
+    // Offered only while this row owns no message: once one is linked, Update is
+    // the way to change it and a second link would just move the target.
+    if (!item?.posted) {
+        form.appendChild(managedAdoptSection(page, spec, () => ({
+            menu_key: readers.menu_key(),
+            display_name: readers.display_name(),
+        })));
+    }
+
+    const footer = element('div', 'form-footer');
+    const save = element('button', 'btn btn-outline', tr('dashboard.save_settings'));
+    save.type = 'button';
+    const publish = element('button', 'btn btn-primary',
+        tr(item?.posted ? 'dashboard.managed_update' : 'dashboard.managed_post'));
+    publish.type = 'submit';
+    publish.prepend(icon('ic-send', 'ic ic-sm'));
+    footer.append(save, publish);
+    form.appendChild(footer);
+
+    const submit = async (alsoPublish) => {
+        const values = collect();
+        const problem = managedProblem(spec, values);
+        if (problem) {
+            toast(tr(problem), true);
+            return;
+        }
+        if (alsoPublish && !values.channel) {
+            toast(tr('dashboard.publish_channel_required'), true);
+            return;
+        }
+        save.disabled = true;
+        publish.disabled = true;
+        try {
+            const payload = {
+                menu_key: values.menu_key,
+                display_name: values.display_name,
+                revision: item?.revision ?? 0,
+                colour: values.colour,
+                ...spec.pack(values),
+            };
+            const saved = await api(`/guilds/${guildId}/managed/${spec.kind}`,
+                                    {method: 'POST', headers: headers(),
+                                     body: JSON.stringify(payload)});
+            toast(saved.message);
+            managedDirty = false;
+            if (alsoPublish) {
+                const queued = await api(
+                    `/guilds/${guildId}/managed/${spec.kind}/`
+                    + `${encodeURIComponent(values.menu_key)}/publish`,
+                    {method: 'POST', headers: headers(),
+                     body: JSON.stringify({channel_id: values.channel})});
+                toast(queued.message);
+                await followAction(queued.data?.action_id);
+            }
+            await loadManaged(page);
+        } catch (error) {
+            await handleWriteConflict(error, () => loadManaged(page));
+        } finally {
+            save.disabled = false;
+            publish.disabled = false;
+        }
+    };
+
+    save.addEventListener('click', () => submit(false));
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        submit(true);
+    });
+
+    // Delegated, because blocks and rows appear and disappear at runtime and a
+    // per-field listener would go stale. The resource picker dispatches `change`
+    // from its carrier with `bubbles`, so a channel choice arrives here too.
+    let pending = null;
+    const onEdit = () => {
+        managedDirty = true;
+        // A colour input fires `input` continuously while dragging and a
+        // ten-embed panel is ~40 nodes, so the redraw is coalesced.
+        clearTimeout(pending);
+        pending = setTimeout(redraw, 120);
+    };
+    form.addEventListener('input', onEdit);
+    form.addEventListener('change', onEdit);
+    if (repeat) repeat.onChange(() => { managedDirty = true; redraw(); });
+
+    layout.append(form, preview);
+    host.appendChild(layout);
+    redraw();
+    const first = form.querySelector('input:not([disabled]), textarea');
+    if (first) first.focus();
+}
+
+/** Take over a message the bot already posted.
+ *
+ *  The schema-12 migration leaves `message_id` NULL on purpose, so a menu that
+ *  was already up keeps working while the dashboard cannot yet edit *that*
+ *  message. Without this the only route was posting a second copy and deleting
+ *  the first by hand, which moves the message to the bottom of its channel and
+ *  loses its pins.
+ */
+function managedAdoptSection(page, spec, identity) {
+    const fieldset = document.createElement('fieldset');
+    fieldset.className = 'form-section';
+    const legend = document.createElement('legend');
+    legend.textContent = tr('dashboard.managed_step_adopt');
+    fieldset.appendChild(legend);
+
+    const grid = element('div', 'form-grid');
+    const reference = document.createElement('input');
+    reference.type = 'text';
+    reference.placeholder = 'https://discord.com/channels/…';
+    const field = element('label', 'input-group wide');
+    field.appendChild(element('span', 'field-label', tr('dashboard.managed_adopt_field')));
+    field.appendChild(reference);
+    const hint = fieldHint('managed_adopt');
+    if (hint) field.appendChild(hint);
+    grid.appendChild(field);
+    fieldset.appendChild(grid);
+
+    const action = element('button', 'btn btn-outline', tr('dashboard.managed_adopt'));
+    action.type = 'button';
+    action.addEventListener('click', async () => {
+        const {menu_key: menuKey, display_name: displayName} = identity();
+        if (!menuKey || !displayName) {
+            toast(tr('dashboard.errors.managed_name_invalid'), true);
+            return;
+        }
+        if (!reference.value.trim()) {
+            toast(tr('dashboard.errors.managed_adopt_reference'), true);
+            return;
+        }
+        action.disabled = true;
+        try {
+            const result = await api(`/guilds/${guildId}/managed/${spec.kind}/adopt`,
+                                     {method: 'POST', headers: headers(),
+                                      body: JSON.stringify({
+                                          message: reference.value.trim(),
+                                          menu_key: menuKey,
+                                          display_name: displayName})});
+            toast(result.message);
+            managedDirty = false;
+            await loadManaged(page);
+            // Straight back into the creator, now filled from the message, so
+            // what was read can be checked before anything else is changed.
+            const adopted = managedItems.find((row) => row.menu_key === menuKey);
+            if (adopted) showManagedEditor(page, adopted);
+        } catch (error) {
+            handleApiError(error);
+            action.disabled = false;
+        }
+    });
+    fieldset.appendChild(action);
+    return fieldset;
+}
+
+/** The cross-field rules a declaration cannot express, per kind. */
+function managedProblem(spec, values) {
+    if (!values.display_name) return 'dashboard.errors.managed_name_invalid';
+    if (!values.menu_key) return 'dashboard.errors.managed_key_invalid';
+    if (spec.kind === 'rules' || spec.kind === 'embed') {
+        const sections = values.embeds || [];
+        if (!sections.length) return 'dashboard.errors.managed_rules_sections';
+        const total = sections.reduce(
+            (sum, row) => sum + row.title.length + row.body.length, 0);
+        // One message carries 6000 characters across all its embeds, and going
+        // over fails the whole send rather than truncating.
+        if (total > MESSAGE_TOTAL_LIMIT) return 'dashboard.errors.managed_rules_total';
+    }
+    if (spec.kind === 'role_menu') {
+        const labels = (values.entries || []).map((entry) => entry.label);
+        if (!labels.length) return 'dashboard.errors.managed_menu_empty';
+        // The label is the button's `custom_id`, so two the same cannot be told
+        // apart — and the API refuses the whole save rather than one row.
+        if (new Set(labels).size !== labels.length) {
+            return 'dashboard.errors.managed_entry_duplicate';
+        }
+    }
+    return null;
+}
+
+/** Repeatable rows: numbered embed blocks, or role-menu buttons. */
+function managedRepeat(spec, existing) {
+    const block = spec.layout === 'block';
+    const node = element('div', 'json-row-editor');
+    let notify = () => {};
+
+    if (!block) {
+        const head = element('div', 'menu-row menu-head');
+        head.style.setProperty('--row-columns', String(spec.fields.length));
+        spec.fields.forEach((field) => head.appendChild(
+            element('span', null, tr(field.label))));
+        head.appendChild(element('span', 'menu-head-spacer'));
+        node.appendChild(head);
+    }
+
+    const rows = element('div', block ? 'embed-blocks' : 'menu-rows');
+    node.appendChild(rows);
+
+    const renumber = () => {
+        [...rows.children].forEach((row, index) => {
+            const caption = row.querySelector('.embed-block-index');
+            if (caption) {
+                caption.textContent = format(spec.caption, {n: index + 1});
+            }
+        });
+    };
+
+    const addRow = (values = {}) => {
+        if (rows.children.length >= spec.limit) {
+            toast(format('dashboard.managed_row_limit', {limit: spec.limit}), true);
+            return;
+        }
+        const row = element('div', block ? 'embed-block' : 'menu-row');
+        const controls = block ? element('div', 'embed-block-fields') : row;
+        if (block) {
+            const bar = element('div', 'embed-block-bar');
+            bar.appendChild(element('span', 'embed-block-index', ''));
+            row.appendChild(bar);
+        } else {
+            row.style.setProperty('--row-columns', String(spec.fields.length));
+        }
+
+        spec.fields.forEach((field) => {
+            const control = managedFieldControl(field.name, field,
+                                                values[field.name], true);
+            control.node.dataset.column = field.name;
+            if (control.node.classList) {
+                control.node.classList.add(
+                    field.narrow ? 'row-field' : 'row-field');
+                if (field.narrow) control.node.classList.add('narrow');
+            }
+            if (field.kind === 'text' || field.kind === 'multiline') {
+                control.node.placeholder = tr(field.label);
+            }
+            if (block) {
+                controls.appendChild(managedFieldWrapper(
+                    {...field, wide: field.kind === 'multiline'}, control.node));
+            } else {
+                controls.appendChild(control.node);
+            }
+        });
+        if (block) row.appendChild(controls);
+
+        const remove = element('button', 'btn-icon danger', '');
+        remove.type = 'button';
+        remove.title = tr('dashboard.role_menu_remove');
+        remove.setAttribute('aria-label', tr('dashboard.role_menu_remove'));
+        remove.appendChild(icon('ic-trash', 'ic ic-sm'));
+        remove.addEventListener('click', () => {
+            row.remove();
+            renumber();
+            notify();
+        });
+        (block ? row.querySelector('.embed-block-bar') : row).appendChild(remove);
+
+        rows.appendChild(row);
+        renumber();
+    };
+
+    existing.forEach(addRow);
+    // A panel with no section cannot be posted and a menu with no button is a
+    // message nobody can use, so a new one opens with the row that is the point
+    // rather than with an empty editor.
+    if (!existing.length) addRow();
+
+    const add = element('button', 'btn btn-outline menu-add', '');
+    add.type = 'button';
+    add.appendChild(icon('ic-plus', 'ic ic-sm'));
+    add.appendChild(document.createTextNode(tr(spec.addLabel)));
+    add.addEventListener('click', () => { addRow(); notify(); });
+    node.appendChild(add);
+
+    const read = () => [...rows.children].map((row) => {
+        const values = {};
+        spec.fields.forEach((field) => {
+            const target = row.querySelector(`[data-column="${field.name}"]`);
+            values[field.name] = (field.kind === 'role')
+                ? readManagedChannel(target.closest('.resource-picker') || target)
+                : target.value.trim();
+        });
+        return values;
+        // An incomplete row is skipped rather than serialised with a stand-in:
+        // the API refuses the whole patch over one bad value.
+    }).filter((values) => spec.fields.every(
+        (field) => !field.required || values[field.name]));
+
+    return {node, read, onChange: (handler) => { notify = handler; }};
+}
+
+async function deleteManaged(page, item, button) {
+    const accepted = await confirmAction(format(
+        item.posted ? 'dashboard.managed_delete_posted_confirm'
+                    : 'dashboard.managed_delete_confirm',
+        {name: item.display_name}));
+    if (!accepted) return;
+    button.disabled = true;
+    try {
+        const removed = await api(
+            `/guilds/${guildId}/managed/${item.kind}/`
+            + `${encodeURIComponent(item.menu_key)}`,
+            {method: 'DELETE', headers: headers(),
+             body: JSON.stringify({revision: item.revision})});
+        toast(removed.message);
+        await followAction(removed.data?.action_id);
+        await loadManaged(page);
+    } catch (error) {
+        await handleWriteConflict(error, () => loadManaged(page));
+        button.disabled = false;
+    }
+}
+
+/* ------------------------------------------------------------- the preview */
+
+/** Roughly what Discord will show, built from the form's collected values.
+ *
+ *  From the values rather than from the DOM, so the preview and the thing that
+ *  is posted cannot disagree — the argument `collectSettingChanges` makes on the
+ *  settings form. What it deliberately does not do is render markdown: Discord's
+ *  flavour is large enough that a partial parser shows a *different* wrong
+ *  answer than plain text, and a preview that is confidently wrong is worse than
+ *  one that is plainly literal. The note under it says so.
+ */
+function messagePreview(spec, values) {
+    const wrapper = element('div');
+    wrapper.appendChild(element('h3', 'token-help-title',
+                                tr('dashboard.managed_preview_heading')));
+
+    const message = element('div', 'preview-message');
+    const guild = selectedGuild();
+    const author = element('div', 'preview-author');
+    author.appendChild(avatarNode('/brand-avatar.png', 'Bot', 'preview-avatar'));
+    author.appendChild(element('span', 'preview-author-name', guild?.name || ''));
+    message.appendChild(author);
+
+    const embeds = (spec.kind === 'rules' || spec.kind === 'embed')
+        ? (values.embeds || []).map((row) => ({title: row.title, body: row.body}))
+        : [{title: values.title, body: values.body}];
+
+    embeds.forEach((embed, index) => {
+        const card = element('div', 'preview-embed');
+        // A custom property, not a `style=` attribute: CSSOM is what the CSP
+        // permits, and the value is derived from a bounded integer rather than
+        // from anything an operator typed.
+        card.style.setProperty('--preview-accent',
+            `#${(values.colour & 0xFFFFFF).toString(16).padStart(6, '0')}`);
+        const text = element('div', 'preview-embed-text');
+        if (embed.title) {
+            text.appendChild(element('div', 'preview-embed-title', embed.title));
+        }
+        // The one transformation the renderer performs, mirrored here so the
+        // preview does not lie about it.
+        text.appendChild(element('div', 'preview-embed-body',
+                                 String(embed.body || '').replaceAll('\\n', '\n')));
+        card.appendChild(text);
+        // The thumbnail is first-embed-only, exactly as the renderer does it.
+        if (index === 0 && spec.kind === 'rules' && values.thumbnail
+                && guild?.icon_url) {
+            card.appendChild(avatarNode(guild.icon_url, guild.name, 'preview-thumb'));
+        }
+        message.appendChild(card);
+        if (index === 0 && String(values.image_url || '').startsWith('https://')) {
+            const banner = document.createElement('img');
+            banner.className = 'preview-banner';
+            banner.src = values.image_url;
+            banner.alt = '';
+            message.appendChild(banner);
+        }
+    });
+
+    const buttons = previewButtons(spec, values);
+    if (buttons.length) {
+        const bar = element('div', 'preview-buttons');
+        buttons.forEach(({label, style, emoji}) => {
+            const chip = element('div', `preview-button ${style}`);
+            if (emoji) chip.appendChild(element('span', null, emoji));
+            chip.appendChild(element('span', null, label));
+            bar.appendChild(chip);
+        });
+        message.appendChild(bar);
+    }
+    wrapper.appendChild(message);
+
+    if (spec.kind === 'rules' || spec.kind === 'embed') {
+        const total = (values.embeds || []).reduce(
+            (sum, row) => sum + row.title.length + row.body.length, 0);
+        const readout = element('div', 'total-readout');
+        readout.appendChild(element('span', null, tr('dashboard.managed_total_characters')));
+        readout.appendChild(element('span',
+            `total-value ${total > MESSAGE_TOTAL_LIMIT ? 'invalid' : 'valid'}`,
+            `${total} / ${MESSAGE_TOTAL_LIMIT}`));
+        wrapper.appendChild(readout);
+    }
+
+    wrapper.appendChild(element('p', 'section-hint',
+                                tr('dashboard.managed_preview_note')));
+    return wrapper;
+}
+
+/** The buttons a kind's message carries. Knowledge about `cogs/`, not a form. */
+function previewButtons(spec, values) {
+    // An embed carries no button at all: it is the message and nothing else.
+    if (spec.kind === 'embed') return [];
+    if (spec.kind === 'role_menu') {
+        return (values.entries || [])
+            .filter((entry) => entry.label)
+            .map((entry) => ({label: entry.label, style: 'secondary',
+                              emoji: entry.emoji}));
+    }
+    if (spec.kind === 'rules' && !values.accept_button) return [];
+    return [{
+        label: values.button_label || tr(`dashboard.managed_default_button_${spec.kind}`),
+        style: spec.buttonStyle,
+        emoji: spec.buttonEmoji,
+    }];
 }
 
 const ACTION_POLL_INTERVAL = 1500;
@@ -3121,68 +3955,6 @@ async function followAction(actionId) {
     }
     toast(tr('dashboard.action_still_running'));
 }
-
-function loadDraftIntoForm(draft) {
-    builderType = draft.document_type;
-    document.querySelectorAll('[data-builder]').forEach((button) => {
-        button.classList.toggle('active', button.dataset.builder === draft.document_type);
-    });
-    const form = document.getElementById('builder-form');
-    form.name.value = draft.name;
-    form.content.value = JSON.stringify(draft.content ?? {}, null, 2);
-    form.name.focus();
-    toast(format('dashboard.draft_loaded', {name: draft.name}));
-}
-
-async function saveBuilder(event) {
-    event.preventDefault();
-    const submit = event.target.querySelector('button[type="submit"]');
-    const data = new FormData(event.target);
-    const name = data.get('name');
-
-    let content;
-    try {
-        content = JSON.parse(data.get('content'));
-    } catch (error) {
-        toast(tr('dashboard.invalid_json'), true);
-        return;
-    }
-
-    // Saving under an existing name is an update, so it must carry that draft's
-    // revision or the optimistic check rejects every save after the first.
-    const existing = builderDocuments.find(
-        (draft) => draft.document_type === builderType && draft.name === name,
-    );
-
-    submit.disabled = true;
-    try {
-        const result = await api(`/guilds/${guildId}/builders`, {
-            method: 'POST',
-            headers: headers(),
-            body: JSON.stringify({
-                document_type: builderType,
-                name,
-                content,
-                revision: existing ? existing.revision : 0,
-            }),
-        });
-        toast(result.message);
-        event.target.reset();
-        await loadBuilders();
-    } catch (error) {
-        handleApiError(error);
-    } finally {
-        submit.disabled = false;
-    }
-}
-
-/* ------------------------------------------------------------------- audit */
-
-const RELATIVE_UNITS = [
-    ['day', 86400],
-    ['hour', 3600],
-    ['minute', 60],
-];
 
 function relativeTime(isoTimestamp) {
     const parsed = Date.parse(isoTimestamp);

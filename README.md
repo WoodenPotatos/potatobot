@@ -1,6 +1,6 @@
 # PotatoBot
 
-![PotatoBot avatar](botdata/pfp/potatobotpfp.png)
+![PotatoBot avatar](potatobotpfp.png)
 
 Hi! My name is Woody.
 
@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.3.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.4.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -111,12 +111,12 @@ Use the exact same stable HTTPS origin in the environment and Discord Developer 
 The dashboard supports Discord OAuth, server-held refreshable OAuth tokens,
 session-bound CSRF protection, live permission checks for mutations, typed/revisioned
 settings, feature flags, data-scope foundations, safe channel/role selectors, shop and
-gacha configuration, builder drafts, queued Discord publishing, fulfillment, and audit
+gacha configuration, the content builders, queued Discord publishing, fulfillment, and audit
 history. Raw full-JSON configuration and legacy price/reward endpoints are not exposed.
 
 The interface uses a dark sidebar with a light content area: an overview page with
 quick actions and counters, feature toggles grouped by dependency, settings split into
-labelled sections, and tables for shop items, fulfillment requests, builder drafts and
+labelled sections, and tables for shop items, fulfillment requests, posted messages and
 the audit log. The account avatar sits at the top right, with the guild switcher next to
 it showing each server's icon; its menu selects the appearance mode (follow the operating
 system, light, or the original dark potato palette) and the dashboard's display language,
@@ -172,8 +172,21 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
-### 2.3.0-beta.1
+### 2.4.0-beta.1
 
+- **Five public betas shipped with a private heading on the front page.** `README.md` renders the three most recent changelog sections, and promotion renamed only the top one, so a stale `2.0.0-rc.1 - Unreleased` sat under every release and 2.1 and 2.2 were never mentioned at all. Promotion now merges the whole leading run of unreleased sections, and the publisher refuses a snapshot where an `Unreleased` survives, where the README does not name the release, or where it has lost one of its generated blocks.
+- **The plain embed sender is a creator like the others.** It was the last thing still writing drafts: a name and a JSON textarea, posted and then unreachable forever. It is now a list and a creator with 1–10 numbered embeds, a colour, a banner image and a live preview — and no buttons, no drafts and nothing else around it, because an embed is the message itself. Post it, and it stays editable; press Update and the same message changes. It carries **no feature toggle**, since there is nothing there anybody would switch off.
+- Schema 13 rebuilds `managed_messages` so it can hold an embed. SQLite cannot alter a CHECK constraint, so this is a create-copy-drop-rename of the kind schema 8 used, gated on the table's own SQL: re-running is a no-op and an interrupted upgrade repairs itself. Rehearsed against a copy of the live database — every row, every column and every id survives.
+- `dashboard_documents` keeps no reader. Dropping the table is a destructive migration with nothing to gain, so it stays the way `server_config` does.
+- CI installs Node. Four tests drive the dashboard's JavaScript through it and skip themselves without a runtime, so all four had been reporting green while running nothing — and they are the checks guarding the defects that reached the deployment. A test asserts both halves now, because the failure mode of a guard is silence.
+- **You can take over the panels you have already posted** instead of recreating them. Paste a message link into a creator and the bot reads that message, fills the form from it and records the link, so Update edits that exact message from then on — your rules panel, ticket launcher and entry gate stay where they are, with their pins and their place in the channel. The schema-12 migration always left this half undone: it says a menu already posted keeps working "until it is re-posted **or told which message it is**", and only the re-posting half existed. Your three role menus need only the link: their content — all 19 role and emoji pairs — was already imported by that migration, and a role menu's buttons are deliberately *not* read back from the message, because a button carries no role id and the database is the only place those live. It refuses a message the bot did not post rather than accepting it and failing on every Update, refuses a link from another server, and refuses a message another item already owns.
+- The rules panel takes a **banner image**, which is what `/rules_verify` posts. Without it, adopting one of those messages would have stripped the banner on the first Update, silently.
+- **The `/work` editor says what you may type.** There are two tokens, `{earnings}` and `{coin}`, and the hints named only the first, so the currency symbol was undiscoverable. The page now lists both with the rules that apply — 500 characters, line breaks and formatting work, mentions cannot ping anyone, and any other braced text stays exactly as written. The hint claiming the shipped responses are "not editable" was also out of date; editing one adopts that tier into your server.
+- …and 16 more, in [CHANGELOG.md](CHANGELOG.md).
+
+### 2.1.0-beta.1 to 2.3.0-beta.1
+
+- These notes cover five public betas — `v2.1.0b1` through `v2.3.0b1` — as one block. The changelog was a single running section then and the publisher renamed only its top heading, so the per-release boundaries were never recorded and inventing them now would be a guess; the tags are the authority on what each build contained. The 2.4.0 boundary below it *is* exact, because `git blame` can place every line against the commit that wrote it.
 - The README is an overview and a quick start again. The verification commands and the local-dashboard walkthrough moved to `docs/development.md`, which already owned that ground, and it says what it runs on: a headless Linux server under systemd behind a reverse proxy, which the README never stated. Corrected the stale facts too — it claimed schema 8 while announcing schema 11 fourteen lines below, called the dashboard experimental where `CLAUDE.md` explicitly says it is load-bearing, and said `/work` falls back to shipped *Hungarian locale lines* when the shipped set is English database rows.
 - `docs/development.md` said schema 6, called the dashboard a typed alpha, and documented a `/work` fallback deleted some time ago. `docs/release_checklist.md` pinned schema 6 in a step that has to be true at every release, so it names the constant now instead of a number.
 - A stored gacha banner can pick up rewards the bot shipped after it was saved. Nothing ever reconciled the two, so a banner was frozen at the shipped set of the day it was first saved — which is how the streak freeze reached the shop and the shipped 4-star tier while being unobtainable from the banner a guild actually pulls on. **Add missing rewards** appends only what the table lacks and leaves your weights and your deliberate omissions alone; **Reset rewards** replaces the whole table with the shipped one. Both exist because neither can stand in for the other.
@@ -181,10 +194,9 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - The banner key says what it wants. The message you got was the browser's own "please match the requested format", which blocks submitting and so never let the server's descriptive message through; the field now carries the same words as a hint and a tooltip.
 - A reward row on a banner nobody has saved yet is editable, like one you added. The synthesised standard banner rendered its rows as committed, which is why they behaved differently from your own. And the reward table explains what "amount" means, which depends on the kind.
 - Casino and Everydle are one master toggle each, with the individual games as sub-toggles on their own settings page. Eight near-identical games in the flat Features list pushed everything else off it; the list is 27 entries instead of 35. A child depends on its master, so the existing cascade switches the games off with it — `parent` is only where it renders.
-- Everydle has its own settings category. Its channel and its five reward settings shared a "Games" page with the general other-games channel, which the two had nothing to do with beyond both being games.
-- …and 40 more, in [CHANGELOG.md](CHANGELOG.md).
+- …and 41 more, in [CHANGELOG.md](CHANGELOG.md).
 
-### 2.0.0-rc.1 - Unreleased
+### 2.0.0-rc.1
 
 - Added transactional schema-4 wager recovery and atomic booster reward claims.
 - Made feature policy fail closed until its guild cache is ready.

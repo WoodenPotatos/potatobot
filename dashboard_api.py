@@ -3,6 +3,7 @@ import asyncio
 import copy
 import os
 import hmac
+import re
 import json
 import secrets
 import sqlite3
@@ -30,6 +31,11 @@ from flask import (Flask, jsonify, redirect, request, send_from_directory,
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import database
+import managed_messages
+from managed_messages import (
+    MANAGED_KIND_FEATURES,
+    render_managed_message,
+)
 import item_catalog
 import permission_audit
 import settings_cache
@@ -288,9 +294,7 @@ def _within_rate_limit(bucket: str, limit: int, window: int) -> bool:
         return True
 
 
-BRAND_AVATAR_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "botdata", "pfp"
-)
+BRAND_AVATAR_DIR = os.path.dirname(os.path.abspath(__file__))
 BRAND_AVATAR_FILE = "potatobotpfp.png"
 
 
@@ -298,9 +302,12 @@ BRAND_AVATAR_FILE = "potatobotpfp.png"
 def brand_avatar():
     """The bot's avatar, used as the sidebar mark and the browser tab icon.
 
-    Served from `botdata/pfp/` rather than copied into `dashboard/` so the
-    operator swaps one file and both surfaces follow. Cached hard because it
-    changes about as often as the bot's identity does.
+    Served from the repository root rather than copied into `dashboard/` so the
+    operator swaps one file and both surfaces follow. It sits at the root rather
+    than under `botdata/` because that directory holds the game icons, which are
+    other people's artwork and are excluded from the published snapshot — the
+    avatar is ours and ships with it. Cached hard because it changes about as
+    often as the bot's identity does.
     """
     path = os.path.join(BRAND_AVATAR_DIR, BRAND_AVATAR_FILE)
     if not os.path.isfile(path):
@@ -1444,7 +1451,11 @@ def guild_work_responses(guild_id):
             "tiers": list(database.WORK_TIERS),
             "message_max_length": database.WORK_MESSAGE_MAX_LENGTH,
             "per_tier_limit": database.WORK_RESPONSES_PER_TIER,
+            # Both tokens travel from the model rather than being typed into
+            # the catalogs, so the help block on the page cannot drift from what
+            # `work_response_text` actually substitutes.
             "earnings_placeholder": database.WORK_EARNINGS_PLACEHOLDER,
+            "coin_placeholder": database.WORK_COIN_PLACEHOLDER,
         }})
     try:
         payload = require_json_object()
@@ -1800,125 +1811,483 @@ def modify_guild_shop_item(guild_id, item_key):
         return internal_error_response("shop item update")
 
 
-def _validate_builder_content(document_type: str, content: dict):
-    if not isinstance(content, dict):
-        raise RequestValidationError("dashboard.errors.builder_content_object")
-    if document_type == "embed":
-        if set(content) - {"title", "description", "color", "footer", "fields"}:
-            raise RequestValidationError("dashboard.errors.builder_embed_fields_unsupported")
-        if len(str(content.get("title", ""))) > 256 or len(str(content.get("description", ""))) > 4096:
-            raise RequestValidationError("dashboard.errors.builder_embed_too_long")
-        fields = content.get("fields", [])
-        if not isinstance(fields, list) or len(fields) > 25:
-            raise RequestValidationError("dashboard.errors.builder_embed_field_invalid")
-        # The worker calls field.get(...) per entry, so a list of anything else
-        # would only fail after the action was already queued.
-        for field in fields:
-            if not isinstance(field, dict) or set(field) - {"name", "value", "inline"}:
-                raise RequestValidationError("dashboard.errors.builder_embed_field_invalid")
-        if "color" in content:
-            color = content["color"]
-            if isinstance(color, bool) or not isinstance(color, int) or not 0 <= color <= 0xFFFFFF:
-                raise RequestValidationError("dashboard.errors.builder_embed_color_invalid")
-    elif document_type == "rules":
-        if set(content) != {"sections"} or not isinstance(content["sections"], list):
-            raise RequestValidationError("dashboard.errors.builder_rules_invalid")
-        if len(content["sections"]) > 25:
-            raise RequestValidationError("dashboard.errors.builder_rules_too_many")
-        for section in content["sections"]:
-            if not isinstance(section, dict):
-                raise RequestValidationError("dashboard.errors.builder_rules_invalid")
-    elif document_type == "panel":
-        if set(content) - {"panel_type", "title", "description", "options"}:
-            raise RequestValidationError("dashboard.errors.builder_panel_invalid")
-        if content.get("panel_type") not in {"tickets", "airlock", "role_menu"}:
-            raise RequestValidationError("dashboard.errors.builder_panel_type")
-    else:
-        raise RequestValidationError("dashboard.errors.builder_type_unsupported")
-    return content
+# `dashboard_documents` and its three routes are gone. A draft that could only
+# ever be posted again is not an embed sender, it is a second copy of one — so
+# the plain embed became a managed message like everything else on those pages,
+# and the table it used keeps no reader, the way `server_config` does.
 
 
-@app.route("/api/guilds/<int:guild_id>/builders", methods=["GET", "POST"])
-def guild_builders(guild_id):
+# --------------------------------------------------------- managed messages
+
+# Discord's own limits, which nothing checked before. A rules panel is one
+# message, so the section count is the embed-per-message limit rather than a
+# number somebody picked — `/rules_group` hard-coded seven.
+RULES_SECTION_LIMIT = 10
+EMBED_TITLE_LIMIT = 256
+EMBED_BODY_LIMIT = 4096
+MESSAGE_EMBED_TOTAL_LIMIT = 6000
+
+
+def _managed_text(value, limit, error_key, *, required=False):
+    if value is None or value == "":
+        if required:
+            raise RequestValidationError(error_key)
+        return None
+    if not isinstance(value, str) or len(value) > limit:
+        raise RequestValidationError(error_key)
+    return value
+
+
+def _validate_managed_options(kind, options):
+    """The per-kind half of a managed message, validated before it is stored.
+
+    `panel.options` was not checked at all, so a panel could name a variant the
+    worker had never heard of and fail as an opaque error code after the operator
+    had already pressed Post.
+    """
+    if not isinstance(options, dict):
+        raise RequestValidationError("dashboard.errors.managed_options_invalid")
+    if kind in ("rules", "embed"):
+        allowed = ({"sections", "image_url"} if kind == "embed"
+                   else {"sections", "accept_button", "button_label",
+                         "thumbnail", "image_url"})
+        if set(options) - allowed:
+            raise RequestValidationError("dashboard.errors.managed_options_invalid")
+        sections = options.get("sections")
+        if not isinstance(sections, list) or not sections:
+            raise RequestValidationError("dashboard.errors.managed_rules_sections")
+        if len(sections) > RULES_SECTION_LIMIT:
+            raise RequestValidationError("dashboard.errors.managed_rules_too_many")
+        total = 0
+        for section in sections:
+            if not isinstance(section, dict) or set(section) - {"title", "body"}:
+                raise RequestValidationError("dashboard.errors.managed_rules_sections")
+            title = _managed_text(section.get("title"), EMBED_TITLE_LIMIT,
+                                  "dashboard.errors.managed_rules_title_long")
+            body = _managed_text(section.get("body"), EMBED_BODY_LIMIT,
+                                 "dashboard.errors.managed_rules_body_long",
+                                 required=True)
+            total += len(title or "") + len(body)
+        # One message carries at most 6000 characters across all its embeds, and
+        # exceeding it fails the whole send rather than truncating.
+        if total > MESSAGE_EMBED_TOTAL_LIMIT:
+            raise RequestValidationError("dashboard.errors.managed_rules_total")
+        for flag in ("accept_button", "thumbnail"):
+            if flag in options and not isinstance(options[flag], bool):
+                raise RequestValidationError("dashboard.errors.managed_options_invalid")
+        if kind == "rules":
+            _validate_button_label(options)
+        _validate_image_url(options)
+    elif kind in ("ticket", "airlock"):
+        # One button, whose job the bot fixes and whose text the operator sets.
+        if set(options) - {"button_label"}:
+            raise RequestValidationError("dashboard.errors.managed_options_invalid")
+        _validate_button_label(options)
+    elif options:
+        # A role menu carries its buttons in `entries`, so anything here would be
+        # stored and never read, which is worse than a refusal.
+        raise RequestValidationError("dashboard.errors.managed_options_invalid")
+    return options
+
+
+def _validate_image_url(options):
+    """A banner for the leading section, as `/rules_verify` posts.
+
+    HTTPS only and length-capped. Discord fetches whatever this names, so an
+    arbitrary scheme has no business here; the command it replaces took a bare
+    string, which is why this is narrower rather than wider.
+    """
+    url = _managed_text(options.get("image_url"), 1024,
+                        "dashboard.errors.managed_image_invalid")
+    if url is not None and not url.startswith("https://"):
+        raise RequestValidationError("dashboard.errors.managed_image_invalid")
+    return url
+
+
+def _validate_button_label(options):
+    """The operator's button text, if they set one.
+
+    A newline is rejected rather than stripped: Discord accepts one in a label
+    and draws it as a space, so storing it would read back as something other
+    than what it does.
+    """
+    label = _managed_text(options.get("button_label"),
+                          managed_messages.BUTTON_LABEL_LIMIT,
+                          "dashboard.errors.managed_button_label")
+    if label is not None and any(character in label for character in "\r\n\t"):
+        raise RequestValidationError("dashboard.errors.managed_button_label")
+    return label
+
+
+def _validate_managed_entries(kind, entries):
+    if not isinstance(entries, list):
+        raise RequestValidationError("dashboard.errors.managed_entries_invalid")
+    if kind != "role_menu":
+        if entries:
+            raise RequestValidationError("dashboard.errors.managed_entries_invalid")
+        return []
+    if len(entries) > database.MANAGED_ENTRY_LIMIT:
+        raise RequestValidationError("dashboard.errors.managed_entry_limit")
+    seen, cleaned = set(), []
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) - {"label", "role_id",
+                                                        "emoji"}:
+            raise RequestValidationError("dashboard.errors.managed_entries_invalid")
+        # 80 characters is Discord's button-label limit, and the label is also the
+        # `custom_id` a posted button routes by, so a duplicate is two buttons
+        # that cannot be told apart.
+        label = _managed_text(entry.get("label"),
+                              managed_messages.BUTTON_LABEL_LIMIT,
+                              "dashboard.errors.managed_entry_label",
+                              required=True)
+        if label in seen:
+            raise RequestValidationError("dashboard.errors.managed_entry_duplicate")
+        seen.add(label)
+        try:
+            role_id = _snowflake_arg(entry.get("role_id"))
+        except ValueError:
+            raise RequestValidationError("dashboard.errors.managed_entry_role")
+        if not role_id:
+            raise RequestValidationError("dashboard.errors.managed_entry_role")
+        cleaned.append({"label": label, "role_id": role_id,
+                        "emoji": _managed_text(entry.get("emoji"), 64,
+                                               "dashboard.errors.managed_entry_emoji") or ""})
+    return cleaned
+
+
+def _require_managed_kind(kind):
+    if kind not in database.MANAGED_MESSAGE_KINDS:
+        raise RequestValidationError("dashboard.errors.managed_kind_invalid")
+    return kind
+
+
+@app.route("/api/guilds/<int:guild_id>/managed/<kind>", methods=["GET", "POST"])
+def guild_managed_messages(guild_id, kind):
     if not is_guild_authorized(guild_id):
         return unauthorized_response()
-    if request.method == "GET":
-        return jsonify({"status": "success", "data": database.run_read_sync(database.list_dashboard_documents, guild_id)})
     try:
+        _require_managed_kind(kind)
+        if request.method == "GET":
+            return jsonify({"status": "success", "data": database.run_read_sync(
+                database.list_managed_messages, guild_id, kind)})
         payload = require_json_object()
-        require_exact_keys(payload, {"document_type", "name", "content", "revision"})
-        require_setting_key(payload["document_type"])
+        require_exact_keys(payload, {"menu_key", "display_name", "revision",
+                                     "title", "body", "colour", "options",
+                                     "entries"})
         require_revision(payload["revision"])
-        if not isinstance(payload["name"], str) or not payload["name"].strip():
-            raise RequestValidationError("dashboard.errors.builder_name_required")
-        content = _validate_builder_content(payload["document_type"], payload["content"])
-        result = database.save_dashboard_document(
-            guild_id, actor_id(), payload["document_type"],
-            payload["name"], content, payload["revision"],
+        colour = payload["colour"]
+        if colour is not None and (isinstance(colour, bool)
+                                   or not isinstance(colour, int)
+                                   or not 0 <= colour <= 0xFFFFFF):
+            raise RequestValidationError("dashboard.errors.managed_colour_invalid")
+        result = database.save_managed_message(
+            guild_id, actor_id(), kind, payload["menu_key"],
+            payload["display_name"], payload["revision"],
+            title=_managed_text(payload["title"], EMBED_TITLE_LIMIT,
+                                "dashboard.errors.managed_title_long"),
+            body=_managed_text(payload["body"], EMBED_BODY_LIMIT,
+                               "dashboard.errors.managed_body_long"),
+            colour=colour,
+            options=_validate_managed_options(kind, payload["options"]),
+            entries=_validate_managed_entries(kind, payload["entries"]),
         )
-        return jsonify({"status": "success", "message": t("dashboard.draft_saved"),
+        return jsonify({"status": "success", "message": t("dashboard.managed_saved"),
                         "data": result}), 201
     except ValueError as error:
         return invalid_request_response(error)
     except database.RevisionConflictError:
-        return jsonify({"status": "error", "message": t("dashboard.revision_conflict")}), 409
+        return jsonify({"status": "error",
+                        "message": t("dashboard.revision_conflict")}), 409
     except database.DatabaseOperationError:
-        return internal_error_response("builder save")
+        return internal_error_response("managed message save")
 
 
-@app.route("/api/guilds/<int:guild_id>/builders/<int:document_id>", methods=["DELETE"])
-def delete_guild_builder(guild_id, document_id):
+@app.route("/api/guilds/<int:guild_id>/managed/<kind>/<menu_key>",
+           methods=["DELETE"])
+def delete_guild_managed_message(guild_id, kind, menu_key):
+    """Remove the row, and the message with it.
+
+    Deleting the row alone would leave a posted message whose buttons answer
+    "role not found" forever, so the message deletion is queued *before* the row
+    goes — with the channel and message ids in the payload, because the worker
+    cannot read them back afterwards.
+    """
     if not is_guild_authorized(guild_id):
         return unauthorized_response()
     try:
+        _require_managed_kind(kind)
         payload = require_json_object()
         require_exact_keys(payload, {"revision"})
-        result = database.delete_dashboard_document(
-            guild_id, actor_id(), document_id, require_revision(payload["revision"])
-        )
+        revision = require_revision(payload["revision"])
+        stored = database.run_read_sync(database.get_managed_message, guild_id,
+                                        kind, menu_key)
+        if not stored:
+            return jsonify({"status": "error",
+                            "message": t("dashboard.errors.managed_not_found")}), 404
+        action_id = None
+        if stored["message_id"]:
+            action_id = database.queue_control_action(
+                guild_id, actor_id(), "delete_managed",
+                {"channel_id": int(stored["channel_id"]),
+                 "message_id": int(stored["message_id"])})
+        result = database.delete_managed_message(guild_id, actor_id(), kind,
+                                                 menu_key, revision)
         return jsonify({"status": "success",
-                        "message": t("dashboard.draft_deleted"), "data": result})
+                        "message": t("dashboard.managed_deleted"),
+                        "data": dict(result, action_id=action_id)})
     except LookupError:
         return jsonify({"status": "error",
-                        "message": t("dashboard.errors.document_not_found")}), 404
+                        "message": t("dashboard.errors.managed_not_found")}), 404
     except ValueError as error:
         return invalid_request_response(error)
     except database.RevisionConflictError:
-        return jsonify({"status": "error", "message": t("dashboard.revision_conflict")}), 409
+        return jsonify({"status": "error",
+                        "message": t("dashboard.revision_conflict")}), 409
     except database.DatabaseOperationError:
-        return internal_error_response("builder delete")
+        return internal_error_response("managed message delete")
 
 
-@app.route("/api/guilds/<int:guild_id>/builders/<int:document_id>/publish", methods=["POST"])
-def publish_builder(guild_id, document_id):
+# A Discord message link, as the client copies it out of Discord. The guild
+# segment is checked against the request rather than trusted, so a link from
+# somewhere else cannot name a channel of this guild by accident.
+MESSAGE_LINK = re.compile(
+    # The guild segment is compared against the request rather than shape-checked
+    # — the comparison is the real guard, and pinning its length would only make
+    # a test guild id unusable.
+    r"^https://(?:\w+\.)?discord\.com/channels/(\d{1,20})/(\d{17,20})/(\d{17,20})$"
+)
+
+# Which button `custom_id` belongs to which kind, so a message can be recognised
+# as the thing it is rather than by guesswork. Derived from the views themselves
+# — these are the ids `RuleAcceptView`, `TicketLauncher` and `EnterServerView`
+# register, and a click on an already-posted message routes by exactly these.
+KIND_BUTTON_IDS = {
+    "rules": "accept_rules_btn",
+    "ticket": "ticket_button",
+    "airlock": "enter_server_btn",
+}
+
+
+def _parse_message_reference(value, guild_id):
+    """`(channel_id, message_id)` from a link, or `(None, message_id)` from a bare id."""
+    if not isinstance(value, str) or not value.strip():
+        raise RequestValidationError("dashboard.errors.managed_adopt_reference")
+    value = value.strip()
+    match = MESSAGE_LINK.match(value)
+    if match:
+        link_guild, channel_id, message_id = (int(part) for part in match.groups())
+        if link_guild != guild_id:
+            raise RequestValidationError("dashboard.errors.managed_adopt_other_guild")
+        return channel_id, message_id
+    if value.isdigit() and 17 <= len(value) <= 20:
+        return None, int(value)
+    raise RequestValidationError("dashboard.errors.managed_adopt_reference")
+
+
+async def _find_message(guild, channel_id, message_id):
+    """The message, from the channel the link names or by searching the guild.
+
+    A bare id has to be looked for, because Discord's API has no "fetch a message
+    by id" that is not scoped to a channel.
+    """
+    channels = ([guild.get_channel(channel_id)] if channel_id
+                else list(guild.text_channels))
+    for channel in channels:
+        if not isinstance(channel, discord.TextChannel):
+            continue
+        if not channel.permissions_for(guild.me).read_message_history:
+            continue
+        try:
+            return await channel.fetch_message(message_id)
+        except (discord.NotFound, discord.Forbidden):
+            continue
+    return None
+
+
+def _content_from_message(kind, message):
+    """Read a posted message back into the fields a managed row holds.
+
+    Only what the row can express is taken. For a role menu the *entries* are
+    deliberately not read: the database already holds this guild's labels, roles
+    and emoji exactly, and a button carries no role id at all — the role is
+    resolved per click. Reading them back from the message could only lose
+    information.
+    """
+    embeds = message.embeds
+    lead = embeds[0] if embeds else None
+    colour = lead.color.value if lead is not None and lead.color else None
+    label = None
+    for row in message.components:
+        for item in getattr(row, "children", []):
+            if getattr(item, "custom_id", None) == KIND_BUTTON_IDS.get(kind):
+                label = item.label
+    # A label matching the shipped wording is stored as *absent*, so the panel
+    # keeps following the language setting instead of being pinned to today's
+    # translation of it.
+    default_label = {
+        "rules": lambda: t("admin.accept_rules_button"),
+        "ticket": lambda: t("tickets.open_btn"),
+        "airlock": lambda: t("admin.enter_server_button"),
+    }.get(kind)
+    if label and default_label and label == default_label():
+        label = None
+
+    if kind in ("rules", "embed"):
+        sections = [
+            {"title": embed.title or None, "description": embed.description or ""}
+            for embed in embeds
+        ]
+        image = (lead.image.url if lead is not None and lead.image
+                 and str(lead.image.url or "").startswith("https://") else None)
+        packed = [{"title": section["title"], "body": section["description"]}
+                  for section in sections]
+        if kind == "embed":
+            # No button, no server icon: an embed is the message and nothing
+            # around it, so there is nothing else on the message to read.
+            return {"title": None, "body": None, "colour": colour,
+                    "options": {"sections": packed, "image_url": image},
+                    "entries": None}
+        return {
+            "title": None, "body": None, "colour": colour,
+            "options": {
+                "sections": packed,
+                "accept_button": label is not None or any(
+                    getattr(item, "custom_id", None) == KIND_BUTTON_IDS["rules"]
+                    for row in message.components
+                    for item in getattr(row, "children", [])),
+                "thumbnail": bool(lead is not None and lead.thumbnail
+                                  and lead.thumbnail.url),
+                "button_label": label,
+                "image_url": image,
+            },
+            "entries": None,
+        }
+
+    return {
+        "title": (lead.title if lead is not None else None) or None,
+        "body": (lead.description if lead is not None else None) or None,
+        "colour": colour,
+        "options": {"button_label": label} if label else {},
+        "entries": None,
+    }
+
+
+@app.route("/api/guilds/<int:guild_id>/managed/<kind>/adopt", methods=["POST"])
+def adopt_guild_managed_message(guild_id, kind):
+    """Take over a message the bot already posted.
+
+    The schema-12 migration deliberately leaves `message_id` NULL: a menu already
+    posted keeps working, but the dashboard cannot edit *that* message until it is
+    re-posted or told which one it is. This is the telling half. Without it the
+    only way to bring an existing panel under the dashboard was to post a second
+    copy and delete the first by hand, which moves the message to the bottom of
+    its channel and loses its pins.
+
+    Requires the in-process bot: reading a message is Discord's state. A
+    standalone dashboard answers 503 rather than guessing.
+    """
+    if not is_guild_authorized(guild_id):
+        return unauthorized_response()
+    guild = _dashboard_bot.get_guild(guild_id) if _dashboard_bot else None
+    if guild is None or guild.me is None:
+        return jsonify({"status": "error",
+                        "message": t("dashboard.resources_unavailable")}), 503
+    try:
+        _require_managed_kind(kind)
+        payload = require_json_object()
+        require_exact_keys(payload, {"message", "menu_key", "display_name"})
+        channel_id, message_id = _parse_message_reference(payload["message"],
+                                                          guild_id)
+
+        # Nothing may be adopted twice: two rows editing one message would each
+        # overwrite the other, and neither would say so.
+        for existing in database.run_read_sync(database.list_managed_messages,
+                                              guild_id):
+            if (existing["message_id"] == str(message_id)
+                    and existing["menu_key"] != payload["menu_key"]):
+                raise RequestValidationError("dashboard.errors.managed_adopt_claimed")
+
+        message = asyncio.run_coroutine_threadsafe(
+            _find_message(guild, channel_id, message_id), _dashboard_bot.loop
+        ).result(timeout=15)
+        if message is None:
+            raise RequestValidationError("dashboard.errors.managed_adopt_not_found")
+        # Discord lets a bot edit only its own messages, so anything else could
+        # be adopted and would then fail on every Update. Refusing here is the
+        # difference between "no" and "yes, and it will never work".
+        if message.author.id != guild.me.id:
+            raise RequestValidationError("dashboard.errors.managed_adopt_not_ours")
+
+        content = _content_from_message(kind, message)
+        stored = database.run_read_sync(database.get_managed_message, guild_id,
+                                        kind, payload["menu_key"])
+        # A role menu's entries stay exactly as they are: the database holds this
+        # guild's roles and a button never carried one.
+        entries = [dict(entry, role_id=int(entry["role_id"]))
+                   for entry in (stored or {}).get("entries", [])
+                   if entry.get("role_id")]
+        result = database.save_managed_message(
+            guild_id, actor_id(), kind, payload["menu_key"],
+            payload["display_name"], (stored or {}).get("revision", 0),
+            title=content["title"], body=content["body"],
+            colour=content["colour"],
+            options=_validate_managed_options(kind, content["options"]),
+            entries=entries,
+        )
+        database.record_managed_post(guild_id, kind, payload["menu_key"],
+                                     message.channel.id, message.id)
+        return jsonify({
+            "status": "success", "message": t("dashboard.managed_adopted"),
+            "data": dict(result,
+                         adopted=database.run_read_sync(
+                             database.get_managed_message, guild_id, kind,
+                             payload["menu_key"])),
+        }), 201
+    except ValueError as error:
+        return invalid_request_response(error)
+    except database.RevisionConflictError:
+        return jsonify({"status": "error",
+                        "message": t("dashboard.revision_conflict")}), 409
+    except database.DatabaseOperationError:
+        return internal_error_response("managed message adopt")
+
+
+@app.route("/api/guilds/<int:guild_id>/managed/<kind>/<menu_key>/publish",
+           methods=["POST"])
+def publish_guild_managed_message(guild_id, kind, menu_key):
+    """Post it, or edit the message already posted.
+
+    One route for both, because which one it is is a fact the database already
+    holds — asking the operator to choose is how `/update_games` ended up wanting
+    a message id typed by hand.
+    """
     if not is_guild_authorized(guild_id):
         return unauthorized_response()
     try:
+        _require_managed_kind(kind)
         payload = require_json_object()
-        if set(payload) != {"channel_id"}:
-            raise RequestValidationError("dashboard.errors.publish_target_invalid")
+        require_exact_keys(payload, {"channel_id"})
         try:
-            # A string, for the same 53-bit reason the settings route accepts one.
-            payload["channel_id"] = _snowflake_arg(payload["channel_id"])
+            channel_id = _snowflake_arg(payload["channel_id"])
         except ValueError:
             raise RequestValidationError("dashboard.errors.publish_target_invalid")
-        # Verify the channel belongs to this guild before anything is queued.
-        # Leaving it to the worker meant arbitrary snowflakes entered the outbox
-        # and failed later as an opaque error code the operator never sees.
+        if not channel_id:
+            raise RequestValidationError("dashboard.errors.publish_target_invalid")
+        # The same pre-queue check the embed publish does: an id that is not a
+        # channel of this guild must not enter the outbox.
         guild = _dashboard_bot.get_guild(guild_id) if _dashboard_bot else None
-        if guild is not None and guild.get_channel(payload["channel_id"]) is None:
+        if guild is not None and guild.get_channel(channel_id) is None:
             raise RequestValidationError("dashboard.errors.publish_channel_not_in_guild")
-
-        documents = {item["document_id"]: item for item in database.run_read_sync(database.list_dashboard_documents, guild_id)}
-        document = documents.get(document_id)
-        if not document:
-            raise RequestValidationError("dashboard.errors.document_not_found")
-        action_type = {"embed": "send_embed", "rules": "publish_rules",
-                       "panel": "publish_panel"}[document["document_type"]]
+        stored = database.run_read_sync(database.get_managed_message, guild_id,
+                                        kind, menu_key)
+        if not stored:
+            return jsonify({"status": "error",
+                            "message": t("dashboard.errors.managed_not_found")}), 404
+        if kind == "role_menu" and not stored["entries"]:
+            raise RequestValidationError("dashboard.errors.managed_menu_empty")
         action_id = database.queue_control_action(
-            guild_id, actor_id(), action_type,
-            {"document_id": document_id, "channel_id": payload["channel_id"]},
-        )
+            guild_id, actor_id(), "publish_managed",
+            {"kind": kind, "menu_key": menu_key, "channel_id": channel_id})
         return jsonify({"status": "success", "message": t("dashboard.action_queued"),
                         "data": {"action_id": action_id}}), 202
     except ValueError as error:
@@ -2036,6 +2405,64 @@ async def execute_member_erasure(bot, action) -> str | None:
     return None
 
 
+async def execute_managed_publish(guild, channel, action):
+    """Post the managed message, or edit the one already posted.
+
+    A recorded message that Discord no longer has is posted afresh rather than
+    reported as an error: the operator deleted it by hand, and the alternative is
+    a row that can never be published again.
+    """
+    payload = action["payload"]
+    stored = await database.run_read(database.get_managed_message, guild.id,
+                                     payload.get("kind"), payload.get("menu_key"))
+    if not stored:
+        return "document_unavailable"
+    embeds, view = render_managed_message(guild, stored)
+    if embeds is None:
+        return view  # the error code
+
+    if stored["message_id"]:
+        try:
+            posted = await channel.fetch_message(int(stored["message_id"]))
+            await posted.edit(embeds=embeds, view=view,
+                              allowed_mentions=discord.AllowedMentions.none())
+            # Re-record: the operator may have published into a different
+            # channel than the one the message is in.
+            await database.run_write(database.record_managed_post, guild.id,
+                                     stored["kind"], stored["menu_key"],
+                                     posted.channel.id, posted.id)
+            return None
+        except discord.NotFound:
+            dashboard_logger.info(
+                "Managed message %s/%s was gone; posting a new one "
+                "(guild_id=%s)", stored["kind"], stored["menu_key"], guild.id)
+
+    message = await channel.send(embeds=embeds, view=view,
+                                 allowed_mentions=discord.AllowedMentions.none())
+    await database.run_write(database.record_managed_post, guild.id,
+                             stored["kind"], stored["menu_key"],
+                             channel.id, message.id)
+    return None
+
+
+async def execute_managed_delete(channel, action):
+    """Remove a message whose row is already gone.
+
+    The ids travel in the payload because the row was deleted in the request that
+    queued this — the row is the operator's decision and takes effect at once,
+    while removing the message is Discord work that can be retried.
+    """
+    payload = action["payload"]
+    try:
+        message = await channel.fetch_message(int(payload["message_id"]))
+    except discord.NotFound:
+        return None  # Already gone, which is the outcome that was asked for.
+    if not channel.permissions_for(channel.guild.me).manage_messages:
+        return "bot_permission_denied"
+    await message.delete()
+    return None
+
+
 async def control_action_worker(bot):
     """Execute queued Discord publishes after live permission and feature checks."""
     next_prune = 0.0
@@ -2078,73 +2505,12 @@ async def control_action_worker(bot):
                 error_code = "channel_unavailable"
             elif not channel.permissions_for(guild.me).send_messages:
                 error_code = "bot_permission_denied"
+            elif action["action_type"] == "publish_managed":
+                error_code = await execute_managed_publish(guild, channel, action)
+            elif action["action_type"] == "delete_managed":
+                error_code = await execute_managed_delete(channel, action)
             else:
-                documents = {
-                    item["document_id"]: item
-                    for item in await database.run_read(
-                        database.list_dashboard_documents, guild.id
-                    )
-                }
-                document = documents.get(action["payload"].get("document_id"))
-                if not document:
-                    error_code = "document_unavailable"
-                elif action["action_type"] == "send_embed" and is_enabled(guild.id, "general"):
-                    content = document["content"]
-                    embed = discord.Embed(
-                        title=content.get("title"), description=content.get("description"),
-                        color=int(content.get("color", 0xF5B041)),
-                    )
-                    for field in content.get("fields", []):
-                        embed.add_field(name=str(field.get("name", ""))[:256],
-                                        value=str(field.get("value", ""))[:1024],
-                                        inline=bool(field.get("inline", False)))
-                    if content.get("footer"):
-                        embed.set_footer(text=str(content["footer"])[:2048])
-                    await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
-                elif action["action_type"] == "publish_rules" and is_enabled(guild.id, "onboarding"):
-                    for index, section in enumerate(document["content"].get("sections", [])):
-                        # Discord rate limiting can stretch a multi-section
-                        # publish well past the lease, so renew as we go rather
-                        # than let another worker reclaim and repost it.
-                        if index and index % 5 == 0:
-                            await database.run_write(
-                                database.renew_control_action_lease, action["action_id"]
-                            )
-                        embed = discord.Embed(
-                            title=str(section.get("title", ""))[:256],
-                            description=str(section.get("description", ""))[:4096],
-                            color=0xF5B041,
-                        )
-                        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
-                elif action["action_type"] == "publish_panel":
-                    content = document["content"]
-                    panel_type = content.get("panel_type")
-                    view = None
-                    if panel_type == "tickets" and is_enabled(guild.id, "tickets"):
-                        from cogs.tickets import TicketLauncher
-                        view = TicketLauncher()
-                    elif panel_type == "airlock" and is_enabled(guild.id, "onboarding"):
-                        from cogs.admin import EnterServerView
-                        view = EnterServerView()
-                    elif panel_type == "role_menu" and is_enabled(guild.id, "role_menus"):
-                        from cogs.roleselect import GameRoleView, NewsRoleView, ThemesRoleView
-                        variant = content.get("options", {}).get("variant", "games")
-                        view_class = {"games": GameRoleView, "news": NewsRoleView,
-                                      "themes": ThemesRoleView}.get(variant)
-                        if view_class:
-                            view = view_class()
-                    if view is None:
-                        error_code = "feature_disabled_or_invalid_panel"
-                    else:
-                        embed = discord.Embed(
-                            title=str(content.get("title", ""))[:256],
-                            description=str(content.get("description", ""))[:4096],
-                            color=0xF5B041,
-                        )
-                        await channel.send(embed=embed, view=view,
-                                           allowed_mentions=discord.AllowedMentions.none())
-                else:
-                    error_code = "feature_disabled_or_unsupported"
+                error_code = "feature_disabled_or_unsupported"
         except discord.HTTPException:
             dashboard_logger.exception("Dashboard control action failed (action_id=%s)", action["action_id"])
             error_code = "discord_http_error"

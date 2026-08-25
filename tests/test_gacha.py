@@ -312,7 +312,7 @@ class GachaTests(unittest.TestCase):
     def test_a_slow_action_keeps_its_lease_and_is_not_posted_twice(self):
         """Re-queueing on elapsed time alone made a slow multi-section publish
         run a second time, after its Discord sends had already happened."""
-        action_id = database.queue_control_action(10, 999, "publish_rules", {})
+        action_id = database.queue_control_action(10, 999, "publish_managed", {})
         claimed = database.claim_control_action()
         self.assertEqual(claimed["action_id"], action_id)
 
@@ -392,7 +392,8 @@ class GachaTests(unittest.TestCase):
 
     def test_control_action_is_claimed_and_completed_once(self):
         action_id = database.queue_control_action(
-            10, 999, "send_embed", {"document_id": 1, "channel_id": 2}
+            10, 999, "publish_managed",
+            {"kind": "embed", "menu_key": "notice", "channel_id": 2}
         )
         claimed = database.claim_control_action()
         self.assertEqual(claimed["action_id"], action_id)

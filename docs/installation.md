@@ -230,6 +230,28 @@ concerns, so you can fix as you go.
 `shop_gacha` is disabled by default and depends on `economy` and `shop`. Turning
 `economy` off takes the gacha with it — the cascade prompt lists what goes.
 
+Then post the messages your members actually press, from the **Content** group.
+Each page is a list and a creator: fill it in, pick a channel, press **Post**.
+Afterwards the same page edits the message in place — add a role, press
+**Update**, and the message already in the channel changes.
+
+| Page | What it posts |
+| --- | --- |
+| Embeds | An announcement. 1–10 embeds, a colour, a banner, no buttons. |
+| Rules panel | Your rules, optionally ending in a button that grants the onboarding role. |
+| Role menus | Buttons members press to give themselves a role. |
+| Ticket launcher | One button that opens a private channel with your moderators. |
+| Entry gate | One button that swaps the onboarding role for the member role — the last step of joining. |
+
+A welcome flow is usually rules panel → role menus → entry gate, each in its own
+channel.
+
+**Already posted some of these from Discord?** Do not post them again. Open the
+creator, paste the message link into *Take over a message you already posted*,
+and the bot reads that message and takes it over where it stands, pins and all.
+Only messages the bot itself posted can be taken over — Discord lets a bot edit
+nothing else.
+
 ## 11. Before you rely on it
 
 - **Back up `economy.db`.** Use `sqlite3 economy.db ".backup out.db"`, not `cp`:

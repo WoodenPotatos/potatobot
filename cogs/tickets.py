@@ -16,6 +16,7 @@ from datetime import datetime
 from cogs.utils import BoundedCooldownMap, t, guild_setting_sync
 import database
 from feature_access import require_interaction_feature
+from managed_messages import render_managed_message
 
 TICKET_OPEN_COOLDOWN = 300
 TRANSCRIPT_MESSAGE_LIMIT = 50_000
@@ -62,12 +63,24 @@ async def get_ticket_opener(channel):
 
 # Persistent ticket launcher and opener/staff-authorized controls.
 
+# The one launcher `/setup_tickets` addresses; a guild may create others from
+# the dashboard, for a second support channel.
+TICKET_LAUNCHER_KEY = "ticket"
+
+
 class TicketLauncher(discord.ui.View):
-    def __init__(self):
+    """The launcher's button, whose label an operator may set.
+
+    The instance registered with `bot.add_view` takes no label and keeps the
+    shipped one — a click routes by `custom_id`, never by label — so only the
+    instance built for one posted message carries the operator's text.
+    """
+
+    def __init__(self, *, label: str = None):
         super().__init__(timeout=None)
-        
+
         # Construct the persistent button at runtime so its label is localized.
-        btn_ticket = discord.ui.Button(label=t("tickets.open_btn"), style=discord.ButtonStyle.blurple, custom_id="ticket_button", emoji="📩")
+        btn_ticket = discord.ui.Button(label=label or t("tickets.open_btn"), style=discord.ButtonStyle.blurple, custom_id="ticket_button", emoji="📩")
         btn_ticket.callback = self.ticket
         self.add_item(btn_ticket)
 
@@ -287,12 +300,20 @@ class Tickets(commands.Cog):
     @discord.app_commands.default_permissions(administrator=True)
     @commands.has_permissions(administrator=True)
     async def setup_tickets(self, ctx):
-        embed = discord.Embed(
-            title=t("tickets.setup_title"),
-            description=t("tickets.setup_desc"),
-            color=discord.Color.blue()
-        )
-        await ctx.channel.send(embed=embed, view=TicketLauncher())
+        from cogs.admin import store_simple_panel
+        stored = await store_simple_panel(
+            ctx, "ticket", TICKET_LAUNCHER_KEY,
+            t("tickets.setup_title"), t("tickets.setup_desc"),
+            discord.Color.blue().value)
+        embeds, view = render_managed_message(ctx.guild, stored)
+        if embeds is None:
+            return await ctx.send(t("tickets.operation_failed"), ephemeral=True)
+        message = await ctx.channel.send(embeds=embeds, view=view)
+        # Recorded, so the dashboard can edit the launcher this command posted
+        # instead of being unable to see it.
+        await database.run_write(database.record_managed_post, ctx.guild.id,
+                                 "ticket", TICKET_LAUNCHER_KEY, ctx.channel.id,
+                                 message.id)
         if ctx.interaction:
             await ctx.send(t("utils.command_completed"), ephemeral=True)
 

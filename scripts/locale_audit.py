@@ -270,13 +270,38 @@ def composed_key_families() -> dict:
         ("not_found", "already_redeemed", "premium_success", "fulfillment_success")
     ]
     # Outbox failure codes, rendered by the actions column on the builders page.
+    # An executor *returns* its code rather than assigning it, so both forms are
+    # matched — otherwise a whole executor's failures would be invisible here.
     families["action error codes"] = sorted(
         f"dashboard.action_errors.{code}"
         for code in set(re.findall(
-            r'error_code = "([a-z_]+)"',
+            r'(?:error_code = |return )"([a-z_]+)"',
             (ROOT / "dashboard_api.py").read_text(encoding="utf-8"),
         ))
     )
+    # The content-builder pages, whose titles and subtitles are composed from the
+    # page id and whose kind labels come from the managed-message kinds.
+    families["content builder pages"] = sorted(
+        key
+        for page in ("embeds", "rules_panel", "role_menus", "ticket_launcher",
+                     "entry_gate")
+        for key in (f"dashboard.title_{page}", f"dashboard.subtitle_{page}")
+    )
+    # `/setup_games` and friends compose their embed text from the menu key, so
+    # these three trios are asked for by name and found by no grep. They are the
+    # fallback for a menu with no operator-set title, which is every menu the
+    # schema 12 migration seeded.
+    families["seeded role menu text"] = sorted(
+        f"roleselect.{menu_key}_{part}"
+        for _setting_key, menu_key in database.SEEDED_ROLE_MENUS
+        for part in ("title", "desc", "updated")
+    )
+    # The label a preview falls back to when an operator has set none, one per
+    # kind whose button the bot owns rather than the operator.
+    families["default button labels"] = [
+        f"dashboard.managed_default_button_{kind}"
+        for kind in ("rules", "ticket", "airlock")
+    ]
     families["appearance modes"] = [
         f"dashboard.themes.{mode}" for mode in ("system", "light", "dark")
     ]

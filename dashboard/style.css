@@ -847,6 +847,10 @@ input:focus, select:focus, textarea:focus {
 }
 
 input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+/* A colour well, for the managed messages that carry their own embed colour.
+ * Left at its intrinsic size a colour input renders as a tiny swatch next to
+ * full-width text fields beside it. */
+input[type="color"] { width: 100%; height: 38px; padding: 2px; cursor: pointer; }
 
 .form-footer {
     display: flex;
@@ -1508,6 +1512,161 @@ input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent);
 }
 
 .menu-head .menu-head-spacer { width: 34px; }
+
+/* The creator and its preview, side by side until there is no room for two. */
+.managed-creator {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .managed-creator { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* A rules section is a numbered block rather than a row: a title and a body do
+   not fit a shared column header, and "Embed 3" is the thing an operator is
+   looking for when they scroll. */
+.embed-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.embed-block {
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  background: var(--surface-raised);
+}
+
+.embed-block-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.embed-block-index {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+}
+
+.embed-block-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+/* A sketch of the Discord message. It is deliberately not a faithful renderer —
+   see `messagePreview` — so it borrows the page's own surfaces rather than
+   trying to imitate Discord's chrome. */
+.message-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.preview-message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+
+.preview-author { display: flex; align-items: center; gap: var(--space-2); }
+.preview-avatar { width: 24px; height: 24px; border-radius: 50%; }
+.preview-author-name { font-size: .8rem; font-weight: 600; color: var(--text-strong); }
+
+.preview-embed {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border-inline-start: 4px solid var(--preview-accent, var(--accent));
+}
+
+.preview-embed-title { font-weight: 700; font-size: .88rem; color: var(--text-strong); }
+
+.preview-embed-body {
+  /* `pre-wrap` is what makes a line break visible without a markup sink, and
+     `anywhere` stops a pasted URL widening the column. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: .82rem;
+  color: var(--text-body);
+}
+
+/* The banner sits under the leading embed, as Discord draws it. */
+.preview-banner { width: 100%; border-radius: var(--radius-sm); }
+
+.preview-thumb { width: 44px; height: 44px; border-radius: var(--radius-sm); object-fit: cover; }
+
+.preview-buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* The one place a literal hex is right and must be the same in both themes: the
+   point is to look like Discord's buttons, and those are not our tokens. */
+.preview-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: .78rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.preview-button.primary { background: #5865F2; }
+.preview-button.success { background: #248046; }
+.preview-button.secondary { background: #4E5058; }
+
+/* What an operator may type into a work response. A token list had no
+   precedent — the only prose styles were `.card-hint`, which needs a
+   `.card-head` ancestor, and `.field-hint`, which needs an `.input-group`
+   parent — so this is the one new block, sized to read as help rather than as
+   content. */
+.token-help {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-hairline);
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+
+.token-help-title {
+  font-size: .71rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.token-help-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-4);
+}
+
+/* The token itself is the thing to copy, so it reads as code and not as prose. */
+.token-help .token {
+  font-family: var(--font-mono);
+  color: var(--text-strong);
+}
+
+.token-help-note { margin: 0; }
 
 /* A note under a section, explaining what the whole block does. */
 .section-hint {

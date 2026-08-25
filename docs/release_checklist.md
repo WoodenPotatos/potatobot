@@ -26,10 +26,20 @@
 
 ## Canary and publication
 
-- Deploy `2.0.0-rc.1` to the private guild for seven days and complete
+- Deploy the alpha to the private guild and complete
   `docs/performance_recovery_plan.md` without unresolved money or authorization
-  failures.
-- Freeze changes, create release notes and rollback instructions, then export a
-  sanitized working tree to a separate empty public repository.
+  failures. The version is whatever `pyproject.toml` says; naming one here is how
+  this file goes stale.
+- Freeze changes, then publish with `python scripts/publish_public.py --promote`.
+  It is the only thing that builds a snapshot: it derives the file list from
+  `git ls-files`, promotes the alpha to the next beta inside the built tree, and
+  runs its whole preflight before writing a byte.
+- **The README and the changelog are part of the artefact.** Promotion merges the
+  leading run of `Unreleased` sections under the published heading and regenerates
+  the README inside the tree; the publisher then refuses if any `Unreleased`
+  survives, if the README does not name the release, or if it has lost a
+  generated marker. Five public betas shipped with a stale heading before that
+  check existed — read `README.md` in the built tree once, and confirm what a
+  visitor will see on the front page.
 - Scan every exported ref and file. Never change this development repository's
   visibility and never mirror its Git history.

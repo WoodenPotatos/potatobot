@@ -489,10 +489,7 @@ SETTING_DEFINITIONS = {
                  None, legacy_path=("channels", "everydle"),
                  channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
-        _setting("other_games_channel", "games", "general", SettingValueType.CHANNEL,
-                 None, legacy_path=("channels", "other_games_channel"),
-                 channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
+
         _setting("ticket_category", "community", "tickets", SettingValueType.CHANNEL,
                  None, feature="tickets", legacy_path=("channels", "ticket_category"),
                  channel_types=CATEGORY_CHANNEL_TYPES,
@@ -568,25 +565,33 @@ SETTING_DEFINITIONS = {
         _setting("level_roles", "community", "levels", SettingValueType.JSON,
                  {}, feature="levels", legacy_path=("level_roles",),
                  json_shape=JSON_SHAPE_LEVEL_ROLES),
-        # A role menu is {label: {"id": role_id, "emoji": str}}. The shape is
-        # declared rather than inferred so the dashboard renders a row per entry
-        # with a real role picker, and so a malformed map is refused on save
-        # instead of surfacing as a button that cannot resolve its role.
-        _setting("game_roles", "community", "role_menus", SettingValueType.JSON,
-                 {}, feature="role_menus", legacy_path=("game_roles",),
-                 json_shape=JSON_SHAPE_ROLE_MENU),
-        _setting("news_roles", "community", "role_menus", SettingValueType.JSON,
-                 {}, feature="role_menus", legacy_path=("news_roles",),
-                 json_shape=JSON_SHAPE_ROLE_MENU),
-        _setting("theme_roles", "community", "role_menus", SettingValueType.JSON,
-                 {}, feature="role_menus", legacy_path=("themes_roles",),
-                 json_shape=JSON_SHAPE_ROLE_MENU),
+        # The three role menus were settings here until schema 12. A guild may
+        # have any number of menus now, each one a `managed_messages` row with a
+        # posted message the dashboard can edit, so a fixed trio of settings
+        # could not express what the feature does. `JSON_SHAPE_ROLE_MENU` and
+        # its validator stay: the builder route validates a menu's entries with
+        # the same rule the settings save used, so the two cannot disagree about
+        # what a malformed menu is.
         _setting("factions", "factions", "factions", SettingValueType.JSON,
                  {}, feature="factions", legacy_path=("factions",),
                  json_shape=JSON_SHAPE_FACTIONS),
-        _setting("lfg_channels", "community", "lfg", SettingValueType.JSON,
+        # LFG owns a category of its own. It used to be one page inside
+        # Community while its second channel sat in a "Games and prices"
+        # category that priced nothing and owned nothing else — the prices are
+        # all shop item prices under Economy, and the casino category owns no
+        # settings at all.
+        _setting("lfg_channels", "lfg", "lfg", SettingValueType.JSON,
                  {}, feature="lfg", legacy_path=("lfg_channels",),
                  json_shape=JSON_SHAPE_LFG_CHANNELS),
+        # The LFG channel with no role attached: `/search` has always had this
+        # second branch, and this only names it for what it is. It also picks up
+        # `feature="lfg"`, which it lacked while `lfg_channels` had it — an
+        # asymmetry that left it configurable while LFG was switched off.
+        _setting("lfg_default_channel", "lfg", "lfg", SettingValueType.CHANNEL,
+                 None, feature="lfg",
+                 legacy_path=("channels", "other_games_channel"),
+                 channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
         _setting("social_notification_channel", "community", "socials", SettingValueType.CHANNEL,
                  None, legacy_path=("socials", "notification_channel"),
                  channel_types=TEXT_CHANNEL_TYPES,

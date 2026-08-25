@@ -270,33 +270,6 @@ class DashboardSecurityTests(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 400)
 
-    def test_embed_fields_and_colour_are_validated_before_queueing(self):
-        headers = self._headers()
-        rejected = [
-            {"fields": ["not-a-dict"]},
-            {"fields": [{"name": "a", "unexpected": 1}]},
-            {"color": "red"},
-            {"color": 0x1000000},
-            {"color": True},
-        ]
-        for content in rejected:
-            with self.subTest(content=content):
-                response = self.client.post(
-                    "/api/guilds/123/builders",
-                    json={"document_type": "embed", "name": "draft",
-                          "content": content, "revision": 0},
-                    headers=headers,
-                )
-                self.assertEqual(response.status_code, 400, response.get_data(as_text=True))
-        accepted = self.client.post(
-            "/api/guilds/123/builders",
-            json={"document_type": "embed", "name": "draft",
-                  "content": {"color": 0xF5B041, "fields": [{"name": "a", "value": "b"}]},
-                  "revision": 0},
-            headers=headers,
-        )
-        self.assertEqual(accepted.status_code, 201, accepted.get_data(as_text=True))
-
     def test_fulfillment_identifier_is_length_bounded(self):
         headers = self._headers()
         response = self.client.post(
@@ -415,34 +388,11 @@ class DashboardSecurityTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
-    def test_builder_draft_can_be_deleted_with_its_revision(self):
-        headers = self._headers()
-        created = self.client.post(
-            "/api/guilds/123/builders",
-            json={"document_type": "embed", "name": "draft",
-                  "content": {"title": "hello"}, "revision": 0},
-            headers=headers,
-        )
-        self.assertEqual(created.status_code, 201)
-        document = self.client.get("/api/guilds/123/builders").get_json()["data"][0]
-
-        stale = self.client.delete(
-            f"/api/guilds/123/builders/{document['document_id']}",
-            json={"revision": document["revision"] + 5}, headers=headers,
-        )
-        self.assertEqual(stale.status_code, 409)
-
-        removed = self.client.delete(
-            f"/api/guilds/123/builders/{document['document_id']}",
-            json={"revision": document["revision"]}, headers=headers,
-        )
-        self.assertEqual(removed.status_code, 200, removed.get_data(as_text=True))
-        self.assertEqual(self.client.get("/api/guilds/123/builders").get_json()["data"], [])
-
     def test_action_status_is_readable_and_guild_scoped(self):
         headers = self._headers()
         action_id = database.queue_control_action(
-            123, 42, "send_embed", {"document_id": 1, "channel_id": 2}
+            123, 42, "publish_managed",
+            {"kind": "embed", "menu_key": "notice", "channel_id": 2}
         )
         response = self.client.get(f"/api/guilds/123/actions/{action_id}")
         self.assertEqual(response.status_code, 200)
@@ -458,8 +408,8 @@ class DashboardSecurityTests(unittest.TestCase):
     def test_settled_actions_are_pruned_and_live_ones_are_kept(self):
         # The worker claims the oldest pending row, so settle that one and leave
         # the newer one queued.
-        done = database.queue_control_action(123, 42, "send_embed", {})
-        pending = database.queue_control_action(123, 42, "send_embed", {})
+        done = database.queue_control_action(123, 42, "publish_managed", {})
+        pending = database.queue_control_action(123, 42, "publish_managed", {})
         claimed = database.claim_control_action()
         self.assertEqual(claimed["action_id"], done)
         database.finish_control_action(done, True)

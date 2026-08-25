@@ -145,21 +145,28 @@ class MentionSafetyTests(unittest.TestCase):
         self.assertNotIn(hostile, discord.utils.escape_mentions(hostile))
 
     def test_lfg_search_escapes_every_user_supplied_field(self):
+        """Each field by name, rather than a count of escape calls.
+
+        The count said "at least three" and was satisfied by escaping one field
+        three times; it also had to be revisited every time the command grew a
+        branch. What matters is *which* values reach message content: the
+        member's nickname, which they choose, and the free-text game name.
+        """
         source = (ROOT / "cogs" / "general.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
-        escaped_calls = 0
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            if node.name != "search":
-                continue
-            for inner in ast.walk(node):
-                if isinstance(inner, ast.Call) and ast.unparse(inner).startswith(
-                    "discord.utils.escape_mentions("
-                ):
-                    escaped_calls += 1
-        # One for the pinged branch nickname, two for the free-text branch.
-        self.assertGreaterEqual(escaped_calls, 3)
+        search = next(node for node in ast.walk(tree)
+                      if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                      and node.name == "search")
+        escaped = {
+            ast.unparse(inner.args[0])
+            for inner in ast.walk(search)
+            if isinstance(inner, ast.Call)
+            and ast.unparse(inner.func) == "discord.utils.escape_mentions"
+            and inner.args
+        }
+        for field in ("ctx.author.display_name", "game"):
+            with self.subTest(field=field):
+                self.assertIn(field, escaped)
 
     def test_role_pings_are_restricted_to_the_configured_lfg_role(self):
         source = (ROOT / "cogs" / "general.py").read_text(encoding="utf-8")

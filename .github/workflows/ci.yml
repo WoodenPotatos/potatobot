@@ -26,6 +26,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+      # Four tests drive dashboard/script.js through Node — the row editor's
+      # round trip, `tr`'s guard, the managed creators' pack/unpack pair, and the
+      # payload each creator submits. Without Node they call `skipTest` and pass,
+      # so the checks guarding the defects that reached the deployment were the
+      # ones CI never ran.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - run: python -m pip install --requirement requirements-dev.lock
       # A published tree ships only the example, exactly as a fresh install
       # does. Creating the real file here is installation step one, and it keeps

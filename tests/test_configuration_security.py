@@ -28,8 +28,7 @@ class ConfigurationCoverageTests(unittest.TestCase):
     # top key rather than treating each entry — a role menu, a level milestone —
     # as a setting of its own.
     WHOLE_KEY_SETTINGS = {
-        "game_roles", "news_roles", "themes_roles", "factions", "lfg_channels",
-        "level_roles",
+        "factions", "lfg_channels", "level_roles",
     }
 
     def config_paths(self):

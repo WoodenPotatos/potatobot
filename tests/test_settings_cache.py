@@ -35,6 +35,21 @@ from settings_registry import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def role_menu_definition():
+    """A stand-in definition carrying the role-menu shape.
+
+    The shape had three settings — `game_roles`, `news_roles`, `theme_roles` —
+    until schema 12 moved role menus into `managed_messages`, where a guild may
+    have any number of them. The shape and its validator survive that move
+    because the builder route checks a menu's entries with the same rule, so
+    these tests drive the validator directly rather than through a setting that
+    no longer exists.
+    """
+    return settings_registry._setting(
+        "role_menu_shape_probe", "community", "role_menus",
+        SettingValueType.JSON, {}, json_shape=JSON_SHAPE_ROLE_MENU)
+
+
 class InstanceScopeTests(unittest.TestCase):
     """An installation-wide setting must not be storable per guild."""
 
@@ -232,13 +247,22 @@ class RoleMenuShapeTests(unittest.TestCase):
     """The editor can express it, so the API has to validate it."""
 
     def setUp(self):
-        self.definition = SETTING_DEFINITIONS["game_roles"]
+        self.definition = role_menu_definition()
 
-    def test_the_three_role_menus_declare_the_shape(self):
-        for key in ("game_roles", "news_roles", "theme_roles"):
-            with self.subTest(key=key):
-                self.assertEqual(JSON_SHAPE_ROLE_MENU,
-                                 SETTING_DEFINITIONS[key].json_shape)
+    def test_the_shape_survived_the_settings_that_declared_it(self):
+        """It is the builder's validator now, not a setting's.
+
+        The three role-menu settings are gone; the rule about what a menu entry
+        may contain is not, because a menu is still 25 buttons with an 80
+        character label and an emoji. If the validator is ever deleted, the
+        builder route silently accepts whatever it is handed.
+        """
+        self.assertIn(JSON_SHAPE_ROLE_MENU,
+                      settings_registry._JSON_SHAPE_VALIDATORS)
+        self.assertEqual([], [key for key, definition
+                              in SETTING_DEFINITIONS.items()
+                              if definition.json_shape == JSON_SHAPE_ROLE_MENU],
+                         "role menus are managed messages, not settings")
 
     def test_a_role_id_is_normalised_to_an_integer(self):
         """It arrives as a string because a browser cannot hold it exactly."""
@@ -644,24 +668,40 @@ class RowEditorReportsCleanTests(unittest.TestCase):
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         start = source.index("const JSON_ROW_SHAPES = {")
         spec = source[start:source.index("\n};", start) + 3]
+        # The comparison the dashboard actually uses, so this harness tests it
+        # rather than a copy that could stay green while it broke.
+        compare_start = source.index("function canonicalValue(value) {")
+        compare = source[compare_start:source.index("\n}", compare_start) + 2]
 
         # One representative stored value per shape, wired the way the GET wires
         # it, so the fixture exercises the real transform rather than a guess.
         stored = {
-            "game_roles": {"LoL": {"id": 1420070400000000001, "emoji": "x"}},
+            "role_menu": {"LoL": {"id": 1420070400000000001, "emoji": "x"}},
             "level_roles": {"5": 1420070400000000002},
             "lfg_channels": {"1420070400000000003": 1420070400000000004},
             "factions": {"alpha": {"leader_role_id": 1420070400000000005,
                                    "manageable_ids": [1420070400000000006,
                                                       1420070400000000002]}},
         }
-        wired = {key: dashboard_api._wire_value(SETTING_DEFINITIONS[key], value)
+        # `role_menu` has no setting since schema 12, so its definition is the
+        # stand-in above; the others are real settings.
+        definitions = {key: (role_menu_definition() if key == "role_menu"
+                             else SETTING_DEFINITIONS[key]) for key in stored}
+        wired = {key: dashboard_api._wire_value(definitions[key], value)
                  for key, value in stored.items()}
-        shape_of = {key: SETTING_DEFINITIONS[key].json_shape for key in stored}
+        shape_of = {key: definitions[key].json_shape for key in stored}
 
         driver = "\n".join([
+            compare,
             spec,
-            f"const wired = {json.dumps(wired)};",
+            # Serialised by the dashboard app's own JSON provider, which is what
+            # the browser receives. `app.json.sort_keys` defaults to True, so an
+            # entry arrives with its fields alphabetical rather than in the order
+            # the server built them — and the fixture used to use `json.dumps`,
+            # whose default preserves insertion order. It was feeding this test a
+            # payload the browser never sees, which is precisely why the test
+            # could not see the bug it exists to catch.
+            f"const wired = {dashboard_api.app.json.dumps(wired)};",
             f"const SHAPE_OF = {json.dumps(shape_of)};",
             (ROOT / "tests" / "js" / "row_editor_roundtrip.js").read_text(encoding="utf-8"),
         ])

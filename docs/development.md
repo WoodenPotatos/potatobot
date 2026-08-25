@@ -4,7 +4,7 @@
 
 PotatoBot is a Hungarian-first Discord bot for a private community. It combines community administration with economy, profiles, games, music, activity automation, and a web control plane. It runs on a headless Linux server under systemd, behind a reverse proxy.
 
-The current private deployment is the compatibility target. **Schema version 11** is current; `database.LATEST_SCHEMA_VERSION` is the authority and this sentence is not. Since schema 5's typed guild settings, configurable shop definitions, inventory, gacha banners/pity/pull ledgers, fixed vault reserves, vouchers, timed entitlements, fulfillment, builder drafts and dashboard action outbox: schema 6 added the persistent tenth-pull guarantee counter and voucher subsystem ownership, 7 added ticket claim persistence and action leases, 8 put `guild_id` into the last single-tenant primary keys, 9 added banner display names and the `/work` response pool, 10 added the warning tag, and 11 added `instance_settings` for values that have no guild dimension. Legacy economy callers still remain effectively single-guild — wallets are keyed by Discord user id alone. Treat `managed` and `self_hosted` profiles as architectural foundations, not as proof of completed production isolation.
+The current private deployment is the compatibility target. **Schema version 13** is current; `database.LATEST_SCHEMA_VERSION` is the authority and this sentence is not. Since schema 5's typed guild settings, configurable shop definitions, inventory, gacha banners/pity/pull ledgers, fixed vault reserves, vouchers, timed entitlements, fulfillment, builder drafts and dashboard action outbox: schema 6 added the persistent tenth-pull guarantee counter and voucher subsystem ownership, 7 added ticket claim persistence and action leases, 8 put `guild_id` into the last single-tenant primary keys, 9 added banner display names and the `/work` response pool, 10 added the warning tag, 11 added `instance_settings` for values that have no guild dimension, 12 gave a posted Discord message an identity so the dashboard can edit it later, and 13 widened that table so a plain embed is one too — which retired the builder drafts schema 5 introduced, leaving `dashboard_documents` with no reader. Legacy economy callers still remain effectively single-guild — wallets are keyed by Discord user id alone. Treat `managed` and `self_hosted` profiles as architectural foundations, not as proof of completed production isolation.
 
 The dashboard is **load-bearing, not experimental**: it is the only way an operator configures an installation, so a dashboard defect is a bot defect. Its raw JSON and global price/reward endpoints are gone and every setting is edited through a typed control. The remaining release boundary is complete multi-guild storage integration and service separation.
 
@@ -190,7 +190,34 @@ Three pages have no settings of their own. `GET /api/changelog` parses `CHANGELO
 
 Flask request handlers are synchronous and have no event loop, so dashboard reads use `database.run_read_sync()`. It marks the Waitress thread as a reader for one classified accessor, giving it the same `query_only` connection the read pool uses, and refuses anything absent from `READ_ONLY_OPERATIONS`. Mutations remain on the serialized writer. Before this split every page load took the process-wide write lock several times and stalled the bot's writer.
 
-Builder drafts accept constrained embed, rules, and panel JSON. Publishing enters a durable outbox; the bot worker rechecks the actor, feature, channel, and bot permissions before a Discord send. Shop creation accepts only fixed/timed roles, fixed vaults, approved consumables, non-inflationary repeatable coin bundles, and manual-fulfillment vouchers. Hungarian name and description are mandatory and item keys are immutable. The consumable and vault templates pick their item from `GET /api/item-catalog` instead of hand-written JSON, and the API validates against the same catalog. The gacha editor can add and remove reward rows, not only retune the ones a banner already stores — a guild that has saved a banner keeps its own configuration, so a newly shipped default reward reaches it only through that control. Waitress serves the application, but non-private deployment still requires separating and supervising the dashboard process.
+The **Content** group holds five pages — Embeds, Rules panel, Role menus, Ticket launcher and Entry gate — and every one of them reads and writes `managed_messages`. Each lists what exists and offers Save, Post/Update and Delete against the message it already posted; before schema 12 nothing recorded a `message_id`, so a draft could be posted again but never updated, and schema 13 brought the last of them, the plain embed, into the same system. A message the bot posted earlier can be **adopted** by pasting its link, which is the other half of the sentence the schema-12 seed left open. Publishing still enters the durable outbox; the bot worker rechecks the actor, feature, channel, and bot permissions before a Discord send, and `managed_messages.py` renders the row for both the worker and the bot's own `/setup_*` and `/rules_group`. Shop creation accepts only fixed/timed roles, fixed vaults, approved consumables, non-inflationary repeatable coin bundles, and manual-fulfillment vouchers. Hungarian name and description are mandatory and item keys are immutable. The consumable and vault templates pick their item from `GET /api/item-catalog` instead of hand-written JSON, and the API validates against the same catalog. The gacha editor can add and remove reward rows, not only retune the ones a banner already stores — a guild that has saved a banner keeps its own configuration, so a newly shipped default reward reaches it only through that control. Waitress serves the application, but non-private deployment still requires separating and supervising the dashboard process.
+
+### Managed messages
+
+`managed_messages` is keyed by `(guild_id, kind, menu_key)` with `kind` one of
+`role_menu`, `rules`, `ticket`, `airlock`; a role menu's buttons live in
+`managed_message_entries`. The invariants are in `CLAUDE.md` under **Managed
+Messages and the Content Builders**; the ones that bite while developing are
+these.
+
+- `record_managed_post` is not part of a content save. Where a message was
+  posted is a fact about Discord, and an edit must not claim the message moved.
+- The renderer, not the queue, evaluates the feature gate — a feature can be
+  switched off while an action waits in the outbox.
+- `RoleMenuView()` with no arguments is the routing instance for
+  `bot.add_view()`: it unions every guild's labels and carries no role id.
+  `RoleMenuView(guild_id, menu_key)` is one guild's menu. Omitting the guild id
+  is how a dashboard-posted menu came to show every guild's buttons.
+- A rules panel holds 1–10 sections, because a message holds 10 embeds, and its
+  256/4096/6000-character limits are validated before the action is queued.
+- `menu_key` is immutable: it is the primary key and it addresses the posted
+  message. `display_name` is what an operator renames.
+- A button label never touches a `custom_id`. The instance registered with
+  `bot.add_view` keeps the shipped label; only the instance built for one posted
+  message carries the operator's.
+- The creator is `MANAGED_FIELDS` + `MANAGED_KINDS` in `dashboard/script.js`, one
+  page per kind. `pack` must emit all eight keys the POST route names — the route
+  uses `require_exact_keys`.
 
 ### Gacha and shop inventory
 

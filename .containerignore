@@ -1,0 +1,19 @@
+# What must never enter the image. The build does `COPY . .`, so anything left
+# lying around in a working tree would otherwise be baked in — the same reason
+# the publisher derives its snapshot from `git ls-files` rather than from disk.
+.git
+.env
+*.db
+*.db-wal
+*.db-shm
+*.db.backup*
+backups/
+logs/
+venv/
+.venv/
+.claude/
+dashboard-reference/
+.local-dev/
+# Game icons: uploaded to Discord by hand, read by no code, other people's
+# artwork. The bot's own avatar lives at the repository root and does ship.
+botdata/

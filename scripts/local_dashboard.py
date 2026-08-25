@@ -322,10 +322,6 @@ def _collect_configured_ids() -> tuple[dict, dict]:
     add_role(socials.get("twitch_role_id"), "twitch")
     add_role(socials.get("youtube_role_id"), "youtube")
 
-    for menu in ("game_roles", "news_roles", "themes_roles"):
-        for name, entry in (config.get(menu) or {}).items():
-            if isinstance(entry, dict):
-                add_role(entry.get("id"), name)
 
     for name, faction in (config.get("factions") or {}).items():
         if not isinstance(faction, dict):
@@ -343,7 +339,12 @@ def _collect_configured_ids() -> tuple[dict, dict]:
 
 
 def _collect_stored_setting_ids(guild_ids) -> tuple[set, set]:
-    """Snowflakes already saved in `guild_settings`, so those resolve too."""
+    """Snowflakes already saved in the database, so those resolve too.
+
+    `guild_settings` plus the role-menu entries, which stopped being settings at
+    schema 12 — without them every menu row on the builder page would render as
+    an unavailable role.
+    """
     import database
     from settings_registry import SETTING_DEFINITIONS, SettingValueType
 
@@ -364,6 +365,13 @@ def _collect_stored_setting_ids(guild_ids) -> tuple[set, set]:
             target.update(
                 int(entry) for entry in entries
                 if isinstance(entry, int) and not isinstance(entry, bool)
+            )
+        for menu in database.list_managed_messages(guild_id, "role_menu"):
+            stored = database.get_managed_message(guild_id, "role_menu",
+                                                  menu["menu_key"])
+            roles.update(
+                int(entry["role_id"]) for entry in (stored or {})["entries"]
+                if entry.get("role_id")
             )
     return channels, roles
 
