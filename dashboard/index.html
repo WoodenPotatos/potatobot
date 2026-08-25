@@ -23,6 +23,7 @@
         <symbol id="ic-economy" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v10M14.7 9.4c-.5-.8-1.5-1.3-2.7-1.3-1.6 0-2.7.8-2.7 2s1 1.7 2.7 2 2.9.7 2.9 2.1-1.2 2.1-2.9 2.1c-1.3 0-2.3-.5-2.8-1.4"/></symbol>
         <symbol id="ic-gacha" viewBox="0 0 24 24"><path d="m12 3 2.5 5.6 6.1.7-4.5 4.2 1.2 6-5.3-3-5.3 3 1.2-6L3.4 9.3l6.1-.7z"/></symbol>
         <symbol id="ic-shop" viewBox="0 0 24 24"><path d="M4 8h16l-1.2 11.2a1.5 1.5 0 0 1-1.5 1.3H6.7a1.5 1.5 0 0 1-1.5-1.3z"/><path d="M8.5 8V6a3.5 3.5 0 0 1 7 0v2"/></symbol>
+        <symbol id="ic-casino" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><path d="M8.5 8.5h.01M15.5 8.5h.01M12 12h.01M8.5 15.5h.01M15.5 15.5h.01"/></symbol>
         <symbol id="ic-games" viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="10.5" rx="4"/><path d="M7 10.5v3M5.5 12h3M15.5 11.2h.01M18 13.6h.01"/></symbol>
         <symbol id="ic-factions" viewBox="0 0 24 24"><path d="M5 21V4.5M5 5h6.5l-1.3 2.5L11.5 10H5"/><path d="M14 21v-9M14 12.5h6l-1.3 2.5L20 17.5h-6"/></symbol>
         <symbol id="ic-moderation" viewBox="0 0 24 24"><path d="M12 3 5 6v5.5c0 4.3 2.9 8.3 7 9.5 4.1-1.2 7-5.2 7-9.5V6z"/><path d="m9.3 12 1.9 1.9 3.5-3.6"/></symbol>
@@ -142,6 +143,14 @@
                         <span data-i18n="dashboard.category_games"></span>
                         <svg class="ic ic-sm chevron" aria-hidden="true"><use href="#ic-chevron-down"></use></svg>
                     </button>
+                    <button type="button" class="nav-item" data-page="everydle" data-category="everydle">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-games"></use></svg>
+                        <span data-i18n="dashboard.nav_everydle"></span>
+                    </button>
+                    <button type="button" class="nav-item" data-page="casino" data-category="casino">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-casino"></use></svg>
+                        <span data-i18n="dashboard.nav_casino"></span>
+                    </button>
                     <button type="button" class="nav-item" data-page="games" data-category="games">
                         <svg class="ic" aria-hidden="true"><use href="#ic-games"></use></svg>
                         <span data-i18n="dashboard.nav_games"></span>
@@ -172,7 +181,7 @@
                         <span data-i18n="dashboard.category_administration"></span>
                         <svg class="ic ic-sm chevron" aria-hidden="true"><use href="#ic-chevron-down"></use></svg>
                     </button>
-                    <button type="button" class="nav-item" data-page="builders" data-category="builders">
+                    <button type="button" class="nav-item" data-page="builders">
                         <svg class="ic" aria-hidden="true"><use href="#ic-builders"></use></svg>
                         <span data-i18n="dashboard.nav_builders"></span>
                     </button>
@@ -287,7 +296,9 @@
                                 <label class="input-group">
                                     <span class="field-label" data-i18n="dashboard.gacha_banner_key"></span>
                                     <input name="banner_key" type="text" required
-                                           pattern="[a-z0-9][a-z0-9_]*" maxlength="64">
+                                           pattern="[a-z0-9][a-z0-9_]*" maxlength="64"
+                                           data-i18n-title="dashboard.gacha_banner_key_hint">
+                                    <span class="field-hint" data-i18n="dashboard.gacha_banner_key_hint"></span>
                                 </label>
                                 <label class="input-group">
                                     <span class="field-label" data-i18n="dashboard.gacha_banner_name"></span>

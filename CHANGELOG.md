@@ -1,6 +1,107 @@
 # Changelog
 
-## 2.2.0-beta.2
+## 2.3.0-beta.1
+
+- The README is an overview and a quick start again. The verification commands
+  and the local-dashboard walkthrough moved to `docs/development.md`, which
+  already owned that ground, and it says what it runs on: a headless Linux
+  server under systemd behind a reverse proxy, which the README never stated.
+  Corrected the stale facts too — it claimed schema 8 while announcing schema 11
+  fourteen lines below, called the dashboard experimental where `CLAUDE.md`
+  explicitly says it is load-bearing, and said `/work` falls back to shipped
+  *Hungarian locale lines* when the shipped set is English database rows.
+- `docs/development.md` said schema 6, called the dashboard a typed alpha, and
+  documented a `/work` fallback deleted some time ago. `docs/release_checklist.md`
+  pinned schema 6 in a step that has to be true at every release, so it names the
+  constant now instead of a number.
+
+- A stored gacha banner can pick up rewards the bot shipped after it was saved.
+  Nothing ever reconciled the two, so a banner was frozen at the shipped set of
+  the day it was first saved — which is how the streak freeze reached the shop
+  and the shipped 4-star tier while being unobtainable from the banner a guild
+  actually pulls on. **Add missing rewards** appends only what the table lacks and
+  leaves your weights and your deliberate omissions alone; **Reset rewards**
+  replaces the whole table with the shipped one. Both exist because neither can
+  stand in for the other.
+- A new banner starts with one placeholder reward per tier instead of a copy of
+  all eighteen, so the first thing you do with it is not pruning. It cannot be
+  literally empty: a tier can still be rolled and has to have something to award.
+- The banner key says what it wants. The message you got was the browser's own
+  "please match the requested format", which blocks submitting and so never let
+  the server's descriptive message through; the field now carries the same words
+  as a hint and a tooltip.
+- A reward row on a banner nobody has saved yet is editable, like one you added.
+  The synthesised standard banner rendered its rows as committed, which is why
+  they behaved differently from your own. And the reward table explains what
+  "amount" means, which depends on the kind.
+
+- Casino and Everydle are one master toggle each, with the individual games as
+  sub-toggles on their own settings page. Eight near-identical games in the flat
+  Features list pushed everything else off it; the list is 27 entries instead of
+  35. A child depends on its master, so the existing cascade switches the games
+  off with it — `parent` is only where it renders.
+- Everydle has its own settings category. Its channel and its five reward
+  settings shared a "Games" page with the general other-games channel, which the
+  two had nothing to do with beyond both being games.
+- Removed the backpack from `/profile`. It showed one legacy flag off a column
+  nothing has written since consumables became guild-scoped inventory rows, so it
+  read "Empty" for everyone who had not bought a lockpick before that change.
+  `/inventory` is the real view, and it is gated on `economy` now rather than on
+  the gacha — both the shop and the gacha put items there, so a guild with the
+  shop on and the gacha off could not see what it had bought.
+
+- Fixed the settings form marking itself unsaved with nothing touched, and
+  refusing to save when it did. Three ways the editor's output could differ from
+  what the API sent: an unset role was serialised as the id `"0"`, which the API
+  rejects as not a snowflake — and it rejects the whole patch, so one half-filled
+  row made every change in that category fail to save; an entry stored without
+  one of its fields, or as a legacy bare id, was sent in a shape the editor never
+  writes; and a faction's managed roles were compared in the picker's order
+  rather than a canonical one. Incomplete rows are now left out and marked as the
+  thing to finish, the wire format carries every field of a shape, and role lists
+  are sorted on both sides.
+- Made the Builders page reachable. It carried a `data-category` that no setting
+  declares, and the sidebar hides a category page that owns no settings — so the
+  embed, rules and panel builders were hidden on every load while being fully
+  implemented. A test now catches a page that renders from its own section but is
+  gated on settings anyway.
+- Fixed the sidebar's last entry being unreachable on a phone. The height was
+  `100vh`, which on a browser with a bottom tab bar is taller than the visible
+  viewport, so the foot of the nav sat under the chrome with nothing to scroll.
+- Fixed a long label pushing its input out of line. Every field is its own
+  column flex box in a grid, so a label that wrapped to two lines dropped its
+  input below the neighbouring one.
+- The row editors have column headers, so a populated role menu is no longer
+  three anonymous boxes — a text cell's placeholder disappears once it has a
+  value and a picker never had one. Their add button is styled as a button
+  again; it was missing the class that gives it padding, a radius and the page's
+  font, and the remove button carried a class defined nowhere.
+- The gacha banner selector no longer resizes when you switch banners.
+
+- Renamed the currency in every shipped string. "PC" and "Potatocoin" are Potato
+  Empire's coin, and they were in 37 strings per catalog — a dashboard label
+  reading "Daily normal PC reward" and a Discord embed reading "1 pull - 5,000 PC"
+  ship one guild's fact to every guild. The word is "coins" / "érme" now; the
+  symbol stays the `currency_emoji` setting, and a test forbids either name coming
+  back.
+- Word lists are edited one entry per line. Filtered terms, watched Twitch
+  channels, YouTube channel ids and the inactivity ignore list all rendered as a
+  raw JSON box, so an empty list showed the two characters `[]` and it was
+  anybody's guess whether the brackets and quotes were part of what you type.
+- Explained the numbers that cannot be read from their label. A weight is
+  relative to its siblings, a tier total is a share of every pull, and the
+  duplicate refund applies to exactly one reward kind — each now carries a hint,
+  and the three `/work` outcome weights show their computed share the way the
+  gacha reward table already did.
+- Removed `general_channels`, a configured channel list that nothing has ever
+  read, along with the `channels.general` key it mirrored.
+- Removed six gacha settings that nothing read. `gacha_roll_cost`,
+  `gacha_hard_pity`, `gacha_soft_pity_start`, `gacha_soft_pity_multiplier`,
+  `gacha_four_star_guarantee_interval` and `gacha_duplicate_percent` were a
+  name-for-name duplicate of the banner's own config, which is what the runtime
+  actually reads — so the Economy page carried a second "Gacha" section that could
+  disagree with the banner page and change nothing either way. Banners are
+  configured in one place now.
 
 - Stopped writing every log line twice. `waitress.serve` calls
   `logging.basicConfig()`, which adds a root handler when nothing else has one,

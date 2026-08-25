@@ -1,9 +1,9 @@
-# 2.0 release checklist
+# Release checklist
 
 ## Code and data
 
 - All tests and compile checks pass on Python 3.12, 3.13, and 3.14.
-- A production-shaped legacy database migrates to schema 6 twice without changes
+- A production-shaped legacy database migrates to `database.LATEST_SCHEMA_VERSION` twice without changes
   on the second run; integrity check, counts, and checksums are recorded.
 - Pending wager, duplicate settlement, booster deduplication, guild isolation,
   realm approval, opt-out, authorization loss, and rollback paths are exercised.

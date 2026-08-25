@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "potatobot"
-version = "2.2.0b2"
+version = "2.3.0b1"
 description = "A Hungarian-first Discord community bot and control plane"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"

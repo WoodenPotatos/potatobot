@@ -69,7 +69,7 @@ class DashboardSecurityTests(unittest.TestCase):
         The endpoint returns every banner a guild has, because a guild may run
         several; the tests here exercise the default one.
         """
-        banners = self.client.get("/api/guilds/123/gacha").get_json()["data"]
+        banners = self.client.get("/api/guilds/123/gacha").get_json()["data"]["banners"]
         return next(banner for banner in banners if banner["is_default"])
 
     def test_login_uses_state_and_exact_redirect_uri(self):
@@ -989,7 +989,7 @@ class DashboardSecurityTests(unittest.TestCase):
         # A new banner starts disabled so a half-filled table is never pullable.
         self.assertFalse(created.get_json()["data"]["enabled"])
 
-        banners = self.client.get("/api/guilds/123/gacha").get_json()["data"]
+        banners = self.client.get("/api/guilds/123/gacha").get_json()["data"]["banners"]
         summer = next(item for item in banners if item["banner_key"] == "summer")
         self.assertEqual("Summer", summer["display_name"])
         self.assertFalse(summer["is_default"])

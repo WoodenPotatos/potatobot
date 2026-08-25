@@ -109,7 +109,7 @@ class ProfileView(discord.ui.View):
         if not result:
             return None 
             
-        lvl, xp, bal, wins, losses, streak_count, last_streak_update, rob_bonus = result
+        lvl, xp, bal, wins, losses, streak_count, last_streak_update = result
         rank = await database.run(
             database.get_user_rank, xp, guild_member_ids(self.member.guild)
         )
@@ -147,11 +147,7 @@ class ProfileView(discord.ui.View):
         embed.add_field(name=t("profiles.global_rank_label"), value=t("profiles.global_rank_value", rank=rank), inline=True)
         embed.add_field(name=t("profiles.level_label"), value=t("profiles.level_value", level=lvl), inline=True)
         
-        inventory = t("profiles.lockpick_active") if rob_bonus > 0.0 else t("profiles.empty_inventory")
-        
         embed.add_field(name=t("profiles.daily_streak_label"), value=streak_display, inline=True)
-        embed.add_field(name=t("profiles.inventory_label"), value=inventory, inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True) 
         
         embed.add_field(name=t("profiles.progress_label", percent=int(percent*100)), 
                         value=t("profiles.progress_value", bar=bar, xp=xp, next_xp=next_lvl_xp), inline=False)

@@ -85,9 +85,11 @@ def work_response_text(tier: str, stored: list[dict], earnings: int) -> str:
     """Pick one response for a tier and substitute the earnings into it.
 
     Every response lives in `work_responses`, so there is one place to look and
-    one place to edit. A guild's own rows replace the installation defaults for
-    that tier only, which is why the choice is made per tier rather than per
-    guild: writing your own "big payday" lines does not blank the other two.
+    one place to edit. `database.get_work_responses` has already resolved which
+    scope is in effect for each tier — a guild's own rows if it has any for that
+    tier, the shipped set otherwise — so this draws from what it was given rather
+    than choosing again. It used to loop over the scopes itself, which was a
+    second copy of that rule.
 
     A response has no language dimension by design — a guild's flavour text is
     that guild's, and a guild speaks one language — so the text is taken as
@@ -95,14 +97,11 @@ def work_response_text(tier: str, stored: list[dict], earnings: int) -> str:
     escaped, and the placeholder is substituted with a literal replace rather
     than `str.format` so a stray brace cannot raise here.
     """
-    for scope in ("guild", "default"):
-        candidates = [
-            row for row in stored
-            if row["tier"] == tier and row.get("scope", "guild") == scope
-            and row["enabled"] and row["weight"] > 0
-        ]
-        if not candidates:
-            continue
+    candidates = [
+        row for row in stored
+        if row["tier"] == tier and row["enabled"] and row["weight"] > 0
+    ]
+    if candidates:
         point = RNG.randrange(sum(row["weight"] for row in candidates))
         for row in candidates:
             point -= row["weight"]
@@ -113,8 +112,9 @@ def work_response_text(tier: str, stored: list[dict], earnings: int) -> str:
                 ).replace(
                     database.WORK_COIN_PLACEHOLDER, currency_emoji()
                 )
-    # An installation whose defaults were all deleted has nothing to say, and a
-    # blank embed description is rejected by Discord.
+    # A guild that disabled every line of a tier it owns, or an installation
+    # whose shipped rows were all deleted, has nothing to say — and Discord
+    # rejects a blank embed description.
     return t("casino.work_no_response")
 
 

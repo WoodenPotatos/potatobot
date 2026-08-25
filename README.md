@@ -8,14 +8,14 @@ This is my self-created and self-hosted Discord bot written in Python. I origina
 
 That being said i would like to share this project with you all whom are weird enough like me and want to skip using big bots and want something that is ours. The bot is still in active development and has way more bugs and problems that i currently have records of so please be aware of them and report anything that you find to help me fix them.
 
-For the moment i wont share any file that is related to the AI in question. The bot's biggest feature is that it has a central web based dashboard where basically everything is modifiable. The features itselves are all toggleable so even tho the bot has more features than a swiss army knife, everyone can customize it to their own needs. I don't and won't have anything locked behind anything. 
+For the moment i won't share any file that is related to the AI in question. The bot's biggest feature is that it has a central web based dashboard where basically everything is modifiable. The features themselves are all toggleable so even tho the bot has more features than a swiss army knife, everyone can customize it to their own needs. I don't and won't have anything locked behind anything. 
 
 The bot's main language is Hungarian but it has a full English localization, and it is quite easy to add other languages. However i would be really happy if you could help me translate to other languages so that i could also add them to the repo for others to use. 
 
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.2.0-beta.2** &nbsp;·&nbsp; channel `beta`
+**Version 2.3.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -29,12 +29,11 @@ cd /opt/potatobot
 python3 -m venv venv
 ./venv/bin/python -m pip install --requirement requirements.lock
 cp .env.example .env        # add your bot token
-cp config.json.example config.json
 POTATOBOT_DB_PATH=$PWD/economy.db ./venv/bin/python update_db.py
 ./venv/bin/python main.py
 ```
 
-Requires Python 3.12–3.14. The full walkthrough — Discord application, intents, OAuth, HTTPS, systemd and the guild setup check — is in [docs/installation.md](docs/installation.md).
+Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. `config.json` is optional: it is only a fallback for a setting an installation has never saved, and `python scripts/import_config.py` retires it. The full walkthrough — Discord application, intents, OAuth, HTTPS, systemd and the guild setup check — is in [docs/installation.md](docs/installation.md).
 <!-- END GENERATED: install -->
 
 ## Highlights
@@ -46,9 +45,9 @@ Requires Python 3.12–3.14. The full walkthrough — Discord application, inten
 - SQLite WAL storage with ordered, in-place migrations and asynchronous read/write execution
 - Guild feature flags with dependency checks, audit revisions, and runtime cache refresh
 - Moderation, warnings, faction management, tickets, onboarding, role menus, and temporary voice channels
-- LoLdle, Valdle, DBDle, blackjack, dice, roulette, slots, and mines
+- LoLdle, Valdle, DbDle, blackjack, dice, roulette, slots, and mines
 - HTTPS YouTube-only music playback through bounded `yt-dlp` and FFmpeg workers
-- OAuth-authenticated experimental dashboard designed to run behind private HTTPS
+- OAuth-authenticated dashboard designed to run behind private HTTPS
 - Typed, categorized guild dashboard with feature-aware navigation, safe Discord
   selectors, audit history, gacha/banner controls, content builders, and safe shop templates
 - Every guild setting editable from the dashboard, with a ten-minute idle
@@ -59,11 +58,15 @@ Requires Python 3.12–3.14. The full walkthrough — Discord application, inten
   vouchers, and consumables
 - One shared item catalog behind the shop and the gacha, so the same consumable
   or vault means the same thing however a member obtained it
-- Per-guild `/work` outcome odds, payouts and response text, falling back to the
-  shipped Hungarian lines for any tier a guild has not written its own
+- Per-guild `/work` outcome odds, payouts and response text, editable as plain
+  rows; a tier a guild has not touched uses the shipped set
 
 ## Requirements
 
+- A **Linux server, headless**, supervised by systemd and reached through a
+  reverse proxy. That is what it is developed and run on; `deploy/` holds the
+  units and `Containerfile`/`compose.yaml` hold a container build. Nothing here
+  is written for Windows or macOS.
 - Python 3.12, 3.13, or 3.14
 - A Discord application and bot token
 - Discord privileged Member and Message Content intents
@@ -90,7 +93,7 @@ Important environment variables are documented in `.env.example`. In particular:
 - `POTATOBOT_LEGACY_GUILD_ID` identifies the original guild when a legacy private database is connected to multiple guilds.
 - Dashboard OAuth requires matching HTTPS values for `POTATOBOT_DASHBOARD_EXTERNAL_URL` and `DISCORD_REDIRECT_URI`, with the latter ending in `/api/callback`.
 
-Prices, rewards, voice preferences, leaderboards, ranks and rental cleanup are per guild as of schema 8, where `guild_id` 0 holds the installation default. Wallets are not: `users` is still keyed by Discord user ID alone, so the live economy is not multi-guild-safe yet and cooldowns are deliberately installation-wide. Dashboard access still uses a single `ADMIN_DISCORD_ID`.
+The schema is at version 11. Prices, rewards, voice preferences, leaderboards, ranks, rental cleanup, `/work` responses and gacha banners are per guild, with `guild_id` 0 holding the installation default; installation-wide settings live in their own table with no guild dimension at all. Wallets are not: `users` is still keyed by Discord user ID alone, so the live economy is not multi-guild-safe yet and cooldowns are deliberately installation-wide. Dashboard access still uses a single `ADMIN_DISCORD_ID`.
 
 Members can export their data with `/mydata` and erase it with `/deletemydata`; the host can erase on a member's behalf from the dashboard. Erasure keeps the economy row under an anonymous tombstone so installation totals never change silently. See `docs/privacy.md`.
 
@@ -134,51 +137,19 @@ whichever system granted it. Only the way you get one differs: buying a vault yo
 own is refused and costs nothing, while pulling a duplicate pays the configured
 compensation instead.
 
-### Running the dashboard locally
-
-When the deployment is unreachable and you only want to look at the control
-plane:
-
-```bash
-python scripts/local_dashboard.py          # then open http://127.0.0.1:5001/
-python scripts/local_dashboard.py --fresh  # re-copy the database first
-```
-
-It copies `economy.db` into `.local-dev/`, migrates and fingerprints the copy so
-a stale database is also a migration rehearsal, builds a stand-in Discord guild
-from the ids in `config.json` so the selectors resolve, and signs you in as the
-host without OAuth. It refuses to start against a proxied or managed environment,
-always binds loopback, and never writes the tracked `config.json`. Everything it
-fakes is printed at startup.
-
 ## Verification
 
-Run the complete test and syntax checks before committing:
+Before relying on a change:
 
 ```bash
-python -m unittest discover -s tests -v
-python -m compileall -q . -x './\.git|./venv|./\.venv'
+python -m unittest discover -s tests
+python scripts/locale_audit.py --brief
 ```
 
-Before deploying a schema change, rehearse it on a copy of the deployed database
-and prove no data was lost:
-
-```bash
-python scripts/rehearse_migration.py /opt/potatobot/economy.db
-```
-
-It copies the database, fingerprints it, migrates the copy, fingerprints again and
-compares, exiting non-zero if any table's row count changes. The copy it leaves
-behind is the rollback artefact. `scripts/db_snapshot.py` does the fingerprint and
-compare steps on their own. Never point either at the live file while the bot runs.
-
-When adding Hungarian localization keys, synchronize empty placeholders into the other general catalogs:
-
-```bash
-python scripts/sync_locale_keys.py
-```
-
-Do not machine-translate the generated empty values.
+Migrations are rehearsed against a copy, never the live file, and the full
+procedure — snapshots, row-count comparison and the acceptance matrices — is in
+[docs/development.md](docs/development.md) and
+`docs/performance_recovery_plan.md`.
 
 ## Documentation
 
@@ -201,17 +172,17 @@ Do not machine-translate the generated empty values.
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
-### 2.2.0-beta.2
+### 2.3.0-beta.1
 
-- Stopped writing every log line twice. `waitress.serve` calls `logging.basicConfig()`, which adds a root handler when nothing else has one, so every record that propagated was emitted again in Python's default format; and `bot.run()` was configuring the `discord` logger the bot had already set up. A 500 MB journal cap was being spent at twice the rate, and any count of errors or reconnects in it read double.
-- No setting is edited as hand-written JSON any more. The level ladder, the LFG map and the faction map were the last three, and they looked like editing a config file that happened to live in a form. Each has a row editor now — a level and the role it grants, a channel and the role to ping, a faction name with its leader role and the roles it manages — built from one engine driven by a declared spec rather than four near-copies, and each shape is validated server-side so a malformed map is refused instead of failing later inside a button callback. The level ladder still accepts a role *name* as well as an id, because it always has.
-- Retired `config.json` as a source the bot writes. Every cog reads its settings through the in-memory cache now, so a dashboard save is visible without `?reloadconfig` and a setting can be genuinely per-guild. The mirror is gone with it: `_apply_legacy_config_values`, `reconcile_legacy_config_mirror` and the lock that made their read-modify-write safe are deleted, and `/maintenance` writes the same row the dashboard writes instead of rewriting the file. The file survives as the fallback for a setting an installation has never saved, which is what makes the one-time import something an operator does when they choose rather than a prerequisite for upgrading.
-- Fixed three things the conversion turned up. A role-menu button had its role id baked in at construction on a view shared by every message, so it could only ever be right for one guild; it resolves the role per click now. Both social polling loops read one notification channel for the whole installation and now iterate guilds. And the inactivity scanner read its log channel outside the guild loop, so one guild's channel received every guild's report.
-- Fixed the inactivity ignore list, which would have stopped ignoring anyone the moment it was saved from the dashboard. It holds Discord ids, is a string list because a snowflake cannot cross to a browser as a number, and was compared against `member.id` directly — true only while the value came from `config.json`, where it is stored as integers. It is compared as ids now, and the one-time import converts the legacy shape and says that it did.
-- Made YouTube notifications reachable. `socials.youtube_channels` was read by the polling loop and existed in neither the registry nor the example config, so it always resolved empty — the feature could not be switched on from anywhere. It is a typed setting now.
-- Gave installation-wide settings a home. **Schema 11** adds `instance_settings`, keyed by setting alone, and `language`, `currency_emoji`, `maintenance`, `command_prefix` and `data_retention_days` now live there rather than being stored per guild while being installation-wide in fact. The scope is a structural fact now, not a convention: an instance setting cannot be written per guild at all. Pre-existing rows are moved across, and a key that was stored for several guilds keeps its most recent value and says which it discarded.
-- Added `settings_cache`, so a command path no longer reads SQLite for a setting. `is_channel` resolves a setting key through it — one change that moved all 22 channel gates — and `maintenance_blocks` reads it too. It falls back to `config.json` and then the registry default rather than to nothing, which is what keeps maintenance failing *open*: an unreadable setting must not be an outage, and that is the opposite of how the feature gate fails.
-- …and 20 more, in [CHANGELOG.md](CHANGELOG.md).
+- The README is an overview and a quick start again. The verification commands and the local-dashboard walkthrough moved to `docs/development.md`, which already owned that ground, and it says what it runs on: a headless Linux server under systemd behind a reverse proxy, which the README never stated. Corrected the stale facts too — it claimed schema 8 while announcing schema 11 fourteen lines below, called the dashboard experimental where `CLAUDE.md` explicitly says it is load-bearing, and said `/work` falls back to shipped *Hungarian locale lines* when the shipped set is English database rows.
+- `docs/development.md` said schema 6, called the dashboard a typed alpha, and documented a `/work` fallback deleted some time ago. `docs/release_checklist.md` pinned schema 6 in a step that has to be true at every release, so it names the constant now instead of a number.
+- A stored gacha banner can pick up rewards the bot shipped after it was saved. Nothing ever reconciled the two, so a banner was frozen at the shipped set of the day it was first saved — which is how the streak freeze reached the shop and the shipped 4-star tier while being unobtainable from the banner a guild actually pulls on. **Add missing rewards** appends only what the table lacks and leaves your weights and your deliberate omissions alone; **Reset rewards** replaces the whole table with the shipped one. Both exist because neither can stand in for the other.
+- A new banner starts with one placeholder reward per tier instead of a copy of all eighteen, so the first thing you do with it is not pruning. It cannot be literally empty: a tier can still be rolled and has to have something to award.
+- The banner key says what it wants. The message you got was the browser's own "please match the requested format", which blocks submitting and so never let the server's descriptive message through; the field now carries the same words as a hint and a tooltip.
+- A reward row on a banner nobody has saved yet is editable, like one you added. The synthesised standard banner rendered its rows as committed, which is why they behaved differently from your own. And the reward table explains what "amount" means, which depends on the kind.
+- Casino and Everydle are one master toggle each, with the individual games as sub-toggles on their own settings page. Eight near-identical games in the flat Features list pushed everything else off it; the list is 27 entries instead of 35. A child depends on its master, so the existing cascade switches the games off with it — `parent` is only where it renders.
+- Everydle has its own settings category. Its channel and its five reward settings shared a "Games" page with the general other-games channel, which the two had nothing to do with beyond both being games.
+- …and 40 more, in [CHANGELOG.md](CHANGELOG.md).
 
 ### 2.0.0-rc.1 - Unreleased
 

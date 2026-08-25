@@ -57,7 +57,7 @@ COMMAND_POLICIES = {
     "pay": _command("economy"),
     "shop": _command("shop", ResponsePolicy.PRIVATE),
     "gacha": _command("shop_gacha", ResponsePolicy.PRIVATE),
-    "inventory": _command("shop_gacha", ResponsePolicy.PRIVATE),
+    "inventory": _command("economy", ResponsePolicy.PRIVATE),
     "redeem": _command("shop_gacha", ResponsePolicy.PRIVATE),
     "bj": _command("casino_blackjack"),
     "dice": _command("casino_dice"),

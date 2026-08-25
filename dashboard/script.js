@@ -21,6 +21,7 @@ let settings = {};
 // the card head decides which.
 let gacha = null;
 let gachaBanners = [];
+let shippedRewards = null;
 let activeBannerKey = null;
 // The shared built-in item catalog. Identical for every guild, so it is fetched
 // once and reused by the gacha reward picker and the shop item builder.
@@ -48,6 +49,8 @@ const CATEGORY_ICONS = {
     community: 'ic-community',
     economy: 'ic-economy',
     games: 'ic-games',
+    everydle: 'ic-games',
+    casino: 'ic-casino',
     moderation: 'ic-moderation',
     factions: 'ic-factions',
     music: 'ic-music',
@@ -788,7 +791,13 @@ async function loadGuild() {
         featureState = features.data;
         settings = settingData.data;
         permissionFindings = null;
-        gachaBanners = gachaData.data;
+        // The payload grew a wrapper when the shipped reward table joined it, so
+        // an older shape (a bare array) is still accepted rather than crashing
+        // the whole page load on a stale cached script.
+        gachaBanners = Array.isArray(gachaData.data)
+            ? gachaData.data : gachaData.data.banners;
+        shippedRewards = Array.isArray(gachaData.data)
+            ? null : gachaData.data.shipped_rewards;
         resources = resourceData.data;
         // A banner deleted in another tab must not leave the page editing a
         // banner the server no longer has.
@@ -811,7 +820,11 @@ async function loadGuild() {
 /** A category page stays visible while any of its settings is still owned by an
  *  enabled feature; only pages with a dedicated owner follow that flag directly. */
 function categoryHasVisibleSettings(category) {
-    return visibleDefinitions(category).length > 0;
+    // Sub-toggles are content too: the Casino page owns no settings at all and
+    // exists to hold the five game switches, so measuring settings alone would
+    // hide it exactly the way it hid the Builders page.
+    return visibleDefinitions(category).length > 0
+        || childFeaturesOf(category).length > 0;
 }
 
 function updateNavigation() {
@@ -864,7 +877,15 @@ async function showPage(page) {
 
     if (page === 'overview') await renderOverview();
     if (page === 'features') updateFeatureSubtitle();
-    if (page === 'gacha') renderGacha();
+    if (page === 'gacha') {
+        renderGacha();
+        const missing = Object.values(gacha?.missing_rewards || {})
+            .reduce((sum, entries) => sum + entries.length, 0);
+        if (missing) {
+            addPageAction('dashboard.gacha_add_missing', 'ic-plus', addMissingRewards);
+        }
+        addPageAction('dashboard.gacha_reset_rewards', 'ic-gacha', resetBannerRewards);
+    }
     if (page === 'work-responses') await loadWorkResponses();
     if (page === 'shop-builder') await loadShopItems();
     if (page === 'builders') await loadBuilders();
@@ -976,6 +997,9 @@ const OTHER_GROUP = 'other';
 function featureGroups() {
     const byGroup = new Map();
     Object.entries(featureState).forEach(([key, state]) => {
+        // A sub-toggle renders on its parent's settings page instead. Eight
+        // near-identical games in the flat list pushed everything else off it.
+        if (state.parent) return;
         const groupKey = state.group || OTHER_GROUP;
         if (!byGroup.has(groupKey)) byGroup.set(groupKey, []);
         byGroup.get(groupKey).push([key, state]);
@@ -998,6 +1022,43 @@ function featureGroupLabel(groupKey) {
     return tr(`dashboard.feature_groups.${groupKey}`);
 }
 
+/** One feature switch. Shared by the Features page and the sub-toggle block on a
+ *  parent's settings page, so a child behaves exactly like its parent does —
+ *  including refusing to turn on while a dependency is off. */
+function featureSwitchRow(key, state) {
+    const row = element('label', 'feature-row');
+    const text = element('span', 'feature-text');
+    text.appendChild(element('span', 'feature-name', tr(state.locale_key)));
+
+    const blockers = (state.dependencies || []).filter(
+        (dependency) => featureState[dependency]?.enabled === false,
+    );
+    if (blockers.length) {
+        const names = blockers
+            .map((dependency) => tr(featureState[dependency].locale_key)).join(', ');
+        text.appendChild(element('span', 'feature-dep',
+            format('dashboard.feature_requires', {features: names})));
+    }
+
+    const switchWrap = element('span', 'switch');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = state.enabled;
+    input.disabled = blockers.length > 0 && !state.enabled;
+    input.addEventListener('change', () => saveFeature(key, input, state.revision));
+    switchWrap.append(input, element('span', 'track'));
+
+    row.append(text, switchWrap);
+    return row;
+}
+
+/** The sub-toggles a settings category owns, by the convention that a child's
+ *  `parent` is the category it renders on. */
+function childFeaturesOf(category) {
+    return Object.entries(featureState)
+        .filter(([, state]) => state.parent === category);
+}
+
 function renderFeatures() {
     const host = document.getElementById('feature-grid');
     host.replaceChildren();
@@ -1008,28 +1069,7 @@ function renderFeatures() {
         const grid = element('div', 'feature-grid');
 
         entries.forEach(([key, state]) => {
-            const row = element('label', 'feature-row');
-            const text = element('span', 'feature-text');
-            text.appendChild(element('span', 'feature-name', tr(state.locale_key)));
-
-            const blockers = (state.dependencies || []).filter(
-                (dependency) => featureState[dependency]?.enabled === false,
-            );
-            if (blockers.length) {
-                const names = blockers.map((dependency) => tr(featureState[dependency].locale_key)).join(', ');
-                text.appendChild(element('span', 'feature-dep', format('dashboard.feature_requires', {features: names})));
-            }
-
-            const switchWrap = element('span', 'switch');
-            const input = document.createElement('input');
-            input.type = 'checkbox';
-            input.checked = state.enabled;
-            input.disabled = blockers.length > 0 && !state.enabled;
-            input.addEventListener('change', () => saveFeature(key, input, state.revision));
-            switchWrap.append(input, element('span', 'track'));
-
-            row.append(text, switchWrap);
-            grid.appendChild(row);
+            grid.appendChild(featureSwitchRow(key, state));
         });
 
         section.appendChild(grid);
@@ -1098,9 +1138,25 @@ function renderSettings(category) {
     const host = document.getElementById('settings-grid');
     host.replaceChildren();
 
+    // The master's own sub-toggles come first: they decide whether the settings
+    // below them do anything at all.
+    const children = childFeaturesOf(category);
+    if (children.length) {
+        const section = element('fieldset', 'form-section');
+        section.appendChild(element('legend', null, tr('dashboard.sub_features')));
+        const grid = element('div', 'feature-grid');
+        children.forEach(([key, state]) => grid.appendChild(featureSwitchRow(key, state)));
+        section.appendChild(grid);
+        section.appendChild(element('p', 'section-hint', tr('dashboard.sub_features_hint')));
+        host.appendChild(section);
+    }
+
     const definitions = visibleDefinitions(category);
     if (!definitions.length) {
-        host.appendChild(emptyState('dashboard.no_settings', CATEGORY_ICONS[category] || 'ic-administration'));
+        if (!children.length) {
+            host.appendChild(emptyState('dashboard.no_settings',
+                CATEGORY_ICONS[category] || 'ic-administration'));
+        }
         setSubtitle('dashboard.subtitle_settings', {count: 0});
         return;
     }
@@ -1126,8 +1182,14 @@ function renderSettings(category) {
         const grid = element('div', 'form-grid');
 
         entries.forEach((definition) => {
+            // A <label> forwards a click to the labelable control it wraps, and a
+            // button is labelable — so a field whose editor *contains* buttons
+            // must be a div. That is why the picker types are listed here, and
+            // a shaped-JSON editor is full of them too: row pickers, an add
+            // button and a remove button per row.
             const wrapsButton = ['channel', 'role', 'channel_list', 'role_list']
-                .includes(definition.value_type);
+                .includes(definition.value_type)
+                || Boolean(JSON_ROW_SHAPES[definition.json_shape]);
             const group = element(wrapsButton ? 'div' : 'label', 'input-group');
             if (['string_list', 'json', 'channel_list', 'role_list'].includes(definition.value_type)) {
                 group.classList.add('wide');
@@ -1138,6 +1200,15 @@ function renderSettings(category) {
             const input = settingInput(definition, settings[definition.key]?.value);
             input.dataset.key = definition.key;
             group.appendChild(input);
+
+            if (WEIGHT_GROUPS[definition.key]) {
+                const share = element('small', 'field-share');
+                share.dataset.forKey = definition.key;
+                group.appendChild(share);
+            }
+
+            const hint = fieldHint(definition.key);
+            if (hint) group.appendChild(hint);
 
             const badge = element('small', `apply-${definition.apply_behavior}`,
                 tr(`dashboard.apply_${definition.apply_behavior}`));
@@ -1158,6 +1229,7 @@ function renderSettings(category) {
         host.appendChild(section);
     });
 
+    refreshWeightShares();
     refreshSettingsDirtyState();
     setSubtitle('dashboard.subtitle_settings', {count: definitions.length});
     // Deliberately not awaited: the diagnostic is an enhancement, and the form
@@ -1235,6 +1307,7 @@ function collectSettingChanges() {
  *  A JSON field mid-edit cannot be parsed, so the count is unknown rather than
  *  zero — reporting zero there would disable the only way to save. */
 function refreshSettingsDirtyState() {
+    refreshWeightShares();
     const form = document.getElementById('settings-form');
     const submit = form.querySelector('button[type="submit"]');
     const reset = form.querySelector('button[type="reset"]');
@@ -1361,23 +1434,25 @@ const JSON_ROW_SHAPES = {
     role_menu: {
         key: {kind: 'text', label: 'dashboard.role_menu_label'},
         columns: [
-            {name: 'id', kind: 'role', label: 'dashboard.role_menu_role'},
+            {name: 'id', kind: 'role', label: 'dashboard.role_menu_role',
+             required: true},
             {name: 'emoji', kind: 'text', label: 'dashboard.role_menu_emoji',
              narrow: true},
         ],
         unpack: (entry) => (entry && typeof entry === 'object')
             ? {id: entry.id, emoji: entry.emoji || ''}
             : {id: entry, emoji: ''},
-        pack: (columns) => ({id: columns.id || '0', emoji: columns.emoji || ''}),
+        pack: (columns) => ({id: columns.id, emoji: columns.emoji || ''}),
     },
     level_roles: {
         // The key is the milestone. `min` is 2 because level 2 is the lowest a
         // member can reach, and the API refuses anything below it.
         key: {kind: 'number', label: 'dashboard.level_roles_level', min: 2,
               max: 1000},
-        columns: [{name: 'role', kind: 'role', label: 'dashboard.level_roles_role'}],
+        columns: [{name: 'role', kind: 'role',
+                   label: 'dashboard.level_roles_role', required: true}],
         unpack: (entry) => ({role: entry}),
-        pack: (columns) => columns.role || '0',
+        pack: (columns) => columns.role,
     },
     lfg_channels: {
         // A team-finding post goes in a text channel, so the picker is narrowed
@@ -1387,21 +1462,22 @@ const JSON_ROW_SHAPES = {
         // unreachable.
         key: {kind: 'channel', label: 'dashboard.lfg_channel',
               channelTypes: ['text', 'news']},
-        columns: [{name: 'role', kind: 'role', label: 'dashboard.lfg_role'}],
+        columns: [{name: 'role', kind: 'role', label: 'dashboard.lfg_role',
+                   required: true}],
         unpack: (entry) => ({role: entry}),
-        pack: (columns) => columns.role || '0',
+        pack: (columns) => columns.role,
     },
     factions: {
         key: {kind: 'text', label: 'dashboard.faction_key'},
         columns: [
             {name: 'leader_role_id', kind: 'role',
-             label: 'dashboard.faction_leader'},
+             label: 'dashboard.faction_leader', required: true},
             {name: 'manageable_ids', kind: 'role_list',
              label: 'dashboard.faction_managed'},
         ],
         unpack: (entry) => (entry && typeof entry === 'object') ? entry : {},
         pack: (columns) => ({
-            leader_role_id: columns.leader_role_id || '0',
+            leader_role_id: columns.leader_role_id,
             manageable_ids: columns.manageable_ids || [],
         }),
     },
@@ -1433,6 +1509,16 @@ function jsonRowEditor(definition, value) {
     carrier.className = 'menu-carrier';
     carrier.hidden = true;
     wrapper.appendChild(carrier);
+
+    // Column headers, from the same spec the rows are built from. Without them a
+    // populated menu is three anonymous boxes: a text cell's placeholder vanishes
+    // the moment it has a value, and a picker never had one at all.
+    const head = element('div', 'menu-row menu-head');
+    head.style.setProperty('--row-columns', String(shape.columns.length + 1));
+    head.appendChild(element('span', null, tr(shape.key.label)));
+    shape.columns.forEach((spec) => head.appendChild(element('span', null, tr(spec.label))));
+    head.appendChild(element('span', 'menu-head-spacer'));
+    wrapper.appendChild(head);
 
     const rows = element('div', 'menu-rows');
     wrapper.appendChild(rows);
@@ -1473,7 +1559,12 @@ function jsonRowEditor(definition, value) {
         }
         if (spec.kind === 'role_list') {
             const carrierNode = node.querySelector('.picker-carrier');
-            return [...carrierNode.selectedOptions].map((o) => o.value);
+            // Sorted to match how the server stores it. The options are ordered
+            // by role position, so reading them in option order produced a
+            // different array from the same set of roles and the form looked
+            // dirty the moment it opened.
+            return [...carrierNode.selectedOptions].map((o) => o.value)
+                .sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
         }
         return node.value.trim();
     };
@@ -1483,12 +1574,21 @@ function jsonRowEditor(definition, value) {
         rows.querySelectorAll('.menu-row').forEach((row) => {
             const keyNode = row.querySelector('[data-column="__key"]');
             const key = readField(keyNode, shape.key);
-            if (!key) return;
             const columns = {};
             shape.columns.forEach((spec) => {
                 columns[spec.name] = readField(
                     row.querySelector(`[data-column="${spec.name}"]`), spec);
             });
+            // An incomplete row is left out entirely rather than serialised with
+            // a stand-in. `pack` used to turn an unset picker into the id "0",
+            // which the API rejects as not a snowflake — and it rejects the
+            // *whole* patch, so one half-filled row made every change in the
+            // category fail to save while the section stayed marked unsaved.
+            // The row is flagged instead, so it is visibly the thing to finish.
+            const incomplete = !key
+                || shape.columns.some((spec) => spec.required && !columns[spec.name]);
+            row.classList.toggle('menu-row-incomplete', incomplete && !isBlankRow(key, columns));
+            if (incomplete) return;
             collected[key] = shape.pack(columns);
         });
         carrier.value = JSON.stringify(collected);
@@ -1496,6 +1596,14 @@ function jsonRowEditor(definition, value) {
         // bound to the real control.
         carrier.dispatchEvent(new Event('change', {bubbles: true}));
     };
+
+    /** A row nobody has typed in yet. Freshly added rows are empty by
+     *  definition, so they are not "incomplete" until something is filled in. */
+    const isBlankRow = (key, columns) => !key
+        && shape.columns.every((spec) => {
+            const held = columns[spec.name];
+            return Array.isArray(held) ? held.length === 0 : !held;
+        });
 
     const addRow = (key, entry) => {
         const row = element('div', 'menu-row');
@@ -1517,7 +1625,7 @@ function jsonRowEditor(definition, value) {
             ));
         });
 
-        const remove = element('button', 'menu-remove icon-button');
+        const remove = element('button', 'menu-remove');
         remove.type = 'button';
         remove.title = tr('dashboard.role_menu_remove');
         remove.appendChild(icon('ic-trash', 'ic ic-sm'));
@@ -1535,7 +1643,7 @@ function jsonRowEditor(definition, value) {
 
     Object.entries(entries).forEach(([key, entry]) => addRow(key, entry));
 
-    const add = element('button', 'menu-add btn-ghost');
+    const add = element('button', 'menu-add btn btn-ghost btn-sm');
     add.type = 'button';
     add.appendChild(icon('ic-plus', 'ic ic-sm'));
     add.appendChild(document.createTextNode(tr('dashboard.role_menu_add')));
@@ -1733,6 +1841,61 @@ function resourcePicker(definition, value) {
  *  The language list is the only one so far and it already has display names
  *  under `dashboard.languages.*`; anything else falls back to the raw value
  *  rather than rendering a missing key. */
+/** Settings that are weights, and the group each competes against.
+ *
+ *  A weight only means something relative to its siblings, so the label alone
+ *  cannot be understood — the gacha reward table already solved this with a
+ *  computed "chance within the tier" column, and this brings the same reading to
+ *  the settings form. Declared rather than inferred from the key prefix, because
+ *  a future weight that is *not* drawn against these three must not silently
+ *  join the group.
+ */
+const WEIGHT_GROUPS = {
+    work_tier_normal_weight: ['work_tier_normal_weight', 'work_tier_free_weight',
+                              'work_tier_high_weight'],
+    work_tier_free_weight: ['work_tier_normal_weight', 'work_tier_free_weight',
+                            'work_tier_high_weight'],
+    work_tier_high_weight: ['work_tier_normal_weight', 'work_tier_free_weight',
+                            'work_tier_high_weight'],
+};
+
+/** Keep every weight field's computed share in step with what is typed. */
+function refreshWeightShares() {
+    const read = (key) => {
+        const field = document.querySelector(`#settings-grid [data-key="${key}"]`);
+        const value = Number(field?.value);
+        return Number.isFinite(value) && value > 0 ? value : 0;
+    };
+    document.querySelectorAll('#settings-grid .field-share').forEach((node) => {
+        const group = WEIGHT_GROUPS[node.dataset.forKey] || [];
+        const total = group.reduce((sum, key) => sum + read(key), 0);
+        const own = read(node.dataset.forKey);
+        node.textContent = total
+            ? format('dashboard.weight_share', {percent: ((own / total) * 100).toFixed(1)})
+            : tr('dashboard.weight_share_none');
+    });
+}
+
+
+/** An explanatory line under a field, when the catalogs have one for it.
+ *
+ *  Locale-driven rather than registry-driven: a hint is prose about what a
+ *  number means, it changes without the setting changing, and every hint needs
+ *  translating anyway. A missing key renders nothing, so a field without a hint
+ *  is simply a field without a hint — `tr` returns a bracketed key for a miss,
+ *  which is the test for absence.
+ *
+ *  This exists because several numbers on this page cannot be understood from
+ *  their label alone: a weight is relative to the others in its group, a tier
+ *  total is a share of every pull, and the duplicate refund applies to exactly
+ *  one reward kind.
+ */
+function fieldHint(key) {
+    const text = tr(`dashboard.hints.${key}`);
+    return text.startsWith('[') ? null : element('span', 'field-hint', text);
+}
+
+
 /** The label for one constrained value, from the prefix its setting declares.
  *
  *  Declared in the registry rather than matched on the setting's key here:
@@ -1774,7 +1937,19 @@ function settingInput(definition, storedValue) {
         return jsonRowEditor(definition, value);
     }
 
-    if (['string_list', 'json'].includes(definition.value_type)) {
+    // A plain list of words is edited as one entry per line. It used to render
+    // as a JSON textarea, so an empty list showed the two characters `[]` and it
+    // was anybody's guess whether the brackets and the quotes were part of the
+    // value. Pasting a list from somewhere else now works, and empty means empty.
+    if (definition.value_type === 'string_list') {
+        const input = document.createElement('textarea');
+        input.value = (Array.isArray(value) ? value : []).join('\n');
+        input.placeholder = tr('dashboard.string_list_placeholder');
+        input.spellcheck = false;
+        return input;
+    }
+
+    if (definition.value_type === 'json') {
         const input = document.createElement('textarea');
         input.value = JSON.stringify(value ?? null, null, 2);
         return input;
@@ -1821,7 +1996,12 @@ function readSettingInput(definition, field) {
     if (['channel_list', 'role_list'].includes(definition.value_type)) {
         return [...input.selectedOptions].map((option) => option.value);
     }
-    if (['string_list', 'json'].includes(definition.value_type)) return JSON.parse(input.value);
+    if (definition.value_type === 'string_list') {
+        // Blank lines and stray whitespace are the operator's formatting, not
+        // entries. A term that normalises to nothing is dropped server-side too.
+        return input.value.split('\n').map((line) => line.trim()).filter(Boolean);
+    }
+    if (definition.value_type === 'json') return JSON.parse(input.value);
     return input.value;
 }
 
@@ -1875,6 +2055,7 @@ function renderGachaBannerBar() {
 
     const picker = document.createElement('select');
     picker.id = 'gacha-banner-picker';
+    picker.className = 'banner-picker';
     gachaBanners.forEach((banner) => {
         const option = new Option(banner.display_name, banner.banner_key);
         option.selected = banner.banner_key === activeBannerKey;
@@ -1888,6 +2069,7 @@ function renderGachaBannerBar() {
     bar.appendChild(picker);
 
     const name = document.createElement('input');
+    name.className = 'banner-name';
     name.type = 'text';
     name.id = 'gacha-banner-display-name';
     name.maxLength = 64;
@@ -1982,12 +2164,15 @@ function renderGacha() {
             if (GACHA_TIER_FIELDS.includes(key)) input.addEventListener('input', updateGachaTotal);
         }
         group.appendChild(input);
+        const hint = fieldHint(`gacha_${key}`);
+        if (hint) group.appendChild(hint);
         grid.appendChild(group);
     });
 
     const rewardGroup = element('div', 'input-group wide');
     rewardGroup.append(
         element('span', 'field-label', tr('dashboard.gacha_rewards')),
+        element('span', 'field-hint', tr('dashboard.gacha_amount_hint')),
         renderRewardTable(config.rewards),
     );
     grid.appendChild(rewardGroup);
@@ -2007,6 +2192,46 @@ const REWARD_COLUMNS = 7;
  * read back without holding a parallel copy of the model in a variable, and so
  * a row added here survives a save.
  */
+/** Put the shipped reward table back, wholesale.
+ *
+ *  Paired with `addMissingRewards` on purpose: a reset is what you want when a
+ *  banner has drifted somewhere you no longer like, and it destroys your edits;
+ *  adding what is missing is what you want when the bot shipped a new reward and
+ *  you only need that. Neither can stand in for the other.
+ */
+async function resetBannerRewards() {
+    if (!shippedRewards || !gacha) return;
+    if (!await confirmAction(tr('dashboard.gacha_reset_rewards_confirm'))) return;
+    gacha.config.rewards = JSON.parse(JSON.stringify(shippedRewards));
+    renderGacha();
+    toast(tr('dashboard.gacha_rewards_replaced'));
+}
+
+/** Append the shipped rewards this banner's table does not have.
+ *
+ *  A stored banner is frozen at the shipped set of the day it was first saved,
+ *  and nothing reconciled the two — which is how `streak_freeze` reached the
+ *  shop and the shipped 4-star tier while being unobtainable from the banner
+ *  actually in use. Existing rows are untouched, so an operator's weights and
+ *  their deliberate omissions both survive until they ask for this.
+ */
+function addMissingRewards() {
+    if (!gacha) return;
+    const missing = gacha.missing_rewards || {};
+    let added = 0;
+    Object.entries(missing).forEach(([tier, entries]) => {
+        const table = gacha.config.rewards[tier] || (gacha.config.rewards[tier] = []);
+        entries.forEach((entry) => { table.push({...entry}); added += 1; });
+    });
+    if (!added) {
+        toast(tr('dashboard.gacha_nothing_missing'));
+        return;
+    }
+    gacha.missing_rewards = {};
+    renderGacha();
+    toast(format('dashboard.gacha_rewards_added', {count: added}));
+}
+
 function renderRewardTable(rewards) {
     const wrap = element('div', 'table-wrap');
     const node = table([
@@ -2035,7 +2260,11 @@ function renderRewardTable(rewards) {
         body.appendChild(heading);
 
         entries.forEach((entry) => {
-            body.appendChild(rewardRow(tier, entry, false));
+            // A banner the guild has never saved is still the synthesised shipped
+            // one, so its rows are committed to nothing and their key and kind
+            // stay editable. Rendering them locked is why a standard banner's
+            // rows behaved differently from ones you added yourself.
+            body.appendChild(rewardRow(tier, entry, !gacha || !gacha.revision));
         });
     });
 
@@ -2344,42 +2573,16 @@ async function loadWorkResponses() {
         return;
     }
     renderWorkResponseTable(host);
-    const own = workResponses.responses.filter((entry) => entry.scope !== 'default');
-    if (own.length === 0) {
-        addPageAction('dashboard.work_copy_defaults', 'ic-work', copyWorkDefaults);
-    }
-    setSubtitle('dashboard.subtitle_work_responses', {count: own.length});
-}
-
-/** Copy the installation defaults into this guild so they can be edited.
- *  Without this an operator who wants to adjust one shipped line has to retype
- *  it; there is no dedicated endpoint because creating them one at a time is
- *  exactly what the existing route does. */
-async function copyWorkDefaults() {
-    const defaults = workResponses.responses.filter((entry) => entry.scope === 'default');
-    if (!defaults.length) return;
-    if (!await confirmAction(format('dashboard.work_copy_defaults_confirm',
-        {count: defaults.length}))) return;
-    try {
-        for (const entry of defaults) {
-            await api(`/guilds/${guildId}/work-responses`, {
-                method: 'POST',
-                headers: headers(),
-                body: JSON.stringify({
-                    tier: entry.tier, message: entry.message, weight: entry.weight,
-                }),
-            });
-        }
-        toast(format('dashboard.work_copied', {count: defaults.length}));
-    } catch (error) {
-        handleApiError(error);
-    }
-    await loadWorkResponses();
+    setSubtitle('dashboard.subtitle_work_responses',
+                {count: workResponses.responses.length});
 }
 
 /** Each row is editable in place: the text, its weight and whether it is drawn.
- *  A tier an operator has written nothing for still works, because the command
- *  falls back to the shipped responses for that tier alone. */
+ *  A shipped line is an ordinary row — editing or deleting one copies its whole
+ *  tier into this guild first, server-side and in one transaction, so what the
+ *  operator sees is a plain list they can change. The "copy the defaults over"
+ *  button this replaces existed because a shipped row was unreachable, and it
+ *  made half the page look read-only for no reason the operator could act on. */
 function renderWorkResponseTable(host) {
     const node = table([
         'dashboard.work_tier', 'dashboard.work_message',
@@ -2390,98 +2593,76 @@ function renderWorkResponseTable(host) {
     const rows = workResponses.responses;
     if (!rows.length) emptyRow(body, 6, 'dashboard.work_empty');
 
-    // A guild's own rows replace the installation defaults for that tier only,
-    // so the effective pool is decided per tier — and the displayed chance has
-    // to be a share of the pool that is actually drawn from.
-    const tierScope = new Map();
-    rows.forEach((entry) => {
-        if (entry.scope !== 'default') tierScope.set(entry.tier, 'guild');
-    });
-    const inEffect = (entry) => (tierScope.get(entry.tier) || 'default')
-        === (entry.scope === 'default' ? 'default' : 'guild');
-
+    // Every row here is in effect: the API resolves per tier and returns the
+    // guild's own lines for a tier it owns, the shipped ones otherwise. So the
+    // chance is a share of the pool that is genuinely drawn from, and there is
+    // no such thing as an overridden row to render differently. A shipped row
+    // still looks and behaves like any other — editing it copies its tier into
+    // this guild first, which is the server's job, not something to explain in
+    // three badges and a read-only cell.
     const tierTotals = new Map();
-    rows.filter((entry) => entry.enabled && inEffect(entry)).forEach((entry) => {
+    rows.filter((entry) => entry.enabled).forEach((entry) => {
         tierTotals.set(entry.tier, (tierTotals.get(entry.tier) || 0) + entry.weight);
     });
 
     rows.forEach((entry) => {
-        const isDefault = entry.scope === 'default';
         const row = element('tr');
-        if (isDefault) row.classList.add('reward-disabled');
 
-        const tierCell = element('td', null, tr(`dashboard.work_tier_${entry.tier}`));
-        if (isDefault) tierCell.appendChild(pill('dashboard.work_scope_default', 'neutral'));
-        row.appendChild(tierCell);
+        row.appendChild(element('td', null, tr(`dashboard.work_tier_${entry.tier}`)));
 
         const messageCell = element('td', 'cell-grow');
-        let message = null;
-        if (isDefault) {
-            // Shipped with the bot, shared by every guild that has not written
-            // its own, so it is shown for reference and not edited from here.
-            messageCell.appendChild(element('span', null, entry.message));
-        } else {
-            message = document.createElement('textarea');
-            message.value = entry.message;
-            message.maxLength = workResponses.message_max_length || 500;
-            message.setAttribute('aria-label', tr('dashboard.work_message'));
-            messageCell.appendChild(message);
-        }
+        const message = document.createElement('textarea');
+        message.value = entry.message;
+        message.maxLength = workResponses.message_max_length || 500;
+        message.setAttribute('aria-label', tr('dashboard.work_message'));
+        messageCell.appendChild(message);
         row.appendChild(messageCell);
 
         const weightCell = element('td');
-        let weight = null;
-        if (isDefault) {
-            weightCell.appendChild(element('span', 'cell-mono', String(entry.weight)));
-        } else {
-            weight = document.createElement('input');
-            weight.type = 'number';
-            weight.min = '1';
-            weight.value = entry.weight;
-            weight.setAttribute('aria-label', tr('dashboard.column_reward_weight'));
-            weightCell.appendChild(weight);
-        }
+        const weight = document.createElement('input');
+        weight.type = 'number';
+        weight.min = '1';
+        weight.value = entry.weight;
+        weight.setAttribute('aria-label', tr('dashboard.column_reward_weight'));
+        weightCell.appendChild(weight);
         row.appendChild(weightCell);
 
         const total = tierTotals.get(entry.tier) || 0;
         row.appendChild(element('td', 'cell-mono',
-            entry.enabled && total && inEffect(entry)
+            entry.enabled && total
                 ? `${((entry.weight / total) * 100).toFixed(1)}%`
                 : '—'));
 
         const status = element('td');
-        status.appendChild(inEffect(entry)
-            ? pill(entry.enabled ? 'dashboard.status_enabled' : 'dashboard.status_disabled',
-                entry.enabled ? 'on' : 'off')
-            : pill('dashboard.work_scope_overridden', 'neutral'));
+        status.appendChild(pill(
+            entry.enabled ? 'dashboard.status_enabled' : 'dashboard.status_disabled',
+            entry.enabled ? 'on' : 'off'));
         row.appendChild(status);
 
         const actions = element('td', 'cell-actions');
-        if (!isDefault) {
-            const save = element('button', 'btn btn-outline', tr('dashboard.save_settings'));
-            save.type = 'button';
-            save.addEventListener('click', () => saveWorkResponse(entry, {
-                message: message.value, weight: Number(weight.value),
-                enabled: entry.enabled,
-            }, save));
+        const save = element('button', 'btn btn-outline', tr('dashboard.save_settings'));
+        save.type = 'button';
+        save.addEventListener('click', () => saveWorkResponse(entry, {
+            message: message.value, weight: Number(weight.value),
+            enabled: entry.enabled,
+        }, save));
 
-            const toggle = element('button', 'btn btn-outline',
-                tr(entry.enabled ? 'dashboard.disable' : 'dashboard.enable'));
-            toggle.type = 'button';
-            toggle.addEventListener('click', () => saveWorkResponse(entry, {
-                message: message.value, weight: Number(weight.value),
-                enabled: !entry.enabled,
-            }, toggle));
+        const toggle = element('button', 'btn btn-outline',
+            tr(entry.enabled ? 'dashboard.disable' : 'dashboard.enable'));
+        toggle.type = 'button';
+        toggle.addEventListener('click', () => saveWorkResponse(entry, {
+            message: message.value, weight: Number(weight.value),
+            enabled: !entry.enabled,
+        }, toggle));
 
-            const remove = element('button', 'btn-icon danger', '');
-            remove.type = 'button';
-            remove.title = tr('dashboard.delete');
-            remove.setAttribute('aria-label', tr('dashboard.delete'));
-            remove.appendChild(icon('ic-trash', 'ic ic-sm'));
-            remove.addEventListener('click', () => deleteWorkResponse(entry, remove));
+        const remove = element('button', 'btn-icon danger', '');
+        remove.type = 'button';
+        remove.title = tr('dashboard.delete');
+        remove.setAttribute('aria-label', tr('dashboard.delete'));
+        remove.appendChild(icon('ic-trash', 'ic ic-sm'));
+        remove.addEventListener('click', () => deleteWorkResponse(entry, remove));
 
-            actions.append(save, toggle, remove);
-        }
+        actions.append(save, toggle, remove);
         row.appendChild(actions);
         body.appendChild(row);
     });

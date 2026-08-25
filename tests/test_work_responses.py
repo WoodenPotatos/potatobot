@@ -125,17 +125,84 @@ class WorkResponseStorageTests(unittest.TestCase):
         with self.assertRaises(database.ValidationError):
             database.create_work_response(7, 99, "normal", "ok", True)
 
-    def test_a_guild_cannot_edit_or_delete_an_installation_default(self):
-        """The defaults are shared by every guild that has not written its own,
-        so a guild page must not be able to reach them."""
-        default_id = next(row["response_id"]
-                          for row in database.get_work_responses(7))
-        with self.assertRaises(LookupError):
-            database.update_work_response(
-                7, 99, default_id, "normal", "hijacked", 1, True, 1
-            )
-        with self.assertRaises(LookupError):
-            database.delete_work_response(7, 99, default_id, 1)
+    def test_editing_a_shipped_response_adopts_its_tier_first(self):
+        """The shipped set is shared, so it is copied rather than edited.
+
+        It used to be unreachable: a guild could see a default and never touch
+        it, so the page rendered half its rows read-only with a badge and offered
+        a separate "copy them all" button. That reads as something broken rather
+        than as a starting point. Editing one now copies that tier into the guild
+        and edits the copy, in one transaction.
+        """
+        shipped = [row for row in database.get_work_responses(7)
+                   if row["tier"] == "normal"]
+        self.assertTrue(all(row["scope"] == "default" for row in shipped))
+        target = shipped[0]
+
+        database.update_work_response(
+            7, 99, target["response_id"], "normal", "my own line", 4, True,
+            target["revision"],
+        )
+
+        after = [row for row in database.get_work_responses(7)
+                 if row["tier"] == "normal"]
+        self.assertTrue(all(row["scope"] == "guild" for row in after),
+                        "the whole tier is adopted, not just the edited row")
+        self.assertEqual(len(shipped), len(after))
+        self.assertIn("my own line", [row["message"] for row in after])
+
+        # The shipped rows themselves are untouched, because every other guild
+        # still resolves to them.
+        installation = database.get_work_responses(database.WORK_DEFAULT_GUILD_ID)
+        self.assertNotIn("my own line", [row["message"] for row in installation])
+
+    def test_deleting_a_shipped_response_adopts_the_tier_and_drops_that_line(self):
+        shipped = [row for row in database.get_work_responses(7)
+                   if row["tier"] == "high"]
+        target = shipped[0]
+
+        database.delete_work_response(7, 99, target["response_id"],
+                                      target["revision"])
+
+        after = [row for row in database.get_work_responses(7)
+                 if row["tier"] == "high"]
+        self.assertEqual(len(shipped) - 1, len(after))
+        self.assertTrue(all(row["scope"] == "guild" for row in after))
+        self.assertNotIn(target["message"], [row["message"] for row in after])
+
+    def test_adopting_a_tier_leaves_the_other_tiers_shipped(self):
+        """Resolution is per tier, so writing your own big-payday lines does not
+        blank the other two."""
+        target = next(row for row in database.get_work_responses(7)
+                      if row["tier"] == "high")
+        database.update_work_response(
+            7, 99, target["response_id"], "high", "mine", 1, True,
+            target["revision"],
+        )
+        scopes = {}
+        for row in database.get_work_responses(7):
+            scopes.setdefault(row["tier"], set()).add(row["scope"])
+        self.assertEqual({"guild"}, scopes["high"])
+        self.assertEqual({"default"}, scopes["normal"])
+        self.assertEqual({"default"}, scopes["free"])
+
+    def test_adoption_happens_once(self):
+        first = next(row for row in database.get_work_responses(7)
+                     if row["tier"] == "normal")
+        database.update_work_response(
+            7, 99, first["response_id"], "normal", "one", 1, True,
+            first["revision"],
+        )
+        owned = [row for row in database.get_work_responses(7)
+                 if row["tier"] == "normal"]
+        second = owned[0]
+        database.update_work_response(
+            7, 99, second["response_id"], "normal", "two", 1, True,
+            second["revision"],
+        )
+        after = [row for row in database.get_work_responses(7)
+                 if row["tier"] == "normal"]
+        self.assertEqual(len(owned), len(after), "a second edit must not re-adopt")
 
     def test_the_per_tier_limit_is_enforced(self):
         for index in range(database.WORK_RESPONSES_PER_TIER):
@@ -214,31 +281,34 @@ class WorkSelectionTests(unittest.TestCase):
         self.assertTrue(rendered.strip())
         self.assertNotIn("[", rendered)
 
-    def test_a_guild_row_wins_over_a_default_for_its_tier_only(self):
+    def test_it_draws_only_from_the_pool_it_was_given(self):
+        """Choosing which scope is in effect is `get_work_responses`' job now.
+
+        This used to loop over the scopes itself, which was a second copy of that
+        rule — and it had a bug the duplication hid: a guild whose only row for a
+        tier was *disabled* fell through to the shipped line, so switching your
+        own line off silently brought the default back. `CLAUDE.md` says the
+        opposite, and says why: disabling is a decision about that tier.
+        """
         pool = [
-            {"tier": "normal", "weight": 1, "enabled": True, "scope": "default",
-             "message": "default normal"},
-            {"tier": "free", "weight": 1, "enabled": True, "scope": "default",
-             "message": "default free"},
-            {"tier": "normal", "weight": 1, "enabled": True, "scope": "guild",
-             "message": "guild normal"},
+            {"tier": "normal", "weight": 1, "enabled": True,
+             "message": "resolved normal"},
+            {"tier": "free", "weight": 1, "enabled": True,
+             "message": "resolved free"},
         ]
         for _ in range(20):
-            self.assertEqual("guild normal",
+            self.assertEqual("resolved normal",
                              casino.work_response_text("normal", pool, 0))
-            self.assertEqual("default free",
+            self.assertEqual("resolved free",
                              casino.work_response_text("free", pool, 0))
 
-    def test_a_disabled_guild_row_does_not_fall_back_to_the_default(self):
-        """Disabling a guild's only row for a tier is a decision about that
-        tier, not a request to bring the shipped line back."""
-        pool = [
-            {"tier": "high", "weight": 1, "enabled": True, "scope": "default",
-             "message": "default high"},
-            {"tier": "high", "weight": 1, "enabled": False, "scope": "guild",
-             "message": "guild high"},
-        ]
-        self.assertEqual("default high", casino.work_response_text("high", pool, 0))
+    def test_a_disabled_row_does_not_resurrect_anything(self):
+        """A tier whose every line is off has nothing to say, and says so."""
+        pool = [{"tier": "high", "weight": 1, "enabled": False,
+                 "message": "switched off"}]
+        from cogs.utils import t
+        self.assertEqual(t("casino.work_no_response"),
+                         casino.work_response_text("high", pool, 0))
 
     def test_stored_responses_override_only_their_own_tier(self):
         stored = [{"tier": "normal", "weight": 1, "enabled": True,

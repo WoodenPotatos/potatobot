@@ -247,7 +247,12 @@ svg[hidden] { display: none; }
     top: 0;
     display: flex;
     flex-direction: column;
+    /* `dvh` is the visible viewport. On a mobile browser with a bottom tab bar
+       `100vh` is taller than what you can see, so the foot of the nav — the last
+       item, Changelog — sat under the chrome with no way to scroll to it. The
+       `vh` line stays first as the fallback for an engine without `dvh`. */
     height: 100vh;
+    height: 100dvh;
     background: var(--surface-chrome);
     color: var(--text-on-chrome);
     z-index: 40;
@@ -792,9 +797,26 @@ table.data tbody tr.reward-new td { background: var(--surface-raised); }
     text-transform: uppercase;
     letter-spacing: .09em;
     color: var(--text-muted);
+    /* Every field is its own column flex box in an auto-fill grid, so a label
+       that wraps to two lines made its cell taller and dropped its input below
+       the neighbouring one. Reserving two lines and sitting the text at the
+       bottom keeps the inputs on one line across the row whether a label wraps
+       or not. Uppercase plus letter-spacing widens the text, which is why these
+       wrap sooner than the character count suggests. */
+    min-height: 2.6em;
+    display: flex;
+    align-items: flex-end;
 }
 
 .input-group > .field-hint { font-size: .72rem; color: var(--text-muted); }
+/* The computed share beside a weight. Accent-coloured and monospaced digits, so
+   it reads as a derived number rather than as another thing to type. */
+.input-group > .field-share {
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
 .input-group small { font-size: .72rem; color: var(--text-muted); }
 .input-group small.apply-restart { color: var(--danger); font-weight: 600; }
 .input-group small.apply-subsystem_reload { color: var(--warning); font-weight: 600; }
@@ -1473,6 +1495,62 @@ input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent);
 
 .menu-row .row-field.narrow {
   text-align: center;
+}
+
+/* The header row shares the row grid so a heading sits over its own column. The
+   trailing spacer stands in for the remove button's track. */
+.menu-head {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+}
+
+.menu-head .menu-head-spacer { width: 34px; }
+
+/* A note under a section, explaining what the whole block does. */
+.section-hint {
+  margin-top: var(--space-3);
+  font-size: .74rem;
+  color: var(--text-muted);
+}
+
+/* The banner bar is rebuilt on every selection change and ends with a small pill
+   for the default banner but a non-shrinkable Delete button for a custom one, so
+   two `width: 100%` flex items were re-resolved against different remaining
+   space and visibly jumped. Fixing their widths makes the bar the same shape
+   whichever banner is selected; the trailing slot reserves room so swapping the
+   pill for the button cannot move them either. */
+.banner-picker {
+  width: 13rem;
+  flex: 0 0 13rem;
+  text-overflow: ellipsis;
+}
+
+.banner-name {
+  width: 13rem;
+  flex: 0 0 13rem;
+}
+
+#gacha-banner-bar { min-height: 38px; }
+
+@media (max-width: 720px) {
+  .banner-picker,
+  .banner-name { width: 100%; flex: 1 1 100%; }
+}
+
+/* A row missing something required is not submitted, so it has to look like the
+   thing to finish rather than like a row that saved. */
+.menu-row-incomplete {
+  border-left: 3px solid var(--warning);
+  padding-left: var(--space-2);
+  margin-left: calc(-1 * var(--space-2) - 3px);
+}
+
+/* Stacked rows on a phone make a shared header meaningless. */
+@media (max-width: 720px) {
+  .menu-head { display: none; }
 }
 
 .menu-remove {

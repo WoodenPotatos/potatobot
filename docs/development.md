@@ -2,11 +2,11 @@
 
 ## 1. Purpose and current maturity
 
-PotatoBot is a Hungarian-first Discord bot for a private community. It combines community administration with economy, profiles, games, music, activity automation, and an experimental web control plane.
+PotatoBot is a Hungarian-first Discord bot for a private community. It combines community administration with economy, profiles, games, music, activity automation, and a web control plane. It runs on a headless Linux server under systemd, behind a reverse proxy.
 
-The current private deployment is the compatibility target. Schema version 6 adds the persistent tenth-pull guarantee counter, pull-ledger marker, and voucher subsystem ownership to schema 5's typed guild settings, configurable shop definitions, inventory, gacha banners/pity/pull ledgers, fixed vault reserves, vouchers, timed entitlements, fulfillment, builder drafts, and dashboard action outbox. Legacy economy callers still remain effectively single-guild. Treat `managed` and `self_hosted` profiles as architectural foundations, not as proof of completed production isolation.
+The current private deployment is the compatibility target. **Schema version 11** is current; `database.LATEST_SCHEMA_VERSION` is the authority and this sentence is not. Since schema 5's typed guild settings, configurable shop definitions, inventory, gacha banners/pity/pull ledgers, fixed vault reserves, vouchers, timed entitlements, fulfillment, builder drafts and dashboard action outbox: schema 6 added the persistent tenth-pull guarantee counter and voucher subsystem ownership, 7 added ticket claim persistence and action leases, 8 put `guild_id` into the last single-tenant primary keys, 9 added banner display names and the `/work` response pool, 10 added the warning tag, and 11 added `instance_settings` for values that have no guild dimension. Legacy economy callers still remain effectively single-guild — wallets are keyed by Discord user id alone. Treat `managed` and `self_hosted` profiles as architectural foundations, not as proof of completed production isolation.
 
-The dashboard is a typed alpha control plane. Its raw JSON and global price/reward endpoints have been removed; the remaining release boundary is operational hardening, complete multi-guild storage integration, and service separation.
+The dashboard is **load-bearing, not experimental**: it is the only way an operator configures an installation, so a dashboard defect is a bot defect. Its raw JSON and global price/reward endpoints are gone and every setting is edited through a typed control. The remaining release boundary is complete multi-guild storage integration and service separation.
 
 ## 2. Repository map
 
@@ -216,7 +216,7 @@ Reward vouchers persist their owning subsystem. `cogs/gacha.py` expires only Gac
 
 ### Configurable work responses and member display
 
-`/work` reads its outcome odds, payouts and XP from the ten `work_*` typed settings and its response text from the `work_responses` table (schema 9). The three tiers — `normal`, `free`, `high` — are mechanics rather than text and keep English identifiers. The shipped weights are 998/1/1, which reproduce the previous hard-coded one-in-a-thousand chances exactly, and a tier with no stored responses falls back to that tier's `casino.job_*` locale lines, so a guild can override one outcome's flavour without blanking the others. `casino.WORK_DEFAULT_RESPONSE_COUNTS` must stay in step with those keys; a count that outgrew the catalog would render a raw key to a member, and a test enforces it. Response text is operator authored and reaches message content, so it goes through `discord.utils.escape_mentions`, and `{earnings}` is substituted with a literal `str.replace` rather than `str.format` so a stray brace cannot raise mid-command. Weights compete inside a tier, so the chance the dashboard shows is a response's share of its own tier.
+`/work` reads its outcome odds, payouts and XP from the ten `work_*` typed settings and its response text from the `work_responses` table (schema 9). The three tiers — `normal`, `free`, `high` — are mechanics rather than text and keep English identifiers. The shipped weights are 998/1/1, which reproduce the previous hard-coded one-in-a-thousand chances exactly, and a tier the guild has never touched resolves to the shipped rows at `guild_id = 0`, so a guild can override one outcome's flavour without blanking the others. `database.get_work_responses` does that resolution and returns only what is in effect, which is why the dashboard shows one plain editable list: editing or deleting a shipped line adopts that tier into the guild first, in the same transaction. (An earlier version fell back to `casino.job_*` locale lines and kept a `WORK_DEFAULT_RESPONSE_COUNTS` constant in step with them; both are gone, and `scripts/locale_audit.py` lists `casino.job_` as a retired prefix.) Response text is operator authored and reaches message content, so it goes through `discord.utils.escape_mentions`, and `{earnings}` is substituted with a literal `str.replace` rather than `str.format` so a stray brace cannot raise mid-command. Weights compete inside a tier, so the chance the dashboard shows is a response's share of its own tier.
 
 A guild-facing list must never print a raw member id. `cogs.utils.display_member_name` returns the display name when the account resolves and a guild-salted `blake2s` pseudonym when it does not, which is the case for a member who left between the query and the render. Nothing is written and nothing is deleted, so it reverses itself: the real name reappears as soon as the member resolves again. The guild id is the salt, so the same account carries no recognisable label between guilds.
 
@@ -312,6 +312,54 @@ The August 2026 outage was caused by a retired DNS server listed first in Networ
 Manage resolver settings in the active NetworkManager connection and fix the DHCP source; do not make generated `/etc/resolv.conf` immutable. Tailscale DNS acceptance and Tailscale Serve are separate controls.
 
 ## 11. Testing and acceptance
+
+### Verification commands
+
+Run the complete test and syntax checks before committing:
+
+```bash
+python -m unittest discover -s tests -v
+python -m compileall -q . -x './\.git|./venv|./\.venv'
+```
+
+Before deploying a schema change, rehearse it on a copy of the deployed database
+and prove no data was lost:
+
+```bash
+python scripts/rehearse_migration.py /opt/potatobot/economy.db
+```
+
+It copies the database, fingerprints it, migrates the copy, fingerprints again and
+compares, exiting non-zero if any table's row count changes. The copy it leaves
+behind is the rollback artefact. `scripts/db_snapshot.py` does the fingerprint and
+compare steps on their own. Never point either at the live file while the bot runs.
+
+When adding Hungarian localization keys, synchronize empty placeholders into the other general catalogs:
+
+```bash
+python scripts/sync_locale_keys.py
+```
+
+Do not machine-translate the generated empty values.
+
+
+### Running the dashboard locally
+
+When the deployment is unreachable and you only want to look at the control
+plane:
+
+```bash
+python scripts/local_dashboard.py          # then open http://127.0.0.1:5001/
+python scripts/local_dashboard.py --fresh  # re-copy the database first
+```
+
+It copies `economy.db` into `.local-dev/`, migrates and fingerprints the copy so
+a stale database is also a migration rehearsal, builds a stand-in Discord guild
+from the ids in `config.json` so the selectors resolve, and signs you in as the
+host without OAuth. It refuses to start against a proxied or managed environment,
+always binds loopback, and never writes the tracked `config.json`. Everything it
+fakes is printed at startup.
+
 
 The standard local gate is:
 

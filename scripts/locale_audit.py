@@ -452,6 +452,7 @@ COMPOSED_PREFIXES = (
     "casino.job_",
     "shop.items.", "dashboard.action_errors.", "dashboard.themes.",
     "dashboard.languages.",
+    "dashboard.hints.",
     "dashboard.warn_actions.", "dashboard.warn_tags.",
     "moderation.warn_tags.", "moderation.escalation_applied_",
     "moderation.escalation_blocked_",

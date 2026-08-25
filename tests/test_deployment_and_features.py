@@ -2,6 +2,8 @@ import ast
 import json
 import os
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -451,6 +453,51 @@ class LevelRoleTests(unittest.TestCase):
         }
         self.assertEqual({}, offenders)
 
+    def test_no_shipped_text_names_one_guild_s_currency(self):
+        """The bot is universal; the currency's *name* is not.
+
+        "PC" and "Potatocoin" are Potato Empire's coin. They were in 37 strings
+        per catalog — a dashboard label reading "Daily normal PC reward" and a
+        Discord embed reading "1 pull - 5,000 PC" are the same defect as a role
+        id in a default: one guild's fact shipped to every guild. The symbol is
+        the `currency_emoji` setting; the word is "coins" / "érme".
+        """
+        import json
+        import re
+        from pathlib import Path
+
+        import database
+
+        root = Path(__file__).resolve().parents[1]
+        # "PC" as a standalone token, so "PCem" or a stray acronym is not a hit.
+        forbidden = re.compile(r"(?<![A-Za-z])PC(?![A-Za-z])|potatocoin", re.I)
+        offenders = {}
+
+        def walk(node, path, into):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    walk(value, f"{path}.{key}" if path else key, into)
+            elif isinstance(node, str) and forbidden.search(node):
+                into.append(path)
+
+        for catalog in sorted((root / "locales").glob("*.json")):
+            found = []
+            walk(json.loads(catalog.read_text(encoding="utf-8")), "", found)
+            if found:
+                offenders[catalog.name] = found
+
+        shipped_work = [
+            message for _tier, message in database.WORK_DEFAULT_RESPONSES
+            if forbidden.search(message)
+        ]
+        if shipped_work:
+            offenders["WORK_DEFAULT_RESPONSES"] = shipped_work
+
+        self.assertEqual(
+            {}, offenders,
+            "name the currency 'coins'/'érme' and let currency_emoji carry the symbol",
+        )
+
     def test_no_shipped_text_carries_a_discord_snowflake(self):
         """The same rule, widened to everything else that ships.
 
@@ -547,8 +594,40 @@ class RegistryPresentationTests(unittest.TestCase):
                     if definition.group == "everydle"}
         self.assertTrue(casino and everydle)
         self.assertEqual(set(), casino & everydle)
-        self.assertTrue(all(key.startswith("casino_") for key in casino))
-        self.assertTrue(all(key.startswith("everydle_") for key in everydle))
+        # The group holds a master plus its games: `casino` and `casino_*`.
+        self.assertTrue(all(key == "casino" or key.startswith("casino_")
+                            for key in casino))
+        self.assertTrue(all(key == "everydle" or key.startswith("everydle_")
+                            for key in everydle))
+
+    def test_each_game_family_has_one_master_and_the_rest_are_children(self):
+        """Eight near-identical games in the flat Features list pushed everything
+        else off it, so each family collapsed to one master toggle."""
+        for parent in ("casino", "everydle"):
+            with self.subTest(parent=parent):
+                self.assertIn(parent, FEATURE_DEFINITIONS)
+                self.assertIsNone(FEATURE_DEFINITIONS[parent].parent,
+                                  "a master is not itself a child")
+                children = [key for key, definition in FEATURE_DEFINITIONS.items()
+                            if definition.parent == parent]
+                self.assertGreater(len(children), 1)
+                for child in children:
+                    # Depending on the parent is what makes the existing
+                    # transitive cascade switch the children off with it; `parent`
+                    # alone is only a rendering hint.
+                    self.assertIn(parent, FEATURE_DEFINITIONS[child].dependencies)
+
+    def test_a_child_renders_on_a_category_named_after_its_parent(self):
+        """The convention the dashboard relies on, and the reason it is one name
+        rather than two that can disagree."""
+        parents = {definition.parent for definition in FEATURE_DEFINITIONS.values()
+                   if definition.parent}
+        html = (ROOT / "dashboard" / "index.html").read_text(encoding="utf-8")
+        for parent in sorted(parents):
+            with self.subTest(parent=parent):
+                self.assertIn(f'data-category="{parent}"', html,
+                              "a parent needs a settings page to render its "
+                              "children on")
 
     def test_channel_settings_declare_a_usable_channel_kind(self):
         channel_types = {

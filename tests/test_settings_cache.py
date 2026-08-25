@@ -9,6 +9,9 @@ line away from `is_enabled`, which must fail the other way.
 
 import ast
 import asyncio
+import json
+import subprocess
+import shutil
 import os
 import sqlite3
 import tempfile
@@ -558,3 +561,168 @@ class IgnoredUsersComparisonTests(unittest.TestCase):
         self.assertNotIn("if member.id in ignored_users: continue\n"
                          "                result", source)
         self.assertIn("int(entry) for entry in", source)
+
+
+class EverySettingHasAReaderTests(unittest.TestCase):
+    """A registered setting nothing reads is a form that changes nothing.
+
+    Six `gacha_*` settings were a name-for-name duplicate of the banner config —
+    the runtime read the banner, the Economy page edited the copy, and the two
+    could disagree indefinitely without either being wrong. Nothing detected it
+    because a dead setting still validates, still saves, still audits and still
+    renders a perfectly good input box.
+    """
+
+    #: Generated families whose members are read by a computed key rather than by
+    #: their literal name, so a text search cannot find them.
+    COMPUTED_PREFIXES = (
+        "shop_price_",              # database.get_shop_price, by item key
+        "reward_",                  # database.get_reward, by activity
+        "warn_threshold_", "warn_action_", "warn_timeout_minutes_",
+        "work_tier_", "work_xp_",
+    )
+
+    def test_every_setting_is_read_somewhere(self):
+        searched = []
+        for path in (ROOT.glob("*.py"), (ROOT / "cogs").glob("*.py"),
+                     (ROOT / "dashboard").glob("*.js"),
+                     (ROOT / "dashboard").glob("*.html"),
+                     (ROOT / "scripts").glob("*.py")):
+            for candidate in path:
+                if candidate.name in ("settings_registry.py",):
+                    continue
+                searched.append(candidate.read_text(encoding="utf-8"))
+        haystack = "\n".join(searched)
+
+        orphans = sorted(
+            key for key in SETTING_DEFINITIONS
+            if not key.startswith(self.COMPUTED_PREFIXES)
+            and key not in haystack
+        )
+        self.assertEqual(
+            [], orphans,
+            "these settings are editable and read by nothing; delete them or "
+            "wire them up",
+        )
+
+    def test_the_computed_families_are_actually_generated(self):
+        """The allowlist above must not become a place to hide a dead setting.
+
+        Every prefix it exempts has to match more than one key — a prefix
+        matching one key is that key being excused by name.
+        """
+        for prefix in self.COMPUTED_PREFIXES:
+            with self.subTest(prefix=prefix):
+                matches = [k for k in SETTING_DEFINITIONS if k.startswith(prefix)]
+                self.assertGreater(len(matches), 1, prefix)
+
+
+class RowEditorReportsCleanTests(unittest.TestCase):
+    """A shaped-JSON editor must not mark itself unsaved the moment it opens.
+
+    Three asymmetries between what the editor writes and what the API sends did
+    exactly that, and one of them was worse than cosmetic: an unset picker was
+    serialised as the id `"0"`, which the API rejects as not a snowflake — and it
+    rejects the *whole* patch, so one half-filled row made every change in the
+    category fail to save while the section stayed marked unsaved.
+
+    Driven through Node because the logic under test is JavaScript. No DOM is
+    involved: the shape spec's `unpack`/`pack` pair and the required-column rule
+    are plain data.
+    """
+
+    def _node(self):
+        return shutil.which("node")
+
+    def test_no_shape_reports_a_change_it_did_not_make(self):
+        node = self._node()
+        if node is None:
+            self.skipTest("node is not installed")
+
+        import dashboard_api
+
+        source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        start = source.index("const JSON_ROW_SHAPES = {")
+        spec = source[start:source.index("\n};", start) + 3]
+
+        # One representative stored value per shape, wired the way the GET wires
+        # it, so the fixture exercises the real transform rather than a guess.
+        stored = {
+            "game_roles": {"LoL": {"id": 1420070400000000001, "emoji": "x"}},
+            "level_roles": {"5": 1420070400000000002},
+            "lfg_channels": {"1420070400000000003": 1420070400000000004},
+            "factions": {"alpha": {"leader_role_id": 1420070400000000005,
+                                   "manageable_ids": [1420070400000000006,
+                                                      1420070400000000002]}},
+        }
+        wired = {key: dashboard_api._wire_value(SETTING_DEFINITIONS[key], value)
+                 for key, value in stored.items()}
+        shape_of = {key: SETTING_DEFINITIONS[key].json_shape for key in stored}
+
+        driver = "\n".join([
+            spec,
+            f"const wired = {json.dumps(wired)};",
+            f"const SHAPE_OF = {json.dumps(shape_of)};",
+            (ROOT / "tests" / "js" / "row_editor_roundtrip.js").read_text(encoding="utf-8"),
+        ])
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                         encoding="utf-8") as handle:
+            handle.write(driver)
+            path = handle.name
+        try:
+            result = subprocess.run([node, path], capture_output=True, text=True)
+        finally:
+            os.unlink(path)
+        self.assertEqual(0, result.returncode,
+                         result.stdout + result.stderr)
+
+    def test_the_required_columns_are_declared(self):
+        """The rule only works if the columns that must hold a value say so."""
+        source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        spec = source[source.index("const JSON_ROW_SHAPES = {"):]
+        spec = spec[:spec.index("\n};")]
+        # One per shape: the role a menu grants, the role a level grants, the
+        # role an LFG channel pings, the role that leads a faction.
+        self.assertEqual(4, spec.count("required: true"))
+
+
+class NavigationReachabilityTests(unittest.TestCase):
+    """A page that exists must be reachable from the sidebar.
+
+    `updateNavigation` hides a `.nav-item[data-category]` whose category owns no
+    settings. The Builders item carried `data-category="builders"` while no
+    setting declares that category, so it was hidden on every load and the embed,
+    rules and panel builders were unreachable — they read as "missing from the
+    dashboard" while being fully implemented.
+    """
+
+    def setUp(self):
+        self.html = (ROOT / "dashboard" / "index.html").read_text(encoding="utf-8")
+        self.categories = {definition.category
+                           for definition in SETTING_DEFINITIONS.values()}
+
+    def test_a_page_owning_a_section_is_not_gated_on_settings(self):
+        import re
+
+        offenders = []
+        for page, category in re.findall(
+            r'data-page="([a-z-]+)"(?:\s+data-category="([a-z]+)")?', self.html
+        ):
+            if not category:
+                continue
+            owns_section = f'id="{page}"' in self.html
+            if owns_section and category not in self.categories:
+                offenders.append(page)
+        self.assertEqual(
+            [], offenders,
+            "these pages render from their own section but are hidden for "
+            "owning no settings; drop their data-category",
+        )
+
+    def test_every_settings_category_has_a_nav_entry(self):
+        """The mirror image: a category nothing links to is unreachable too."""
+        import re
+
+        linked = set(re.findall(r'data-category="([a-z]+)"', self.html))
+        self.assertEqual(set(), self.categories - linked,
+                         "a settings category with no sidebar entry")

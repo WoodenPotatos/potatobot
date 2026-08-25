@@ -70,6 +70,15 @@ class FeatureDefinition:
     # undifferentiated block. Each value needs a
     # `dashboard.feature_groups.<group>` locale key.
     group: str = "other"
+    # A feature that is a sub-toggle of another. It renders on the parent's own
+    # settings page rather than in the flat Features list, because eight
+    # near-identical games — three Everydle, five casino — pushed everything else
+    # off the screen there.
+    #
+    # The convention is deliberate and load-bearing: **the settings category the
+    # children render on is the parent's key.** So `parent="everydle"` renders on
+    # the `everydle` category page. One name instead of two that can disagree.
+    parent: str | None = None
 
 
 @dataclass(frozen=True)
@@ -149,7 +158,7 @@ class SettingDefinition:
 
 
 def _feature(key: str, group: str, *, dependencies: tuple[str, ...] = (),
-             default: bool = True,
+             default: bool = True, parent: str | None = None,
              permissions: tuple[str, ...] = ()) -> FeatureDefinition:
     return FeatureDefinition(
         key=key,
@@ -157,6 +166,7 @@ def _feature(key: str, group: str, *, dependencies: tuple[str, ...] = (),
         dependencies=dependencies,
         default=default,
         group=group,
+        parent=parent,
         required_discord_permissions=permissions,
     )
 
@@ -192,6 +202,16 @@ JSON_SHAPE_SNOWFLAKE_FIELDS = {
     JSON_SHAPE_FACTIONS: ("leader_role_id", "manageable_ids"),
 }
 
+# Every field a shape's entry has, with what an absent one stands for. The row
+# editor always writes the full set, so a stored entry that is missing one would
+# differ from what the editor renders the moment the form opened — and the form
+# would report itself unsaved with nothing touched. Filling the gap here means
+# both sides of that comparison describe the same entry.
+JSON_SHAPE_ENTRY_FIELDS = {
+    JSON_SHAPE_ROLE_MENU: {"id": None, "emoji": ""},
+    JSON_SHAPE_FACTIONS: {"leader_role_id": None, "manageable_ids": []},
+}
+
 
 def wire_json_shape(shape: str, value):
     """Stringify every snowflake inside a shaped JSON value.
@@ -202,22 +222,30 @@ def wire_json_shape(shape: str, value):
     if shape not in JSON_SHAPE_SNOWFLAKE_FIELDS or not isinstance(value, dict):
         return value
     fields = JSON_SHAPE_SNOWFLAKE_FIELDS[shape]
+    defaults = JSON_SHAPE_ENTRY_FIELDS.get(shape, {})
     wired = {}
     for key, entry in value.items():
         if fields is None:
             wired[key] = None if entry is None else str(entry)
             continue
         if not isinstance(entry, dict):
-            wired[key] = entry
-            continue
-        updated = dict(entry)
+            # A legacy bare id. The editor renders it as a full entry, so send
+            # one, or the form is dirty the instant it opens.
+            entry = {next(iter(defaults), "id"): entry}
+        updated = {**defaults, **entry}
         for field in fields:
             if field not in updated:
                 continue
             held = updated[field]
-            updated[field] = ([str(item) for item in held]
-                              if isinstance(held, list)
-                              else (None if held is None else str(held)))
+            if isinstance(held, list):
+                # Sorted, because the editor reads a role list back in the
+                # picker's own order and the validator stores it sorted. Sending
+                # it any other way makes the form dirty on open for a value that
+                # was stored before either did so.
+                updated[field] = [str(item) for item in
+                                  sorted(held, key=lambda role: int(role))]
+            else:
+                updated[field] = None if held is None else str(held)
         wired[key] = updated
     return wired
 
@@ -260,21 +288,36 @@ FEATURE_DEFINITIONS = {
         _feature("rentals", "economy",
                  dependencies=("economy", "shop", "tickets"),
                  permissions=("manage_expressions",)),
-        _feature("casino_blackjack", "casino", dependencies=("economy",),
+        _feature("casino", "casino", dependencies=("economy",),
                  permissions=("embed_links",)),
-        _feature("casino_dice", "casino", dependencies=("economy",),
+        _feature("casino_blackjack", "casino", parent="casino",
+                 dependencies=("economy", "casino"),
                  permissions=("embed_links",)),
-        _feature("casino_roulette", "casino", dependencies=("economy",),
+        _feature("casino_dice", "casino", parent="casino",
+                 dependencies=("economy", "casino"),
                  permissions=("embed_links",)),
-        _feature("casino_slots", "casino", dependencies=("economy",),
+        _feature("casino_roulette", "casino", parent="casino",
+                 dependencies=("economy", "casino"),
                  permissions=("embed_links",)),
-        _feature("casino_mines", "casino", dependencies=("economy",),
+        _feature("casino_slots", "casino", parent="casino",
+                 dependencies=("economy", "casino"),
                  permissions=("embed_links",)),
-        _feature("everydle_loldle", "everydle", dependencies=("economy",),
+        _feature("casino_mines", "casino", parent="casino",
+                 dependencies=("economy", "casino"),
+                 permissions=("embed_links",)),
+        # One master toggle per family of near-identical games, with the games
+        # themselves as sub-toggles on the master's own settings page. Eight of
+        # them in a flat list pushed everything else off the Features page.
+        _feature("everydle", "everydle", dependencies=("economy",),
                  permissions=("embed_links", "attach_files")),
-        _feature("everydle_valdle", "everydle", dependencies=("economy",),
+        _feature("everydle_loldle", "everydle", parent="everydle",
+                 dependencies=("economy", "everydle"),
                  permissions=("embed_links", "attach_files")),
-        _feature("everydle_dbdle", "everydle", dependencies=("economy",),
+        _feature("everydle_valdle", "everydle", parent="everydle",
+                 dependencies=("economy", "everydle"),
+                 permissions=("embed_links", "attach_files")),
+        _feature("everydle_dbdle", "everydle", parent="everydle",
+                 dependencies=("economy", "everydle"),
                  permissions=("embed_links", "attach_files")),
         _feature("music", "media",
                  permissions=("connect", "speak", "embed_links")),
@@ -430,10 +473,6 @@ SETTING_DEFINITIONS = {
         # could not set at all.
         _setting("top_ranker_role", "community", "levels", SettingValueType.ROLE,
                  None, feature="levels", legacy_path=("roles", "top_ranker"), assignable_role=True),
-        _setting("general_channels", "community", "general", SettingValueType.CHANNEL_LIST,
-                 [], feature="general", legacy_path=("channels", "general"),
-                 channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
         _setting("join_channel", "community", "announcements", SettingValueType.CHANNEL,
                  None, feature="member_announcements", legacy_path=("channels", "join"),
                  channel_types=TEXT_CHANNEL_TYPES,
@@ -446,7 +485,7 @@ SETTING_DEFINITIONS = {
                  None, feature="member_announcements", legacy_path=("channels", "booster"),
                  channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
-        _setting("everydle_channel", "games", "everydle", SettingValueType.CHANNEL,
+        _setting("everydle_channel", "everydle", "everydle", SettingValueType.CHANNEL,
                  None, legacy_path=("channels", "everydle"),
                  channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
@@ -592,19 +631,6 @@ SETTING_DEFINITIONS = {
                  50, feature="economy", minimum=0, maximum=1000000),
         _setting("work_xp_high", "economy", "work", SettingValueType.INTEGER,
                  5, feature="economy", minimum=0, maximum=1000000),
-        _setting("gacha_roll_cost", "economy", "gacha", SettingValueType.INTEGER,
-                 5000, feature="shop_gacha", minimum=1, maximum=100000000),
-        _setting("gacha_hard_pity", "economy", "gacha", SettingValueType.INTEGER,
-                 100, feature="shop_gacha", minimum=1, maximum=1000),
-        _setting("gacha_soft_pity_start", "economy", "gacha", SettingValueType.INTEGER,
-                 75, feature="shop_gacha", minimum=0, maximum=999),
-        _setting("gacha_soft_pity_multiplier", "economy", "gacha", SettingValueType.INTEGER,
-                 3, feature="shop_gacha", minimum=1, maximum=20),
-        _setting("gacha_four_star_guarantee_interval", "economy", "gacha",
-                 SettingValueType.INTEGER, 10, feature="shop_gacha",
-                 minimum=1, maximum=1000),
-        _setting("gacha_duplicate_percent", "economy", "gacha", SettingValueType.INTEGER,
-                 10, feature="shop_gacha", minimum=0, maximum=100),
     )
 }
 
@@ -624,7 +650,11 @@ for _activity_key, (_coin, _xp) in {
     "chat_message": (5, 2), "voice_minute_normal": (5, 5),
     "voice_minute_premium": (10, 10),
 }.items():
-    _category = "games" if _activity_key.startswith(("loldle", "valdle", "dbdle")) else "economy"
+    # Everydle's rewards belong with Everydle, not with a "Games" page that also
+    # holds the general other-games channel — the two had nothing to do with each
+    # other beyond both being games.
+    _category = ("everydle" if _activity_key.startswith(("loldle", "valdle", "dbdle"))
+                 else "economy")
     for _reward_type, _default in (("coin", _coin), ("xp", _xp)):
         definition = _setting(
             f"reward_{_activity_key}_{_reward_type}", _category, "rewards",
@@ -789,9 +819,13 @@ def _validated_factions(value):
         managed = entry.get("manageable_ids") or []
         if not isinstance(managed, list):
             raise ValueError("a faction's managed roles must be a list")
+        # Sorted, and deduplicated: a faction's managed roles are a set, and the
+        # editor reads them back in the picker's own order (by role position),
+        # so an unsorted stored list compared unequal to what the form rendered
+        # and the section reported itself unsaved with nothing touched.
         normalised[key.strip()] = {
             "leader_role_id": _snowflake(entry.get("leader_role_id")),
-            "manageable_ids": [_snowflake(role) for role in managed],
+            "manageable_ids": sorted({_snowflake(role) for role in managed}),
         }
     return normalised
 

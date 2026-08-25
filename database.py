@@ -1830,6 +1830,7 @@ def get_feature_states(guild_id: int) -> dict[str, dict]:
             "apply_behavior": definition.apply_behavior.value,
             "locale_key": definition.locale_key,
             "group": definition.group,
+            "parent": definition.parent,
             "value_type": definition.value_type.__name__,
             "sensitive": definition.sensitive,
             "required_discord_permissions": list(
@@ -2866,7 +2867,8 @@ def get_user_profile(user_id: int):
     try:
         with get_connection() as conn:
             cursor = conn.execute("""
-                SELECT level, xp, balance, bj_wins, bj_losses, streak_count, last_streak_update, rob_bonus 
+                SELECT level, xp, balance, bj_wins, bj_losses, streak_count,
+                       last_streak_update
                 FROM users WHERE user_id = ?
             """, (user_id,))
             return cursor.fetchone()
@@ -3621,13 +3623,19 @@ def validate_work_weight(weight) -> int:
 
 
 def get_work_responses(guild_id: int) -> list[dict]:
-    """This guild's `/work` responses and the installation defaults behind them.
+    """The `/work` responses that are actually in effect for this guild.
 
-    Each row carries a `scope`: `guild` for the guild's own, `default` for the
-    shipped ones at WORK_DEFAULT_GUILD_ID. Resolution is per tier — a guild that
-    writes its own "big payday" lines replaces the defaults for that tier only
-    and keeps them for the other two. The caller decides which set to draw from;
-    both are returned so the dashboard can show what is actually in effect.
+    Resolved **per tier**: a guild that owns rows for a tier gets those, and a
+    tier it has never touched falls back to the shipped set at
+    WORK_DEFAULT_GUILD_ID. Writing your own "big payday" lines therefore replaces
+    that tier only and keeps the other two.
+
+    Both sets used to be returned together, which meant the dashboard showed a
+    guild's own lines *and* the shipped ones for the same tier, half of them
+    read-only with a badge — a list of things that look configured but are not.
+    Returning only what is in effect makes the page a plain list of what `/work`
+    will say, and each row's `scope` says whether editing it will copy it into
+    this guild first.
     """
     with get_connection() as conn:
         rows = conn.execute(
@@ -3636,11 +3644,17 @@ def get_work_responses(guild_id: int) -> list[dict]:
             "ORDER BY guild_id DESC, tier, response_id",
             (int(guild_id), WORK_DEFAULT_GUILD_ID),
         ).fetchall()
+    guild_id = int(guild_id)
+    owned_tiers = {row[1] for row in rows if row[6] == guild_id}
     return [{"response_id": row[0], "tier": row[1], "weight": row[2],
              "message": row[3], "enabled": bool(row[4]), "revision": row[5],
              "scope": ("default" if row[6] == WORK_DEFAULT_GUILD_ID
-                       and int(guild_id) != WORK_DEFAULT_GUILD_ID else "guild")}
-            for row in rows]
+                       and guild_id != WORK_DEFAULT_GUILD_ID else "guild")}
+            for row in rows
+            # A shipped row for a tier this guild owns is not in effect, so it is
+            # not shown and not drawn from.
+            if row[6] == guild_id or row[1] not in owned_tiers
+            or guild_id == WORK_DEFAULT_GUILD_ID]
 
 
 def seed_default_work_responses(conn) -> int:
@@ -3700,6 +3714,78 @@ def create_work_response(guild_id: int, actor_id: int, tier: str, message: str,
             "message": message, "enabled": enabled, "revision": 1}
 
 
+def _adopt_for_shipped_response(conn, guild_id: int, actor_id: int,
+                                response_id: int) -> int:
+    """Resolve a response id the guild may not own yet.
+
+    If it names a shipped row, that row's whole tier is adopted into this guild
+    and the id of the guild's copy is returned. If it names one of the guild's
+    own rows, or nothing at all, the id comes back unchanged and the caller's
+    ordinary guild-scoped lookup decides.
+
+    The tier is read from the shipped row rather than taken from the caller, so a
+    request cannot adopt a tier it did not name.
+    """
+    shipped = conn.execute(
+        "SELECT tier FROM work_responses WHERE guild_id = ? AND response_id = ?",
+        (WORK_DEFAULT_GUILD_ID, int(response_id)),
+    ).fetchone()
+    if shipped is None:
+        return int(response_id)
+    adopted = adopt_work_tier(conn, guild_id, actor_id, shipped[0])
+    return adopted.get(int(response_id), int(response_id))
+
+
+def adopt_work_tier(conn, guild_id: int, actor_id: int, tier: str) -> dict:
+    """Copy a tier's shipped responses into this guild, once, on the caller's
+    connection.
+
+    The shipped set lives at `WORK_DEFAULT_GUILD_ID` and is protected by the same
+    guild filter that isolates one guild from another — so an operator could see
+    a default but never edit or delete it, and the page had to render it
+    read-only with a badge and offer a separate "copy them all" button. Presented
+    that way it read as something broken rather than as a starting point.
+
+    This adopts **one tier**, because `cogs.casino.work_response_text` already
+    resolves per tier: adopting `normal` leaves `free` and `high` still answering
+    from the shipped set, so a guild that only wants its own big-payday lines
+    gets exactly that.
+
+    Returns a map from the shipped `response_id` to the guild's new one, so the
+    caller can apply an edit to the copy the operator was actually looking at.
+    Idempotent by absence: a tier the guild already owns is left alone.
+    """
+    tier = validate_work_tier(tier)
+    owned = conn.execute(
+        "SELECT COUNT(*) FROM work_responses WHERE guild_id = ? AND tier = ?",
+        (int(guild_id), tier),
+    ).fetchone()[0]
+    if owned:
+        return {}
+    shipped = conn.execute(
+        "SELECT response_id, message, weight, enabled FROM work_responses "
+        "WHERE guild_id = ? AND tier = ? ORDER BY response_id",
+        (WORK_DEFAULT_GUILD_ID, tier),
+    ).fetchall()
+    timestamp = datetime.now(timezone.utc).isoformat()
+    adopted = {}
+    for response_id, message, weight, enabled in shipped:
+        cursor = conn.execute(
+            "INSERT INTO work_responses (guild_id, tier, message, weight, "
+            "enabled, revision, updated_by, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+            (int(guild_id), tier, message, weight, enabled,
+             int(actor_id), timestamp),
+        )
+        adopted[int(response_id)] = int(cursor.lastrowid)
+    if adopted:
+        write_settings_audit(
+            conn, guild_id, actor_id, "work_response.adopt_tier", tier,
+            None, {"tier": tier, "adopted": len(adopted)},
+        )
+    return adopted
+
+
 def update_work_response(guild_id: int, actor_id: int, response_id: int,
                          tier: str, message: str, weight: int, enabled: bool,
                          expected_revision: int) -> dict:
@@ -3711,6 +3797,13 @@ def update_work_response(guild_id: int, actor_id: int, response_id: int,
     timestamp = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        # Editing a shipped response adopts its whole tier into this guild first
+        # and then edits the copy, in this transaction, so a half-adopted tier
+        # cannot exist. The operator sees one plain editable list; what actually
+        # happens is a copy-on-write per tier.
+        resolved = _adopt_for_shipped_response(conn, guild_id, actor_id, response_id)
+        adopted = resolved != int(response_id)
+        response_id = resolved
         row = conn.execute(
             "SELECT tier, weight, message, enabled, revision FROM work_responses "
             "WHERE guild_id = ? AND response_id = ?",
@@ -3719,6 +3812,11 @@ def update_work_response(guild_id: int, actor_id: int, response_id: int,
         if row is None:
             conn.rollback()
             raise LookupError("work response not found")
+        if adopted:
+            # The copy starts at revision 1 whatever the shipped row said, so an
+            # edit arriving with the shipped revision must not read as a
+            # conflict.
+            expected_revision = row[4]
         if int(expected_revision) != row[4]:
             conn.rollback()
             raise RevisionConflictError("work response revision conflict")
@@ -3746,6 +3844,13 @@ def delete_work_response(guild_id: int, actor_id: int, response_id: int,
                          expected_revision: int) -> dict:
     with get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        # Deleting a shipped response means "not that line, in this guild", which
+        # needs the guild to own the tier first — otherwise the row is not the
+        # guild's to remove and the tier keeps resolving to the shipped set,
+        # including the line just deleted.
+        resolved = _adopt_for_shipped_response(conn, guild_id, actor_id, response_id)
+        adopted = resolved != int(response_id)
+        response_id = resolved
         row = conn.execute(
             "SELECT tier, weight, message, enabled, revision FROM work_responses "
             "WHERE guild_id = ? AND response_id = ?",
@@ -3754,6 +3859,10 @@ def delete_work_response(guild_id: int, actor_id: int, response_id: int,
         if row is None:
             conn.rollback()
             raise LookupError("work response not found")
+        # A copy adopted a moment ago carries a revision the client never saw, so
+        # comparing against what it sent would be a conflict every time.
+        if adopted:
+            expected_revision = row[4]
         if int(expected_revision) != row[4]:
             conn.rollback()
             raise RevisionConflictError("work response revision conflict")
@@ -3853,6 +3962,57 @@ def get_gacha_banner(guild_id: int, banner_key: str = DEFAULT_GACHA_BANNER_KEY) 
                 "is_default": True,
                 "config": json.loads(json.dumps(DEFAULT_GACHA_CONFIG))}
     return _banner_row_dict(row)
+
+
+def shipped_reward_table() -> dict:
+    """The reward table a fresh installation ships with, deep-copied."""
+    return json.loads(json.dumps(DEFAULT_GACHA_CONFIG["rewards"]))
+
+
+def missing_shipped_rewards(config_value: dict) -> dict:
+    """The shipped rewards a stored banner's table does not have, per tier.
+
+    A stored banner is frozen at the shipped set of the day it was first saved,
+    and nothing has ever reconciled the two — so when a reward is added to
+    `DEFAULT_GACHA_CONFIG`, every already-saved banner keeps the old table and
+    can never award it. `streak_freeze` reached the live installation's shop and
+    its 4-star tier and was unobtainable from its actual banner for exactly that
+    reason.
+
+    Matched on the reward key alone: a key is what a pull row records and what a
+    locale entry is named after, so two entries with one key would double its odds
+    and make the displayed chance a lie. An operator who deleted a shipped reward
+    on purpose will be offered it again — which is why this is a separate action
+    from a reset rather than something that happens on save.
+    """
+    stored = config_value.get("rewards") or {}
+    missing = {}
+    for tier, entries in shipped_reward_table().items():
+        have = {entry.get("key") for entry in stored.get(tier, [])
+                if isinstance(entry, dict)}
+        absent = [entry for entry in entries if entry["key"] not in have]
+        if absent:
+            missing[tier] = absent
+    return missing
+
+
+def new_banner_config() -> dict:
+    """The config a freshly created banner starts with.
+
+    Everything except the reward table comes from the shipped defaults, because
+    the cost and the pity numbers are sensible starting points that an operator
+    would otherwise retype. The reward table does **not**: copying eighteen
+    shipped rewards means the first thing you do with a new banner is prune it.
+
+    It cannot be literally empty — `_validated_gacha_config` requires at least
+    one enabled reward per tier, because a tier can still be rolled and must have
+    something to award — so each tier gets one small coin reward to replace.
+    """
+    config = json.loads(json.dumps(DEFAULT_GACHA_CONFIG))
+    placeholder = {"key": "coins_250", "kind": "coins", "amount": 250,
+                   "weight": 1, "enabled": True}
+    config["rewards"] = {tier: [dict(placeholder)] for tier in ("3", "4", "5")}
+    return config
 
 
 def create_gacha_banner(guild_id: int, actor_id: int, banner_key: str,

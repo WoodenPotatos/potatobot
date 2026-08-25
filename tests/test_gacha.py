@@ -560,3 +560,84 @@ class GachaBannerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BannerRewardReconciliationTests(unittest.TestCase):
+    """A stored banner is frozen at the shipped rewards of the day it was saved.
+
+    Nothing ever reconciled the two, so a reward added to `DEFAULT_GACHA_CONFIG`
+    could never reach a banner already in use — which is how `streak_freeze`
+    reached the live installation's shop and its shipped 4-star tier while being
+    unobtainable from the banner that guild actually pulls on.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "gacha.db")
+        database.initialize_database()
+        database.register_guild(42, "Guild")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _saved_without(self, key):
+        config = json.loads(json.dumps(database.DEFAULT_GACHA_CONFIG))
+        for tier, entries in config["rewards"].items():
+            config["rewards"][tier] = [e for e in entries if e["key"] != key]
+        standard = next(b for b in database.list_gacha_banners(42)
+                        if b["banner_key"] == "standard")
+        database.set_gacha_banner(42, 7, True, config, standard["revision"],
+                                  "standard")
+        return database.get_gacha_banner(42, "standard")
+
+    def test_a_reward_absent_from_a_stored_banner_is_reported(self):
+        banner = self._saved_without("streak_freeze")
+        missing = database.missing_shipped_rewards(banner["config"])
+        found = [entry["key"] for entries in missing.values() for entry in entries]
+        self.assertEqual(["streak_freeze"], found)
+
+    def test_a_banner_holding_everything_reports_nothing(self):
+        self.assertEqual(
+            {}, database.missing_shipped_rewards(
+                {"rewards": database.shipped_reward_table()}))
+
+    def test_adding_the_missing_rewards_produces_a_valid_config(self):
+        """The reconciliation has to survive the validator, or it is useless."""
+        banner = self._saved_without("streak_freeze")
+        config = banner["config"]
+        for tier, entries in database.missing_shipped_rewards(config).items():
+            config["rewards"][tier].extend(entries)
+        # Saving it is the real test: the validator rejects a duplicate key, and
+        # a vault whose amount disagrees with the catalog.
+        database.set_gacha_banner(42, 7, True, config, banner["revision"],
+                                  "standard")
+        after = database.get_gacha_banner(42, "standard")
+        self.assertEqual({}, database.missing_shipped_rewards(after["config"]))
+
+    def test_it_matches_on_the_key_alone(self):
+        """A key is what a pull row records, so two entries with one key would
+        double its odds and make the displayed chance a lie."""
+        banner = self._saved_without("streak_freeze")
+        config = banner["config"]
+        # Present under the same key but with a different weight: still present.
+        config["rewards"]["4"].append(
+            {"key": "streak_freeze", "kind": "item", "amount": 1, "weight": 99})
+        self.assertEqual({}, database.missing_shipped_rewards(config))
+
+    def test_a_new_banner_starts_with_one_placeholder_per_tier(self):
+        """Copying eighteen shipped rewards means the first thing an operator
+        does with a new banner is prune it. It cannot be literally empty, because
+        a tier can still be rolled and must have something to award."""
+        config = database.new_banner_config()
+        for tier in ("3", "4", "5"):
+            with self.subTest(tier=tier):
+                self.assertEqual(1, len(config["rewards"][tier]))
+        # The scalars are still the shipped starting points.
+        self.assertEqual(database.DEFAULT_GACHA_CONFIG["cost"], config["cost"])
+        self.assertEqual(database.DEFAULT_GACHA_CONFIG["tiers"], config["tiers"])
+        # And it validates, so a new banner is saveable straight away.
+        database.create_gacha_banner(42, 7, "summer", "Summer", config)
+        created = database.get_gacha_banner(42, "summer")
+        self.assertFalse(created["enabled"], "a new banner starts disabled")

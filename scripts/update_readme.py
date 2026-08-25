@@ -70,14 +70,16 @@ def render_install() -> str:
         "python3 -m venv venv",
         "./venv/bin/python -m pip install --requirement requirements.lock",
         "cp .env.example .env        # add your bot token",
-        "cp config.json.example config.json",
         "POTATOBOT_DB_PATH=$PWD/economy.db ./venv/bin/python update_db.py",
         "./venv/bin/python main.py",
         "```",
         "",
-        "Requires Python 3.12–3.14. The full walkthrough — Discord application,"
-        " intents, OAuth, HTTPS, systemd and the guild setup check — is in"
-        " [docs/installation.md](docs/installation.md).",
+        "Runs on a headless Linux server under systemd. Requires Python"
+        " 3.12–3.14. `config.json` is optional: it is only a fallback for a"
+        " setting an installation has never saved, and"
+        " `python scripts/import_config.py` retires it. The full walkthrough —"
+        " Discord application, intents, OAuth, HTTPS, systemd and the guild setup"
+        " check — is in [docs/installation.md](docs/installation.md).",
     ])
 
 

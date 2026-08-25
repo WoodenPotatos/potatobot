@@ -1422,11 +1422,17 @@ def _validate_work_response(payload: dict) -> dict:
 
 @app.route("/api/guilds/<int:guild_id>/work-responses", methods=["GET", "POST"])
 def guild_work_responses(guild_id):
-    """Per-guild `/work` response pool.
+    """The `/work` responses in effect for this guild.
 
-    A guild with no rows is not an error: the command falls back to the shipped
-    locale responses per tier, so a guild can override the flavour text of one
-    outcome without having to author all three.
+    Resolved per tier by `database.get_work_responses`: the guild's own rows for
+    a tier it owns, the shipped rows at guild 0 otherwise — so a guild can
+    override the flavour text of one outcome without authoring all three. Each
+    row carries a `scope` saying which it is; a `default` row is edited and
+    deleted through the same routes as any other, and the write adopts its tier
+    into this guild first.
+
+    (The fallback used to be locale lines. It has been database rows since the
+    `/work` pool moved into `work_responses`.)
     """
     if not is_guild_authorized(guild_id):
         return unauthorized_response()
@@ -1509,8 +1515,19 @@ def guild_gacha(guild_id):
     if not is_guild_authorized(guild_id):
         return unauthorized_response()
     if request.method == "GET":
-        return jsonify({"status": "success", "data": database.run_read_sync(
-            database.list_gacha_banners, guild_id)})
+        banners = database.run_read_sync(database.list_gacha_banners, guild_id)
+        # A stored banner is frozen at the shipped reward set of the day it was
+        # first saved, and nothing has ever reconciled the two — so a reward added
+        # to the shipped table can never reach it. Each banner is told what it is
+        # missing, and the shipped table travels once so "reset to defaults" does
+        # not need a second request.
+        for banner in banners:
+            banner["missing_rewards"] = database.missing_shipped_rewards(
+                banner.get("config") or {})
+        return jsonify({"status": "success", "data": {
+            "banners": banners,
+            "shipped_rewards": database.shipped_reward_table(),
+        }})
     try:
         payload = require_json_object()
         require_exact_keys(
@@ -1559,7 +1576,7 @@ def create_guild_gacha_banner(guild_id):
             raise RequestValidationError("dashboard.errors.banner_name_invalid")
         config_value = payload.get("config")
         if config_value is None:
-            config_value = json.loads(json.dumps(database.DEFAULT_GACHA_CONFIG))
+            config_value = database.new_banner_config()
         elif not isinstance(config_value, dict):
             raise RequestValidationError("dashboard.errors.config_not_object")
         result = database.create_gacha_banner(
