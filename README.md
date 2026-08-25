@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.1.0-beta.2** &nbsp;·&nbsp; channel `beta`
+**Version 2.2.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -200,14 +200,17 @@ Do not machine-translate the generated empty values.
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
-### 2.1.0-beta.2
+### 2.2.0-beta.1
 
-- Moved the version to `pyproject.toml` as its only source, read at runtime. The operator-editable `release_version` and `release_date` settings are gone, along with `bot_settings.version` and `bot_settings.release_date`: two sources, one of them a form, is why the file said 1.9 while the packaging metadata said 2.0.0-rc.1.
-- Derived the release channel from the version rather than declaring it, so a build cannot claim to be stable while carrying a prerelease suffix. `/version` now shows the channel and the public repository, and no longer shows a release date.
-- Added `scripts/bump_version.py`, which refuses a bump that would move the version backwards and ties `x`/`y`/`z` to breaking changes, features and fixes rather than to how large a change felt.
-- Made the currency symbol configurable as the `currency_emoji` instance setting, defaulting to a Unicode emoji. It was one guild's custom emoji hard-coded in 105 places, so every other installation rendered the literal `<:potatocoins:…>` text on every balance, price, payout and `/work` line. `t()` substitutes it into a `{coin}` token, so no call site changed. **Existing `work_responses` rows keep their current text**: seeding is gated on absence, and those rows are operator-authored content rather than shipped defaults. Casino embed footers no longer carry a currency icon, because a Unicode emoji has no image to point at.
-- Added the guild setup check: the permission diagnostic now declares what the bot needs per setting rather than per channel kind, and checks what *members* need as well — a slash command does not appear at all where `use_application_commands` is denied. It also reads the legacy configuration, without which it resolved every channel and role to nothing and reported clean while checking none of them.
-- Added `docs/installation.md` and `docs/level_setup.md`, and stopped shipping one guild's role ids as the `level_roles` default.
+- Gave installation-wide settings a home. **Schema 11** adds `instance_settings`, keyed by setting alone, and `language`, `currency_emoji`, `maintenance`, `command_prefix` and `data_retention_days` now live there rather than being stored per guild while being installation-wide in fact. The scope is a structural fact now, not a convention: an instance setting cannot be written per guild at all. Pre-existing rows are moved across, and a key that was stored for several guilds keeps its most recent value and says which it discarded.
+- Added `settings_cache`, so a command path no longer reads SQLite for a setting. `is_channel` resolves a setting key through it — one change that moved all 22 channel gates — and `maintenance_blocks` reads it too. It falls back to `config.json` and then the registry default rather than to nothing, which is what keeps maintenance failing *open*: an unreadable setting must not be an outage, and that is the opposite of how the feature gate fails.
+- A dashboard save in a separate process is now visible to the bot without `?reloadconfig`. The rows are projected back into the in-process configuration on every poll, so every remaining reader is live; a key with no row keeps what the file holds, and the file itself is never written by the bot.
+- Added `scripts/import_config.py`, which gives every value in `config.json` a database row once — idempotent, audited, with a dry run, never overwriting a row somebody saved, and writing through the same validated path the dashboard uses instead of being a second way in.
+- Role menus are edited as rows now, not as hand-written JSON: a label, a real role picker and an emoji per entry, with the shape declared in the registry so the API refuses a malformed menu instead of storing one that fails later in a button callback. The role ids inside that JSON cross the wire as strings, for the same reason every other snowflake does.
+- A setting that applies to the whole installation now says so on the form. The API cannot reject a legitimate save, so an operator changing the language on one server's page and finding it changed everywhere had no way to know.
+- Added tagged warnings and per-tag consequences. **Schema 10** is purely additive: `warnings.tag`, gated on table shape so re-running repairs itself, with every existing row keeping a NULL tag and counting under the default one — it is what those warnings have always effectively been. `/warn` takes a kind from a fixed list, `/modlogs` shows it, and each kind carries its own threshold, consequence and timeout length as typed settings. Every threshold ships at 0, meaning never act, so an upgrade applies nothing nobody asked for.
+- Split alerting from acting: `moderation_warn_alerts` posts a crossed threshold to the new moderation log channel, `moderation_warn_actions` applies the consequence, and alerting works with actions off. Actions ship **disabled**, never touch the guild owner or an administrator, and never attempt somebody above the bot. The warning and the count it is compared against are written in one transaction, so two moderators warning at once cannot both miss the threshold.
+- …and 14 more, in [CHANGELOG.md](CHANGELOG.md).
 
 ### 2.0.0-rc.1 - Unreleased
 

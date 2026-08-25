@@ -459,3 +459,96 @@ class MigrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Schema10WarningTagTests(unittest.TestCase):
+    """Schema 10 adds `warnings.tag` and rewrites no row.
+
+    The failure worth guarding is silent: if the default tag did not absorb a
+    NULL, an upgrade would report every existing member's history as zero for
+    the tag their warnings had always effectively been under, and every
+    threshold would reset with it.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _downgrade_to_9(self):
+        """Reshape a current database into the schema-9 warnings table."""
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("DROP INDEX IF EXISTS idx_warnings_guild_user_tag")
+            conn.execute("ALTER TABLE warnings DROP COLUMN tag")
+            conn.execute("PRAGMA user_version = 9")
+            conn.commit()
+
+    def test_clean_database_has_the_column_and_its_index(self):
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(warnings)")}
+            self.assertIn("tag", columns)
+            indexes = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'")}
+            self.assertIn("idx_warnings_guild_user_tag", indexes)
+
+    def test_upgrade_preserves_rows_and_counts_them_under_the_default_tag(self):
+        database.initialize_database()
+        self._downgrade_to_9()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.executemany(
+                "INSERT INTO warnings (user_id, mod_id, reason, date, guild_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [(7, 1, "one", "2026-01-01T00:00:00", 55),
+                 (7, 1, "two", "2026-01-02T00:00:00", 55)],
+            )
+            conn.commit()
+
+        database.initialize_database()
+
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
+        self.assertEqual(2, database.get_warning_count(7, 55))
+        # An untagged row is a general warning, which is what it always was.
+        self.assertEqual(2, database.get_warning_count(7, 55, "general"))
+        self.assertEqual(0, database.get_warning_count(7, 55, "spam"))
+        self.assertEqual(
+            [None, None], [row[4] for row in database.get_warnings(7, 55)])
+
+    def test_re_running_the_migration_changes_nothing(self):
+        database.initialize_database()
+        self._downgrade_to_9()
+        database.initialize_database()
+        database.record_warning(7, 1, "one", "2026-01-01T00:00:00", 55, "spam")
+        before = database.get_warnings(7, 55)
+        database.initialize_database()
+        self.assertEqual(before, database.get_warnings(7, 55))
+
+    def test_a_pre_migration_backup_is_written(self):
+        database.initialize_database()
+        self._downgrade_to_9()
+        database.initialize_database()
+        self.assertTrue(
+            glob.glob(os.path.join(self.temp_dir.name, "economy.db.backup-v9-*")),
+            "an upgrade must leave the rollback artefact behind",
+        )
+
+    def test_record_warning_counts_include_the_row_it_just_wrote(self):
+        """The threshold can ban, so the count must include this warning."""
+        database.initialize_database()
+        first = database.record_warning(7, 1, "a", "2026-01-01T00:00:00", 55, "spam")
+        second = database.record_warning(7, 1, "b", "2026-01-02T00:00:00", 55, "spam")
+        other = database.record_warning(7, 1, "c", "2026-01-03T00:00:00", 55, "nsfw")
+        self.assertEqual((1, 1), (first["total"], first["tag_count"]))
+        self.assertEqual((2, 2), (second["total"], second["tag_count"]))
+        # A different tag counts separately but adds to the total.
+        self.assertEqual((3, 1), (other["total"], other["tag_count"]))
+        # And a guild sees only its own.
+        self.assertEqual(0, database.get_warning_count(7, 999, "spam"))

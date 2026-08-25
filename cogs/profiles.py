@@ -178,7 +178,7 @@ class Profiles(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(name="lvls", description=t("general.cmd_lvls"))
-    @is_channel("channels.levels")
+    @is_channel("levels_channels")
     async def toplvl(self, ctx):
         view = LvlsView(ctx.guild)
         embed = await view.generate_embed()
@@ -189,7 +189,7 @@ class Profiles(commands.Cog):
             await ctx.send(t("profiles.no_levels_stored"))
 
     @commands.hybrid_command(name="ranks", description=t("general.cmd_ranks"))
-    @is_channel("channels.levels")
+    @is_channel("levels_channels")
     async def top(self, ctx):
         view = RanksView(ctx.guild)
         embed = await view.generate_embed()
@@ -200,7 +200,7 @@ class Profiles(commands.Cog):
             await ctx.send(t("profiles.leaderboard_empty"))
 
     @commands.hybrid_command(name="topstreak", description=t("general.cmd_topstreak"))
-    @is_channel("channels.everydle")
+    @is_channel("everydle_channel")
     async def topstreak(self, ctx):
         top_streakers = await database.run(
             database.get_top_streaks, guild_member_ids(ctx.guild), 10
@@ -231,7 +231,7 @@ class Profiles(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="profile", description=t("general.cmd_profile"))
-    @is_channel("channels.levels")
+    @is_channel("levels_channels")
     async def profile(self, ctx, member: discord.Member = None):
         member = member or ctx.author
     

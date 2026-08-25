@@ -14,7 +14,8 @@ import database
 from feature_access import is_enabled, require_interaction_feature
 from discord.ext import commands
 
-from cogs.utils import BoundedCooldownMap, t, config
+from cogs.utils import (BoundedCooldownMap, t, config,
+                        member_faction_role_ids, all_faction_role_ids)
 
 voice_logger = logging.getLogger("PotatoBot.VoiceMod")
 
@@ -207,7 +208,17 @@ class UserPermsView(discord.ui.View):
         self.add_item(UserSelect(channel, user))
 
 class VoiceControlView(discord.ui.View):
-    def __init__(self):
+    """The temporary-room control panel.
+
+    Persistent, so one registered instance routes every panel's clicks by
+    custom_id and the view holds no per-message state. `faction_lock` decides
+    only what a *newly posted* panel renders: the instance handed to
+    `bot.add_view()` keeps every button unconditionally, because a panel posted
+    while the flag was on must still route its click to a refusal rather than
+    to nothing at all.
+    """
+
+    def __init__(self, *, faction_lock: bool = True):
         super().__init__(timeout=None)
         
         # Translating buttons dynamically
@@ -217,6 +228,10 @@ class VoiceControlView(discord.ui.View):
         btn_unlock = discord.ui.Button(label=t("voicemod.unlock_btn"), style=discord.ButtonStyle.success, emoji="🔓", custom_id="vc_unlock")
         btn_unlock.callback = self.unlock; self.add_item(btn_unlock)
         
+        if faction_lock:
+            btn_faction = discord.ui.Button(label=t("voicemod.faction_lock_btn"), style=discord.ButtonStyle.danger, emoji="🛡️", custom_id="vc_faction_lock")
+            btn_faction.callback = self.lock_to_faction; self.add_item(btn_faction)
+
         btn_claim = discord.ui.Button(label=t("voicemod.claim_btn"), style=discord.ButtonStyle.primary, emoji="👑", custom_id="vc_claim")
         btn_claim.callback = self.claim_ownership; self.add_item(btn_claim)
         
@@ -282,6 +297,18 @@ class VoiceControlView(discord.ui.View):
         if not await owns_current_channel(interaction.channel, interaction.user):
             return await interaction.response.send_message(t("voicemod.not_your_room"), ephemeral=True)
         
+        # A faction lock granted connect to specific roles, so unlocking has to
+        # withdraw those grants or the room stays faction-shaped while reporting
+        # itself open. The channel's own overwrites say which ones to clear, so
+        # nothing has to be persisted about how the room was locked. This runs
+        # before the member-role restore below, which therefore wins if an
+        # operator has made the member role a faction role too.
+        faction_ids = all_faction_role_ids()
+        for target, overwrite in list(interaction.channel.overwrites.items()):
+            if isinstance(target, discord.Role) and target.id in faction_ids:
+                overwrite.update(connect=None)
+                await interaction.channel.set_permissions(target, overwrite=overwrite)
+
         # Restore inherited behavior for the default role.
         ev_ow = interaction.channel.overwrites_for(interaction.guild.default_role)
         ev_ow.update(connect=None)
@@ -300,6 +327,54 @@ class VoiceControlView(discord.ui.View):
             database.set_voice_lock, interaction.guild_id, owner_id, 0
         )
         await interaction.response.send_message(t("voicemod.room_unlocked"), ephemeral=True)
+
+    async def lock_to_faction(self, interaction: discord.Interaction):
+        # interaction_check has already cleared maintenance and temporary_voice.
+        # This button owns a second flag and rechecks it here, because a panel
+        # posted while the feature was on outlives an operator turning it off.
+        if not await require_interaction_feature(
+            interaction, "temporary_voice_faction_lock"
+        ):
+            return
+        owner_id = await database.run(database.get_active_channel_owner, interaction.channel.id)
+        if not await owns_current_channel(interaction.channel, interaction.user):
+            return await interaction.response.send_message(t("voicemod.not_your_room"), ephemeral=True)
+
+        # An empty set is "no faction", never "every faction": refuse rather
+        # than lock the room to nobody or to everybody.
+        faction_ids = member_faction_role_ids(interaction.user)
+        roles = [role for role in
+                 (interaction.guild.get_role(role_id) for role_id in sorted(faction_ids))
+                 if role is not None]
+        if not roles:
+            return await interaction.response.send_message(t("voicemod.no_faction"), ephemeral=True)
+
+        # Deny the broad roles exactly as the plain lock does, preserving
+        # unrelated overwrite bits, then grant the faction back on top.
+        ev_ow = interaction.channel.overwrites_for(interaction.guild.default_role)
+        ev_ow.update(connect=False)
+        await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=ev_ow)
+
+        member_role_id = config.get("roles", {}).get("member")
+        if member_role_id:
+            member_role = interaction.guild.get_role(member_role_id)
+            if member_role:
+                mem_ow = interaction.channel.overwrites_for(member_role)
+                mem_ow.update(connect=False)
+                await interaction.channel.set_permissions(member_role, overwrite=mem_ow)
+
+        for role in roles:
+            role_ow = interaction.channel.overwrites_for(role)
+            role_ow.update(connect=True)
+            await interaction.channel.set_permissions(role, overwrite=role_ow)
+
+        # A faction lock is a lock: unlock and the cleanup path both read this.
+        await database.run(
+            database.set_voice_lock, interaction.guild_id, owner_id, 1
+        )
+        await interaction.response.send_message(
+            t("voicemod.room_faction_locked", count=len(roles)), ephemeral=True
+        )
 
     async def claim_ownership(self, interaction: discord.Interaction):
         channel = interaction.channel
@@ -503,7 +578,9 @@ class VoiceMods(commands.Cog):
                 await database.run(database.remove_active_channel, new_channel.id)
                 return
 
-            view = VoiceControlView()
+            view = VoiceControlView(
+                faction_lock=is_enabled(guild.id, "temporary_voice_faction_lock")
+            )
             msg = t("voicemod.control_panel_msg", user=member.mention)
             await new_channel.send(msg, view=view)
 

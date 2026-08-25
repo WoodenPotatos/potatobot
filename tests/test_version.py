@@ -285,3 +285,65 @@ class WorkResponseSubstitutionTests(unittest.TestCase):
         for tier, message in database.WORK_DEFAULT_RESPONSES:
             with self.subTest(tier=tier, message=message[:40]):
                 self.assertNotRegex(message, r"<a?:[A-Za-z0-9_]+:\d+>")
+
+
+class CoinArgumentTests(unittest.TestCase):
+    """No caller may pass `coin` to `t()`.
+
+    `t()` supplies it from the currency setting with `kwargs.setdefault`, so an
+    explicit argument silently wins. That is exactly how the shop menu came to
+    show the fallback emoji while every other surface showed the configured one:
+    a call site passed the symbol as a parameter instead of embedding it, so the
+    105-site sweep never saw it.
+    """
+
+    def test_no_call_site_passes_coin(self):
+        import re
+        from pathlib import Path
+
+        pattern = re.compile(r"\bt\(\s*[\"'][^\"']+[\"'][^)]*\bcoin\s*=")
+        offenders = []
+        for path in sorted(ROOT.glob("cogs/*.py")) + sorted(ROOT.glob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            for number, line in enumerate(text.splitlines(), 1):
+                if pattern.search(line):
+                    offenders.append(f"{path.relative_to(ROOT)}:{number}")
+        self.assertEqual(
+            [], offenders,
+            "let t() supply the currency symbol; an explicit coin= overrides it")
+
+    def test_the_shop_select_label_carries_no_currency(self):
+        """A select option's label is plain text.
+
+        `<:name:id>` renders literally there, so the menu showed a raw emoji id.
+        The currency belongs on the option's `emoji=`, not in its label, and this
+        is the one key that deliberately has no `{coin}` token.
+        """
+        from cogs.utils import t
+        label = t("shop.select_option_label", lang="en", name="Premium", price=5000)
+        self.assertEqual("Premium | Price: 5000", label)
+        self.assertNotIn("{coin}", label)
+
+    def test_the_shop_option_emoji_follows_the_setting(self):
+        from cogs.utils import config, currency_select_emoji
+        original = config.get("bot_settings", {}).get("currency_emoji")
+        try:
+            config["bot_settings"]["currency_emoji"] = "🪙"
+            self.assertEqual("🪙", currency_select_emoji())
+
+            config["bot_settings"]["currency_emoji"] = "<:coin:1420070400000000001>"
+            parsed = currency_select_emoji()
+            self.assertEqual(1420070400000000001, parsed.id)
+
+            # Discord rejects an option whose emoji it cannot resolve, and that
+            # fails the whole command rather than looking wrong, so anything
+            # ambiguous is dropped instead of guessed.
+            for junk in ("not an emoji", "<a:x:123>", "PC"):
+                with self.subTest(junk=junk):
+                    config["bot_settings"]["currency_emoji"] = junk
+                    self.assertIsNone(currency_select_emoji())
+        finally:
+            if original is None:
+                config["bot_settings"].pop("currency_emoji", None)
+            else:
+                config["bot_settings"]["currency_emoji"] = original

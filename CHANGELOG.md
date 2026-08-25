@@ -1,6 +1,104 @@
 # Changelog
 
-## 2.1.0-beta.2
+## 2.2.0-beta.1
+
+- Gave installation-wide settings a home. **Schema 11** adds
+  `instance_settings`, keyed by setting alone, and `language`, `currency_emoji`,
+  `maintenance`, `command_prefix` and `data_retention_days` now live there rather
+  than being stored per guild while being installation-wide in fact. The scope is
+  a structural fact now, not a convention: an instance setting cannot be written
+  per guild at all. Pre-existing rows are moved across, and a key that was stored
+  for several guilds keeps its most recent value and says which it discarded.
+- Added `settings_cache`, so a command path no longer reads SQLite for a setting.
+  `is_channel` resolves a setting key through it — one change that moved all 22
+  channel gates — and `maintenance_blocks` reads it too. It falls back to
+  `config.json` and then the registry default rather than to nothing, which is
+  what keeps maintenance failing *open*: an unreadable setting must not be an
+  outage, and that is the opposite of how the feature gate fails.
+- A dashboard save in a separate process is now visible to the bot without
+  `?reloadconfig`. The rows are projected back into the in-process configuration
+  on every poll, so every remaining reader is live; a key with no row keeps what
+  the file holds, and the file itself is never written by the bot.
+- Added `scripts/import_config.py`, which gives every value in `config.json` a
+  database row once — idempotent, audited, with a dry run, never overwriting a
+  row somebody saved, and writing through the same validated path the dashboard
+  uses instead of being a second way in.
+- Role menus are edited as rows now, not as hand-written JSON: a label, a real
+  role picker and an emoji per entry, with the shape declared in the registry so
+  the API refuses a malformed menu instead of storing one that fails later in a
+  button callback. The role ids inside that JSON cross the wire as strings, for
+  the same reason every other snowflake does.
+- A setting that applies to the whole installation now says so on the form. The
+  API cannot reject a legitimate save, so an operator changing the language on
+  one server's page and finding it changed everywhere had no way to know.
+
+- Added tagged warnings and per-tag consequences. **Schema 10** is purely
+  additive: `warnings.tag`, gated on table shape so re-running repairs itself,
+  with every existing row keeping a NULL tag and counting under the default one
+  — it is what those warnings have always effectively been. `/warn` takes a kind
+  from a fixed list, `/modlogs` shows it, and each kind carries its own
+  threshold, consequence and timeout length as typed settings. Every threshold
+  ships at 0, meaning never act, so an upgrade applies nothing nobody asked for.
+- Split alerting from acting: `moderation_warn_alerts` posts a crossed threshold
+  to the new moderation log channel, `moderation_warn_actions` applies the
+  consequence, and alerting works with actions off. Actions ship **disabled**,
+  never touch the guild owner or an administrator, and never attempt somebody
+  above the bot. The warning and the count it is compared against are written in
+  one transaction, so two moderators warning at once cannot both miss the
+  threshold.
+- Added a word filter under `moderation_word_filter`, disabled by default. It
+  deletes the message, files a warning under a configured kind and lets that
+  kind's threshold decide what follows, so escalation exists in one place. Text
+  is matched after casefolding, stripping accents, mapping digit substitutions,
+  removing separators and collapsing repeats — `B.A.D`, `b a d`, `baaad` and
+  `b4d` all fold together. Staff are exempt by permission and by role, the
+  matched term is never repeated in a public channel, and the configuration is
+  cached per guild because this runs on every message.
+- Added the streak freeze to the item catalog, so the shop and the four-star
+  gacha tier are two ways to obtain one item. It forgives one day beyond the
+  grace an Everydle streak already had, is spent retroactively by the claim that
+  needs it rather than by a scheduled job, and is consumed in the same
+  transaction as that claim. A longer absence resets the streak and does not
+  spend the item.
+- A constrained setting's choice labels now come from a prefix the registry
+  declares, instead of the dashboard matching on the setting's key — which it
+  did for `language`, and which is how an interface starts keeping its own copy
+  of a list.
+
+
+- Added a faction lock to the temporary-room control panel. It denies `connect`
+  to `@everyone` and the member role, then grants it back to every role the
+  owner's faction claims, behind the new `temporary_voice_faction_lock` feature
+  flag — which ships disabled and cascades off with either `temporary_voice` or
+  `factions`. A member in no faction is refused rather than locking the room to
+  nobody, and `Unlock` withdraws the grants by reading the channel's own
+  overwrites, so nothing about how a room was locked has to be stored.
+- Split Factions out of the Moderation category. That page held the faction map
+  and the inactivity ignore list and was named after neither; Factions is now its
+  own sidebar entry and its own feature group, and Moderation keeps the ignore
+  list.
+
+- Fixed the shop menu's currency symbol. A Discord select option's label is
+  plain text, so a custom emoji rendered there as its raw `<:name:id>`; the
+  currency now travels on the option's `emoji=` instead, and is dropped rather
+  than guessed when the configured symbol is not something Discord can resolve.
+  A test forbids any caller passing `coin` to `t()`, which is how the original
+  hard-coded symbol survived the sweep.
+- Fixed channel and role pickers being unusable on a phone. Focusing the search
+  field opened the on-screen keyboard, the keyboard resized the viewport, and the
+  popover closed on any resize — so it dismissed itself immediately. The search
+  field is no longer autofocused on a touch device, and a resize repositions the
+  popover rather than closing it. A popover anchored to a field in the page is
+  now positioned in document coordinates by CSS, so the browser carries it with
+  the page instead of a scroll handler chasing it — a fixed surface repositioned
+  from JavaScript always trails a compositor-thread scroll. It closes once its
+  trigger passes under the sticky topbar rather than floating over the header.
+- Navigating between dashboard pages now counts as activity. Pages that render
+  from already-loaded state made no request, so the session cookie genuinely was
+  not refreshed and the idle countdown was telling the truth; a throttled
+  keepalive against a new `GET /api/session/touch` makes navigation refresh it.
+  That endpoint touches only the session, at roughly half the cost of
+  `/auth/status`, which reads and decorates the guild list.
 
 - Moved the version to `pyproject.toml` as its only source, read at runtime. The
   operator-editable `release_version` and `release_date` settings are gone, along

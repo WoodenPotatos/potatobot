@@ -905,7 +905,7 @@ class Casino(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(name="bal", description=t("general.cmd_bal"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def bal(self, ctx):
         result = await database.run(database.get_full_user_data, ctx.author.id)
     
@@ -918,7 +918,7 @@ class Casino(commands.Cog):
             await ctx.send(t("casino.bal_empty"))
 
     @commands.hybrid_command(name="daily", description=t("general.cmd_daily"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def daily(self, ctx):
         now = datetime.now()
         
@@ -954,7 +954,7 @@ class Casino(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="work", description=t("general.cmd_work"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def work(self, ctx):
         """Pay one work shift, using this guild's own outcome odds and text.
 
@@ -1021,7 +1021,7 @@ class Casino(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="rob", description=t("general.cmd_rob"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def rob(self, ctx, victim: discord.Member):
         user_id = ctx.author.id
         now = datetime.now()
@@ -1072,7 +1072,7 @@ class Casino(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="pay", description=t("general.cmd_pay"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def pay(self, ctx, member: discord.Member, amount: int):
         if member.id == ctx.author.id:
             return await ctx.send(t("casino.pay_err_self"), ephemeral=True)
@@ -1099,34 +1099,34 @@ class Casino(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="bj", description=t("general.cmd_bj"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def bj(self, ctx, bet: int):
         if bet <= 0:
             return await ctx.send(t("casino.err_bet_min"), ephemeral=True)
         await start_bj_game(ctx, bet)
 
     @commands.hybrid_command(name="dice", description=t("general.cmd_dice"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def dice(self, ctx, bet: str):
         await start_dice_game(ctx, bet)
 
     @commands.hybrid_command(name="roulette", description=t("general.cmd_roulette"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def roulette(self, ctx, bet: int, choice: str):
         await start_roulette_game(ctx, bet, choice)
 
     @commands.hybrid_command(name="slots", description=t("general.cmd_slots"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def slots(self, ctx, bet: int):
         await start_slots_game(ctx, bet)
 
     @commands.hybrid_command(name="mines", description=t("general.cmd_mines"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def mines(self, ctx, bet: int):
         await start_mines_game(ctx, bet)
 
     @commands.hybrid_command(name="freemines", description=t("general.cmd_freemines"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def mines_free(self, ctx):
         await start_free_mines(ctx)
 

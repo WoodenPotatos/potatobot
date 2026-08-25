@@ -1,4 +1,5 @@
 import discord
+import re
 import asyncio
 import copy
 import hashlib
@@ -126,6 +127,32 @@ def currency_emoji() -> str:
     """
     value = config.get("bot_settings", {}).get("currency_emoji")
     return value if isinstance(value, str) and value.strip() else DEFAULT_CURRENCY_EMOJI
+
+
+def currency_select_emoji():
+    """The currency as a Discord select-option emoji, or None if it cannot be one.
+
+    A select option's *label* is plain text: `<:name:id>` renders literally there,
+    which is why the shop menu displayed a raw emoji id while every other surface
+    showed the symbol. `SelectOption(emoji=...)` is the supported route.
+
+    Discord rejects an option carrying an emoji it cannot resolve, and that fails
+    the whole command rather than merely looking wrong, so anything not clearly an
+    emoji is dropped. `PartialEmoji.from_str` cannot be trusted for that check on
+    its own — it never raises, and turns arbitrary prose into a "unicode emoji"
+    named after the prose.
+    """
+    raw = currency_emoji().strip()
+    parsed = discord.PartialEmoji.from_str(raw)
+    if parsed.id is not None:
+        # A well-formed custom reference: from_str only fills `id` when the name
+        # and snowflake both validate.
+        return parsed
+    # Otherwise it has to be a short Unicode emoji. Anything with ASCII letters,
+    # digits or emoji-markup punctuation is prose or a malformed reference.
+    if raw and len(raw) <= 8 and not re.search(r"[A-Za-z0-9<>:]", raw):
+        return raw
+    return None
 
 
 def t(path: str, lang: str = None, **kwargs) -> str:
@@ -258,33 +285,39 @@ def display_member_name(guild, user_id: int) -> str:
     )
 
 
-async def guild_setting(guild_id: int, key: str):
-    """One typed guild setting, falling back to config.json then the registry.
+def guild_setting_sync(guild_id: int, key: str):
+    """One typed setting, from memory, with no await and no database read.
 
-    Most cogs still read `config`, which the dashboard mirrors for the single
-    legacy guild. Reading the typed row first is what lets a setting be
-    per-guild for a second guild without the mirror having to grow a tenant
-    dimension it cannot have.
+    This is the accessor a synchronous read site uses — a command decorator, a
+    permission check, anything that cannot await. `settings_cache` owns the
+    fallback chain (stored row, then `config.json`, then the registry default),
+    so a cold cache resolves exactly the way the bot resolved before the cache
+    existed rather than resolving to nothing.
     """
-    from settings_registry import SETTING_DEFINITIONS
+    import settings_cache
+    return settings_cache.setting(guild_id, key)
 
-    definition = SETTING_DEFINITIONS[key]
-    try:
-        stored = await database.run_read(database.get_guild_settings, guild_id)
-    except database.DatabaseOperationError:
-        utility_logger.exception(
-            "Could not read a typed setting (guild_id=%s, key=%s)", guild_id, key
-        )
-        stored = {}
-    row = stored.get(key)
-    if row is not None:
-        return row["value"]
-    value = config
-    for part in definition.legacy_path or ():
-        if not isinstance(value, dict) or part not in value:
-            return definition.default
-        value = value[part]
-    return value if definition.legacy_path else definition.default
+
+def guild_settings_sync(guild_id: int, keys) -> dict:
+    """Several typed settings from memory, for a synchronous read site."""
+    import settings_cache
+    return settings_cache.settings(guild_id, keys)
+
+
+async def guild_setting(guild_id: int, key: str):
+    """One typed guild setting.
+
+    Reads the in-process cache, which is refreshed on a revision poll and
+    updated immediately for a dashboard change made in this process, so this no
+    longer issues a SQLite read per key. It stays async because every caller
+    awaits it and because a future per-guild resolver may need to.
+    """
+    return guild_setting_sync(guild_id, key)
+
+
+async def guild_settings_many(guild_id: int, keys) -> dict:
+    """Several typed settings at once, from the in-process cache."""
+    return guild_settings_sync(guild_id, keys)
 
 
 async def update_top_ranker_role(guild):
@@ -496,6 +529,18 @@ def is_staff():
     return commands.check(predicate)
 
 def is_channel(allowed_ids):
+    """Restrict a command to the channels one typed setting names.
+
+    Takes a **setting key** rather than a dotted `config.json` path, and
+    resolves it through `settings_cache`. This predicate runs on every
+    invocation of every command carrying it, which makes it the most-executed
+    configuration read in the project — it must not touch SQLite, and it must
+    not stop working while the cache is cold, which is why the cache falls back
+    to the file rather than to nothing.
+
+    A bare int or list is still accepted, for a gate that is fixed rather than
+    configurable.
+    """
     async def predicate(ctx):
         if ctx.guild is None:
             await ctx.send(t("utils.err_no_dm"), ephemeral=True)
@@ -503,9 +548,11 @@ def is_channel(allowed_ids):
 
         resolved_ids = allowed_ids
         if isinstance(allowed_ids, str):
-            resolved_ids = config
-            for part in allowed_ids.split("."):
-                resolved_ids = resolved_ids.get(part, {})
+            resolved_ids = guild_setting_sync(ctx.guild.id, allowed_ids)
+        # An unset channel setting is an empty gate, exactly as an absent
+        # config path was: nobody but an administrator passes.
+        if resolved_ids is None:
+            resolved_ids = []
         clean_ids = (
             [resolved_ids]
             if isinstance(resolved_ids, int)
@@ -563,6 +610,49 @@ async def role_autocomplete(interaction: discord.Interaction, current: str) -> l
             choices.append(discord.app_commands.Choice(name=role.name, value=str(role.id)))
     
     return choices[:25]
+
+def member_faction_role_ids(member) -> set[int]:
+    """Every role id belonging to the factions this member is part of.
+
+    A member belongs to a faction when they hold its leader role or any of the
+    roles that faction manages, so one helper answers for a leader and for an
+    ordinary member alike, and somebody in two factions gets the union.
+
+    An empty set means "no faction", never "every faction" — a caller granting
+    access from this must refuse rather than fall back to allowing everyone.
+    """
+    held = {role.id for role in getattr(member, "roles", ())}
+    allowed: set[int] = set()
+    for data in config.get("factions", {}).values():
+        if not isinstance(data, dict):
+            continue
+        leader_id = data.get("leader_role_id")
+        faction_ids = {role_id for role_id in data.get("manageable_ids") or ()
+                       if isinstance(role_id, int)}
+        if isinstance(leader_id, int):
+            faction_ids.add(leader_id)
+        if held & faction_ids:
+            allowed |= faction_ids
+    return allowed
+
+
+def all_faction_role_ids() -> set[int]:
+    """Every role id any configured faction claims.
+
+    Used to reverse a faction lock without persisting which roles it granted:
+    the channel's own overwrites say what to clear.
+    """
+    every: set[int] = set()
+    for data in config.get("factions", {}).values():
+        if not isinstance(data, dict):
+            continue
+        leader_id = data.get("leader_role_id")
+        if isinstance(leader_id, int):
+            every.add(leader_id)
+        every |= {role_id for role_id in data.get("manageable_ids") or ()
+                  if isinstance(role_id, int)}
+    return every
+
 
 def is_premium(member):
     premium_ids = config["roles"].get("premium", [])

@@ -78,6 +78,11 @@ def _definitions() -> tuple[ItemDefinition, ...]:
                        shop_price=10000, gacha_kind="item"),
         ItemDefinition("vault_glove", ItemEffect.INVENTORY, value=0.25,
                        shop_price=75000, gacha_kind="item"),
+        # One extra forgiven day on an Everydle streak, spent retroactively by
+        # the next claim rather than by a scheduled job. `value` is that number
+        # of days, so the mechanic reads from the catalog like every other one.
+        ItemDefinition("streak_freeze", ItemEffect.INVENTORY, value=1,
+                       shop_price=60000, gacha_kind="item"),
         ItemDefinition("bodyguard", ItemEffect.BODYGUARD, value=0.7,
                        shop_price=15000),
         # Fixed reserves, not percentages. A higher tier replaces a lower one.

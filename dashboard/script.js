@@ -49,6 +49,7 @@ const CATEGORY_ICONS = {
     economy: 'ic-economy',
     games: 'ic-games',
     moderation: 'ic-moderation',
+    factions: 'ic-factions',
     music: 'ic-music',
     builders: 'ic-builders',
     administration: 'ic-administration',
@@ -167,8 +168,38 @@ async function api(path, options = {}) {
 
 /* --------------------------------------------------------- session countdown */
 
+// When the last authenticated request went out. Navigation between pages that
+// render from loaded state makes none, so without a keepalive the cookie really
+// does expire while somebody is using the interface — the countdown was not
+// wrong, the session was genuinely ending.
+let lastServerContact = 0;
+// Short, because `/api/session/touch` only refreshes the cookie — no database
+// read, no guild decoration. The guard exists to collapse a double click, not to
+// ration requests: reads allow 300 a minute and this is one per navigation.
+const KEEPALIVE_SECONDS = 5;
+
+/** Touch the server if it has been a while, so navigating counts as activity.
+ *
+ *  Throttled because a click that already fetches has refreshed the cookie, and
+ *  a second request would tell us nothing. `/auth/status` is the cheapest
+ *  authenticated endpoint and is already the one the countdown is calibrated
+ *  from. Failures are ignored: the next real call will surface a dead session
+ *  through `handleApiError`, and a keepalive is not the place to end one.
+ */
+async function keepSessionAlive() {
+    if (!sessionIdleSeconds) return;
+    if ((Date.now() - lastServerContact) / 1000 < KEEPALIVE_SECONDS) return;
+    try {
+        await api('/session/touch');
+    } catch (error) {
+        // Deliberately silent: the next real call surfaces a dead session
+        // through `handleApiError`, and a keepalive is not the place to end one.
+    }
+}
+
 /** Restart the idle countdown, mirroring what the request just did to the cookie. */
 function slideSessionDeadline() {
+    lastServerContact = Date.now();
     if (!sessionIdleSeconds) return;
     sessionDeadline = Date.now() + sessionIdleSeconds * 1000;
     renderSessionTimer();
@@ -308,10 +339,13 @@ function openPopover(trigger, buildMenu, options = {}) {
     menu.setAttribute('role', options.role || 'menu');
     if (options.ariaLabel) menu.setAttribute('aria-label', options.ariaLabel);
 
+    // Filled in below; `close` must be defined before the handlers that call it.
+    const closers = [];
+
     const close = () => {
         document.removeEventListener('click', onOutsideClick);
         document.removeEventListener('keydown', onKeyDown, true);
-        window.removeEventListener('resize', close);
+        closers.forEach((undo) => undo());
         surface.remove();
         trigger.setAttribute('aria-expanded', 'false');
         closeOpenPopover = null;
@@ -339,21 +373,78 @@ function openPopover(trigger, buildMenu, options = {}) {
 
     buildMenu(menu, close);
 
-    // Anchored to the trigger's right edge; the surface is fixed so the sticky
-    // topbar's stacking context cannot clip it.
-    const box = trigger.getBoundingClientRect();
-    surface.style.setProperty('--popover-top', `${Math.round(box.bottom + 8)}px`);
-    if (options.align === 'left') {
-        surface.style.setProperty('--popover-left', `${Math.round(box.left)}px`);
-        surface.style.setProperty('--popover-right', 'auto');
-        surface.classList.add('popover-left');
-    } else {
-        surface.style.setProperty('--popover-right', `${Math.round(window.innerWidth - box.right)}px`);
-    }
-    if (options.matchWidth) {
-        surface.style.setProperty('--popover-width', `${Math.round(box.width)}px`);
-        surface.classList.add('popover-matched');
-    }
+    // The surface is fixed so the sticky topbar's stacking context cannot clip
+    // it, which means it does not move with the page: scrolling left the menu
+    // hanging in mid-air while its trigger slid away behind it. Position is
+    // therefore recomputed on scroll rather than only at open time.
+    if (options.align === 'left') surface.classList.add('popover-left');
+    if (options.matchWidth) surface.classList.add('popover-matched');
+
+    // A trigger in the sticky header never moves, so a fixed surface is right
+    // there. Anything else is positioned in document coordinates and carried by
+    // the page itself — the only way to avoid trailing, because a JS-repositioned
+    // fixed element always lags a compositor-thread scroll.
+    const header = document.querySelector('.topbar');
+    const inHeader = Boolean(header && header.contains(trigger));
+    if (!inHeader) surface.classList.add('popover-in-page');
+
+    const place = () => {
+        const box = trigger.getBoundingClientRect();
+        // Document coordinates for an in-page menu, viewport for a header one.
+        // Both are scroll-invariant, so this writes the same values on every
+        // call and the surface never chases the scroll.
+        const offsetY = inHeader ? 0 : window.scrollY;
+        const offsetX = inHeader ? 0 : window.scrollX;
+        // The topbar is sticky, so a field scrolled up behind it is invisible
+        // while the fixed surface below is not: the menu went on floating over
+        // the header, anchored to a field nobody could see. Anchoring below the
+        // field's bottom edge keeps the surface clear of the header for as long
+        // as that edge is, so the moment it passes underneath, close.
+        // Not for a trigger that lives *in* the header — the account menu and the
+        // guild switcher are anchored there, their bottom edge is above the
+        // header's own, and this rule would close them the instant they opened.
+        const headerBottom = (inHeader || !header)
+            ? 0 : header.getBoundingClientRect().bottom;
+        if (box.bottom <= headerBottom || box.top > window.innerHeight) {
+            close();
+            return;
+        }
+        surface.style.setProperty(
+            '--popover-top', `${Math.round(box.bottom + offsetY + 8)}px`);
+        if (options.align === 'left') {
+            surface.style.setProperty(
+                '--popover-left', `${Math.round(box.left + offsetX)}px`);
+            surface.style.setProperty('--popover-right', 'auto');
+        } else {
+            // The page never scrolls horizontally, so the document's right edge
+            // and the viewport's coincide and this holds for both modes.
+            surface.style.setProperty(
+                '--popover-right', `${Math.round(window.innerWidth - box.right)}px`);
+        }
+        if (options.matchWidth) {
+            surface.style.setProperty('--popover-width', `${Math.round(box.width)}px`);
+        }
+    };
+    place();
+
+    // Coalesced to one reposition per frame. Repositioning synchronously on
+    // every scroll event made the surface visibly trail its trigger, because
+    // scroll fires far more often than the page paints.
+    let frame = 0;
+    const schedulePlace = () => {
+        if (frame) return;
+        frame = requestAnimationFrame(() => {
+            frame = 0;
+            place();
+        });
+    };
+    // Capture, because the scroll happens on whichever ancestor is scrollable
+    // and those events do not bubble. Passive, because this never preventDefaults.
+    window.addEventListener('scroll', schedulePlace, {capture: true, passive: true});
+    closers.push(() => {
+        window.removeEventListener('scroll', schedulePlace, {capture: true});
+        if (frame) cancelAnimationFrame(frame);
+    });
 
     surface.appendChild(menu);
     root.appendChild(surface);
@@ -364,10 +455,26 @@ function openPopover(trigger, buildMenu, options = {}) {
     // seen as the outside click that dismisses it.
     setTimeout(() => document.addEventListener('click', onOutsideClick), 0);
     document.addEventListener('keydown', onKeyDown, true);
-    window.addEventListener('resize', close);
 
-    (menu.querySelector('[data-autofocus]')
-        || menu.querySelector(`[role="${itemRole}"]`))?.focus();
+    // Only a *width* change invalidates the anchoring. An on-screen keyboard
+    // changes the height alone, and closing on that made every picker unusable
+    // on a phone: the search field took focus, the keyboard opened, and the
+    // resize it caused dismissed the menu immediately.
+    const openedAt = window.innerWidth;
+    const onResize = () => {
+        // A width change moves the layout under the menu; reposition rather than
+        // close, and only give up if the trigger has gone.
+        if (window.innerWidth !== openedAt) schedulePlace();
+    };
+    window.addEventListener('resize', onResize);
+    closers.push(() => window.removeEventListener('resize', onResize));
+
+    // Autofocusing a text field summons the keyboard, so on a touch device the
+    // search box is left for the user to tap. The list is what they came for.
+    const wantsKeyboard = !window.matchMedia?.('(pointer: coarse)').matches;
+    const target = (wantsKeyboard && menu.querySelector('[data-autofocus]'))
+        || menu.querySelector(`[role="${itemRole}"]`);
+    target?.focus();
     return close;
 }
 
@@ -730,6 +837,9 @@ function updateNavigation() {
 
 async function showPage(page) {
     activePage = page;
+    // Not awaited: navigation must not wait on the network, and the pages that
+    // do fetch will slide the deadline themselves anyway.
+    keepSessionAlive();
     document.querySelectorAll('.page').forEach((node) => node.classList.add('hidden'));
     document.querySelectorAll('.nav-item').forEach((node) => {
         const active = node.dataset.page === page;
@@ -1032,6 +1142,15 @@ function renderSettings(category) {
             const badge = element('small', `apply-${definition.apply_behavior}`,
                 tr(`dashboard.apply_${definition.apply_behavior}`));
             group.appendChild(badge);
+            // An installation-wide setting is edited from a guild page but is
+            // not that guild's. Saying so is the only way the interface can
+            // express it — the API cannot reject a legitimate save, and an
+            // operator changing "the language" for one server and finding it
+            // changed everywhere would be right to call that a bug.
+            if (definition.scope === 'instance') {
+                group.appendChild(element('small', 'field-scope',
+                    tr('dashboard.scope_instance')));
+            }
             grid.appendChild(group);
         });
 
@@ -1231,6 +1350,111 @@ function pickerMarker(entry) {
     return dot;
 }
 
+/** A row editor for a role menu: {label: {id, emoji}}.
+ *
+ *  The same four decisions the resource picker documents apply here, and the
+ *  first is the load-bearing one: **a hidden textarea stays the value carrier**.
+ *  `readSettingInput`, `collectSettingChanges`, the dirty-state check and a
+ *  native form reset all act on a real form control, so this editor adds a way
+ *  to *edit* the value without becoming a second way to *save* it.
+ *
+ *  Role ids stay strings throughout. A Discord id is 64-bit and a JavaScript
+ *  number holds 53 bits, so calling Number() on one here would round it and the
+ *  save would write a role that does not exist.
+ *
+ *  Entry order is preserved, because `collectSettingChanges` compares
+ *  JSON.stringify against the loaded value and a reordered object would read as
+ *  a change nobody made.
+ */
+function roleMenuEditor(definition, value) {
+    const entries = (value && typeof value === 'object' && !Array.isArray(value))
+        ? value : {};
+
+    const wrapper = element('div', 'role-menu-editor');
+    const carrier = document.createElement('textarea');
+    carrier.className = 'menu-carrier';
+    carrier.hidden = true;
+    wrapper.appendChild(carrier);
+
+    const rows = element('div', 'menu-rows');
+    wrapper.appendChild(rows);
+
+    const serialise = () => {
+        const collected = {};
+        rows.querySelectorAll('.menu-row').forEach((row) => {
+            const label = row.querySelector('.menu-label').value.trim();
+            if (!label) return;
+            const picker = row.querySelector('.picker-carrier');
+            const chosen = [...picker.selectedOptions].map((option) => option.value);
+            collected[label] = {
+                id: chosen[0] || '0',
+                emoji: row.querySelector('.menu-emoji').value.trim(),
+            };
+        });
+        carrier.value = JSON.stringify(collected);
+        // Dispatched from the carrier so the dirty-state listener, which is
+        // bound to the real control, sees it.
+        carrier.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    const addRow = (label, entry) => {
+        const row = element('div', 'menu-row');
+
+        const labelInput = document.createElement('input');
+        labelInput.type = 'text';
+        labelInput.className = 'menu-label';
+        labelInput.value = label;
+        labelInput.placeholder = tr('dashboard.role_menu_label');
+        labelInput.addEventListener('input', serialise);
+        row.appendChild(labelInput);
+
+        // A synthetic single-role definition, so the picker is the same one every
+        // other role field uses rather than a second implementation. The key is
+        // suffixed because `applyPermissionNotes` matches findings on it and a
+        // per-row note would have nowhere sensible to go.
+        const picker = resourcePicker(
+            { ...definition, key: `${definition.key}.entry`, value_type: 'role' },
+            entry && entry.id && String(entry.id) !== '0' ? String(entry.id) : null,
+        );
+        picker.querySelector('.picker-carrier').addEventListener('change', serialise);
+        row.appendChild(picker);
+
+        const emojiInput = document.createElement('input');
+        emojiInput.type = 'text';
+        emojiInput.className = 'menu-emoji';
+        emojiInput.value = (entry && entry.emoji) || '';
+        emojiInput.placeholder = tr('dashboard.role_menu_emoji');
+        emojiInput.addEventListener('input', serialise);
+        row.appendChild(emojiInput);
+
+        const remove = element('button', 'menu-remove icon-button');
+        remove.type = 'button';
+        remove.title = tr('dashboard.role_menu_remove');
+        remove.appendChild(icon('ic-trash', 'ic ic-sm'));
+        remove.addEventListener('click', () => { row.remove(); serialise(); });
+        row.appendChild(remove);
+
+        rows.appendChild(row);
+        return row;
+    };
+
+    Object.entries(entries).forEach(([label, entry]) => addRow(label, entry));
+
+    const add = element('button', 'menu-add btn-ghost');
+    add.type = 'button';
+    add.appendChild(icon('ic-plus', 'ic ic-sm'));
+    add.appendChild(document.createTextNode(tr('dashboard.role_menu_add')));
+    add.addEventListener('click', () => {
+        const row = addRow('', null);
+        row.querySelector('.menu-label').focus();
+    });
+    wrapper.appendChild(add);
+
+    serialise();
+    return wrapper;
+}
+
+
 function resourcePicker(definition, value) {
     const isList = definition.value_type.endsWith('_list');
     const chosen = isList ? (Array.isArray(value) ? value : []) : [value];
@@ -1413,12 +1637,22 @@ function resourcePicker(definition, value) {
  *  The language list is the only one so far and it already has display names
  *  under `dashboard.languages.*`; anything else falls back to the raw value
  *  rather than rendering a missing key. */
+/** The label for one constrained value, from the prefix its setting declares.
+ *
+ *  Declared in the registry rather than matched on the setting's key here:
+ *  several settings share one set of choices — every warn action reads from the
+ *  same four — and `language` used to be special-cased in this function, which
+ *  is exactly how the interface starts carrying its own copy of a list.
+ *
+ *  With no prefix, or no catalog entry, the raw value is the label. That is
+ *  safe because a choice is always a stable English identifier, so an
+ *  unlabelled one reads as itself instead of as a bracketed key.
+ */
 function choiceLabel(definition, choice) {
-    if (definition.key === 'language') {
-        const label = tr(`dashboard.languages.${choice}`);
-        return label.startsWith('[') ? choice : label;
-    }
-    return choice;
+    const prefix = definition.choice_locale_prefix;
+    if (!prefix) return choice;
+    const label = tr(`${prefix}.${choice}`);
+    return label.startsWith('[') ? choice : label;
 }
 
 function settingInput(definition, storedValue) {
@@ -1435,6 +1669,13 @@ function settingInput(definition, storedValue) {
 
     if (['channel', 'role', 'channel_list', 'role_list'].includes(definition.value_type)) {
         return resourcePicker(definition, value);
+    }
+
+    // A JSON setting whose shape the registry declares gets a typed editor
+    // instead of a text box full of braces. The shape is declared server-side so
+    // the API validates the same structure this renders.
+    if (definition.json_shape === 'role_menu') {
+        return roleMenuEditor(definition, value);
     }
 
     if (['string_list', 'json'].includes(definition.value_type)) {
@@ -1465,8 +1706,15 @@ function settingInput(definition, storedValue) {
 }
 
 function readSettingInput(definition, field) {
-    const input = field.classList?.contains('resource-picker')
-        ? field.querySelector('.picker-carrier') : field;
+    // Both typed editors wrap a real form control, and this is where that pays
+    // off: everything downstream — the save, the dirty check, a form reset —
+    // keeps acting on a control rather than on a widget.
+    let input = field;
+    if (field.classList?.contains('resource-picker')) {
+        input = field.querySelector('.picker-carrier');
+    } else if (field.classList?.contains('role-menu-editor')) {
+        input = field.querySelector('.menu-carrier');
+    }
     if (definition.value_type === 'boolean') return input.checked;
     if (definition.value_type === 'integer') return Number(input.value);
     // Snowflakes stay strings. `Number("1420070400000000001")` is ...200,

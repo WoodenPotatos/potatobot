@@ -56,7 +56,9 @@ READ_ONLY_OPERATIONS = {
     "get_gacha_banner", "list_gacha_banners", "get_work_responses",
     "get_user_inventory",
     "get_user_vouchers",
-    "get_guild_settings", "get_settings_audit", "get_shop_item_definitions",
+    "get_guild_settings", "get_instance_settings", "get_schema_version",
+    "get_settings_revision",
+    "get_settings_audit", "get_shop_item_definitions",
     "list_dashboard_documents", "get_control_action",
     "get_fulfillment_requests",
     "get_expired_entitlements",
@@ -157,7 +159,7 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 9
+LATEST_SCHEMA_VERSION = 11
 
 # A claimed control action is re-queued only once its lease expires. The worker
 # renews the lease as it runs, so slowness never causes a duplicate Discord post.
@@ -246,6 +248,7 @@ DEFAULT_GACHA_CONFIG = {
             {"key": "sticker_30d", "kind": "voucher", "amount": 30, "weight": 1},
             {"key": "sound_30d", "kind": "voucher", "amount": 30, "weight": 1},
             {"key": "vault_glove", "kind": "item", "amount": 1, "weight": 1},
+            {"key": "streak_freeze", "kind": "item", "amount": 1, "weight": 1},
             # Vaults use the shop's item keys and the catalog's reserves, so the
             # same key always means the same protection whichever system awarded
             # it. Banners saved before this change keep their vault_25000 and
@@ -568,6 +571,20 @@ def _create_scoped_schema(conn):
             updated_at TEXT NOT NULL,
             PRIMARY KEY (guild_id, feature_key)
         );
+        -- Schema 11. An installation-wide setting has no guild dimension, and
+        -- putting that in the schema rather than in a convention is the point:
+        -- five settings were declared per guild and stored per guild while being
+        -- instance-wide in fact, which nothing noticed because there is one
+        -- guild. `guild_settings` also carries a foreign key to `guilds`, so the
+        -- guild_id = 0 convention `active_channels` uses would have needed a
+        -- sentinel guild row; a separate table needs nothing.
+        CREATE TABLE IF NOT EXISTS instance_settings (
+            setting_key TEXT PRIMARY KEY,
+            value_json TEXT NOT NULL,
+            revision INTEGER NOT NULL DEFAULT 1,
+            updated_by INTEGER,
+            updated_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS guild_settings (
             guild_id INTEGER NOT NULL REFERENCES guilds(guild_id),
             setting_key TEXT NOT NULL,
@@ -851,6 +868,20 @@ def _create_control_plane_v5_schema(conn):
         # identifier that pull history and pity rows reference. An existing
         # banner keeps a NULL name and falls back to its key.
         conn.execute("ALTER TABLE gacha_banners ADD COLUMN display_name TEXT")
+    warning_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(warnings)")
+    }
+    if "tag" not in warning_columns:
+        # Schema 10, purely additive and rewriting no row. A warning now carries
+        # which kind of rule it was for, so a threshold and its consequence can
+        # be configured per kind instead of one count governing everything. An
+        # existing warning keeps a NULL tag and is counted under the default
+        # tag, which is what it has always effectively been.
+        conn.execute("ALTER TABLE warnings ADD COLUMN tag TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_warnings_guild_user_tag "
+            "ON warnings(guild_id, user_id, tag)"
+        )
     voucher_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(reward_vouchers)")
     }
@@ -859,6 +890,61 @@ def _create_control_plane_v5_schema(conn):
             "ALTER TABLE reward_vouchers ADD COLUMN source_type TEXT "
             "NOT NULL DEFAULT 'gacha' CHECK (source_type IN ('gacha', 'shop'))"
         )
+
+
+def _promote_instance_settings(conn) -> int:
+    """Move a setting now declared instance-wide out of `guild_settings`.
+
+    Schema 11. Gated on absence in `instance_settings` rather than on a version,
+    so re-running is a no-op and an interrupted upgrade repairs itself. The guild
+    rows are deleted once copied, because a row nothing reads is a trap for the
+    next person: rolling back means restoring the pre-migration backup the
+    migration already wrote, not downgrading in place.
+
+    A key stored for more than one guild can only have one installation-wide
+    value, so the most recently updated row wins and the discarded ones are
+    logged rather than dropped silently — on a single-guild installation this
+    never fires, and on any other it is the thing an operator needs to know.
+    """
+    from settings_registry import SETTING_DEFINITIONS, SettingScope
+
+    instance_keys = [key for key, definition in SETTING_DEFINITIONS.items()
+                     if definition.scope is SettingScope.INSTANCE]
+    if not instance_keys:
+        return 0
+    placeholders = ",".join("?" * len(instance_keys))
+    already = {row[0] for row in conn.execute(
+        f"SELECT setting_key FROM instance_settings WHERE setting_key IN ({placeholders})",
+        instance_keys,
+    )}
+    moved = 0
+    for key in instance_keys:
+        rows = conn.execute(
+            "SELECT guild_id, value_json, revision, updated_by, updated_at "
+            "FROM guild_settings WHERE setting_key = ? "
+            "ORDER BY updated_at DESC, revision DESC",
+            (key,),
+        ).fetchall()
+        if not rows:
+            continue
+        if key not in already:
+            _, value_json, revision, updated_by, updated_at = rows[0]
+            conn.execute(
+                "INSERT INTO instance_settings "
+                "(setting_key, value_json, revision, updated_by, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (key, value_json, revision, updated_by, updated_at),
+            )
+            moved += 1
+            if len(rows) > 1:
+                db_logger.warning(
+                    "Setting %r was stored for %s guilds but is "
+                    "installation-wide; kept the row from guild %s and "
+                    "discarded %s other(s).",
+                    key, len(rows), rows[0][0], len(rows) - 1,
+                )
+        conn.execute("DELETE FROM guild_settings WHERE setting_key = ?", (key,))
+    return moved
 
 
 def initialize_database():
@@ -918,6 +1004,12 @@ def initialize_database():
                         "WHERE guild_id = ? AND banner_key = ?",
                         (json.dumps(banner_config, sort_keys=True), guild_id, banner_key),
                     )
+            moved = _promote_instance_settings(conn)
+            if moved:
+                db_logger.info(
+                    "Moved %s installation-wide setting(s) out of guild_settings.",
+                    moved,
+                )
             seeded = seed_default_work_responses(conn)
             if seeded:
                 db_logger.info(
@@ -1434,9 +1526,39 @@ def claim_timed_reward(user_id: int, cooldown_column: str, timestamp: str,
         raise DatabaseOperationError("timed reward failed") from exc
 
 
+def _consume_streak_freeze(conn, guild_id: int, user_id: int,
+                          timestamp: str) -> bool:
+    """Spend one streak freeze from this guild's inventory, if there is one.
+
+    Takes the caller's connection rather than opening its own, so it commits
+    with the claim that spent it. Decrements conditionally on `quantity > 0`
+    and reports whether the row actually moved, so two claims cannot spend one
+    freeze.
+    """
+    return conn.execute(
+        "UPDATE user_inventory SET quantity = quantity - 1, updated_at = ? "
+        "WHERE guild_id = ? AND user_id = ? AND item_key = 'streak_freeze' "
+        "AND quantity > 0",
+        (timestamp, int(guild_id), int(user_id)),
+    ).rowcount == 1
+
+
 def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
-                          base_coin: int, xp_reward: int):
-    """Atomically grants one daily Everydle reward and updates its streak."""
+                          base_coin: int, xp_reward: int,
+                          guild_id: int = None):
+    """Atomically grants one daily Everydle reward and updates its streak.
+
+    A `streak_freeze` in the member's guild inventory buys one extra forgiven
+    day, spent here rather than by a scheduled job: the claim already knows how
+    many days it has been, so the freeze is applied retroactively at the moment
+    the gap would have reset the streak. It is consumed on the same connection
+    and in the same transaction as the claim, because a crash between the two
+    would either hand out a free freeze or charge for one that did nothing.
+
+    `guild_id` is optional because inventory is guild-local and the streak is
+    not. Without it there is no inventory to look in, so the streak resets the
+    way it always did.
+    """
     if cooldown_column not in VALID_COOLDOWN_COLUMNS:
         raise ValueError(f"invalid cooldown column: {cooldown_column}")
     now = datetime.fromisoformat(timestamp)
@@ -1455,6 +1577,7 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
                 return {"claimed": False, "last_claim": last_claim}
 
             streak_count = streak_count or 0
+            froze_streak = False
             if not last_streak_update:
                 new_streak = 1
             else:
@@ -1462,7 +1585,16 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
                 if day_gap == 0:
                     new_streak = streak_count
                 elif day_gap in (1, 2):
+                    # A single missed day is already forgiven, and always was.
                     new_streak = streak_count + 1
+                elif (day_gap == 3 and guild_id is not None
+                      and _consume_streak_freeze(conn, guild_id, user_id,
+                                                 timestamp)):
+                    # One freeze covers exactly one day beyond the built-in
+                    # grace. A longer absence resets, or the item would be a
+                    # permanent streak rather than one forgiven day.
+                    new_streak = streak_count + 1
+                    froze_streak = True
                 else:
                     new_streak = 1
             effective_streak = min(streak_count + 1, 100)
@@ -1477,7 +1609,8 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
                 (timestamp, new_streak, timestamp, user_id),
             )
             conn.commit()
-            result.update({"claimed": True, "reward": reward, "streak": new_streak})
+            result.update({"claimed": True, "reward": reward,
+                           "streak": new_streak, "froze_streak": froze_streak})
             return result
     except (sqlite3.Error, ValueError) as exc:
         db_logger.exception("Everydle reward failed (user=%s, cooldown=%s)", user_id, cooldown_column)
@@ -1647,6 +1780,12 @@ def get_active_guild_ids() -> set[int]:
             row[0]
             for row in conn.execute("SELECT guild_id FROM guilds WHERE active = 1")
         }
+
+
+def get_schema_version() -> int:
+    """The schema version the database file is actually at."""
+    with get_connection() as conn:
+        return conn.execute("PRAGMA user_version").fetchone()[0]
 
 
 def get_active_guilds(guild_ids=None) -> list[dict]:
@@ -2473,33 +2612,90 @@ def add_rented_item(item_type: str, item_id: str, expires_at: str,
 # Moderation records
 # ==========================================
 
+def _warn_tag_filter(tag: str | None) -> tuple[str, tuple]:
+    """SQL fragment restricting a warning query to one tag.
+
+    The default tag absorbs a NULL: every row written before schema 10 has no
+    tag and has always effectively been a general warning, so counting the
+    default tag has to include them or an upgrade would silently reset every
+    member's history to zero.
+    """
+    if tag is None:
+        return "", ()
+    from settings_registry import WARN_DEFAULT_TAG
+    if tag == WARN_DEFAULT_TAG:
+        return " AND (tag = ? OR tag IS NULL)", (tag,)
+    return " AND tag = ?", (tag,)
+
+
 def add_warning(user_id: int, mod_id: int, reason: str, date: str,
-                guild_id: int = None):
+                guild_id: int = None, tag: str = None):
     """Append a moderation warning to the user's record."""
     try:
         with get_connection() as conn:
             conn.execute(
-                "INSERT INTO warnings (user_id, mod_id, reason, date, guild_id) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (user_id, mod_id, reason, date, guild_id),
+                "INSERT INTO warnings (user_id, mod_id, reason, date, guild_id, tag) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, mod_id, reason, date, guild_id, tag),
             )
     except Exception as e:
         db_logger.error(f"Failed to save warning: {e}")
         raise DatabaseOperationError("warning insert failed") from e
 
-def get_warning_count(user_id: int, guild_id: int = None) -> int:
-    """Return the number of warnings stored for a user."""
+
+def record_warning(user_id: int, mod_id: int, reason: str, date: str,
+                   guild_id: int, tag: str) -> dict:
+    """Insert one warning and report the counts that insert produced.
+
+    Deliberately one transaction rather than an insert followed by a count. The
+    threshold this feeds can time out, kick or ban, so it has to be compared
+    against the total *including* this warning; two moderators warning the same
+    member at once would otherwise both read the pre-insert total and neither
+    would see the threshold crossed.
+    """
     try:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                "INSERT INTO warnings (user_id, mod_id, reason, date, guild_id, tag) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (int(user_id), int(mod_id), reason, date, int(guild_id), tag),
+            )
+            warning_id = cursor.lastrowid
+            scope = "user_id = ? AND (guild_id = ? OR guild_id IS NULL)"
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM warnings WHERE {scope}",
+                (int(user_id), int(guild_id)),
+            ).fetchone()[0]
+            clause, parameters = _warn_tag_filter(tag)
+            tag_count = conn.execute(
+                f"SELECT COUNT(*) FROM warnings WHERE {scope}{clause}",
+                (int(user_id), int(guild_id), *parameters),
+            ).fetchone()[0]
+            conn.commit()
+            return {"warning_id": warning_id, "total": total,
+                    "tag_count": tag_count, "tag": tag}
+    except Exception as e:
+        db_logger.error(f"Failed to record warning: {e}")
+        raise DatabaseOperationError("warning insert failed") from e
+
+
+def get_warning_count(user_id: int, guild_id: int = None,
+                      tag: str = None) -> int:
+    """Return the number of warnings stored for a user, optionally by tag."""
+    try:
+        clause, parameters = _warn_tag_filter(tag)
         with get_connection() as conn:
             if guild_id is None:
                 cursor = conn.execute(
-                    "SELECT COUNT(*) FROM warnings WHERE user_id = ?", (user_id,)
+                    f"SELECT COUNT(*) FROM warnings WHERE user_id = ?{clause}",
+                    (user_id, *parameters),
                 )
             else:
                 cursor = conn.execute(
                     "SELECT COUNT(*) FROM warnings WHERE user_id = ? "
-                    "AND (guild_id = ? OR guild_id IS NULL)",
-                    (user_id, guild_id),
+                    f"AND (guild_id = ? OR guild_id IS NULL){clause}",
+                    (user_id, guild_id, *parameters),
                 )
             result = cursor.fetchone()
             return result[0] if result else 0
@@ -2508,18 +2704,23 @@ def get_warning_count(user_id: int, guild_id: int = None) -> int:
         return 0
 
 def get_warnings(user_id: int, guild_id: int = None):
-    """Return all warnings stored for a user."""
+    """Return all warnings stored for a user, newest column order first.
+
+    Each row is (id, reason, date, mod_id, tag); a pre-schema-10 row reports a
+    NULL tag, which renders as the default rather than as a missing value.
+    """
     try:
         with get_connection() as conn:
             if guild_id is None:
                 cursor = conn.execute(
-                    "SELECT id, reason, date, mod_id FROM warnings WHERE user_id = ?",
+                    "SELECT id, reason, date, mod_id, tag FROM warnings "
+                    "WHERE user_id = ?",
                     (user_id,),
                 )
             else:
                 cursor = conn.execute(
-                    "SELECT id, reason, date, mod_id FROM warnings WHERE user_id = ? "
-                    "AND (guild_id = ? OR guild_id IS NULL)",
+                    "SELECT id, reason, date, mod_id, tag FROM warnings "
+                    "WHERE user_id = ? AND (guild_id = ? OR guild_id IS NULL)",
                     (user_id, guild_id),
                 )
             return cursor.fetchall()
@@ -3101,10 +3302,36 @@ def get_config_id(guild_id: int, config_key: str) -> int:
 # ==========================================
 
 def get_guild_settings(guild_id: int) -> dict[str, dict]:
+    """Every stored setting that applies to this guild, guild and instance both.
+
+    Deliberately merged rather than split into two calls. Every caller wants the
+    *effective* stored value for a guild, and a second accessor would have meant
+    every one of them remembering which scope a key has — which is the mistake
+    schema 11 exists to make impossible. Writes are the half that must know:
+    `set_guild_settings` routes by `definition.scope`, so an instance setting
+    cannot land in `guild_settings` at all.
+
+    An instance row wins on a key collision, which can only happen for a row
+    written before schema 11 moved it; the migration removes those, so it is a
+    belt-and-braces ordering rather than a live case.
+    """
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT setting_key, value_json, revision FROM guild_settings WHERE guild_id = ?",
             (int(guild_id),),
+        ).fetchall()
+        instance_rows = conn.execute(
+            "SELECT setting_key, value_json, revision FROM instance_settings"
+        ).fetchall()
+    return {key: {"value": json.loads(value), "revision": revision}
+            for key, value, revision in [*rows, *instance_rows]}
+
+
+def get_instance_settings() -> dict[str, dict]:
+    """Only the installation-wide rows, for a caller with no guild in hand."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT setting_key, value_json, revision FROM instance_settings"
         ).fetchall()
     return {key: {"value": json.loads(value), "revision": revision}
             for key, value, revision in rows}
@@ -3128,29 +3355,47 @@ def set_guild_settings(guild_id: int, actor_id: int, changes: list[dict]):
                 if definition is None or definition.sensitive:
                     raise ValidationError("settings_unknown_or_sensitive", "unknown or sensitive setting")
                 value = validate_setting_value(definition, change["value"])
+                # An instance setting has no guild dimension, so it goes to the
+                # table that has none either. The audit row still records the
+                # guild the change was made from, because that is who did it.
+                from settings_registry import SettingScope
+                instance = definition.scope is SettingScope.INSTANCE
+                table = "instance_settings" if instance else "guild_settings"
+                where = ("setting_key = ?" if instance
+                         else "guild_id = ? AND setting_key = ?")
+                identity = (key,) if instance else (int(guild_id), key)
                 existing = conn.execute(
-                    "SELECT value_json, revision FROM guild_settings "
-                    "WHERE guild_id = ? AND setting_key = ?", (int(guild_id), key)
+                    f"SELECT value_json, revision FROM {table} WHERE {where}",
+                    identity
                 ).fetchone()
                 if existing:
                     if change["revision"] != existing[1]:
                         raise RevisionConflictError("settings revision conflict")
                     revision, old_value = existing[1] + 1, json.loads(existing[0])
                     conn.execute(
-                        "UPDATE guild_settings SET value_json = ?, revision = ?, "
-                        "updated_by = ?, updated_at = ? WHERE guild_id = ? AND setting_key = ?",
-                        (json.dumps(value), revision, int(actor_id), timestamp, int(guild_id), key),
+                        f"UPDATE {table} SET value_json = ?, revision = ?, "
+                        f"updated_by = ?, updated_at = ? WHERE {where}",
+                        (json.dumps(value), revision, int(actor_id), timestamp,
+                         *identity),
                     )
                 else:
                     if change["revision"] not in (None, 0):
                         raise RevisionConflictError("settings revision conflict")
                     revision, old_value = 1, None
-                    conn.execute(
-                        "INSERT INTO guild_settings "
-                        "(guild_id, setting_key, value_json, revision, updated_by, updated_at) "
-                        "VALUES (?, ?, ?, 1, ?, ?)",
-                        (int(guild_id), key, json.dumps(value), int(actor_id), timestamp),
-                    )
+                    if instance:
+                        conn.execute(
+                            "INSERT INTO instance_settings "
+                            "(setting_key, value_json, revision, updated_by, updated_at) "
+                            "VALUES (?, ?, 1, ?, ?)",
+                            (key, json.dumps(value), int(actor_id), timestamp),
+                        )
+                    else:
+                        conn.execute(
+                            "INSERT INTO guild_settings "
+                            "(guild_id, setting_key, value_json, revision, updated_by, updated_at) "
+                            "VALUES (?, ?, ?, 1, ?, ?)",
+                            (int(guild_id), key, json.dumps(value), int(actor_id), timestamp),
+                        )
                 conn.execute(
                     "INSERT INTO settings_audit "
                     "(guild_id, actor_id, action, target_key, old_value_json, "
@@ -3167,6 +3412,23 @@ def set_guild_settings(guild_id: int, actor_id: int, changes: list[dict]):
     except sqlite3.Error as exc:
         db_logger.exception("Guild settings update failed (guild=%s)", guild_id)
         raise DatabaseOperationError("guild settings update failed") from exc
+
+
+def get_settings_revision() -> int:
+    """The highest settings-change audit id, as one installation-wide number.
+
+    Deliberately not per guild. An instance setting's audit row records the
+    guild the change was made *from*, so a per-guild revision would let every
+    other guild miss an installation-wide change. One number means any settings
+    change anywhere makes every guild reload, which costs a few reloads on a
+    multi-guild installation and cannot miss one.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT MAX(audit_id) FROM settings_audit "
+            "WHERE action = 'setting.update'"
+        ).fetchone()
+    return int(row[0]) if row and row[0] is not None else 0
 
 
 def get_settings_audit(guild_id: int, limit: int = 100) -> list[dict]:
@@ -4623,6 +4885,7 @@ ERASE_NULL_ACTOR = (
     ("guild_data_scopes", "updated_by"),
     ("feature_flags", "updated_by"),
     ("guild_settings", "updated_by"),
+    ("instance_settings", "updated_by"),
     ("shop_item_definitions", "updated_by"),
     ("gacha_banners", "updated_by"),
     ("work_responses", "updated_by"),

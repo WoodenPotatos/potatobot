@@ -22,6 +22,7 @@ from feature_access import (
     maintenance_blocks,
     refresh_feature_cache_async,
 )
+import settings_cache
 
 if deployment_settings.dashboard_enabled:
     import dashboard_api
@@ -151,7 +152,7 @@ async def load_cogs():
                 bot_logger.exception("Failed to load extension: %s", filename)
 
 async def refresh_feature_caches():
-    """Notice feature writes made by a separately running dashboard process."""
+    """Notice feature and settings writes made by a separate dashboard process."""
     while not bot.is_closed():
         await asyncio.sleep(2)
         for guild in bot.guilds:
@@ -161,6 +162,15 @@ async def refresh_feature_caches():
                 bot_logger.exception(
                     "Feature cache refresh failed (guild_id=%s)", guild.id
                 )
+        try:
+            # One probe for every guild, because the settings revision is one
+            # installation-wide number rather than one per guild.
+            await settings_cache.refresh([guild.id for guild in bot.guilds])
+        except Exception:
+            # The last known-good cache stays, and every reader keeps resolving
+            # through the legacy fallback, so this is a warning and not an
+            # outage.
+            bot_logger.exception("Settings cache refresh failed")
 
 async def monitor_event_loop_lag():
     """Report blocking work before it grows into expired Discord interactions."""
@@ -187,6 +197,11 @@ async def on_ready():
     for guild in bot.guilds:
         await database_layer.run_write(database_layer.register_guild, guild.id, guild.name)
         await refresh_feature_cache_async(guild.id, force=True)
+
+    try:
+        await settings_cache.refresh([guild.id for guild in bot.guilds], force=True)
+    except Exception:
+        bot_logger.exception("Initial settings cache load failed")
 
     if feature_refresh_task is None or feature_refresh_task.done():
         feature_refresh_task = asyncio.create_task(

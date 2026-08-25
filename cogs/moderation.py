@@ -1,6 +1,10 @@
 import discord
+import logging
 import os
+import re
 import sys
+import time
+import unicodedata
 
 # Resolve repository imports independently of the process working directory.
 COG_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -10,15 +14,301 @@ if ROOT_DIR not in sys.path:
 
 import database
 
+from bounded import BoundedValueMap
 from discord.ext import commands
 from datetime import datetime, timedelta
-from cogs.utils import is_staff, is_higher_than, role_autocomplete, t, config
+from feature_access import is_enabled, maintenance_blocks
+from settings_registry import WARN_DEFAULT_TAG, WARN_TAGS
+from cogs.utils import (is_staff, is_higher_than, role_autocomplete, t, config,
+                        guild_settings_many)
+
+moderation_logger = logging.getLogger("PotatoBot.Moderation")
 
 # Moderation commands enforce both Discord hierarchy and configured staff policy.
+
+# Command metadata is built at import time, so the choice labels are too. The
+# values are the stable English identifiers written into every warning row.
+WARN_TAG_CHOICES = [
+    discord.app_commands.Choice(name=t(f"moderation.warn_tags.{tag}"), value=tag)
+    for tag in WARN_TAGS
+]
+
+# How long a guild's filter configuration is reused before being re-read. This
+# runs on every message, so reading four settings per message is not an option;
+# a minute of staleness on a word list is the accepted price.
+FILTER_CACHE_SECONDS = 60
+
+# Characters people substitute to slip a word past a literal comparison. Applied
+# after accent stripping, so only the shapes that are not already decomposable
+# need to be here.
+FILTER_HOMOGLYPHS = str.maketrans({
+    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b",
+    "@": "a", "$": "s", "!": "i", "|": "i", "\u0142": "l", "\u00f8": "o",
+})
+
+_NON_ALPHANUMERIC = re.compile(r"[^a-z0-9]+")
+_REPEATED = re.compile(r"(.)\1+")
+
+
+def normalise_for_filter(text: str) -> str:
+    """Fold text to the form a word filter should compare against.
+
+    Casefold, decompose and drop combining marks so an accent cannot smuggle a
+    word past, map the common digit-and-symbol substitutions, remove everything
+    that is not a letter or digit so `b.a.d` and `b a d` do not evade, then
+    collapse a run of one character to a single one so `baaad` does not either.
+
+    Both the message and every listed word go through this, which is what keeps
+    the comparison consistent — and is also the trade being made: removing the
+    separators means a listed word matches inside a longer one, and collapsing
+    repeats widens a word by one letter shape. A filter a full stop defeats is
+    worth nothing, and a false positive is visible and fixable where an evasion
+    is silent. Operators list distinctive words and exempt their staff.
+    """
+    folded = unicodedata.normalize("NFKD", str(text or "")).casefold()
+    stripped = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    mapped = stripped.translate(FILTER_HOMOGLYPHS)
+    compact = _NON_ALPHANUMERIC.sub("", mapped)
+    return _REPEATED.sub(r"\1", compact)
+
+async def apply_warn_escalation(guild, member, tag: str, tag_count: int,
+                                reason: str) -> str | None:
+    """Alert and act when this tag's threshold has been reached.
+
+    Alerting and acting are two flags on purpose, and they fail in opposite
+    directions: a missed alert is an inconvenience, a wrong ban is not. Alerting
+    therefore works with actions off, which is the whole point of the split.
+
+    A threshold of 0 means never act. That is a decision, not an unset value —
+    it is what every tag ships with, so upgrading an installation cannot start
+    handing out consequences nobody configured.
+
+    Returns the action actually applied, or None.
+    """
+    settings = await guild_settings_many(guild.id, (
+        f"warn_threshold_{tag}", f"warn_action_{tag}",
+        f"warn_timeout_minutes_{tag}", "moderation_log_channel",
+    ))
+    try:
+        threshold = int(settings.get(f"warn_threshold_{tag}") or 0)
+    except (TypeError, ValueError):
+        threshold = 0
+    if threshold <= 0 or tag_count < threshold:
+        return None
+
+    action = str(settings.get(f"warn_action_{tag}") or "none")
+    acting = (is_enabled(guild.id, "moderation_warn_actions")
+              and action != "none")
+
+    # Never escalate against somebody the guild cannot afford to lose to a
+    # miscounted threshold, and never against somebody the bot could not undo.
+    blocked = None
+    if acting:
+        if member.id == guild.owner_id or member.guild_permissions.administrator:
+            blocked = "protected"
+        elif guild.me.top_role <= member.top_role:
+            blocked = "hierarchy"
+
+    applied = None
+    if acting and blocked is None:
+        audit_reason = t("moderation.escalation_audit_reason",
+                         tag=t(f"moderation.warn_tags.{tag}"), count=tag_count)
+        try:
+            if action == "timeout":
+                minutes = int(settings.get(f"warn_timeout_minutes_{tag}") or 60)
+                await member.timeout(timedelta(minutes=minutes),
+                                     reason=audit_reason)
+            elif action == "kick":
+                await member.kick(reason=audit_reason)
+            elif action == "ban":
+                await member.ban(reason=audit_reason,
+                                 delete_message_seconds=0)
+            applied = action
+        except discord.Forbidden:
+            blocked = "forbidden"
+        except discord.HTTPException:
+            moderation_logger.exception(
+                "Warn escalation failed (guild_id=%s, action=%s)",
+                guild.id, action,
+            )
+            blocked = "failed"
+
+    # Posted after the attempt so the record says what happened, not what was
+    # intended, and posted even when actions are off — that is the split.
+    if is_enabled(guild.id, "moderation_warn_alerts"):
+        channel_id = settings.get("moderation_log_channel")
+        channel = guild.get_channel(int(channel_id)) if channel_id else None
+        if channel is not None:
+            outcome = (t(f"moderation.escalation_applied_{applied}") if applied
+                       else t(f"moderation.escalation_blocked_{blocked}") if blocked
+                       else t("moderation.escalation_alert_only"))
+            embed = discord.Embed(
+                title=t("moderation.escalation_title"),
+                description=t("moderation.escalation_body",
+                              user=member.mention,
+                              tag=t(f"moderation.warn_tags.{tag}"),
+                              count=tag_count, threshold=threshold),
+                color=discord.Color.red() if applied else discord.Color.orange(),
+            )
+            embed.add_field(name=t("moderation.escalation_outcome_label"),
+                            value=outcome, inline=False)
+            # The reason is member-supplied text on the filter path.
+            embed.add_field(name=t("moderation.reason_label"),
+                            value=discord.utils.escape_mentions(reason)[:1024],
+                            inline=False)
+            try:
+                await channel.send(embed=embed)
+            except discord.HTTPException:
+                moderation_logger.warning(
+                    "Could not post a warn escalation alert (guild_id=%s, "
+                    "channel_id=%s)", guild.id, channel_id,
+                )
+    return applied
+
 
 class Moderation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # One entry per guild holding the filter's compiled word list and the
+        # three settings around it, because on_message must not read four
+        # settings per message. Bounded, so a bot in many guilds cannot grow it
+        # without limit.
+        self._filter_cache = BoundedValueMap(max_entries=512)
+
+    async def _filter_config(self, guild_id: int) -> dict:
+        """This guild's filter configuration, re-read at most once a minute."""
+        cached = self._filter_cache.get(guild_id)
+        if cached is not None and time.monotonic() < cached["expires"]:
+            return cached
+        settings = await guild_settings_many(guild_id, (
+            "word_filter_words", "word_filter_exempt_roles",
+            "word_filter_tag", "word_filter_delete_message",
+        ))
+        # Normalised here, once, because the message side is normalised too and
+        # the two are only comparable if folded the same way. An entry that
+        # normalises to nothing — punctuation only — is dropped rather than
+        # matching every message.
+        needles = sorted({
+            folded for folded in
+            (normalise_for_filter(word) for word in
+             (settings.get("word_filter_words") or []))
+            if folded
+        }, key=len)
+        exempt = set()
+        for role_id in settings.get("word_filter_exempt_roles") or ():
+            try:
+                exempt.add(int(role_id))
+            except (TypeError, ValueError):
+                continue
+        tag = settings.get("word_filter_tag")
+        entry = {
+            "expires": time.monotonic() + FILTER_CACHE_SECONDS,
+            "needles": needles,
+            "exempt": exempt,
+            "tag": tag if tag in WARN_TAGS else WARN_DEFAULT_TAG,
+            "delete": bool(settings.get("word_filter_delete_message", True)),
+        }
+        self._filter_cache[guild_id] = entry
+        return entry
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Delete a filtered message and warn under the configured tag.
+
+        The filter deliberately does not decide a consequence. It files a
+        warning and lets the tag's threshold decide, so a guild configures
+        escalation once instead of the filter carrying a second copy of it.
+        """
+        if message.guild is None or message.author.bot:
+            return
+        if not isinstance(message.author, discord.Member):
+            return
+        if not is_enabled(message.guild.id, "moderation_word_filter"):
+            return
+        # Maintenance is the emergency stop and outranks the flag, including for
+        # an automated action nobody asked for at that moment.
+        if maintenance_blocks(message.guild, message.author):
+            return
+
+        member = message.author
+        # Staff are exempt by permission as well as by configured role: a filter
+        # that times out the moderators is worse than no filter at all.
+        if (member.id == message.guild.owner_id
+                or member.guild_permissions.manage_messages):
+            return
+
+        settings = await self._filter_config(message.guild.id)
+        if not settings["needles"]:
+            return
+        if settings["exempt"] & {role.id for role in member.roles}:
+            return
+        folded = normalise_for_filter(message.content)
+        if not folded:
+            return
+        matched = next((needle for needle in settings["needles"]
+                        if needle in folded), None)
+        if matched is None:
+            return
+
+        channel_name = getattr(message.channel, "name", "?")
+        if settings["delete"]:
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.NotFound):
+                pass
+
+        # The stored reason names no word. It is read back in /modlogs and in
+        # the escalation alert, and a warning record is not the place for the
+        # thing the guild is trying to stop repeating.
+        tag = settings["tag"]
+        record = await database.run(
+            database.record_warning, member.id, self.bot.user.id,
+            t("moderation.filter_warn_reason", channel=channel_name),
+            datetime.now().isoformat(), message.guild.id, tag,
+        )
+
+        # Tell the member privately. There is no public notice at all: naming
+        # the rule in the channel repeats what was just deleted.
+        try:
+            await member.send(t("moderation.filter_member_notice",
+                                guild=message.guild.name))
+        except discord.HTTPException:
+            pass
+
+        # The matched term goes to the moderation log and nowhere else, so staff
+        # can see which entry fired without it being said out loud again.
+        await self._report_filter_match(message.guild, member, matched,
+                                        channel_name, record)
+        await apply_warn_escalation(
+            message.guild, member, tag, record["tag_count"],
+            t("moderation.filter_warn_reason", channel=channel_name),
+        )
+
+    async def _report_filter_match(self, guild, member, matched, channel_name,
+                                   record):
+        settings = await guild_settings_many(guild.id, ("moderation_log_channel",))
+        channel_id = settings.get("moderation_log_channel")
+        channel = guild.get_channel(int(channel_id)) if channel_id else None
+        if channel is None:
+            return
+        embed = discord.Embed(title=t("moderation.filter_alert_title"),
+                              color=discord.Color.orange())
+        embed.add_field(name=t("moderation.user_label"), value=member.mention)
+        embed.add_field(name=t("moderation.filter_channel_label"),
+                        value=f"#{channel_name}")
+        # Escaped: an operator authored the list, and it reaches message content.
+        embed.add_field(name=t("moderation.filter_match_label"),
+                        value=f"`{discord.utils.escape_mentions(matched)[:200]}`",
+                        inline=False)
+        embed.set_footer(text=t("moderation.warn_footer_tagged",
+                                count=record["total"],
+                                tag_count=record["tag_count"]))
+        try:
+            await channel.send(embed=embed)
+        except discord.HTTPException:
+            moderation_logger.warning(
+                "Could not post a word-filter alert (guild_id=%s)", guild.id
+            )
 
     @commands.hybrid_command(name="kick", description=t("general.cmd_kick"))
     @discord.app_commands.default_permissions(moderate_members=True)
@@ -126,30 +416,55 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="warn", description=t("general.cmd_warn"))
     @discord.app_commands.default_permissions(moderate_members=True)
+    @discord.app_commands.choices(tag=WARN_TAG_CHOICES)
+    @discord.app_commands.describe(tag=t("moderation.warn_tag_description"))
     @is_staff()
-    async def warn(self, ctx, member: discord.Member, *, reason: str):
+    async def warn(self, ctx, member: discord.Member, tag: str = None, *,
+                   reason: str = None):
         if member.id == ctx.author.id:
             return await ctx.send(t("moderation.self_warn_error"), ephemeral=True)
     
         if not is_higher_than(ctx.author, member):
             return await ctx.send(t("moderation.hierarchy_error", user=member.mention), ephemeral=True)
 
-        # Persist the warning before reporting success.
-        await database.run(
-            database.add_warning, member.id, ctx.author.id, reason,
-            datetime.now().isoformat(), ctx.guild.id,
+        # The slash form always sends one of the choices, so this only ever
+        # fires on the prefix form, which cannot tell a tag from the first word
+        # of a reason. Give the token back to the reason rather than silently
+        # eating it: `?warn @user being rude` must not file "rude" as the whole
+        # reason. `reason` is therefore optional in the signature and required
+        # here, which is also what makes a one-word reason still work.
+        if tag is not None and tag not in WARN_TAGS:
+            reason = f"{tag} {reason}".strip() if reason else tag
+            tag = None
+        tag = tag or WARN_DEFAULT_TAG
+        if not reason or not reason.strip():
+            return await ctx.send(t("moderation.warn_reason_required"),
+                                  ephemeral=True)
+
+        # Persist the warning and read back the counts it produced, in one
+        # transaction, because the threshold below is compared against them.
+        record = await database.run(
+            database.record_warning, member.id, ctx.author.id, reason,
+            datetime.now().isoformat(), ctx.guild.id, tag,
         )
-    
-        # Read the committed count for the public warning footer.
-        count = await database.run(database.get_warning_count, member.id, ctx.guild.id)
-    
+
         # Publish the moderation result to the invoking channel.
         embed = discord.Embed(title=t("moderation.warn_embed_title"), color=discord.Color.gold())
         embed.add_field(name=t("moderation.user_label"), value=member.mention)
-        embed.add_field(name=t("moderation.reason_label"), value=reason)
-        embed.set_footer(text=t("moderation.warn_footer", count=count))
+        embed.add_field(name=t("moderation.tag_label"),
+                        value=t(f"moderation.warn_tags.{tag}"))
+        embed.add_field(name=t("moderation.reason_label"),
+                        value=discord.utils.escape_mentions(reason), inline=False)
+        embed.set_footer(text=t("moderation.warn_footer_tagged",
+                                count=record["total"],
+                                tag_count=record["tag_count"]))
     
         await ctx.send(embed=embed)
+
+        # After the public result, so a member sees the warning even when the
+        # consequence cannot be applied.
+        await apply_warn_escalation(ctx.guild, member, tag,
+                                    record["tag_count"], reason)
 
     @commands.hybrid_command(name="unwarn", description=t("general.cmd_unwarn"))
     @discord.app_commands.default_permissions(moderate_members=True)
@@ -216,7 +531,10 @@ class Moderation(commands.Cog):
             embed.color = discord.Color.green() 
         else:
             embed.color = discord.Color.orange() 
-            for warning_id, reason, date, mod_id in warnings:
+            for warning_id, reason, date, mod_id, tag in warnings:
+                # A pre-schema-10 row has no tag and reads as the default.
+                tag_label = t(f"moderation.warn_tags."
+                              f"{tag if tag in WARN_TAGS else WARN_DEFAULT_TAG}")
                 date_obj = datetime.fromisoformat(date)
                 date_str = date_obj.strftime("%Y-%m-%d %H:%M")
                 mod = ctx.guild.get_member(mod_id)
@@ -229,7 +547,8 @@ class Moderation(commands.Cog):
                         date=date_str,
                         mod=mod_name,
                     ),
-                    value=reason,
+                    value=t("moderation.warn_entry_body", tag=tag_label,
+                            reason=reason),
                     inline=False,
                 )
         

@@ -31,10 +31,13 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import database
 import item_catalog
 import permission_audit
+import settings_cache
 from deployment import settings as deployment_settings
 from feature_access import is_enabled, update_cached_features
-from settings_registry import (FEATURE_GROUP_ORDER, SETTING_DEFINITIONS,
-                               SettingValueType)
+# Imported by name, not as a module: a route below is called
+# `settings_registry` and would shadow it.
+from settings_registry import (FEATURE_GROUP_ORDER, JSON_SHAPE_ROLE_MENU,
+                               SETTING_DEFINITIONS, SettingValueType)
 from version import version_display
 
 dashboard_logger = logging.getLogger("PotatoBot.Dashboard")
@@ -476,6 +479,28 @@ def callback():
             "expires_at": time.time() + int(token_data.get("expires_in", 3600)),
         }
     return redirect("/")
+
+
+@app.route("/api/session/touch")
+def session_touch():
+    """Refresh the session cookie and nothing else.
+
+    Navigating between dashboard pages that render from already-loaded state
+    made no request at all, so `SESSION_REFRESH_EACH_REQUEST` never fired and the
+    session genuinely expired while somebody was using the interface. The
+    countdown was not wrong; there was nothing keeping the session alive.
+
+    `/auth/status` would have served, but it reads the guild list and decorates it
+    from the bot cache, which is far too much work to repeat on every navigation.
+    This touches only the session, and returns the timeout so the client stays
+    calibrated without a second call.
+    """
+    if session.get("logged_in") is not True:
+        return unauthorized_response()
+    return jsonify({
+        "status": "success",
+        "idle_timeout_seconds": int(SESSION_IDLE_TIMEOUT.total_seconds()),
+    })
 
 
 @app.route("/api/auth/status")
@@ -1304,6 +1329,15 @@ def _wire_value(definition, value):
     this reason; so does this one. Storage is unaffected: the values stay
     integers in `guild_settings` and in `config.json`.
     """
+    # A JSON setting can carry ids inside it, and they round exactly the same
+    # way. A role menu's entries are the case that exists today; a shape with no
+    # ids needs nothing here.
+    if definition.json_shape == JSON_SHAPE_ROLE_MENU:
+        if not isinstance(value, dict):
+            return value
+        return {label: {**entry, "id": str(entry.get("id"))}
+                if isinstance(entry, dict) else entry
+                for label, entry in value.items()}
     if definition.value_type not in _SNOWFLAKE_VALUE_TYPES:
         return value
     if isinstance(value, list):
@@ -1342,6 +1376,10 @@ def guild_settings(guild_id):
         result = database.set_guild_settings(
             guild_id, actor_id(), payload["changes"]
         )
+        # Same-process visibility, the way a feature change already works: the
+        # revision poll converges two processes, but waiting two seconds for a
+        # save the operator just made is not "live".
+        settings_cache.apply_changes(guild_id, result)
         _apply_legacy_config_values(
             guild_id, {key: row["value"] for key, row in result.items()}
         )

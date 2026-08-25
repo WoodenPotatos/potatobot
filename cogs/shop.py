@@ -18,7 +18,8 @@ from item_catalog import SHOP_ITEMS, ItemEffect
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
 from cogs.tickets import TicketControl
-from cogs.utils import can_self_assign_role, currency_emoji, is_channel, t, config
+from cogs.utils import (can_self_assign_role, currency_emoji,
+                        currency_select_emoji, is_channel, t, config)
 
 shop_logger = logging.getLogger("PotatoBot.Shop")
 
@@ -115,8 +116,16 @@ class ShopView(discord.ui.View):
         for key, item in self.items.items():
             name = shop_item_name(key, item)
             desc = shop_item_description(key, item)
-            label = t("shop.select_option_label", name=name, price=item['price'], coin="🥔")
-            options.append(discord.SelectOption(label=label, description=desc[:100], value=key))
+            # A select option's label is plain text, so the currency cannot be
+            # written into it: a custom emoji renders as its raw `<:name:id>`
+            # there, which is exactly what this menu was showing. `emoji=` is the
+            # supported route, and it is dropped rather than guessed when the
+            # configured symbol is not something Discord can resolve.
+            label = t("shop.select_option_label", name=name, price=item['price'])
+            options.append(discord.SelectOption(
+                label=label, description=desc[:100], value=key,
+                emoji=currency_select_emoji(),
+            ))
 
         select_menu = discord.ui.Select(placeholder=t("shop.placeholder"), options=options)
         select_menu.callback = self.select_callback
@@ -330,7 +339,7 @@ class Shop(commands.Cog):
         self.rental_cleanup.cancel() 
 
     @commands.hybrid_command(name="shop", description=t("general.cmd_shop"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def shop(self, ctx):
         embed = discord.Embed(
             title=t("shop.shop_title"),

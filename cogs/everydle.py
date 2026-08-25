@@ -174,7 +174,8 @@ class LoldleHardModal(discord.ui.Modal):
                 base_xp = 0
             now_iso = datetime.now().isoformat()
             result = await database.run(database.claim_everydle_reward,
-                interaction.user.id, "last_loldle_hard", now_iso, base_coin, base_xp
+                interaction.user.id, "last_loldle_hard", now_iso, base_coin, base_xp,
+                interaction.guild_id
             )
             if not result["claimed"]:
                 for child in v.children: child.disabled = True
@@ -307,7 +308,8 @@ class LoldleModal(discord.ui.Modal):
                 base_xp = 0
             now_iso = datetime.now().isoformat()
             result = await database.run(database.claim_everydle_reward,
-                interaction.user.id, col_name, now_iso, base_coin, base_xp
+                interaction.user.id, col_name, now_iso, base_coin, base_xp,
+                interaction.guild_id
             )
             if not result["claimed"]:
                 for child in v.children: child.disabled = True
@@ -383,7 +385,8 @@ class ValdleModal(discord.ui.Modal):
                 base_xp = 0
             now_iso = datetime.now().isoformat()
             result = await database.run(database.claim_everydle_reward,
-                interaction.user.id, "last_valdle", now_iso, base_coin, base_xp
+                interaction.user.id, "last_valdle", now_iso, base_coin, base_xp,
+                interaction.guild_id
             )
             if not result["claimed"]:
                 for child in v.children: child.disabled = True
@@ -482,7 +485,8 @@ class DbdleModal(discord.ui.Modal):
                 base_xp = 0
             now_iso = datetime.now().isoformat()
             result = await database.run(database.claim_everydle_reward,
-                interaction.user.id, "last_dbdle_killer", now_iso, base_coin, base_xp
+                interaction.user.id, "last_dbdle_killer", now_iso, base_coin, base_xp,
+                interaction.guild_id
             )
             if not result["claimed"]:
                 for child in v.children: child.disabled = True
@@ -526,7 +530,7 @@ class Everydle(commands.Cog):
         discord.app_commands.Choice(name=t("everydle.diff_choice_easy"), value="easy"),
         discord.app_commands.Choice(name=t("everydle.diff_choice_medium"), value="medium")
     ])
-    @is_channel("channels.everydle")
+    @is_channel("everydle_channel")
     async def loldle(self, ctx, difficulty: str = "medium"): 
         if not CHAMPIONS:
             return await ctx.send(t("everydle.err_champions_json"), ephemeral=True)
@@ -564,7 +568,7 @@ class Everydle(commands.Cog):
         await ctx.send(content=initial_content, view=view, ephemeral=True)
 
     @commands.hybrid_command(name="valdle", description=t("general.cmd_valdle"))
-    @is_channel("channels.everydle")
+    @is_channel("everydle_channel")
     async def valdle(self, ctx):
         if not AGENTS:
             return await ctx.send(t("everydle.err_valdle_json"), ephemeral=True)
@@ -587,7 +591,7 @@ class Everydle(commands.Cog):
         await ctx.send(content=t("everydle.valdle_init", header=header), view=view, ephemeral=True)
 
     @commands.hybrid_command(name="dbdle", description=t("general.cmd_dbdle"))
-    @is_channel("channels.everydle")
+    @is_channel("everydle_channel")
     async def dbdle(self, ctx):
         user_id = ctx.author.id
         now = datetime.now()

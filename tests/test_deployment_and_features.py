@@ -576,3 +576,93 @@ class RegistryPresentationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FactionVoiceLockTests(unittest.TestCase):
+    """The faction lock spans two features and one persistent view.
+
+    Both halves have a failure mode that looks like nothing at all: a cascade
+    that stops short leaves the button live under a disabled faction system, and
+    a registered view missing the button drops the click instead of refusing it.
+    """
+
+    def _transitive_dependants(self, key):
+        """What set_feature_state disables along with `key`."""
+        found, frontier = set(), {key}
+        while frontier:
+            following = set()
+            for definition in FEATURE_DEFINITIONS.values():
+                if set(definition.dependencies) & frontier and definition.key not in found:
+                    found.add(definition.key)
+                    following.add(definition.key)
+            frontier = following
+        return found
+
+    def test_flag_ships_disabled_and_declares_both_halves(self):
+        definition = FEATURE_DEFINITIONS["temporary_voice_faction_lock"]
+        # A guild with no factions configured would otherwise show a button that
+        # can only ever refuse.
+        self.assertFalse(definition.default)
+        self.assertEqual(set(definition.dependencies),
+                         {"temporary_voice", "factions"})
+
+    def test_disabling_either_half_cascades_to_the_lock(self):
+        for owner in ("temporary_voice", "factions", "moderation"):
+            with self.subTest(owner=owner):
+                self.assertIn("temporary_voice_faction_lock",
+                              self._transitive_dependants(owner))
+
+    def test_factions_is_its_own_group_and_category(self):
+        # The Moderation page held only factions and the inactivity ignore list,
+        # so its name described neither.
+        self.assertEqual(FEATURE_DEFINITIONS["factions"].group, "factions")
+        self.assertEqual(SETTING_DEFINITIONS["factions"].category, "factions")
+        self.assertIn("factions", FEATURE_GROUP_ORDER)
+        self.assertNotIn(
+            "factions",
+            {key for key, definition in SETTING_DEFINITIONS.items()
+             if definition.category == "moderation"},
+        )
+
+    def test_registered_view_keeps_every_button_the_flag_can_hide(self):
+        """A persistent view routes a click by custom_id.
+
+        The instance passed to bot.add_view() must therefore carry the faction
+        button even where no guild has the flag on, or a panel posted while it
+        was enabled answers a click with nothing.
+        """
+        from cogs.voicemod import VoiceControlView
+
+        registered = {item.custom_id for item in VoiceControlView().children}
+        rendered_off = {item.custom_id
+                        for item in VoiceControlView(faction_lock=False).children}
+        self.assertIn("vc_faction_lock", registered)
+        self.assertNotIn("vc_faction_lock", rendered_off)
+        # Nothing else may depend on the flag: the rest of the panel is fixed.
+        self.assertEqual(registered - rendered_off, {"vc_faction_lock"})
+
+    def test_member_faction_roles_never_widen_to_everyone(self):
+        from cogs.utils import all_faction_role_ids, config, member_faction_role_ids
+
+        role = lambda role_id: SimpleNamespace(id=role_id)
+        member = lambda *ids: SimpleNamespace(roles=[role(i) for i in ids])
+        original = config.get("factions")
+        config["factions"] = {
+            "alpha": {"leader_role_id": 1, "manageable_ids": [2, 3]},
+            "beta": {"leader_role_id": 4, "manageable_ids": [5]},
+            # An operator-authored blob can hold anything; a malformed faction
+            # must be skipped rather than raise inside a button callback.
+            "malformed": "not a mapping",
+        }
+        try:
+            self.assertEqual(member_faction_role_ids(member(3)), {1, 2, 3})
+            self.assertEqual(member_faction_role_ids(member(1)), {1, 2, 3})
+            self.assertEqual(member_faction_role_ids(member(3, 5)), {1, 2, 3, 4, 5})
+            # The important one: no faction means no faction, not every faction.
+            self.assertEqual(member_faction_role_ids(member(99)), set())
+            self.assertEqual(all_faction_role_ids(), {1, 2, 3, 4, 5})
+        finally:
+            if original is None:
+                config.pop("factions", None)
+            else:
+                config["factions"] = original

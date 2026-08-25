@@ -145,11 +145,23 @@ def maintenance_blocks(guild, actor, command_name: str = "") -> bool:
     the bot-wide check, native application commands via the command tree, and
     component/modal callbacks via require_interaction_feature.
     """
-    from cogs.utils import config
+    import settings_cache
 
     if command_name and command_name.split()[0] in MAINTENANCE_EXEMPT_COMMANDS:
         return False
-    if not config.get("bot_settings", {}).get("maintenance", False):
+    # Read from memory: this runs on every interaction, including every
+    # component and modal callback. It must also fail *open* — the mirror image
+    # of `is_enabled`, which fails closed. An unreadable cache resolves
+    # `maintenance` through config.json and then the registry default, both of
+    # which are "not in maintenance", so a settings problem cannot take the
+    # whole bot down. Do not copy this from `is_enabled`; they are one line
+    # apart and opposite.
+    guild_id = getattr(guild, "id", None)
+    try:
+        if not settings_cache.setting(guild_id, "maintenance"):
+            return False
+    except Exception:
+        logger.exception("Maintenance state unreadable; failing open")
         return False
     # Administrators need access for diagnostics and recovery.
     permissions = getattr(actor, "guild_permissions", None)

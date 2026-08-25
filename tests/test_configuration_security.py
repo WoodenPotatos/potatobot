@@ -196,7 +196,8 @@ class ConfigurationSecurityTests(unittest.TestCase):
 
         pattern = re.compile(
             r"(loaded_die|lockpick|coins_\d+|emoji_\d+d|sticker_\d+d"
-            r"|sound_\d+d|vault_\w+|(small|med|big)_vault|premium_\d+d)$"
+            r"|sound_\d+d|vault_\w+|(small|med|big)_vault|premium_\d+d"
+            r"|streak_freeze)$"
         )
         unmatched = [
             entry["key"]

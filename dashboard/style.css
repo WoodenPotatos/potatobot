@@ -427,6 +427,14 @@ svg[hidden] { display: none; }
     z-index: 9997;
 }
 
+/* A menu anchored to a field in the page is positioned in *document*
+   coordinates, so the browser moves it with the page. Repositioning a fixed
+   element from JS could never keep up: on mobile the scroll runs on the
+   compositor thread and the `scroll` event fires after the visual scroll, so the
+   surface trailed its trigger however tightly the handler was coalesced. A
+   topbar menu stays fixed, because the topbar is sticky and does not move. */
+.popover.popover-in-page { position: absolute; }
+
 /* A form control's menu lines up with its left edge and matches its width; a
    topbar switcher hangs off the right and sizes to its content. */
 .popover.popover-left { left: var(--popover-left, 16px); right: auto; }
@@ -1437,3 +1445,74 @@ input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent);
 }
 
 .brand-avatar:not([src]), .brand-avatar[src=""] { display: none; }
+
+/* Role menu row editor. One row per button the menu will render: a label, the
+   role it grants, the emoji it carries. The carrier textarea is hidden and
+   holds the JSON the save path reads. */
+.role-menu-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.menu-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.menu-row {
+  display: grid;
+  /* Label and role share the room; the emoji needs little and the remove
+     button needs none. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 7rem auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.menu-row .menu-emoji {
+  text-align: center;
+}
+
+.menu-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.menu-remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.menu-add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Four columns do not fit a phone, so each row becomes its own stack. */
+@media (max-width: 720px) {
+  .menu-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .menu-row .resource-picker,
+  .menu-row .menu-label {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Marks a setting that is installation-wide rather than this guild's. */
+.field-scope {
+  color: var(--warning);
+  font-weight: 600;
+}

@@ -95,6 +95,19 @@ class SettingDefinition:
     # choices renders as a dropdown and is rejected on save if it is anything
     # else, so an operator cannot select a value the installation cannot honour.
     choices: tuple[str, ...] = ()
+    # Where the labels for those choices live, as a locale-key prefix: the
+    # dashboard renders `<prefix>.<choice>`. Declared rather than inferred,
+    # because several settings share one set of choices — every warn action
+    # reads from one list of four — and the interface previously special-cased
+    # `language` by key, which is exactly the drift this avoids. Absent means
+    # the raw value is the label, which is safe: a choice is a stable English
+    # identifier, so an unlabelled one degrades to readable, not to `[key]`.
+    choice_locale_prefix: str | None = None
+    # For a JSON setting, which structure it holds. Declared so the dashboard can
+    # render a typed row editor instead of a text box full of braces, and so the
+    # API can reject a malformed map instead of storing it and failing later in a
+    # button callback. `None` keeps the constrained-JSON text box.
+    json_shape: str | None = None
     # Which Discord channel kinds a CHANNEL/CHANNEL_LIST setting may name.
     # Empty means any. This is a presentation constraint that narrows the
     # dashboard's selector; it is deliberately not enforced on save, because
@@ -150,9 +163,33 @@ def _feature(key: str, group: str, *, dependencies: tuple[str, ...] = (),
 
 # The order a dashboard renders groups in. Anything not listed sorts last, so
 # adding a feature with a new group is visible rather than silently hidden.
+# The kinds of rule a warning can be for. Mechanics rather than text, exactly
+# like the /work tiers: each is an English identifier with a locale label, and
+# each carries its own threshold and consequence as typed settings. The set is
+# fixed rather than operator-authored on purpose — a threshold that can kick or
+# ban must not hang off a free-text key somebody can typo into existence, and a
+# tag is written into every warning row, so renaming one would orphan history.
+# The one JSON shape with a typed editor today. A label maps to a role id and
+# the emoji the button carries.
+JSON_SHAPE_ROLE_MENU = "role_menu"
+
+# Discord allows 25 components per message and a role menu is one message, so
+# this is derived from the platform rather than chosen.
+ROLE_MENU_ENTRY_LIMIT = 25
+
+WARN_TAGS = ("general", "spam", "language", "harassment", "nsfw")
+
+# What an untagged warning counts as. Every row written before schema 10 has a
+# NULL tag and has always effectively been a general warning.
+WARN_DEFAULT_TAG = "general"
+
+# What crossing a threshold may do. "none" is the shipped answer for every tag,
+# so an installation that upgrades applies no consequence it was not asked for.
+WARN_ACTIONS = ("none", "timeout", "kick", "ban")
+
 FEATURE_GROUP_ORDER = (
     "core", "community", "onboarding", "economy", "casino", "everydle",
-    "rewards", "moderation", "media", "socials", "other",
+    "rewards", "moderation", "factions", "media", "socials", "other",
 )
 
 
@@ -200,7 +237,7 @@ FEATURE_DEFINITIONS = {
         _feature("moderation", "moderation",
                  permissions=("kick_members", "ban_members",
                               "moderate_members", "manage_messages")),
-        _feature("factions", "moderation", dependencies=("moderation",),
+        _feature("factions", "factions", dependencies=("moderation",),
                  permissions=("manage_roles",)),
         _feature("tickets", "community",
                  permissions=("manage_channels", "manage_messages",
@@ -212,12 +249,28 @@ FEATURE_DEFINITIONS = {
                  permissions=("manage_roles", "embed_links")),
         _feature("temporary_voice", "community",
                  permissions=("manage_channels", "move_members", "connect")),
+        _feature("temporary_voice_faction_lock", "community", default=False,
+                 dependencies=("temporary_voice", "factions"),
+                 permissions=("manage_channels", "manage_roles")),
         _feature("chat_rewards", "rewards",
                  dependencies=("economy", "levels")),
         _feature("voice_rewards", "rewards",
                  dependencies=("economy", "levels")),
         _feature("inactivity", "moderation",
                  permissions=("kick_members", "manage_roles")),
+        # Alerting and acting are split because they fail in opposite
+        # directions: a missed alert is an inconvenience, a wrong ban is not.
+        # Alerts may ship on because every threshold ships at 0 and nothing
+        # fires until an operator sets one; actions ship off regardless.
+        _feature("moderation_warn_alerts", "moderation",
+                 dependencies=("moderation",),
+                 permissions=("send_messages", "embed_links")),
+        _feature("moderation_warn_actions", "moderation", default=False,
+                 dependencies=("moderation",),
+                 permissions=("moderate_members", "kick_members", "ban_members")),
+        _feature("moderation_word_filter", "moderation", default=False,
+                 dependencies=("moderation",),
+                 permissions=("manage_messages", "read_message_history")),
         _feature("member_announcements", "community",
                  permissions=("send_messages", "embed_links")),
         _feature("social_twitch", "socials",
@@ -246,6 +299,9 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
              default, *, feature: str | None = None, legacy_path=None,
              minimum=None, maximum=None, apply=ApplyBehavior.LIVE,
              channel_types: tuple[str, ...] = (), choices: tuple[str, ...] = (),
+             choice_prefix: str | None = None,
+             scope: SettingScope = SettingScope.GUILD,
+             json_shape: str | None = None,
              assignable_role: bool = False,
              bot_permissions: tuple[str, ...] = (),
              member_permissions: tuple[str, ...] = ()):
@@ -256,6 +312,7 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
         page=page,
         value_type=value_type,
         default=default,
+        scope=scope,
         owner_feature=feature,
         legacy_path=tuple(legacy_path) if legacy_path else None,
         minimum=minimum,
@@ -263,6 +320,8 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
         apply_behavior=apply,
         channel_types=channel_types,
         choices=choices,
+        choice_locale_prefix=choice_prefix,
+        json_shape=json_shape,
         role_must_be_assignable=assignable_role,
         bot_channel_permissions=bot_permissions,
         member_channel_permissions=member_permissions,
@@ -283,8 +342,10 @@ SETTING_DEFINITIONS = {
         # a language listed here is not complete enough to select.
         _setting("language", "administration", "instance", SettingValueType.STRING,
                  "hu", legacy_path=("bot_settings", "language"),
+                 scope=SettingScope.INSTANCE,
                  apply=ApplyBehavior.SUBSYSTEM_RELOAD,
-                 choices=SUPPORTED_LANGUAGES),
+                 choices=SUPPORTED_LANGUAGES,
+                 choice_prefix="dashboard.languages"),
         # The symbol every balance, price and payout is printed with. It was
         # hard-coded as one guild's custom emoji in 105 places, which meant every
         # other installation rendered the raw `<:potatocoins:1489…>` text. The
@@ -293,21 +354,25 @@ SETTING_DEFINITIONS = {
         # read per message and applies live.
         _setting("currency_emoji", "administration", "instance",
                  SettingValueType.STRING, "🥔",
+                 scope=SettingScope.INSTANCE,
                  legacy_path=("bot_settings", "currency_emoji")),
         _setting("maintenance", "administration", "instance", SettingValueType.BOOLEAN,
-                 False, legacy_path=("bot_settings", "maintenance")),
+                 False, scope=SettingScope.INSTANCE,
+                 legacy_path=("bot_settings", "maintenance")),
         # discord.py binds the prefix when the bot object is constructed, so this
         # takes effect on restart. Every prefix-only operator command moves with
         # it, which is why it is declared rather than left hard-coded.
         _setting("command_prefix", "administration", "instance",
                  SettingValueType.STRING, "?",
+                 scope=SettingScope.INSTANCE,
                  legacy_path=("bot_settings", "prefix"),
                  apply=ApplyBehavior.RESTART),
         # Days of inactivity after which a departed member's data is erased.
         # 0 retains indefinitely, so upgrading changes nothing until an operator
         # opts in. No legacy_path: retention has never lived in config.json.
         _setting("data_retention_days", "administration", "instance",
-                 SettingValueType.INTEGER, 0, minimum=0, maximum=3650),
+                 SettingValueType.INTEGER, 0, minimum=0, maximum=3650,
+                 scope=SettingScope.INSTANCE),
         _setting("economy_channels", "economy", "rewards", SettingValueType.CHANNEL_LIST,
                  [], feature="economy", legacy_path=("channels", "economy"),
                  channel_types=TEXT_CHANNEL_TYPES,
@@ -377,6 +442,35 @@ SETTING_DEFINITIONS = {
                  [], feature="onboarding", legacy_path=("roles", "autoroles"), assignable_role=True),
         _setting("ignored_users", "moderation", "inactivity", SettingValueType.STRING_LIST,
                  [], feature="inactivity", legacy_path=("roles", "ignored_users")),
+        # Where a crossed threshold is reported. Separate from bot_log_channel,
+        # which is operational logging an operator reads, not moderation record.
+        _setting("moderation_log_channel", "moderation", "warnings",
+                 SettingValueType.CHANNEL, None,
+                 feature="moderation_warn_alerts",
+                 channel_types=TEXT_CHANNEL_TYPES,
+                 bot_permissions=("send_messages", "embed_links")),
+        # Roles the filter never acts on. Recognition only — the bot reads these
+        # roles and never grants them, so the selector must not hide a role that
+        # sits above the bot.
+        _setting("word_filter_exempt_roles", "moderation", "word_filter",
+                 SettingValueType.ROLE_LIST, [],
+                 feature="moderation_word_filter"),
+        # Operator-authored, matched against normalised message text. Stored as
+        # written; normalisation happens at match time so the list stays
+        # readable and an operator can see what they typed.
+        _setting("word_filter_words", "moderation", "word_filter",
+                 SettingValueType.STRING_LIST, [],
+                 feature="moderation_word_filter"),
+        _setting("word_filter_delete_message", "moderation", "word_filter",
+                 SettingValueType.BOOLEAN, True,
+                 feature="moderation_word_filter"),
+        # A match warns under this tag, so the escalation a guild already
+        # configured decides what follows instead of the filter reimplementing
+        # it. Constrained to the tag catalogue rather than free text.
+        _setting("word_filter_tag", "moderation", "word_filter",
+                 SettingValueType.STRING, WARN_DEFAULT_TAG,
+                 feature="moderation_word_filter", choices=WARN_TAGS,
+                 choice_prefix="dashboard.warn_tags"),
         # Level milestone -> the role to grant. A value may be a role id or a
         # role name: `check_level_roles` has always accepted both, and the name
         # path is retained for an installation that configured neither. Ids are
@@ -390,13 +484,20 @@ SETTING_DEFINITIONS = {
         # no honest default; `docs/level_setup.md` documents the ladder instead.
         _setting("level_roles", "community", "levels", SettingValueType.JSON,
                  {}, feature="levels", legacy_path=("level_roles",)),
+        # A role menu is {label: {"id": role_id, "emoji": str}}. The shape is
+        # declared rather than inferred so the dashboard renders a row per entry
+        # with a real role picker, and so a malformed map is refused on save
+        # instead of surfacing as a button that cannot resolve its role.
         _setting("game_roles", "community", "role_menus", SettingValueType.JSON,
-                 {}, feature="role_menus", legacy_path=("game_roles",)),
+                 {}, feature="role_menus", legacy_path=("game_roles",),
+                 json_shape=JSON_SHAPE_ROLE_MENU),
         _setting("news_roles", "community", "role_menus", SettingValueType.JSON,
-                 {}, feature="role_menus", legacy_path=("news_roles",)),
+                 {}, feature="role_menus", legacy_path=("news_roles",),
+                 json_shape=JSON_SHAPE_ROLE_MENU),
         _setting("theme_roles", "community", "role_menus", SettingValueType.JSON,
-                 {}, feature="role_menus", legacy_path=("themes_roles",)),
-        _setting("factions", "moderation", "factions", SettingValueType.JSON,
+                 {}, feature="role_menus", legacy_path=("themes_roles",),
+                 json_shape=JSON_SHAPE_ROLE_MENU),
+        _setting("factions", "factions", "factions", SettingValueType.JSON,
                  {}, feature="factions", legacy_path=("factions",)),
         _setting("lfg_channels", "community", "lfg", SettingValueType.JSON,
                  {}, feature="lfg", legacy_path=("lfg_channels",)),
@@ -480,6 +581,28 @@ for _activity_key, (_coin, _xp) in {
         SETTING_DEFINITIONS[definition.key] = definition
 
 
+# Three settings per warn tag, generated from the one catalogue so the set
+# cannot drift from WARN_TAGS. A threshold of 0 means "never act", which is the
+# shipped answer for every tag: an upgrade must not start kicking people.
+for _tag in WARN_TAGS:
+    for _key, _definition in (
+        (f"warn_threshold_{_tag}", _setting(
+            f"warn_threshold_{_tag}", "moderation", "warnings",
+            SettingValueType.INTEGER, 0, feature="moderation", minimum=0,
+            maximum=1000)),
+        (f"warn_action_{_tag}", _setting(
+            f"warn_action_{_tag}", "moderation", "warnings",
+            SettingValueType.STRING, "none", feature="moderation_warn_actions",
+            choices=WARN_ACTIONS, choice_prefix="dashboard.warn_actions")),
+        (f"warn_timeout_minutes_{_tag}", _setting(
+            f"warn_timeout_minutes_{_tag}", "moderation", "warnings",
+            SettingValueType.INTEGER, 60, feature="moderation_warn_actions",
+            # Discord's own ceiling for a timeout is 28 days.
+            minimum=1, maximum=40320)),
+    ):
+        SETTING_DEFINITIONS[_key] = _definition
+
+
 def _snowflake(value) -> int:
     """Accept a Discord id as an integer or as a decimal string, return an integer.
 
@@ -548,7 +671,38 @@ def validate_setting_value(definition: SettingDefinition, value):
         raise ValueError("setting must be a string list")
     if kind is SettingValueType.JSON and not isinstance(value, (dict, list)):
         raise ValueError("setting must be JSON object or list")
+    if definition.json_shape == JSON_SHAPE_ROLE_MENU:
+        return _validated_role_menu(value)
     return value
+
+
+def _validated_role_menu(value):
+    """Normalise and reject a role menu, rather than storing whatever arrives.
+
+    Returned normalised, not merely checked: the role id is stored as an integer
+    the way every other snowflake is, so what the bot reads has one shape
+    regardless of whether the browser sent a string.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("a role menu must be a JSON object")
+    if len(value) > ROLE_MENU_ENTRY_LIMIT:
+        raise ValueError(
+            f"a role menu holds at most {ROLE_MENU_ENTRY_LIMIT} entries")
+    normalised = {}
+    for label, entry in value.items():
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError("every role menu entry needs a label")
+        if len(label) > 80:
+            # Discord's own ceiling for a button label.
+            raise ValueError("a role menu label is at most 80 characters")
+        if not isinstance(entry, dict) or set(entry) - {"id", "emoji"}:
+            raise ValueError("a role menu entry holds only 'id' and 'emoji'")
+        emoji = entry.get("emoji", "")
+        if not isinstance(emoji, str) or len(emoji) > 64:
+            raise ValueError("a role menu emoji must be a short string")
+        normalised[label.strip()] = {"id": _snowflake(entry.get("id")),
+                                     "emoji": emoji}
+    return normalised
 
 
 def validate_feature_key(feature_key: str) -> FeatureDefinition:

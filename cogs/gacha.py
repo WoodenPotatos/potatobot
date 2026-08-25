@@ -125,7 +125,7 @@ class Gacha(commands.Cog):
         app_commands.Choice(name=t("gacha.choice_ten"), value=10),
     ])
     @app_commands.autocomplete(banner=banner_autocomplete)
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def gacha(self, ctx, rolls: int = 1, banner: str = None):
         """Buy one or ten atomic pulls from one of the guild's banners."""
         if rolls not in (1, 10):
@@ -184,7 +184,7 @@ class Gacha(commands.Cog):
         await ctx.send(embed=embed, ephemeral=False)
 
     @commands.hybrid_command(name="inventory", description=t("general.cmd_inventory"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def inventory(self, ctx):
         items, vouchers = await asyncio.gather(
             database.run_read(database.get_user_inventory, ctx.guild.id, ctx.author.id),
@@ -214,7 +214,7 @@ class Gacha(commands.Cog):
         await ctx.send(embed=embed, ephemeral=True)
 
     @commands.hybrid_command(name="redeem", description=t("general.cmd_redeem"))
-    @is_channel("channels.economy")
+    @is_channel("economy_channels")
     async def redeem(self, ctx, voucher_id: str):
         result = await database.run_write(
             database.redeem_voucher, ctx.guild.id, ctx.author.id, voucher_id

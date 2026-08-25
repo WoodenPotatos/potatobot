@@ -187,6 +187,7 @@ def composed_key_families() -> dict:
     import item_catalog
     import permission_audit
     from feature_access import COMMAND_POLICIES
+    import settings_registry
     from settings_registry import (
         FEATURE_DEFINITIONS,
         FEATURE_GROUP_ORDER,
@@ -328,6 +329,32 @@ def composed_key_families() -> dict:
         f"dashboard.work_tier_{tier}" for tier in database.WORK_TIERS
     ]
 
+    # Labels for a constrained setting's values, derived from the prefix each
+    # definition declares. Generic on purpose: the interface used to match on
+    # the setting's key for `language`, and a second such special case would
+    # have been a second list to keep in step.
+    families["setting choice labels"] = sorted({
+        f"{definition.choice_locale_prefix}.{choice}"
+        for definition in SETTING_DEFINITIONS.values()
+        if definition.choice_locale_prefix
+        for choice in definition.choices
+    })
+
+    # Warn tags and their consequences are composed by f-string in
+    # `cogs/moderation.py`, so nothing greps them: the tag label appears in the
+    # public warn embed, in `/modlogs` and in the escalation alert, and a
+    # missing one would render as a bracketed key on a moderation record.
+    families["warn tags (bot)"] = [
+        f"moderation.warn_tags.{tag}" for tag in settings_registry.WARN_TAGS
+    ]
+    families["warn escalation outcomes"] = [
+        f"moderation.escalation_applied_{action}"
+        for action in settings_registry.WARN_ACTIONS if action != "none"
+    ] + [
+        f"moderation.escalation_blocked_{reason}"
+        for reason in ("protected", "hierarchy", "forbidden", "failed")
+    ]
+
     # Dashboard page titles, from the navigation the shell actually renders.
     pages = sorted(set(re.findall(
         r'data-page="([a-z-]+)"',
@@ -425,6 +452,9 @@ COMPOSED_PREFIXES = (
     "casino.job_",
     "shop.items.", "dashboard.action_errors.", "dashboard.themes.",
     "dashboard.languages.",
+    "dashboard.warn_actions.", "dashboard.warn_tags.",
+    "moderation.warn_tags.", "moderation.escalation_applied_",
+    "moderation.escalation_blocked_",
     # Minigame attribute labels are addressed by dataset field and value id.
     "loldle.", "valdle.", "dbdle.", "everydle.",
 )
