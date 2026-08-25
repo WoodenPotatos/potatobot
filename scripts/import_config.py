@@ -86,6 +86,27 @@ def resolve_target_guild(requested: int | None) -> int:
     return int(guilds[0]["id"])
 
 
+def coerce_to_declared_type(definition, value):
+    """Bring a legacy value to the type its setting declares, losslessly.
+
+    `roles.ignored_users` is the case this exists for: it holds Discord ids and
+    is declared a string list, because a snowflake cannot cross to a browser as
+    a number — but `config.json` holds them as integers. Refusing would make the
+    import unusable on a real installation; coercing silently would hide a
+    genuine type mismatch. So this converts only where the conversion cannot
+    lose anything, and `main` reports every conversion it made.
+
+    Anything else is left alone and fails validation, which is the right
+    outcome: a value that is the wrong *shape* is a mistake in the file.
+    """
+    from settings_registry import SettingValueType
+
+    if definition.value_type is SettingValueType.STRING_LIST:
+        if isinstance(value, list) and any(isinstance(item, int) for item in value):
+            return [str(item) for item in value]
+    return value
+
+
 def plan_import(config: dict, guild_id: int) -> tuple[list[dict], list[str]]:
     """What would be written, and what is already present.
 
@@ -100,7 +121,8 @@ def plan_import(config: dict, guild_id: int) -> tuple[list[dict], list[str]]:
         if key in stored:
             skipped.append(key)
             continue
-        value = legacy_config_value(definition, config)
+        value = coerce_to_declared_type(definition,
+                                        legacy_config_value(definition, config))
         # An absent path resolves to the registry default. Importing that writes
         # a row that says exactly what no row says, so leave it absent: a
         # missing row and a row holding the default are different states and the
@@ -115,7 +137,8 @@ def plan_import(config: dict, guild_id: int) -> tuple[list[dict], list[str]]:
                 f"rejects: {exc}. Fix the file, then re-run."
             ) from exc
         pending.append({"key": key, "value": value, "revision": 0,
-                        "scope": definition.scope})
+                        "scope": definition.scope,
+                        "coerced": value != legacy_config_value(definition, config)})
     return pending, sorted(skipped)
 
 
@@ -153,7 +176,8 @@ def main() -> int:
     for entry in pending:
         scope = "instance" if entry["scope"] is SettingScope.INSTANCE else "guild"
         rendered = json.dumps(entry["value"], ensure_ascii=False)
-        print(f"    + [{scope:8}] {entry['key']} = {rendered[:70]}")
+        note = "  (converted to the declared type)" if entry["coerced"] else ""
+        print(f"    + [{scope:8}] {entry['key']} = {rendered[:70]}{note}")
 
     if arguments.dry_run:
         print(f"  dry run: {len(pending)} row(s) would be written")

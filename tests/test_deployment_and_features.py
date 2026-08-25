@@ -642,27 +642,32 @@ class FactionVoiceLockTests(unittest.TestCase):
         self.assertEqual(registered - rendered_off, {"vc_faction_lock"})
 
     def test_member_faction_roles_never_widen_to_everyone(self):
-        from cogs.utils import all_faction_role_ids, config, member_faction_role_ids
+        from unittest.mock import patch
+
+        import cogs.utils as utils
 
         role = lambda role_id: SimpleNamespace(id=role_id)
-        member = lambda *ids: SimpleNamespace(roles=[role(i) for i in ids])
-        original = config.get("factions")
-        config["factions"] = {
+        member = lambda *ids: SimpleNamespace(
+            roles=[role(i) for i in ids], guild=SimpleNamespace(id=55))
+        factions = {
             "alpha": {"leader_role_id": 1, "manageable_ids": [2, 3]},
             "beta": {"leader_role_id": 4, "manageable_ids": [5]},
             # An operator-authored blob can hold anything; a malformed faction
             # must be skipped rather than raise inside a button callback.
             "malformed": "not a mapping",
         }
-        try:
-            self.assertEqual(member_faction_role_ids(member(3)), {1, 2, 3})
-            self.assertEqual(member_faction_role_ids(member(1)), {1, 2, 3})
-            self.assertEqual(member_faction_role_ids(member(3, 5)), {1, 2, 3, 4, 5})
+        with patch.object(utils, "guild_setting_sync",
+                          lambda guild_id, key: factions):
+            self.assertEqual(utils.member_faction_role_ids(member(3)), {1, 2, 3})
+            self.assertEqual(utils.member_faction_role_ids(member(1)), {1, 2, 3})
+            self.assertEqual(utils.member_faction_role_ids(member(3, 5)),
+                             {1, 2, 3, 4, 5})
             # The important one: no faction means no faction, not every faction.
-            self.assertEqual(member_faction_role_ids(member(99)), set())
-            self.assertEqual(all_faction_role_ids(), {1, 2, 3, 4, 5})
-        finally:
-            if original is None:
-                config.pop("factions", None)
-            else:
-                config["factions"] = original
+            self.assertEqual(utils.member_faction_role_ids(member(99)), set())
+            self.assertEqual(utils.all_faction_role_ids(55), {1, 2, 3, 4, 5})
+
+    def test_a_member_with_no_guild_has_no_faction(self):
+        """A guild is where a faction map lives, so no guild is no faction."""
+        import cogs.utils as utils
+        self.assertEqual(
+            set(), utils.member_faction_role_ids(SimpleNamespace(roles=[])))

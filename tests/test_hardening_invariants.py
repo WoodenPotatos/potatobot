@@ -267,29 +267,70 @@ class ConfigSnapshotTests(unittest.TestCase):
         self.assertEqual(config["bot_settings"].get("alpha"), "alpha")
         self.assertEqual(config["bot_settings"].get("beta"), "beta")
 
-    def test_legacy_mirror_holds_the_lock_across_read_modify_write(self):
-        """The dashboard's mirror must not snapshot outside CONFIG_LOCK.
+    def test_the_journal_is_not_written_twice(self):
+        """Both halves of a duplication that doubled every log line.
 
-        Taking the snapshot under the lock and releasing it before save_config
-        still loses a concurrent writer's keys, so the whole sequence has to sit
-        inside one `with CONFIG_LOCK` block.
+        `waitress.serve` calls `logging.basicConfig()`, which adds a *root*
+        handler when nothing else has one, so anything that propagates is
+        emitted again in Python's default format. And `bot.run()` calls
+        `setup_logging()` on the `discord` logger this project already
+        configured. The result halved a 500 MB journal cap for nothing and made
+        a grep count read double.
+        """
+        source = (ROOT / "main.py").read_text(encoding="utf-8")
+        self.assertIn("configured.propagate = False", source,
+                      "a configured logger must not also reach the root logger")
+        self.assertIn("bot.run(TOKEN, log_handler=None)", source,
+                      "discord.py must not configure the `discord` logger too")
+        # And every logger the bot configures goes through the one helper.
+        for name in ("'discord'", "'PotatoBot'", "'waitress'"):
+            self.assertIn(f"configure_logger({name})", source)
+
+    def test_nothing_in_the_dashboard_writes_config_json(self):
+        """The mirror is gone, and this is what stops it coming back.
+
+        `config.json` was written by the dashboard on every save and rebuilt
+        from the rows at startup, which is why the read-modify-write had to hold
+        CONFIG_LOCK for its whole sequence — a snapshot taken under the lock and
+        saved after it still dropped a concurrent writer's keys. There is now one
+        fewer writer than that: the file is a read-only fallback for a setting an
+        installation has never saved, and every reader goes through
+        `settings_cache`.
         """
         source = (ROOT / "dashboard_api.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
-        target = next(
-            node for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-            and node.name == "_apply_legacy_config_values"
-        )
-        guarded = [
-            node for node in ast.walk(target)
-            if isinstance(node, ast.With)
-            and any("CONFIG_LOCK" in ast.unparse(item.context_expr) for item in node.items)
-        ]
-        self.assertTrue(guarded, "_apply_legacy_config_values must hold CONFIG_LOCK")
-        body = "\n".join(ast.unparse(node) for node in guarded)
-        self.assertIn("snapshot_config()", body)
-        self.assertIn("save_config(updated)", body)
+        # Parsed rather than grepped, so a comment explaining the absence does
+        # not read as the thing being present.
+        called = {
+            node.func.id for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        defined = {
+            node.name for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        imported = {
+            alias.asname or alias.name for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) for alias in node.names
+        }
+        for gone in ("save_config", "snapshot_config", "CONFIG_LOCK"):
+            self.assertNotIn(gone, called | imported,
+                             f"{gone} writes or guards config.json")
+        for gone in ("_apply_legacy_config_values",
+                     "reconcile_legacy_config_mirror", "_legacy_guild_id"):
+            self.assertNotIn(gone, called | defined,
+                             f"{gone} is mirror machinery")
+
+    def test_the_per_guild_price_and_reward_rows_are_still_written(self):
+        """Deleting the mirror must not take these with it.
+
+        They are not the mirror: they are per-guild rows in `shop_prices` and
+        `rewards` that the shop and the reward paths read directly, and they live
+        beside the mirror only because one function used to write both.
+        """
+        source = (ROOT / "dashboard_api.py").read_text(encoding="utf-8")
+        self.assertIn("def _mirror_price_and_reward_tables", source)
+        self.assertIn("_mirror_price_and_reward_tables(", source)
 
 
 class DashboardReadPathTests(unittest.TestCase):

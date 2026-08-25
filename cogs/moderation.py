@@ -19,8 +19,8 @@ from discord.ext import commands
 from datetime import datetime, timedelta
 from feature_access import is_enabled, maintenance_blocks
 from settings_registry import WARN_DEFAULT_TAG, WARN_TAGS
-from cogs.utils import (is_staff, is_higher_than, role_autocomplete, t, config,
-                        guild_settings_many)
+from cogs.utils import (is_staff, is_higher_than, role_autocomplete, t,
+                        guild_setting_sync, guild_settings_many)
 
 moderation_logger = logging.getLogger("PotatoBot.Moderation")
 
@@ -402,7 +402,7 @@ class Moderation(commands.Cog):
     @discord.app_commands.default_permissions(moderate_members=True)
     @is_staff()
     async def msgdel(self, ctx, amount: int):
-        protected_category_id = config["channels"].get("admin_category")
+        protected_category_id = guild_setting_sync(ctx.guild.id, "admin_category")
     
         if ctx.channel.category_id == protected_category_id:
             return await ctx.send(t("moderation.purge_protected_error"), ephemeral=True)
@@ -572,7 +572,7 @@ class Moderation(commands.Cog):
             return await interaction.response.send_message(t("moderation.role_not_found"), ephemeral=True)
 
         is_authorized = False
-        factions_config = config.get("factions", {})
+        factions_config = guild_setting_sync(ctx.guild.id, "factions")
 
         if interaction.user.guild_permissions.administrator:
             is_authorized = True

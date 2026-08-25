@@ -19,7 +19,7 @@ read `CHANGELOG.md` before upgrading, and keep the backups the migration writes.
 | Python | 3.12, 3.13 or 3.14 |
 | FFmpeg | only for music; everything else works without it |
 | A host | any Linux box that can stay online; the reference deployment is AlmaLinux 10 |
-| HTTPS | required *only* if you want the dashboard — see step 7 |
+| HTTPS | required *only* if you want the dashboard — see step 8 |
 
 SQLite ships with Python. There is no separate database server, no Redis, no
 message bus: the bot and the dashboard coordinate through one SQLite file.
@@ -50,11 +50,11 @@ Both are required. The bot requests exactly these two beyond the defaults
 (`main.py`), and it will fail to start cleanly without them.
 
 **OAuth2 tab.** Copy the *Client ID* and *Client Secret* — the dashboard needs
-them. Leave the redirect URI for step 7; you cannot fill it in correctly yet.
+them. Leave the redirect URI for step 8; you cannot fill it in correctly yet.
 
 **Invite it.** Build an invite URL with the `bot` and `applications.commands`
 scopes. Grant the permissions the features you intend to use need, or grant
-Manage Server and narrow it afterwards — the setup check in step 9 will tell you
+Manage Server and narrow it afterwards — the setup check in step 10 will tell you
 precisely what is missing, which is easier than guessing up front.
 
 > Do **not** grant Administrator. It works, and it is reported as a warning by
@@ -114,10 +114,28 @@ it twice reports the same version and changes nothing.
 **The bot owns the schema.** If you later split the dashboard into its own
 service, the bot must start first and the dashboard must never create the schema.
 
-## 7. The dashboard (optional, but you want it)
+## 7. Move the configuration into the database
 
-Skip this and everything is configured by editing `config.json`. With it, every
-channel, role, price and feature flag is a form.
+`config.json` is a fallback, not the authority: the bot reads a setting from the
+database and consults the file only for a setting that has never been saved. This
+gives each of those a row, once:
+
+```bash
+POTATOBOT_DB_PATH=$PWD/economy.db ./venv/bin/python scripts/import_config.py --dry-run
+POTATOBOT_DB_PATH=$PWD/economy.db ./venv/bin/python scripts/import_config.py
+```
+
+It never overwrites a row that already exists — a row exists only because
+somebody saved it, which makes it newer than the file — and re-running it changes
+nothing. Do it after the first migration and before you start editing settings in
+the dashboard, so the values you see there are the ones the bot is using.
+
+## 8. The dashboard (optional, but you want it)
+
+You want it. Settings live in the database and the dashboard is what edits them;
+`config.json` is only a fallback for a value that has never been saved there, so
+without the dashboard you are editing a file the bot stops consulting the moment
+the same setting is saved once.
 
 The dashboard is **never exposed directly**. It binds loopback and sits behind a
 reverse proxy that terminates HTTPS. Deployment validation enforces this and
@@ -162,7 +180,7 @@ rate-limit identity, which turns the login limit into a guild-wide one.
 Leave `POTATOBOT_DASHBOARD_SESSION_SECRET` unset and a private secret file is
 generated beside the database.
 
-## 8. Run it under supervision
+## 9. Run it under supervision
 
 `deploy/potatobot.service` is a starting point. Two things about it:
 
@@ -190,7 +208,7 @@ makes the mistake survive.
 Expect `Database ready (path=…, schema=N, users=N)` followed by each cog
 reporting ready.
 
-## 9. Check the guild, then configure it
+## 10. Check the guild, then configure it
 
 Open the dashboard at your HTTPS origin and sign in with Discord.
 
@@ -212,7 +230,7 @@ concerns, so you can fix as you go.
 `shop_gacha` is disabled by default and depends on `economy` and `shop`. Turning
 `economy` off takes the gacha with it — the cascade prompt lists what goes.
 
-## 10. Before you rely on it
+## 11. Before you rely on it
 
 - **Back up `economy.db`.** Use `sqlite3 economy.db ".backup out.db"`, not `cp`:
   it is consistent against a running writer.
@@ -236,8 +254,14 @@ Pull **before** rehearsing a migration — `scripts/rehearse_migration.py` runs
 and proves nothing. `docs/performance_recovery_plan.md` has the full procedure
 with snapshots and comparison.
 
-Restart even when no Python file changed: the command prefix is read from
-`config.json` when the bot is constructed.
+Restart even when no Python file changed: the command prefix is read once when
+the bot object is constructed, so changing it in the dashboard does nothing until
+the next start. Everything else converges on its own within a couple of seconds.
+
+Upgrading from a version before the configuration moved into the database? Run
+the one-time import from step 7 after `update_db.py`. Nothing breaks without it —
+`config.json` keeps answering for anything never saved in the dashboard — but
+until you do, those values live in a file the dashboard cannot edit.
 
 ## When something is wrong
 

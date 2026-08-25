@@ -15,7 +15,8 @@ from feature_access import is_enabled
 
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta
-from cogs.utils import apply_database_result, mark_top_ranker_dirty, update_user_data, t, config
+from cogs.utils import (apply_database_result, guild_setting_sync,
+                        mark_top_ranker_dirty, update_user_data, t)
 
 event_logger = logging.getLogger("PotatoBot.ServerEvents")
 
@@ -122,22 +123,33 @@ class ServerEvents(commands.Cog):
 
     @tasks.loop(hours=24)
     async def inactivity_scanner(self):
-        admin_log_channel = config.get("channels", {}).get("bot_log")
-        if not admin_log_channel:
-            return
-            
-        admin_channel = self.bot.get_channel(admin_log_channel)
-        if not admin_channel:
-            return
-
         now = datetime.now()
 
         for guild in self.bot.guilds:
             if not is_enabled(guild.id, "inactivity"):
                 continue
+            # The log channel is a per-guild setting, so it is resolved per
+            # guild. It used to be read once outside the loop, which meant one
+            # guild's channel received every guild's report.
+            admin_log_channel = guild_setting_sync(guild.id, "bot_log_channel")
+            admin_channel = (guild.get_channel(admin_log_channel)
+                             if admin_log_channel else None)
+            if admin_channel is None:
+                continue
             for member in guild.members:
                 if member.bot: continue
-                ignored_users = config.get("roles", {}).get("ignored_users", [])
+                # A member id, compared as an id whichever shape it is
+                # stored in. `ignored_users` is a STRING_LIST because a
+                # snowflake cannot cross to a browser as a number, while
+                # `config.json` holds it as integers — so comparing
+                # `member.id in ignored_users` directly was False for anything
+                # ever saved from the dashboard, and the list silently stopped
+                # ignoring anyone.
+                ignored_users = {
+                    int(entry) for entry in
+                    (guild_setting_sync(guild.id, "ignored_users") or ())
+                    if str(entry).isdigit()
+                }
                 if member.id in ignored_users: continue
 
                 result = await database.run(database.get_inactivity_data, member.id)
@@ -238,7 +250,7 @@ class ServerEvents(commands.Cog):
     @commands.Cog.listener()
     async def on_member_join(self, member):
         if is_enabled(member.guild.id, "member_announcements"):
-            channel_id = config.get("channels", {}).get("join")
+            channel_id = guild_setting_sync(member.guild.id, "join_channel")
             channel = member.guild.get_channel(channel_id) if channel_id else None
             if channel is None:
                 event_logger.warning(
@@ -277,7 +289,7 @@ class ServerEvents(commands.Cog):
             )
 
         autorole_ids = (
-            config.get("roles", {}).get("autoroles", [])
+            guild_setting_sync(member.guild.id, "autoroles")
             if is_enabled(member.guild.id, "onboarding") else []
         )
         roles_to_add = []
@@ -302,7 +314,7 @@ class ServerEvents(commands.Cog):
     async def on_member_remove(self, member):
         if not is_enabled(member.guild.id, "member_announcements"):
             return
-        channel_id = config.get("channels", {}).get("leave")
+        channel_id = guild_setting_sync(member.guild.id, "leave_channel")
         channel = member.guild.get_channel(channel_id) if channel_id else None
         if channel is None:
             event_logger.warning(
@@ -330,7 +342,8 @@ class ServerEvents(commands.Cog):
     async def on_member_ban(self, guild, user):
         if not is_enabled(guild.id, "member_announcements"):
             return
-        channel = self.bot.get_channel(config.get("channels", {}).get("leave"))
+        channel = self.bot.get_channel(
+            guild_setting_sync(guild.id, "leave_channel"))
         if channel:
             await asyncio.sleep(1)
         
@@ -360,7 +373,8 @@ class ServerEvents(commands.Cog):
                 return
         
             channel = (
-                after.guild.get_channel(config.get("channels", {}).get("booster"))
+                after.guild.get_channel(
+                    guild_setting_sync(after.guild.id, "booster_channel"))
                 if is_enabled(after.guild.id, "member_announcements") else None
             )
             if channel:

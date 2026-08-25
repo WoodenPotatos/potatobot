@@ -3,10 +3,16 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from cogs.serverevents import ServerEvents
+import settings_cache
 from cogs.utils import config
 
 
 class MemberAnnouncementTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # These read channel settings, which resolve through the process-global
+        # cache before falling back to the patched `config`.
+        settings_cache.invalidate()
+
     def make_member(self, channel):
         guild = SimpleNamespace(
             id=123,

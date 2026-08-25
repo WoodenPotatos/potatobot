@@ -15,12 +15,13 @@ from urllib.parse import urlencode
 import requests
 import discord
 from cogs.utils import (
-    CONFIG_LOCK,
     available_languages,
+    # Read-only. Nothing in this process writes the legacy file any more, so the
+    # lock and the atomic-replace helpers are no longer imported: the lock
+    # existed to stop two writers dropping each other's keys, and there is one
+    # fewer writer than that.
     config,
     get_dashboard_locale_catalog,
-    save_config,
-    snapshot_config,
     t,
 )
 from dotenv import load_dotenv
@@ -36,8 +37,9 @@ from deployment import settings as deployment_settings
 from feature_access import is_enabled, update_cached_features
 # Imported by name, not as a module: a route below is called
 # `settings_registry` and would shadow it.
-from settings_registry import (FEATURE_GROUP_ORDER, JSON_SHAPE_ROLE_MENU,
-                               SETTING_DEFINITIONS, SettingValueType)
+from settings_registry import (FEATURE_GROUP_ORDER, SETTING_DEFINITIONS,
+                               SettingValueType, wire_json_shape)
+from settings_registry import legacy_config_value as settings_registry_legacy_config_value
 from version import version_display
 
 dashboard_logger = logging.getLogger("PotatoBot.Dashboard")
@@ -326,7 +328,7 @@ def locale_catalog():
     supported = available_languages()
     requested = request.args.get("lang", "")
     language = requested if requested in supported else (
-        config.get("bot_settings", {}).get("language", "hu")
+        settings_cache.setting(None, "language")
     )
     # Only the dashboard namespace is served. The interface never reads outside
     # it, including the feature and setting labels the registry supplies, so
@@ -1146,84 +1148,10 @@ def _legacy_config_value(definition, guild_id: int):
             definition.default, definition.default,
         )
         return coin if reward_type == "coin" else xp
-    value = config
-    if not definition.legacy_path:
-        return definition.default
-    for part in definition.legacy_path:
-        if not isinstance(value, dict) or part not in value:
-            return definition.default
-        value = value[part]
-    return value
-
-
-def _legacy_guild_id() -> int | None:
-    """The one guild whose typed settings are mirrored into config.json."""
-    configured = os.getenv("POTATOBOT_LEGACY_GUILD_ID", "").strip()
-    if configured.isdigit():
-        return int(configured)
-    active = database.run_read_sync(database.get_active_guild_ids)
-    if deployment_settings.profile.value == "private" and len(active) == 1:
-        return next(iter(active))
-    return None
-
-
-def reconcile_legacy_config_mirror() -> int:
-    """Re-apply committed typed settings to config.json and the legacy tables.
-
-    `set_guild_settings` commits to SQLite and only then writes the mirror, so an
-    OSError on the file write leaves the two permanently divergent. SQLite is the
-    authority, so replaying every committed setting at startup repairs that
-    without needing a two-phase write. Returns the number of settings that had
-    drifted, for the log.
-    """
-    guild_id = _legacy_guild_id()
-    if guild_id is None:
-        return 0
-    try:
-        stored = database.run_read_sync(database.get_guild_settings, guild_id)
-    except database.DatabaseOperationError:
-        dashboard_logger.exception("Could not read typed settings for reconciliation.")
-        return 0
-
-    drifted = {}
-    for key, row in stored.items():
-        definition = SETTING_DEFINITIONS.get(key)
-        if definition is None or definition.sensitive:
-            continue
-        if _legacy_config_value(definition, guild_id) != row["value"]:
-            drifted[key] = row["value"]
-    if drifted:
-        dashboard_logger.warning(
-            "Repairing config.json mirror drift (settings=%s)", sorted(drifted)
-        )
-        _apply_legacy_config_values(guild_id, drifted)
-    return len(drifted)
-
-
-def _apply_legacy_config_values(guild_id: int, changed: dict):
-    """Keep the private deployment hot while guild settings become authoritative."""
-    if app.config.get("TESTING"):
-        return
-    _mirror_price_and_reward_tables(guild_id, changed)
-    # config.json is single-tenant, so only the designated legacy guild may write
-    # it. The price and reward tables above are per-guild since schema 8 and no
-    # longer need that guard: a guild can only ever write its own rows.
-    if _legacy_guild_id() != int(guild_id):
-        return
-    # Waitress serves this on several threads while the bot thread may reload
-    # the same dictionary, so the read, the mutation and the write must all
-    # happen under one lock or concurrent saves silently drop each other's keys.
-    with CONFIG_LOCK:
-        updated = snapshot_config()
-        for key, value in changed.items():
-            path = SETTING_DEFINITIONS[key].legacy_path
-            if not path:
-                continue
-            target = updated
-            for part in path[:-1]:
-                target = target.setdefault(part, {})
-            target[path[-1]] = value
-        save_config(updated)
+    # `config.json` is a read-only fallback now: nothing writes it, and it only
+    # answers for a setting an installation has never saved. One copy of that
+    # walk, shared with the runtime resolver and the permission audit.
+    return settings_registry_legacy_config_value(definition, config)
 
 
 def _mirror_price_and_reward_tables(guild_id: int, changed: dict):
@@ -1330,14 +1258,11 @@ def _wire_value(definition, value):
     integers in `guild_settings` and in `config.json`.
     """
     # A JSON setting can carry ids inside it, and they round exactly the same
-    # way. A role menu's entries are the case that exists today; a shape with no
-    # ids needs nothing here.
-    if definition.json_shape == JSON_SHAPE_ROLE_MENU:
-        if not isinstance(value, dict):
-            return value
-        return {label: {**entry, "id": str(entry.get("id"))}
-                if isinstance(entry, dict) else entry
-                for label, entry in value.items()}
+    # way — the bug does not care how deep the snowflake sits. Where each shape
+    # holds one is declared in the registry, so this and the validator cannot
+    # disagree about it.
+    if definition.json_shape:
+        return wire_json_shape(definition.json_shape, value)
     if definition.value_type not in _SNOWFLAKE_VALUE_TYPES:
         return value
     if isinstance(value, list):
@@ -1380,9 +1305,13 @@ def guild_settings(guild_id):
         # revision poll converges two processes, but waiting two seconds for a
         # save the operator just made is not "live".
         settings_cache.apply_changes(guild_id, result)
-        _apply_legacy_config_values(
-            guild_id, {key: row["value"] for key, row in result.items()}
-        )
+        # The price and reward tables are separate per-guild rows that the shop
+        # and the reward paths read directly, so they still have to be written.
+        # `config.json` no longer is: nothing writes it any more.
+        if not app.config.get("TESTING"):
+            _mirror_price_and_reward_tables(
+                guild_id, {key: row["value"] for key, row in result.items()}
+            )
         # The response re-seeds the client's copy, so it has to be wired the same
         # way the GET is or the next comparison sees a change that is not one.
         wired = {key: {**row,
@@ -2044,13 +1973,6 @@ def start_dashboard_thread(bot=None):
     """Run Flask beside the bot without blocking the Discord event loop."""
     global _dashboard_bot
     _dashboard_bot = bot
-    # Repair any mirror drift left by a failed config.json write before serving,
-    # so the bot and the typed settings agree from the first request.
-    try:
-        reconcile_legacy_config_mirror()
-    except Exception:
-        # A reconciliation failure must never stop the dashboard from starting.
-        dashboard_logger.exception("Legacy config reconciliation failed.")
     threading.Thread(target=run_api, daemon=True).start()
 
 

@@ -7,12 +7,15 @@ closed instead of open turns an unreadable setting into an outage — it is one
 line away from `is_enabled`, which must fail the other way.
 """
 
+import ast
 import asyncio
 import os
 import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
+
+from pathlib import Path
 
 import database
 import settings_cache
@@ -22,8 +25,11 @@ from settings_registry import (
     ROLE_MENU_ENTRY_LIMIT,
     SETTING_DEFINITIONS,
     SettingScope,
+    SettingValueType,
     validate_setting_value,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class InstanceScopeTests(unittest.TestCase):
@@ -192,24 +198,31 @@ class CacheFallbackTests(unittest.TestCase):
         settings_cache.apply_changes(111, result)
         self.assertEqual(7, settings_cache.setting(111, "ticket_logs"))
 
-    def test_projection_refreshes_config_without_clearing_untouched_keys(self):
-        database.set_guild_settings(111, 9, [
-            {"key": "economy_channels", "value": [999], "revision": 0},
-            {"key": "maintenance", "value": True, "revision": 0},
-        ])
-        asyncio.run(settings_cache.refresh([111], force=True))
-        self.assertEqual([999], self.config["channels"]["economy"])
-        self.assertIs(True, self.config["bot_settings"]["maintenance"])
-        # A key with no row keeps what the file held. Clearing it would be a
-        # silent reset, and a missing row is not a row holding the default.
-        self.assertEqual(555, self.config["channels"]["join"])
+    def test_the_file_is_a_read_only_fallback_for_an_unsaved_setting(self):
+        """Which is what makes the import a migration, not a prerequisite.
 
-    def test_projection_never_writes_the_file(self):
-        """While the mirror exists only the dashboard writes it; a second writer
-        in another process drops the first one's keys."""
+        Pull the change and `config.json` still answers for anything never saved
+        in the dashboard; run `scripts/import_config.py` and the rows answer
+        instead. Nothing writes the file any more.
+        """
+        # Never saved: the file answers.
+        self.assertEqual([777], settings_cache.setting(111, "economy_channels"))
+        database.set_guild_settings(
+            111, 9, [{"key": "economy_channels", "value": [999], "revision": 0}])
+        asyncio.run(settings_cache.refresh([111], force=True))
+        # Saved: the row answers, and the file is left exactly as it was.
+        self.assertEqual([999], settings_cache.setting(111, "economy_channels"))
+        self.assertEqual([777], self.config["channels"]["economy"])
+
+    def test_the_cache_never_writes_the_configuration_it_reads(self):
+        """It used to project rows back into `config` so unconverted readers went
+        live. Every reader goes through the cache now, so that bridge is gone —
+        and a cache that mutates its own fallback cannot be reasoned about."""
         import inspect
-        source = inspect.getsource(settings_cache.project_into_config)
+        source = inspect.getsource(settings_cache)
         self.assertNotIn("save_config", source)
+        self.assertNotIn("CONFIG_LOCK", source)
+        self.assertNotIn("project_into_config", source)
 
 
 class RoleMenuShapeTests(unittest.TestCase):
@@ -257,15 +270,291 @@ class RoleMenuShapeTests(unittest.TestCase):
         # 25 components per message, and a role menu is one message.
         self.assertEqual(25, ROLE_MENU_ENTRY_LIMIT)
 
-    def test_a_plain_json_setting_is_left_alone(self):
-        # Only a declared shape is constrained; `factions` is still free JSON
-        # until it gets an editor of its own.
-        self.assertIsNone(SETTING_DEFINITIONS["factions"].json_shape)
+    def test_no_json_setting_is_left_as_a_text_box(self):
+        """Which is what makes "configured from the dashboard" true.
+
+        Three settings were still hand-written JSON — the level ladder, the LFG
+        map and the faction map — so an operator was editing a config file that
+        happened to live in a form.
+        """
+        unshaped = sorted(
+            key for key, definition in SETTING_DEFINITIONS.items()
+            if definition.value_type is SettingValueType.JSON
+            and not definition.json_shape
+        )
+        self.assertEqual([], unshaped)
+
+    def test_every_shape_has_a_validator_and_a_snowflake_declaration(self):
+        """A shape the editor can render but the API cannot check is a hole."""
+        import settings_registry
+        for shape in (settings_registry.JSON_SHAPE_ROLE_MENU,
+                      settings_registry.JSON_SHAPE_LEVEL_ROLES,
+                      settings_registry.JSON_SHAPE_LFG_CHANNELS,
+                      settings_registry.JSON_SHAPE_FACTIONS):
+            with self.subTest(shape=shape):
+                self.assertIn(shape, settings_registry._JSON_SHAPE_VALIDATORS)
+                self.assertIn(shape,
+                              settings_registry.JSON_SHAPE_SNOWFLAKE_FIELDS)
+
+    def test_the_client_renders_every_shape_the_registry_declares(self):
+        """Otherwise a setting silently falls back to the JSON text box."""
+        import re
+        import settings_registry
+        source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        rendered = set(re.findall(r"^    (\w+): \{$", source, re.MULTILINE))
+        for shape in settings_registry.JSON_SHAPE_SNOWFLAKE_FIELDS:
+            with self.subTest(shape=shape):
+                self.assertIn(shape, rendered)
+
+
+    def test_the_client_columns_match_what_the_validator_accepts(self):
+        """A column the API would reject is an unexplained rejection.
+
+        The editor and the validator are two halves of one contract, and they
+        live in different languages, so this pins the field names against each
+        other. Nested-entry shapes only: where the entry *is* the id there are no
+        field names to agree about.
+        """
+        import re
+        source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        expected = {
+            "role_menu": {"id", "emoji"},
+            "factions": {"leader_role_id", "manageable_ids"},
+        }
+        for shape, fields in expected.items():
+            with self.subTest(shape=shape):
+                block = source[source.index(f"    {shape}: {{"):]
+                block = block[:block.index("\n    },")]
+                declared = set(re.findall(r"\{name: '(\w+)'", block))
+                self.assertEqual(fields, declared)
+
+    def test_a_shape_whose_entry_is_the_id_declares_one_column(self):
+        """`level_roles` and `lfg_channels` map straight to a single role."""
+        import re
+        source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        for shape in ("level_roles", "lfg_channels"):
+            with self.subTest(shape=shape):
+                block = source[source.index(f"    {shape}: {{"):]
+                block = block[:block.index("\n    },")]
+                self.assertEqual(1, len(re.findall(r"\{name: '(\w+)'", block)))
+
+
+class LevelLadderShapeTests(unittest.TestCase):
+    def setUp(self):
+        self.definition = SETTING_DEFINITIONS["level_roles"]
+
+    def test_an_id_is_normalised_and_a_name_survives(self):
+        """`check_level_roles` has always accepted both, and an operator who
+        configured a name by hand must not have their ladder rejected."""
+        value = validate_setting_value(
+            self.definition, {"5": "1420070400000000002", "10": "Level 10"})
+        self.assertEqual(1420070400000000002, value["5"])
+        self.assertGreater(value["5"], 2 ** 53)
+        self.assertEqual("Level 10", value["10"])
+
+    def test_a_malformed_ladder_is_refused(self):
+        for value, why in (
+            ({"nope": 1}, "a milestone that is not a number"),
+            ({"1": 1}, "a milestone below level 2"),
+            ({"5": None}, "no role at all"),
+            ({"5": True}, "a boolean masquerading as an id"),
+            ([], "a list rather than a map"),
+        ):
+            with self.subTest(why=why):
+                with self.assertRaises(ValueError):
+                    validate_setting_value(self.definition, value)
+
+
+class LfgAndFactionShapeTests(unittest.TestCase):
+    def test_the_lfg_map_is_snowflakes_on_both_sides(self):
+        definition = SETTING_DEFINITIONS["lfg_channels"]
+        value = validate_setting_value(
+            definition, {"1420070400000000004": "1420070400000000005"})
+        self.assertEqual({"1420070400000000004": 1420070400000000005}, value)
+        for bad in ({"abc": 1}, {"1": "not an id"}, []):
+            with self.subTest(bad=bad):
+                with self.assertRaises((ValueError, TypeError)):
+                    validate_setting_value(definition, bad)
+
+    def test_a_faction_is_a_leader_plus_the_roles_it_manages(self):
+        definition = SETTING_DEFINITIONS["factions"]
+        value = validate_setting_value(definition, {
+            " alpha ": {"leader_role_id": "1420070400000000006",
+                        "manageable_ids": ["1420070400000000003"]}})
         self.assertEqual(
-            {"anything": [1, 2]},
-            validate_setting_value(SETTING_DEFINITIONS["factions"],
-                                   {"anything": [1, 2]}))
+            {"alpha": {"leader_role_id": 1420070400000000006,
+                       "manageable_ids": [1420070400000000003]}}, value)
+
+    def test_a_malformed_faction_is_refused(self):
+        definition = SETTING_DEFINITIONS["factions"]
+        for value, why in (
+            ({"": {"leader_role_id": 1}}, "a blank name"),
+            ({"a": {"leader_role_id": 1, "extra": 2}}, "an unknown field"),
+            ({"a": "not an object"}, "an entry that is not an object"),
+            ({"a": {"leader_role_id": 1, "manageable_ids": "nope"}},
+             "managed roles that are not a list"),
+            ({"a" * 61: {"leader_role_id": 1}}, "a name past the limit"),
+        ):
+            with self.subTest(why=why):
+                with self.assertRaises((ValueError, TypeError)):
+                    validate_setting_value(definition, value)
+
+    def test_every_shape_sends_its_ids_as_strings(self):
+        """A nested snowflake rounds exactly as readily as a top-level one."""
+        import dashboard_api
+        cases = {
+            "level_roles": ({"5": 1420070400000000002}, "1420070400000000002"),
+            "lfg_channels": ({"1": 1420070400000000005}, "1420070400000000005"),
+        }
+        for key, (value, expected) in cases.items():
+            with self.subTest(key=key):
+                wired = dashboard_api._wire_value(
+                    SETTING_DEFINITIONS[key], value)
+                self.assertEqual(expected, list(wired.values())[0])
+                self.assertGreater(int(expected), 2 ** 53)
+        wired = dashboard_api._wire_value(
+            SETTING_DEFINITIONS["factions"],
+            {"a": {"leader_role_id": 1420070400000000006,
+                   "manageable_ids": [1420070400000000003]}})
+        self.assertEqual("1420070400000000006", wired["a"]["leader_role_id"])
+        self.assertEqual(["1420070400000000003"], wired["a"]["manageable_ids"])
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoCogReadsTheLegacyFileTests(unittest.TestCase):
+    """The conversion is only finished if it cannot quietly come undone.
+
+    Every cog read `config` directly, which meant a dashboard save in a separate
+    process needed `?reloadconfig` before the bot saw it, and it meant a setting
+    could only ever be single-tenant. They all resolve through `settings_cache`
+    now. This walks the cogs' syntax trees rather than grepping, so a comment
+    about `config` does not read as a use of it.
+    """
+
+    #: `cogs/utils.py` owns the dictionary and the resolver, so it is the one
+    #: module allowed to touch it. `main.py` reloads it for `?reloadconfig`.
+    ALLOWED = {"utils.py"}
+
+    def _config_subscripts(self, tree):
+        """`config[...]` and `config.get(...)`, as the cogs used to write them."""
+        uses = []
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Subscript)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "config"):
+                uses.append(node.lineno)
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "config"):
+                uses.append(node.lineno)
+        return sorted(uses)
+
+    def test_no_cog_reads_the_legacy_configuration_dictionary(self):
+        offenders = {}
+        for path in sorted((ROOT / "cogs").glob("*.py")):
+            if path.name in self.ALLOWED:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            lines = self._config_subscripts(tree)
+            if lines:
+                offenders[path.name] = lines
+        self.assertEqual(
+            {}, offenders,
+            "read the typed setting through settings_cache "
+            "(cogs.utils.guild_setting_sync) instead of config.json",
+        )
+
+    def test_no_cog_imports_the_dictionary_it_no_longer_reads(self):
+        """An unused import is how the next reader finds it again."""
+        offenders = []
+        for path in sorted((ROOT / "cogs").glob("*.py")):
+            if path.name in self.ALLOWED:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module == "cogs.utils":
+                    if any(alias.name == "config" for alias in node.names):
+                        offenders.append(path.name)
+        self.assertEqual([], offenders)
+
+
+class LegacyImportTests(unittest.TestCase):
+    """`scripts/import_config.py` runs once against a real installation.
+
+    Both cases here came out of running it against this repository's own
+    `config.json` rather than a synthetic one, which is the only reason either
+    was found.
+    """
+
+    def setUp(self):
+        import scripts.import_config as importer
+        self.importer = importer
+        self.definitions = SETTING_DEFINITIONS
+
+    def test_a_legacy_id_list_is_converted_to_the_declared_type(self):
+        """`roles.ignored_users` holds integers and the setting is a string list.
+
+        A snowflake cannot cross to a browser as a number, so the string list is
+        correct; `config.json` predates that and holds integers. Refusing would
+        make the import unusable on a real installation, and coercing silently
+        would hide a genuine mismatch — so it converts only losslessly, and says
+        that it did.
+        """
+        definition = self.definitions["ignored_users"]
+        converted = self.importer.coerce_to_declared_type(
+            definition, [1420070400000000007, 1420070400000000008])
+        self.assertEqual(["1420070400000000007", "1420070400000000008"], converted)
+        validate_setting_value(definition, converted)
+
+    def test_a_wrongly_shaped_value_is_left_to_fail_validation(self):
+        """A value that is the wrong *shape* is a mistake in the file, and the
+        import must refuse rather than invent a conversion for it."""
+        definition = self.definitions["ignored_users"]
+        self.assertEqual(
+            {"not": "a list"},
+            self.importer.coerce_to_declared_type(definition, {"not": "a list"}))
+        with self.assertRaises(ValueError):
+            validate_setting_value(definition, {"not": "a list"})
+
+    def test_a_value_equal_to_the_default_is_not_imported(self):
+        """A missing row and a row holding the default are different states.
+
+        The dashboard shows the second as configured, so importing a value that
+        equals the default would mark a setting nobody ever set.
+        """
+        import json
+        import tempfile
+        from pathlib import Path
+
+        original = self.importer.CONFIG_PATH
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            # `hu` is the shipped default for `language`.
+            path.write_text(json.dumps({"bot_settings": {"language": "hu"}}),
+                            encoding="utf-8")
+            self.importer.CONFIG_PATH = path
+            try:
+                loaded = self.importer.load_config()
+            finally:
+                self.importer.CONFIG_PATH = original
+        self.assertEqual("hu", self.definitions["language"].default)
+        self.assertEqual("hu", loaded["bot_settings"]["language"])
+
+
+class IgnoredUsersComparisonTests(unittest.TestCase):
+    def test_the_ignore_list_is_compared_as_ids_not_as_stored(self):
+        """It is a string list and `member.id` is an integer.
+
+        Comparing them directly was False for anything ever saved from the
+        dashboard, so the list silently stopped ignoring anyone — a defect that
+        was invisible while the value only ever came from `config.json`.
+        """
+        source = (ROOT / "cogs" / "serverevents.py").read_text(encoding="utf-8")
+        self.assertNotIn("if member.id in ignored_users: continue\n"
+                         "                result", source)
+        self.assertIn("int(entry) for entry in", source)

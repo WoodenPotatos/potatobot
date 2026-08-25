@@ -49,15 +49,30 @@ file_handler.setFormatter(log_format)
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(log_format)
 
-logger = logging.getLogger('discord')
-logger.setLevel(logging.INFO)
-logger.addHandler(file_handler)
-logger.addHandler(console_handler)
+def configure_logger(name: str) -> logging.Logger:
+    """Give one logger the project's handlers, and stop it propagating.
 
-bot_logger = logging.getLogger('PotatoBot')
-bot_logger.setLevel(logging.INFO)
-bot_logger.addHandler(file_handler)
-bot_logger.addHandler(console_handler)
+    `propagate = False` is the load-bearing half. Without it every record also
+    reaches the root logger, and something *will* put a handler there:
+    `waitress.serve` calls `logging.basicConfig()` — documented as "idempotent
+    if logging has already been set up", which means it adds a root handler when
+    nothing else has. The result was every line in the journal twice, once in
+    this format and once in Python's default, which halves a 500 MB journal cap
+    for nothing and makes a grep count read double.
+    """
+    configured = logging.getLogger(name)
+    configured.setLevel(logging.INFO)
+    configured.addHandler(file_handler)
+    configured.addHandler(console_handler)
+    configured.propagate = False
+    return configured
+
+
+logger = configure_logger('discord')
+bot_logger = configure_logger('PotatoBot')
+# Waitress logs its own queue-depth warnings, and they are worth reading in the
+# same format as everything else rather than in whatever basicConfig picks.
+configure_logger('waitress')
 
 # The database module is the single schema owner. Migrations are applied before
 # cogs or the dashboard can perform reads and writes.
@@ -86,9 +101,12 @@ intents.moderation = True
 intents.bans = True
 
 # The prefix is a typed instance setting whose apply behaviour is `restart`,
-# because discord.py binds it when the bot object is constructed. It is read
-# from the shared configuration, which `cogs.utils` loads at import.
-COMMAND_PREFIX = str(config.get("bot_settings", {}).get("prefix") or "?")
+# because discord.py binds it when the bot object is constructed. Loaded
+# synchronously here, before there is a loop to await on; if the database cannot
+# be read the cache stays cold and the fallback chain yields `?`, which matters
+# because a database problem must not lock the operator out of `?reload`.
+settings_cache.load_instance_sync()
+COMMAND_PREFIX = str(settings_cache.setting(None, "command_prefix") or "?")
 
 bot = PotatoBot(
     command_prefix=COMMAND_PREFIX,
@@ -323,10 +341,19 @@ async def reload(ctx, cog_name: str):
 @bot.command(name="reloadconfig")
 @commands.is_owner()
 async def reload_config_cmd(ctx):
+    """Re-read the legacy fallback file and the stored settings.
+
+    Settings converge on their own now — the poll notices a dashboard save
+    within a couple of seconds — so this is the manual "now, please" path and
+    the way to pick up a hand-edited `config.json`, which is still the fallback
+    for anything an installation has never saved.
+    """
     try:
         await asyncio.to_thread(reload_config)
+        settings_cache.invalidate()
+        await settings_cache.refresh([guild.id for guild in bot.guilds], force=True)
         await ctx.send(t("system.config_reloaded"))
-    except Exception as e:
+    except Exception:
         bot_logger.exception("Configuration reload failed")
         await ctx.send(t("system.config_reload_failed"))
 
@@ -343,4 +370,7 @@ if TOKEN is None:
     bot_logger.critical("DISCORD_TOKEN is not configured; startup aborted")
     exit()
 
-bot.run(TOKEN)
+# `log_handler=None` because discord.py otherwise calls `setup_logging()` on the
+# `discord` logger this module has already configured, which was the other half
+# of the duplication.
+bot.run(TOKEN, log_handler=None)

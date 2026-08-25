@@ -11,13 +11,69 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from discord.ext import commands
-from cogs.utils import BoundedCooldownMap, can_self_assign_role, t, config
+import database
+from cogs.utils import (BoundedCooldownMap, can_self_assign_role, t,
+                        guild_setting_sync)
 from feature_access import require_interaction_feature
 
 role_logger = logging.getLogger("PotatoBot.RoleSelect")
 
 ROLE_ACTION_COOLDOWN = 3
 role_action_times = BoundedCooldownMap()
+
+# Which typed setting backs each menu. The custom_id carries the entry's label,
+# so this is also how a click finds the role it should toggle.
+MENU_SETTINGS = ("game_roles", "news_roles", "theme_roles")
+
+
+def menu_entries(guild_id, setting_key) -> dict:
+    """One guild's menu, as {label: {"id": role_id, "emoji": str}}."""
+    stored = guild_setting_sync(guild_id, setting_key) if guild_id else {}
+    return stored if isinstance(stored, dict) else {}
+
+
+def registered_menu_labels(setting_key) -> dict:
+    """Every label any guild uses for this menu, with no role ids attached.
+
+    A persistent view routes a click by `custom_id`, and these custom_ids are
+    derived from the operator's own labels — so the instance handed to
+    `bot.add_view()` cannot enumerate them from one guild without being wrong for
+    every other one. It takes the union instead, and carries no role id at all:
+    the role is resolved per interaction from the guild the click came from,
+    which is what keeps one shared instance correct everywhere and keeps
+    per-message state off a persistent view.
+    """
+    labels = {}
+    try:
+        for guild in database.get_active_guilds():
+            for label, entry in menu_entries(int(guild["id"]), setting_key).items():
+                labels.setdefault(label, entry if isinstance(entry, dict) else {})
+    except Exception:
+        # Registration must not be what stops the bot starting. A label missing
+        # here means that one button answers nothing until the next restart,
+        # which is the same gap the config-based version had.
+        role_logger.exception("Could not enumerate role menu labels (%s)",
+                              setting_key)
+    return labels
+
+
+def resolve_menu_role(interaction, label) -> int | None:
+    """The role this label names in the guild the click came from.
+
+    Searched across all three menus, because the `custom_id` shape already on
+    posted messages does not say which menu a button belongs to.
+    """
+    for setting_key in MENU_SETTINGS:
+        entry = menu_entries(interaction.guild_id, setting_key).get(label)
+        if entry is None:
+            continue
+        role_id = entry.get("id") if isinstance(entry, dict) else entry
+        try:
+            return int(role_id) if role_id else None
+        except (TypeError, ValueError):
+            return None
+    return None
+
 
 async def toggle_configured_role(interaction, role_id, display_name):
     if not await require_interaction_feature(interaction, "role_menus"):
@@ -63,20 +119,25 @@ async def toggle_configured_role(interaction, role_id, display_name):
 # Self-service role menus validate every configured role again at click time.
 
 class GameRoleView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None) 
-        game_data = config.get("game_roles", {})
+    def __init__(self, guild_id: int = None):
+        super().__init__(timeout=None)
+        # A guild renders its own menu; no guild means this is the
+        # instance registered for routing, which takes every label.
+        game_data = (menu_entries(guild_id, "game_roles") if guild_id
+                      else registered_menu_labels("game_roles"))
         for game_name, data in game_data.items():
             self.add_item(GameRoleButton(game_name, data))
 
 class GameRoleButton(discord.ui.Button):
+    """One menu entry. Carries its label and emoji, never its role id.
+
+    The role is looked up per interaction, so this instance is correct for every
+    guild whose menu uses this label — a persistent view is shared by every
+    message it serves and must hold no per-message state.
+    """
+
     def __init__(self, game_name, data):
-        if isinstance(data, dict):
-            self.role_id = data.get("id")
-            button_emoji = data.get("emoji")
-        else:
-            self.role_id = data
-            button_emoji = None
+        button_emoji = data.get("emoji") if isinstance(data, dict) else None
 
         super().__init__(
             label=game_name,
@@ -87,23 +148,30 @@ class GameRoleButton(discord.ui.Button):
         self.game_name = game_name
 
     async def callback(self, interaction: discord.Interaction):
-        await toggle_configured_role(interaction, self.role_id, self.game_name)
+        label = self.game_name
+        await toggle_configured_role(
+            interaction, resolve_menu_role(interaction, label), label)
 
 class NewsRoleView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, guild_id: int = None):
         super().__init__(timeout=None)
-        news_data = config.get("news_roles", {})
+        # A guild renders its own menu; no guild means this is the
+        # instance registered for routing, which takes every label.
+        news_data = (menu_entries(guild_id, "news_roles") if guild_id
+                      else registered_menu_labels("news_roles"))
         for news_name, data in news_data.items():
             self.add_item(NewsRoleButton(news_name, data))
 
 class NewsRoleButton(discord.ui.Button):
+    """One menu entry. Carries its label and emoji, never its role id.
+
+    The role is looked up per interaction, so this instance is correct for every
+    guild whose menu uses this label — a persistent view is shared by every
+    message it serves and must hold no per-message state.
+    """
+
     def __init__(self, news_name, data):
-        if isinstance(data, dict):
-            self.role_id = data.get("id")
-            button_emoji = data.get("emoji")
-        else:
-            self.role_id = data
-            button_emoji = None
+        button_emoji = data.get("emoji") if isinstance(data, dict) else None
 
         super().__init__(
             label=news_name,
@@ -114,23 +182,30 @@ class NewsRoleButton(discord.ui.Button):
         self.news_name = news_name
 
     async def callback(self, interaction: discord.Interaction):
-        await toggle_configured_role(interaction, self.role_id, self.news_name)
+        label = self.news_name
+        await toggle_configured_role(
+            interaction, resolve_menu_role(interaction, label), label)
 
 class ThemesRoleView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, guild_id: int = None):
         super().__init__(timeout=None)
-        themes_data = config.get("themes_roles", {})
+        # A guild renders its own menu; no guild means this is the
+        # instance registered for routing, which takes every label.
+        themes_data = (menu_entries(guild_id, "theme_roles") if guild_id
+                      else registered_menu_labels("theme_roles"))
         for theme_name, data in themes_data.items():
             self.add_item(ThemesRoleButton(theme_name, data))
 
 class ThemesRoleButton(discord.ui.Button):
+    """One menu entry. Carries its label and emoji, never its role id.
+
+    The role is looked up per interaction, so this instance is correct for every
+    guild whose menu uses this label — a persistent view is shared by every
+    message it serves and must hold no per-message state.
+    """
+
     def __init__(self, theme_name, data):
-        if isinstance(data, dict):
-            self.role_id = data.get("id")
-            button_emoji = data.get("emoji")
-        else:
-            self.role_id = data
-            button_emoji = None
+        button_emoji = data.get("emoji") if isinstance(data, dict) else None
 
         super().__init__(
             label=theme_name,
@@ -141,7 +216,9 @@ class ThemesRoleButton(discord.ui.Button):
         self.theme_name = theme_name
 
     async def callback(self, interaction: discord.Interaction):
-        await toggle_configured_role(interaction, self.role_id, self.theme_name)
+        label = self.theme_name
+        await toggle_configured_role(
+            interaction, resolve_menu_role(interaction, label), label)
 
 class RoleSelect(commands.Cog):
     def __init__(self, bot):
@@ -159,7 +236,8 @@ class RoleSelect(commands.Cog):
             description=t("roleselect.games_desc"),
             color=discord.Color.green()
         )
-        view = GameRoleView() 
+        view = GameRoleView(ctx.guild.id)
+        self.bot.add_view(view)
         await ctx.channel.send(embed=embed, view=view)
         if ctx.interaction:
             await ctx.send(t("utils.command_completed"), ephemeral=True)
@@ -172,7 +250,8 @@ class RoleSelect(commands.Cog):
             msg_id_int = int(message_id.strip())
             message = await ctx.channel.fetch_message(msg_id_int)
         
-            new_view = GameRoleView()
+            new_view = GameRoleView(ctx.guild.id)
+            self.bot.add_view(new_view)
             new_embed = discord.Embed(
                 title=t("roleselect.games_title"),
                 description=t("roleselect.games_desc"),
@@ -195,7 +274,8 @@ class RoleSelect(commands.Cog):
             description=t("roleselect.news_desc"),
             color=discord.Color.green()
         )
-        view = NewsRoleView() 
+        view = NewsRoleView(ctx.guild.id)
+        self.bot.add_view(view)
         await ctx.channel.send(embed=embed, view=view)
         if ctx.interaction:
             await ctx.send(t("utils.command_completed"), ephemeral=True)
@@ -208,7 +288,8 @@ class RoleSelect(commands.Cog):
             msg_id_int = int(message_id.strip())
             message = await ctx.channel.fetch_message(msg_id_int)
         
-            new_view = NewsRoleView()
+            new_view = NewsRoleView(ctx.guild.id)
+            self.bot.add_view(new_view)
             new_embed = discord.Embed(
                 title=t("roleselect.news_title"),
                 description=t("roleselect.news_desc"),
@@ -231,7 +312,8 @@ class RoleSelect(commands.Cog):
             description=t("roleselect.themes_desc"),
             color=discord.Color.green()
         )
-        view = ThemesRoleView() 
+        view = ThemesRoleView(ctx.guild.id)
+        self.bot.add_view(view)
         await ctx.channel.send(embed=embed, view=view)
         if ctx.interaction:
             await ctx.send(t("utils.command_completed"), ephemeral=True)
@@ -244,7 +326,8 @@ class RoleSelect(commands.Cog):
             msg_id_int = int(message_id.strip())
             message = await ctx.channel.fetch_message(msg_id_int)
         
-            new_view = ThemesRoleView()
+            new_view = ThemesRoleView(ctx.guild.id)
+            self.bot.add_view(new_view)
             new_embed = discord.Embed(
                 title=t("roleselect.themes_title"),
                 description=t("roleselect.themes_desc"),

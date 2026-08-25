@@ -2,7 +2,6 @@ import discord
 import os
 import sys
 
-from cogs.utils import config
 
 # Resolve repository imports independently of the process working directory.
 COG_DIR = os.path.dirname(os.path.abspath(__file__))

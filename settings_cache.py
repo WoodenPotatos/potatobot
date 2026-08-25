@@ -10,12 +10,17 @@ component and modal.
 **The fallback is the file, never nothing.** This is the one place where copying
 `feature_access` verbatim would be a defect. `is_enabled` fails *closed* because
 running a paid command under unknown policy is worse than refusing it. A setting
-has no such safe refusal: falling back to an empty `economy_channels` does not
-"refuse", it changes where every economy command is allowed, and an empty
-`member_role` silently un-gates an airlock. So when the cache does not know, this
-resolves exactly the way the bot resolved before the cache existed — the stored
-row if there is one, then `config.json` through
+has no such safe refusal: an empty `economy_channels` does not "refuse", it
+changes where every economy command is allowed. So when the cache does not know,
+this resolves the way the bot resolved before the cache existed — the stored row
+if there is one, then `config.json` through
 `settings_registry.legacy_config_value`, then the registry default.
+
+`config.json` is now **read-only and nothing writes it**. It survives as the
+source for a setting an installation has never saved, which is what makes
+`scripts/import_config.py` a migration an operator can take at their own pace
+rather than a prerequisite for upgrading: pull this and the file still answers,
+run the import and the rows answer instead.
 
 That also gives `maintenance` the fail-*open* it requires: its legacy path and
 its registry default are both "not in maintenance", so an unreadable cache
@@ -144,58 +149,24 @@ def invalidate() -> None:
         _REVISION = None
 
 
-def project_into_config() -> int:
-    """Write the cached rows back into the in-process `config` dictionary.
+def load_instance_sync() -> bool:
+    """Load the installation-wide rows synchronously, before the loop exists.
 
-    `config.json` is already a projection of the stored rows — the dashboard
-    writes it on every save and rebuilds it from the rows on every start — so the
-    fifty-odd sites still reading `config` are reading database-derived values
-    already. What they were missing is *liveness*: a dashboard running as a
-    separate process changed the rows and the file, and the bot only noticed on
-    `?reloadconfig` or a restart.
-
-    This closes that without touching those sites, by refreshing the same
-    dictionary they hold a reference to. Two rules make it safe.
-
-    **Only a key that has a row is projected.** A key with no row must keep
-    whatever the file holds, because a missing row and a row holding the default
-    are different states and clearing one would be a silent reset.
-
-    **It never writes the file.** While the mirror exists only the dashboard
-    writes it; a second writer in another process would drop the first one's
-    keys, and `CONFIG_LOCK` is a thread lock that does not span processes.
-
-    Guild-scoped values are projected only when exactly one guild is cached,
-    because `config.json` is single-tenant and there is no honest way to pick
-    between two guilds' channel ids. Instance values are always projected.
+    `main.py` needs the command prefix before it constructs the bot, and a cog
+    needs the language before its import-time metadata is built — both happen
+    before there is an event loop to await on. This is the one synchronous read,
+    it happens once at startup, and it is **allowed to fail**: an unreadable
+    database must not stop the bot coming up on the default prefix, or a database
+    problem locks the operator out of the very commands that would fix it.
     """
-    from cogs.utils import CONFIG_LOCK, config
-
+    try:
+        rows = database.get_instance_settings()
+    except Exception:
+        logger.exception("Could not load installation settings at startup")
+        return False
     with _LOCK:
-        guild_snapshots = dict(_GUILD_VALUES)
-        instance_values = dict(_INSTANCE_VALUES)
-
-    projected = dict(instance_values)
-    if len(guild_snapshots) == 1:
-        projected.update(next(iter(guild_snapshots.values())))
-
-    written = 0
-    with CONFIG_LOCK:
-        for key, value in projected.items():
-            definition = SETTING_DEFINITIONS.get(key)
-            if definition is None or not definition.legacy_path:
-                continue
-            target = config
-            for part in definition.legacy_path[:-1]:
-                node = target.get(part)
-                if not isinstance(node, dict):
-                    node = {}
-                    target[part] = node
-                target = node
-            if target.get(definition.legacy_path[-1]) != value:
-                target[definition.legacy_path[-1]] = value
-                written += 1
-    return written
+        _INSTANCE_VALUES.update({key: row["value"] for key, row in rows.items()})
+    return True
 
 
 async def refresh(guild_ids, *, force: bool = False) -> bool:
@@ -218,7 +189,4 @@ async def refresh(guild_ids, *, force: bool = False) -> bool:
         store(guild_id, stored)
     with _LOCK:
         _REVISION = revision
-    changed = project_into_config()
-    if changed:
-        logger.info("Refreshed %s config value(s) from stored settings.", changed)
     return True

@@ -1446,10 +1446,10 @@ input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent);
 
 .brand-avatar:not([src]), .brand-avatar[src=""] { display: none; }
 
-/* Role menu row editor. One row per button the menu will render: a label, the
-   role it grants, the emoji it carries. The carrier textarea is hidden and
-   holds the JSON the save path reads. */
-.role-menu-editor {
+/* Row editor for a shaped JSON setting: a role menu, the level ladder, the LFG
+   map, the faction map. One row per map entry — the key first, then the entry's
+   fields. The carrier textarea is hidden and holds the JSON the save reads. */
+.json-row-editor {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -1463,14 +1463,15 @@ input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent);
 
 .menu-row {
   display: grid;
-  /* Label and role share the room; the emoji needs little and the remove
-     button needs none. */
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 7rem auto;
+  /* One share per field plus a fixed column for the remove button. The count
+     comes from the shape, set as --row-columns when the row is built, so a
+     two-field shape does not leave two empty columns. */
+  grid-template-columns: repeat(var(--row-columns, 3), minmax(0, 1fr)) auto;
   gap: var(--space-2);
   align-items: center;
 }
 
-.menu-row .menu-emoji {
+.menu-row .row-field.narrow {
   text-align: center;
 }
 
@@ -1499,14 +1500,15 @@ input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent);
   gap: var(--space-2);
 }
 
-/* Four columns do not fit a phone, so each row becomes its own stack. */
+/* Several columns do not fit a phone, so every field takes the full width and
+   only the remove button shares a line. */
 @media (max-width: 720px) {
   .menu-row {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .menu-row .resource-picker,
-  .menu-row .menu-label {
+  .menu-row > .resource-picker,
+  .menu-row > .row-field {
     grid-column: 1 / -1;
   }
 }

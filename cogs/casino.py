@@ -17,7 +17,7 @@ from discord.ext import commands
 from datetime import datetime, timedelta
 from cogs.utils import (
     BoundedCooldownMap, apply_database_result, currency_emoji, is_channel,
-    is_premium, t, config,
+    is_premium, t,
 )
 from feature_access import require_interaction_feature
 

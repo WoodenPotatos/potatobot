@@ -6,6 +6,7 @@ import unittest
 from urllib.parse import parse_qs, urlparse
 
 import dashboard_api
+import settings_cache
 import database
 
 
@@ -34,6 +35,11 @@ class DashboardSecurityTests(unittest.TestCase):
         dashboard_api._rate_limit_events.clear()
         dashboard_api._oauth_tokens.clear()
         dashboard_api._permission_cache._entries.clear()
+        # So is the settings cache, and a settings PATCH here writes into it.
+        # Left behind, this guild's values answer for a later test that expected
+        # to resolve through `config` — the same discipline `database.DB_PATH`
+        # needs, for the same reason.
+        settings_cache.invalidate()
 
     def tearDown(self):
         (
@@ -709,41 +715,34 @@ class DashboardSecurityTests(unittest.TestCase):
         )
         self.assertEqual(rejected.status_code, 400)
 
-    def test_config_mirror_drift_is_repaired_at_startup(self):
-        """SQLite commits first, so a failed config.json write leaves the mirror
-        behind. Startup replays the committed settings to repair it."""
+    def test_a_setting_save_no_longer_writes_the_legacy_file(self):
+        """There is nothing left to reconcile, because nothing diverges.
+
+        `set_guild_settings` committed to SQLite and only then wrote
+        `config.json`, so an OSError on that write left the two permanently
+        apart and startup had to replay every committed setting to repair it.
+        The file is a read-only fallback now: SQLite is the only authority, and a
+        save has one destination.
+        """
         from unittest.mock import patch
 
-        # A committed typed setting the mirror has not caught up with.
-        database.set_guild_settings(
-            123, 42, [{"key": "shop_price_premium", "value": 777, "revision": 0}]
-        )
-        with database.get_connection() as conn:
-            conn.execute("UPDATE shop_prices SET price = 1 WHERE item_id = 'premium'")
+        import cogs.utils
 
-        applied = {}
-
-        def capture(guild_id, changed):
-            applied.update(changed)
-
-        with patch.dict(os.environ, {"POTATOBOT_LEGACY_GUILD_ID": "123"}), \
-                patch.object(dashboard_api, "_apply_legacy_config_values", capture):
-            drifted = dashboard_api.reconcile_legacy_config_mirror()
-
-        self.assertEqual(drifted, 1)
-        self.assertEqual(applied.get("shop_price_premium"), 777)
-
-    def test_reconciliation_is_a_no_op_when_the_mirror_agrees(self):
-        from unittest.mock import patch
-
-        database.set_guild_settings(
-            123, 42, [{"key": "shop_price_premium", "value": 555, "revision": 0}]
-        )
-        with database.get_connection() as conn:
-            conn.execute("UPDATE shop_prices SET price = 555 WHERE item_id = 'premium'")
-
-        with patch.dict(os.environ, {"POTATOBOT_LEGACY_GUILD_ID": "123"}):
-            self.assertEqual(dashboard_api.reconcile_legacy_config_mirror(), 0)
+        writes = []
+        with patch.object(cogs.utils, "save_config",
+                          lambda data: writes.append(data)):
+            self.authenticate(user_id="42")
+            response = self.client.patch(
+                "/api/guilds/123/settings",
+                json={"changes": [{"key": "shop_price_premium",
+                                   "value": 777, "revision": 0}]},
+                headers={"X-CSRF-Token": "csrf-token"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([], writes, "a settings save must not write config.json")
+        # And the row it *does* own is written.
+        self.assertEqual(
+            777, database.get_guild_settings(123)["shop_price_premium"]["value"])
 
     def test_only_the_host_may_erase_a_member(self):
         """Erasure spans the whole installation, so a single guild's administrator
@@ -814,9 +813,10 @@ class DashboardSecurityTests(unittest.TestCase):
         from unittest.mock import patch
 
         database.register_guild(456, "Other Guild")
-        with patch.dict(dashboard_api.app.config, {"TESTING": False}), \
-                patch.object(dashboard_api, "_legacy_guild_id", lambda: None):
-            dashboard_api._apply_legacy_config_values(123, {"shop_price_premium": 4242})
+        # Calls the surviving half directly. The mirror wrapper that used to
+        # call it is gone; these rows are not the mirror.
+        dashboard_api._mirror_price_and_reward_tables(
+            123, {"shop_price_premium": 4242})
 
         self.assertEqual(
             database.get_shop_price(123, "premium", 0), 4242,
@@ -833,13 +833,8 @@ class DashboardSecurityTests(unittest.TestCase):
 
     def test_a_reward_override_keeps_the_sibling_column(self):
         """Patching only the coin value must not blank the XP value."""
-        from unittest.mock import patch
-
-        with patch.dict(dashboard_api.app.config, {"TESTING": False}), \
-                patch.object(dashboard_api, "_legacy_guild_id", lambda: None):
-            dashboard_api._apply_legacy_config_values(
-                123, {"reward_daily_normal_coin": 12345}
-            )
+        dashboard_api._mirror_price_and_reward_tables(
+            123, {"reward_daily_normal_coin": 12345})
 
         default_coin, default_xp = database.REWARD_DEFAULTS["daily_normal"]
         self.assertEqual(

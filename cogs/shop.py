@@ -19,7 +19,8 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
 from cogs.tickets import TicketControl
 from cogs.utils import (can_self_assign_role, currency_emoji,
-                        currency_select_emoji, is_channel, t, config)
+                        currency_select_emoji, guild_setting_sync,
+                        is_channel, t)
 
 shop_logger = logging.getLogger("PotatoBot.Shop")
 
@@ -253,13 +254,14 @@ class ShopView(discord.ui.View):
                     return await interaction.edit_original_response(content=t("shop.not_enough_money"), embed=None, view=self)
                 try:
                     ticket_name = f"{item_data['ticket_prefix']}-{interaction.user.name.lower()}"
-                    category = guild.get_channel(config["channels"]["ticket_category"])
+                    category = guild.get_channel(
+                        guild_setting_sync(guild.id, "ticket_category"))
                     overwrites = {
                         guild.default_role: discord.PermissionOverwrite(view_channel=False),
                         interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True),
                         guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
                     }
-                    for r_id in config.get("roles", {}).get("admin", []):
+                    for r_id in guild_setting_sync(guild.id, "admin_roles"):
                         role = guild.get_role(r_id)
                         if role:
                             overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
@@ -282,8 +284,13 @@ class ShopView(discord.ui.View):
                 return await interaction.edit_original_response(content=t("shop.ticket_opened", channel=channel.mention), embed=None, view=None)
 
             if item_data["type"] == "role":
-                # A role item's catalog value is the config.json roles key.
-                role_id = config["roles"].get(item_data["value"])
+                # A role item's catalog value is the setting key that names the
+                # role, checked against the registry rather than trusted: an
+                # unregistered value would otherwise raise inside the callback.
+                from settings_registry import SETTING_DEFINITIONS
+                setting_key = item_data["value"]
+                role_id = (guild_setting_sync(interaction.guild.id, setting_key)
+                           if setting_key in SETTING_DEFINITIONS else None)
                 role = interaction.guild.get_role(role_id)
                 if not role or not can_self_assign_role(interaction.guild, role):
                     return await interaction.edit_original_response(content=t("shop.role_not_found"), embed=None, view=self)

@@ -169,13 +169,57 @@ def _feature(key: str, group: str, *, dependencies: tuple[str, ...] = (),
 # fixed rather than operator-authored on purpose — a threshold that can kick or
 # ban must not hang off a free-text key somebody can typo into existence, and a
 # tag is written into every warning row, so renaming one would orphan history.
-# The one JSON shape with a typed editor today. A label maps to a role id and
-# the emoji the button carries.
-JSON_SHAPE_ROLE_MENU = "role_menu"
+# The JSON shapes that have a typed row editor instead of a text box full of
+# braces. Every remaining JSON setting has one, which is what makes "configured
+# from the dashboard" true rather than "editable as JSON in the dashboard".
+JSON_SHAPE_ROLE_MENU = "role_menu"        # {label: {"id": role, "emoji": str}}
+JSON_SHAPE_LEVEL_ROLES = "level_roles"    # {level: role}
+JSON_SHAPE_LFG_CHANNELS = "lfg_channels"  # {channel: role}
+JSON_SHAPE_FACTIONS = "factions"          # {key: {leader_role_id, manageable_ids}}
 
 # Discord allows 25 components per message and a role menu is one message, so
 # this is derived from the platform rather than chosen.
 ROLE_MENU_ENTRY_LIMIT = 25
+
+# Where a snowflake sits inside each shape, so the browser gets it as a string.
+# One declaration, read by the wire transform and by the tests: an id nested one
+# level down rounds exactly as readily as one at the top, and the bug does not
+# care how deep it is. A JSON *key* is already a string and needs nothing.
+JSON_SHAPE_SNOWFLAKE_FIELDS = {
+    JSON_SHAPE_ROLE_MENU: ("id",),
+    JSON_SHAPE_LEVEL_ROLES: None,          # the value is the id itself
+    JSON_SHAPE_LFG_CHANNELS: None,
+    JSON_SHAPE_FACTIONS: ("leader_role_id", "manageable_ids"),
+}
+
+
+def wire_json_shape(shape: str, value):
+    """Stringify every snowflake inside a shaped JSON value.
+
+    `None` in the table above means the entry *is* the id; a tuple names the
+    fields that hold one, and a list-valued field is mapped element-wise.
+    """
+    if shape not in JSON_SHAPE_SNOWFLAKE_FIELDS or not isinstance(value, dict):
+        return value
+    fields = JSON_SHAPE_SNOWFLAKE_FIELDS[shape]
+    wired = {}
+    for key, entry in value.items():
+        if fields is None:
+            wired[key] = None if entry is None else str(entry)
+            continue
+        if not isinstance(entry, dict):
+            wired[key] = entry
+            continue
+        updated = dict(entry)
+        for field in fields:
+            if field not in updated:
+                continue
+            held = updated[field]
+            updated[field] = ([str(item) for item in held]
+                              if isinstance(held, list)
+                              else (None if held is None else str(held)))
+        wired[key] = updated
+    return wired
 
 WARN_TAGS = ("general", "spam", "language", "harassment", "nsfw")
 
@@ -483,7 +527,8 @@ SETTING_DEFINITIONS = {
         # had. A role id cannot be guessed for somebody else's guild, so there is
         # no honest default; `docs/level_setup.md` documents the ladder instead.
         _setting("level_roles", "community", "levels", SettingValueType.JSON,
-                 {}, feature="levels", legacy_path=("level_roles",)),
+                 {}, feature="levels", legacy_path=("level_roles",),
+                 json_shape=JSON_SHAPE_LEVEL_ROLES),
         # A role menu is {label: {"id": role_id, "emoji": str}}. The shape is
         # declared rather than inferred so the dashboard renders a row per entry
         # with a real role picker, and so a malformed map is refused on save
@@ -498,9 +543,11 @@ SETTING_DEFINITIONS = {
                  {}, feature="role_menus", legacy_path=("themes_roles",),
                  json_shape=JSON_SHAPE_ROLE_MENU),
         _setting("factions", "factions", "factions", SettingValueType.JSON,
-                 {}, feature="factions", legacy_path=("factions",)),
+                 {}, feature="factions", legacy_path=("factions",),
+                 json_shape=JSON_SHAPE_FACTIONS),
         _setting("lfg_channels", "community", "lfg", SettingValueType.JSON,
-                 {}, feature="lfg", legacy_path=("lfg_channels",)),
+                 {}, feature="lfg", legacy_path=("lfg_channels",),
+                 json_shape=JSON_SHAPE_LFG_CHANNELS),
         _setting("social_notification_channel", "community", "socials", SettingValueType.CHANNEL,
                  None, legacy_path=("socials", "notification_channel"),
                  channel_types=TEXT_CHANNEL_TYPES,
@@ -511,6 +558,12 @@ SETTING_DEFINITIONS = {
                  None, feature="social_youtube", legacy_path=("socials", "youtube_role_id")),
         _setting("twitch_streamers", "community", "socials", SettingValueType.STRING_LIST,
                  [], feature="social_twitch", legacy_path=("socials", "twitch_streamers")),
+        # Read by the YouTube RSS loop and registered nowhere, so it was a key
+        # the code looked for and no operator could set — not in the dashboard
+        # and not in the file. Registering it is what makes the feature reachable.
+        _setting("youtube_channels", "community", "socials",
+                 SettingValueType.STRING_LIST, [], feature="social_youtube",
+                 legacy_path=("socials", "youtube_channels")),
         # `/work` outcome rarity and payouts. The three tier weights are drawn
         # against each other, so the shipped 998/1/1 reproduces the previous
         # hard-coded one-in-a-thousand chances exactly.
@@ -671,9 +724,76 @@ def validate_setting_value(definition: SettingDefinition, value):
         raise ValueError("setting must be a string list")
     if kind is SettingValueType.JSON and not isinstance(value, (dict, list)):
         raise ValueError("setting must be JSON object or list")
-    if definition.json_shape == JSON_SHAPE_ROLE_MENU:
-        return _validated_role_menu(value)
+    validator = _JSON_SHAPE_VALIDATORS.get(definition.json_shape)
+    return validator(value) if validator else value
+
+
+def _shaped_map(value, what):
+    """Every shaped JSON setting is a map, so reject anything else once."""
+    if not isinstance(value, dict):
+        raise ValueError(f"{what} must be a JSON object")
     return value
+
+
+def _validated_level_roles(value):
+    """{level: role}. A value may be an id **or a role name**.
+
+    `check_level_roles` has always accepted both, and `docs/level_setup.md`
+    recommends ids because a renamed role breaks a name. A name is still
+    accepted rather than refused: an operator who configured one by hand should
+    not have their ladder rejected by the editor that came later.
+    """
+    normalised = {}
+    for level, role in _shaped_map(value, "the level ladder").items():
+        try:
+            milestone = int(level)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("a level milestone must be a number") from exc
+        if not 2 <= milestone <= 1000:
+            raise ValueError("a level milestone must be between 2 and 1000")
+        if isinstance(role, bool) or role is None or role == "":
+            raise ValueError("every level needs a role")
+        if isinstance(role, int) or str(role).isdigit():
+            role = _snowflake(role)
+        elif not isinstance(role, str) or len(role) > 100:
+            raise ValueError("a level role must be an id or a role name")
+        normalised[str(milestone)] = role
+    return normalised
+
+
+def _validated_lfg_channels(value):
+    """{channel: role}. Both halves are snowflakes."""
+    normalised = {}
+    for channel, role in _shaped_map(value, "the LFG map").items():
+        normalised[str(_snowflake(channel))] = _snowflake(role)
+    return normalised
+
+
+def _validated_factions(value):
+    """{key: {leader_role_id, manageable_ids}}.
+
+    The key is written nowhere but this setting, so it is free text — but it is
+    short and stripped, because `cogs.utils.member_faction_role_ids` iterates
+    these and a blank key is indistinguishable from a mistake.
+    """
+    normalised = {}
+    for key, entry in _shaped_map(value, "the faction map").items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("every faction needs a name")
+        if len(key) > 60:
+            raise ValueError("a faction name is at most 60 characters")
+        if not isinstance(entry, dict) or set(entry) - {"leader_role_id",
+                                                        "manageable_ids"}:
+            raise ValueError(
+                "a faction holds only 'leader_role_id' and 'manageable_ids'")
+        managed = entry.get("manageable_ids") or []
+        if not isinstance(managed, list):
+            raise ValueError("a faction's managed roles must be a list")
+        normalised[key.strip()] = {
+            "leader_role_id": _snowflake(entry.get("leader_role_id")),
+            "manageable_ids": [_snowflake(role) for role in managed],
+        }
+    return normalised
 
 
 def _validated_role_menu(value):
@@ -703,6 +823,14 @@ def _validated_role_menu(value):
         normalised[label.strip()] = {"id": _snowflake(entry.get("id")),
                                      "emoji": emoji}
     return normalised
+
+
+_JSON_SHAPE_VALIDATORS = {
+    JSON_SHAPE_ROLE_MENU: _validated_role_menu,
+    JSON_SHAPE_LEVEL_ROLES: _validated_level_roles,
+    JSON_SHAPE_LFG_CHANNELS: _validated_lfg_channels,
+    JSON_SHAPE_FACTIONS: _validated_factions,
+}
 
 
 def validate_feature_key(feature_key: str) -> FeatureDefinition:

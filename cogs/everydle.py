@@ -19,7 +19,8 @@ from minigame_data import load_or_disable
 
 from discord.ext import commands
 from datetime import datetime
-from cogs.utils import apply_database_result, is_channel, t, config
+from cogs.utils import (apply_database_result, guild_setting_sync,
+                        is_channel, t)
 from feature_access import require_interaction_feature
 from feature_access import is_enabled
 
@@ -30,7 +31,9 @@ COG_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.dirname(COG_DIR), "data")
 
 # Mechanics use stable IDs; the selected catalog supplies every displayed value and alias.
-ACTIVE_LANGUAGE = config.get("bot_settings", {}).get("language", "hu")
+# Selected at import, which is why changing the language is a subsystem
+# reload rather than a live setting.
+ACTIVE_LANGUAGE = guild_setting_sync(None, "language")
 
 
 def load_game_dataset(game, filename, dataset_name):

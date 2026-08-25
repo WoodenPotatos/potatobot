@@ -85,10 +85,32 @@ class ConfigurationCoverageTests(unittest.TestCase):
         self.assertEqual([], missing)
 
     def test_the_command_prefix_is_read_from_configuration(self):
-        """It used to be a literal in main.py, so the setting would do nothing."""
+        """It used to be a literal in main.py, so the setting would do nothing.
+
+        It now comes from the typed setting through the cache, loaded
+        synchronously because discord.py binds the prefix before there is an
+        event loop. The fallback matters as much as the read: an unreadable
+        database must still leave the bot on `?`, or a database problem locks
+        the operator out of `?reload` and `?reloadconfig` — the two commands
+        that would fix it.
+        """
         source = (ROOT / "main.py").read_text(encoding="utf-8")
         self.assertNotIn('command_prefix="?"', source)
-        self.assertIn('config.get("bot_settings", {}).get("prefix")', source)
+        self.assertIn('settings_cache.load_instance_sync()', source)
+        self.assertIn('settings_cache.setting(None, "command_prefix") or "?"',
+                      source)
+
+    def test_loading_the_installation_settings_cannot_stop_startup(self):
+        """The fallback above is only real if the load itself cannot raise."""
+        import settings_cache
+
+        original = settings_cache.database.get_instance_settings
+        settings_cache.database.get_instance_settings = (
+            lambda: (_ for _ in ()).throw(RuntimeError("no database")))
+        try:
+            self.assertFalse(settings_cache.load_instance_sync())
+        finally:
+            settings_cache.database.get_instance_settings = original
 
 
 class LocalDevelopmentDashboardTests(unittest.TestCase):
@@ -111,13 +133,16 @@ class LocalDevelopmentDashboardTests(unittest.TestCase):
         self.assertIn("utils.CONFIG_PATH = str(local_config)", self.SOURCE)
         self.assertIn("redirect_config_writes(arguments.db.parent)", self.SOURCE)
 
-    def test_zero_is_a_legacy_guild_id_that_disables_the_mirror(self):
-        """The guard only works because `_legacy_guild_id` accepts any digit
-        string; if it ever validated the range, the mirror would switch back on."""
-        import dashboard_api
+    def test_the_legacy_guild_id_is_still_pinned_to_zero(self):
+        """The mirror it disabled is gone; the variable is not.
 
-        with patch.dict(os.environ, {"POTATOBOT_LEGACY_GUILD_ID": "0"}):
-            self.assertEqual(0, dashboard_api._legacy_guild_id())
+        `POTATOBOT_LEGACY_GUILD_ID` has a second reader in `main.py`, which uses
+        it to adopt a legacy database into scoped accounts. Pinning it to 0 kept
+        the launcher from writing the tracked `config.json`; it now keeps the
+        launcher from adopting a copy of the deployment's data, which is the same
+        class of accident.
+        """
+        self.assertIn('os.environ["POTATOBOT_LEGACY_GUILD_ID"] = "0"', self.SOURCE)
 
     def test_it_refuses_to_run_in_a_proxied_or_managed_environment(self):
         self.assertIn("POTATOBOT_DASHBOARD_EXTERNAL_URL", self.SOURCE)

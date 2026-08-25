@@ -16,8 +16,8 @@ import permission_audit
 from discord.ext import commands
 from datetime import datetime, timedelta
 from cogs.utils import (
-    BoundedCooldownMap, can_self_assign_role, config, currency_emoji, is_staff,
-    save_config, t, update_user_data,
+    BoundedCooldownMap, can_self_assign_role, currency_emoji,
+    guild_setting_sync, is_staff, set_guild_setting, t, update_user_data,
 )
 from feature_access import require_interaction_feature
 
@@ -94,7 +94,7 @@ class EmbedSendModal(discord.ui.Modal, title=t("admin.embed_modal_title")):
     async def on_submit(self, interaction: discord.Interaction):
         if not await require_interaction_feature(interaction, "general"):
             return
-        staff_role_ids = config.get("roles", {}).get("admin", [])
+        staff_role_ids = guild_setting_sync(interaction.guild.id, "admin_roles")
         is_current_staff = interaction.user.guild_permissions.administrator or any(
             role.id in staff_role_ids for role in interaction.user.roles
         )
@@ -123,8 +123,10 @@ class RuleAcceptView(discord.ui.View):
 
     @discord.ui.button(label=t("admin.accept_rules_button"), style=discord.ButtonStyle.green, custom_id="accept_rules_btn", emoji="✅")
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        onboarding_role = interaction.guild.get_role(config["roles"].get("onboarding"))
-        member_role = interaction.guild.get_role(config["roles"].get("member"))
+        onboarding_role = interaction.guild.get_role(
+            guild_setting_sync(interaction.guild.id, "onboarding_role") or 0)
+        member_role = interaction.guild.get_role(
+            guild_setting_sync(interaction.guild.id, "member_role") or 0)
 
         if not onboarding_role or not member_role:
             return await interaction.response.send_message(t("admin.role_not_found"), ephemeral=True)
@@ -153,8 +155,10 @@ class EnterServerView(discord.ui.View):
 
     @discord.ui.button(label=t("admin.enter_server_button"), style=discord.ButtonStyle.success, custom_id="enter_server_btn", emoji="🚀")
     async def enter_server(self, interaction: discord.Interaction, button: discord.ui.Button):
-        onboarding_role = interaction.guild.get_role(config["roles"].get("onboarding"))
-        member_role = interaction.guild.get_role(config["roles"].get("member"))
+        onboarding_role = interaction.guild.get_role(
+            guild_setting_sync(interaction.guild.id, "onboarding_role") or 0)
+        member_role = interaction.guild.get_role(
+            guild_setting_sync(interaction.guild.id, "member_role") or 0)
 
         if not onboarding_role or not member_role:
             return await interaction.response.send_message(t("admin.role_not_found"), ephemeral=True)
@@ -180,7 +184,7 @@ class Admin(commands.Cog):
     @discord.app_commands.default_permissions(administrator=True)
     @commands.has_permissions(administrator=True)
     async def sync_autoroles(self, ctx):
-        autorole_ids = config["roles"].get("autoroles", [])
+        autorole_ids = guild_setting_sync(ctx.guild.id, "autoroles")
         if not autorole_ids:
             return await ctx.send(t("admin.no_autoroles_config"), ephemeral=True)
 
@@ -299,10 +303,11 @@ class Admin(commands.Cog):
     @discord.app_commands.default_permissions(moderate_members=True)
     @is_staff()
     async def maintenance(self, ctx, status: bool):
-        data = dict(config)
-        data["bot_settings"] = dict(config.get("bot_settings", {}))
-        data["bot_settings"]["maintenance"] = status
-        await asyncio.to_thread(save_config, data)
+        # The break-glass path for when the dashboard is the broken thing, and
+        # it writes the same row the dashboard writes — through the one write
+        # path, so the value is validated, the revision bumps and the audit row
+        # commits with it. It used to rewrite config.json instead.
+        await set_guild_setting(ctx.guild.id, ctx.author.id, "maintenance", status)
 
         state = t("admin.maintenance_enabled") if status else t("admin.maintenance_disabled")
         await ctx.send(t("admin.maintenance_status", state=state))
@@ -314,7 +319,7 @@ class Admin(commands.Cog):
         bonus_amount = 2000
         await update_user_data(ctx.author, balance_change=bonus_amount)
     
-        target_id = config["channels"]["booster"][0] if isinstance(config["channels"]["booster"], list) else config["channels"]["booster"]
+        target_id = guild_setting_sync(ctx.guild.id, "booster_channel")
         channel = self.bot.get_channel(target_id)
     
         if channel:

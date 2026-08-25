@@ -1,6 +1,49 @@
 # Changelog
 
-## 2.2.0-beta.1
+## 2.2.0-beta.2
+
+- Stopped writing every log line twice. `waitress.serve` calls
+  `logging.basicConfig()`, which adds a root handler when nothing else has one,
+  so every record that propagated was emitted again in Python's default format;
+  and `bot.run()` was configuring the `discord` logger the bot had already set
+  up. A 500 MB journal cap was being spent at twice the rate, and any count of
+  errors or reconnects in it read double.
+
+- No setting is edited as hand-written JSON any more. The level ladder, the LFG
+  map and the faction map were the last three, and they looked like editing a
+  config file that happened to live in a form. Each has a row editor now — a
+  level and the role it grants, a channel and the role to ping, a faction name
+  with its leader role and the roles it manages — built from one engine driven by
+  a declared spec rather than four near-copies, and each shape is validated
+  server-side so a malformed map is refused instead of failing later inside a
+  button callback. The level ladder still accepts a role *name* as well as an id,
+  because it always has.
+
+- Retired `config.json` as a source the bot writes. Every cog reads its settings
+  through the in-memory cache now, so a dashboard save is visible without
+  `?reloadconfig` and a setting can be genuinely per-guild. The mirror is gone
+  with it: `_apply_legacy_config_values`, `reconcile_legacy_config_mirror` and
+  the lock that made their read-modify-write safe are deleted, and `/maintenance`
+  writes the same row the dashboard writes instead of rewriting the file. The
+  file survives as the fallback for a setting an installation has never saved,
+  which is what makes the one-time import something an operator does when they
+  choose rather than a prerequisite for upgrading.
+- Fixed three things the conversion turned up. A role-menu button had its role id
+  baked in at construction on a view shared by every message, so it could only
+  ever be right for one guild; it resolves the role per click now. Both social
+  polling loops read one notification channel for the whole installation and now
+  iterate guilds. And the inactivity scanner read its log channel outside the
+  guild loop, so one guild's channel received every guild's report.
+- Fixed the inactivity ignore list, which would have stopped ignoring anyone the
+  moment it was saved from the dashboard. It holds Discord ids, is a string list
+  because a snowflake cannot cross to a browser as a number, and was compared
+  against `member.id` directly — true only while the value came from
+  `config.json`, where it is stored as integers. It is compared as ids now, and
+  the one-time import converts the legacy shape and says that it did.
+- Made YouTube notifications reachable. `socials.youtube_channels` was read by
+  the polling loop and existed in neither the registry nor the example config, so
+  it always resolved empty — the feature could not be switched on from anywhere.
+  It is a typed setting now.
 
 - Gave installation-wide settings a home. **Schema 11** adds
   `instance_settings`, keyed by setting alone, and `language`, `currency_emoji`,

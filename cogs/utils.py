@@ -125,7 +125,7 @@ def currency_emoji() -> str:
     which every other installation rendered as the literal text
     `<:potatocoins:1489…>` on every balance and price.
     """
-    value = config.get("bot_settings", {}).get("currency_emoji")
+    value = guild_setting_sync(None, "currency_emoji")
     return value if isinstance(value, str) and value.strip() else DEFAULT_CURRENCY_EMOJI
 
 
@@ -169,7 +169,7 @@ def t(path: str, lang: str = None, **kwargs) -> str:
     falling back to anything.
     """
     if lang is None:
-        lang = config.get("bot_settings", {}).get("language", PRIMARY_LANGUAGE)
+        lang = guild_setting_sync(None, "language")
 
     template = None
     for candidate in dict.fromkeys((lang, "en", PRIMARY_LANGUAGE)):
@@ -201,7 +201,7 @@ def t(path: str, lang: str = None, **kwargs) -> str:
 
 def get_locale_catalog(lang: str = None) -> dict:
     """Return an isolated locale catalog for clients such as the dashboard."""
-    selected_language = lang or config.get("bot_settings", {}).get("language", "hu")
+    selected_language = lang or guild_setting_sync(None, "language")
     return copy.deepcopy(locales.get(selected_language, {}))
 
 
@@ -228,7 +228,7 @@ def get_dashboard_locale_catalog(lang: str = None) -> dict:
     is the only complete catalog. Falling back keeps a partially translated
     interface readable instead of showing raw ``[dashboard.key]`` placeholders.
     """
-    selected_language = lang or config.get("bot_settings", {}).get("language", "hu")
+    selected_language = lang or guild_setting_sync(None, "language")
     catalog = copy.deepcopy(locales.get(PRIMARY_LANGUAGE, {}))
     if selected_language == PRIMARY_LANGUAGE:
         return catalog
@@ -304,6 +304,30 @@ def guild_settings_sync(guild_id: int, keys) -> dict:
     return settings_cache.settings(guild_id, keys)
 
 
+async def set_guild_setting(guild_id: int, actor_id: int, key: str, value):
+    """Write one typed setting from the bot side, through the one write path.
+
+    `database.set_guild_settings` is the only writer: it validates the value
+    against the registry, routes it by scope, bumps the revision and commits the
+    audit row on the same connection. A Discord command that changes a setting —
+    `/maintenance` is the one that does — goes through here rather than through
+    raw SQL or, as it used to, by rewriting `config.json`.
+
+    The revision is read immediately before the write, so a concurrent dashboard
+    save still conflicts rather than being silently overwritten.
+    """
+    import settings_cache
+
+    stored = await database.run_read(database.get_guild_settings, guild_id)
+    revision = (stored.get(key) or {}).get("revision", 0)
+    result = await database.run_write(
+        database.set_guild_settings, guild_id, actor_id,
+        [{"key": key, "value": value, "revision": revision}],
+    )
+    settings_cache.apply_changes(guild_id, result)
+    return result[key]["value"]
+
+
 async def guild_setting(guild_id: int, key: str):
     """One typed guild setting.
 
@@ -349,7 +373,7 @@ async def update_top_ranker_role(guild):
         await new_leader.add_roles(role)
         
         # Resolve the announcement channel at use time so hot reload takes effect.
-        levels_channels = config.get("channels", {}).get("levels", [])
+        levels_channels = guild_setting_sync(guild.id, "levels_channels")
         if levels_channels:
             channel = guild.get_channel(levels_channels[0])
             if channel:
@@ -521,7 +545,7 @@ def is_staff():
     async def predicate(ctx):
         if ctx.author.guild_permissions.administrator:
             return True
-        staff_role_ids = config.get("roles", {}).get("admin", [])
+        staff_role_ids = guild_setting_sync(ctx.guild.id, "admin_roles")
         if any(role.id in staff_role_ids for role in ctx.author.roles):
             return True
         await ctx.send(t("utils.err_no_perms"), ephemeral=True)
@@ -586,7 +610,7 @@ async def role_autocomplete(interaction: discord.Interaction, current: str) -> l
         return []
     user = interaction.user
     allowed_roles = []
-    factions_config = config.get("factions", {})
+    factions_config = guild_setting_sync(interaction.guild_id, "factions")
 
     if user.guild_permissions.administrator:
         for data in factions_config.values():
@@ -611,6 +635,17 @@ async def role_autocomplete(interaction: discord.Interaction, current: str) -> l
     
     return choices[:25]
 
+def _faction_entries(guild_id):
+    """This guild's faction definitions, as a list of whatever is stored.
+
+    `config["factions"]` was operator-authored JSON and still is — it is a typed
+    JSON setting now, and a malformed entry has to be skipped rather than raise,
+    because both callers run inside a button callback.
+    """
+    stored = guild_setting_sync(guild_id, "factions") if guild_id else {}
+    return list(stored.values()) if isinstance(stored, dict) else []
+
+
 def member_faction_role_ids(member) -> set[int]:
     """Every role id belonging to the factions this member is part of.
 
@@ -622,8 +657,9 @@ def member_faction_role_ids(member) -> set[int]:
     access from this must refuse rather than fall back to allowing everyone.
     """
     held = {role.id for role in getattr(member, "roles", ())}
+    guild = getattr(member, "guild", None)
     allowed: set[int] = set()
-    for data in config.get("factions", {}).values():
+    for data in _faction_entries(getattr(guild, "id", None)):
         if not isinstance(data, dict):
             continue
         leader_id = data.get("leader_role_id")
@@ -636,14 +672,14 @@ def member_faction_role_ids(member) -> set[int]:
     return allowed
 
 
-def all_faction_role_ids() -> set[int]:
+def all_faction_role_ids(guild_id: int) -> set[int]:
     """Every role id any configured faction claims.
 
     Used to reverse a faction lock without persisting which roles it granted:
     the channel's own overwrites say what to clear.
     """
     every: set[int] = set()
-    for data in config.get("factions", {}).values():
+    for data in _faction_entries(guild_id):
         if not isinstance(data, dict):
             continue
         leader_id = data.get("leader_role_id")
@@ -655,7 +691,7 @@ def all_faction_role_ids() -> set[int]:
 
 
 def is_premium(member):
-    premium_ids = config["roles"].get("premium", [])
+    premium_ids = guild_setting_sync(member.guild.id, "premium_roles")
     for role in member.roles:
         if role.id in premium_ids:
             return True
@@ -672,7 +708,7 @@ def can_self_assign_role(guild, role):
         "administrator", "manage_guild", "manage_roles", "manage_channels",
         "kick_members", "ban_members", "moderate_members", "manage_webhooks",
     )
-    staff_role_ids = set(config.get("roles", {}).get("admin", []))
+    staff_role_ids = set(guild_setting_sync(guild.id, "admin_roles"))
     return not (
         role.is_default()
         or role.managed

@@ -13,7 +13,7 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from discord.ext import commands, tasks
-from cogs.utils import t, config
+from cogs.utils import guild_setting_sync, t
 from feature_access import is_enabled
 
 social_logger = logging.getLogger("PotatoBot.Socials")
@@ -25,14 +25,10 @@ class Socials(commands.Cog):
         
         self.twitch_client_id = os.getenv("TWITCH_CLIENT_ID")
         self.twitch_client_secret = os.getenv("TWITCH_CLIENT_SECRET")
-        configured_streamers = config.get("socials", {}).get("twitch_streamers", [])
-        if configured_streamers and not (
-            self.twitch_client_id and self.twitch_client_secret
-        ):
-            social_logger.error(
-                "Twitch notifications are disabled: TWITCH_CLIENT_ID and "
-                "TWITCH_CLIENT_SECRET must both be configured."
-            )
+        # The "configured but credentialless" warning cannot live here any more:
+        # the streamer list is per guild and a cog is constructed before any
+        # guild is known. It is reported from the poll instead, once per guild.
+        self._warned_missing_credentials = set()
         
         # In-memory notification state prevents duplicate announcements between polls.
         self.live_twitch = set()
@@ -102,10 +98,30 @@ class Socials(commands.Cog):
     # Twitch live-status polling.
     @tasks.loop(minutes=5)
     async def twitch_check_loop(self):
-        social_cfg = config.get("socials", {})
-        channel = self.bot.get_channel(social_cfg.get("notification_channel"))
-        twitch_streamers = social_cfg.get("twitch_streamers", [])
-        if not channel or not is_enabled(channel.guild.id, "social_twitch") or not self.twitch_client_id or not self.twitch_client_secret or not twitch_streamers:
+        for guild in self.bot.guilds:
+            await self._twitch_check_guild(guild)
+
+    async def _twitch_check_guild(self, guild):
+        """One guild's poll. The destination and the streamer list are per-guild
+        settings, so the loop cannot read either of them once and share it."""
+        if not is_enabled(guild.id, "social_twitch"):
+            return
+        channel_id = guild_setting_sync(guild.id, "social_notification_channel")
+        channel = guild.get_channel(channel_id) if channel_id else None
+        twitch_streamers = guild_setting_sync(guild.id, "twitch_streamers")
+        if not channel or not twitch_streamers:
+            return
+        if not (self.twitch_client_id and self.twitch_client_secret):
+            # Said once per guild rather than every five minutes: a guild that
+            # has configured streamers and an installation with no credentials
+            # is a misconfiguration worth reporting, not a recurring alarm.
+            if guild.id not in self._warned_missing_credentials:
+                self._warned_missing_credentials.add(guild.id)
+                social_logger.error(
+                    "Twitch notifications are disabled for guild %s: "
+                    "TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET must both be "
+                    "configured.", guild.id,
+                )
             return
 
         token = await self.get_twitch_token()
@@ -154,10 +170,17 @@ class Socials(commands.Cog):
     # YouTube RSS polling.
     @tasks.loop(minutes=5)
     async def youtube_rss_loop(self):
-        social_cfg = config.get("socials", {})
-        channel = self.bot.get_channel(social_cfg.get("notification_channel"))
-        yt_channels = social_cfg.get("youtube_channels", [])
-        if not channel or not is_enabled(channel.guild.id, "social_youtube") or not yt_channels:
+        for guild in self.bot.guilds:
+            await self._youtube_check_guild(guild)
+
+    async def _youtube_check_guild(self, guild):
+        """One guild's poll, for the same reason as the Twitch one."""
+        if not is_enabled(guild.id, "social_youtube"):
+            return
+        channel_id = guild_setting_sync(guild.id, "social_notification_channel")
+        channel = guild.get_channel(channel_id) if channel_id else None
+        yt_channels = guild_setting_sync(guild.id, "youtube_channels")
+        if not channel or not yt_channels:
             return
 
         for yt_id in yt_channels:

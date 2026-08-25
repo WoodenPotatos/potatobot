@@ -13,7 +13,7 @@ if ROOT_DIR not in sys.path:
 
 from discord.ext import commands
 from datetime import datetime
-from cogs.utils import BoundedCooldownMap, t, config
+from cogs.utils import BoundedCooldownMap, t, guild_setting_sync
 import database
 from feature_access import require_interaction_feature
 
@@ -26,7 +26,7 @@ ticket_control_times = BoundedCooldownMap()
 
 
 def is_ticket_staff(member):
-    staff_role_ids = config.get("roles", {}).get("admin", [])
+    staff_role_ids = guild_setting_sync(member.guild.id, "admin_roles")
     return member.guild_permissions.administrator or any(
         role.id in staff_role_ids for role in member.roles
     )
@@ -108,12 +108,12 @@ class TicketLauncher(discord.ui.View):
             interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True),
         }
 
-        for r_id in config.get("roles", {}).get("admin", []):
+        for r_id in guild_setting_sync(interaction.guild.id, "admin_roles"):
             role = interaction.guild.get_role(r_id)
             if role:
                 overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
 
-        category_id = config["channels"].get("ticket_category")
+        category_id = guild_setting_sync(interaction.guild.id, "ticket_category")
         category = interaction.guild.get_channel(category_id)
 
         channel = None
@@ -197,7 +197,8 @@ class TicketCloseModal(discord.ui.Modal):
             if len(parts[-1]) + len(marker) <= TRANSCRIPT_PART_BYTES:
                 parts[-1].extend(marker)
 
-        log_channel = interaction.guild.get_channel(config["channels"]["ticket_logs"])
+        log_channel = interaction.guild.get_channel(
+            guild_setting_sync(interaction.guild.id, "ticket_logs"))
         if log_channel:
             base_name = (
                 f"log_{interaction.channel.name}_"

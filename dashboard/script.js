@@ -1350,27 +1350,85 @@ function pickerMarker(entry) {
     return dot;
 }
 
-/** A row editor for a role menu: {label: {id, emoji}}.
+/** How each shaped JSON setting becomes rows, declared rather than coded four
+ *  times. `key` is the map key; `columns` are the fields of one entry; `unpack`
+ *  turns a stored entry into column values and `pack` turns them back.
  *
- *  The same four decisions the resource picker documents apply here, and the
- *  first is the load-bearing one: **a hidden textarea stays the value carrier**.
- *  `readSettingInput`, `collectSettingChanges`, the dirty-state check and a
- *  native form reset all act on a real form control, so this editor adds a way
- *  to *edit* the value without becoming a second way to *save* it.
+ *  The shapes and their validators live in `settings_registry`, so a column
+ *  here that the API would reject is a bug this table can be checked against.
+ */
+const JSON_ROW_SHAPES = {
+    role_menu: {
+        key: {kind: 'text', label: 'dashboard.role_menu_label'},
+        columns: [
+            {name: 'id', kind: 'role', label: 'dashboard.role_menu_role'},
+            {name: 'emoji', kind: 'text', label: 'dashboard.role_menu_emoji',
+             narrow: true},
+        ],
+        unpack: (entry) => (entry && typeof entry === 'object')
+            ? {id: entry.id, emoji: entry.emoji || ''}
+            : {id: entry, emoji: ''},
+        pack: (columns) => ({id: columns.id || '0', emoji: columns.emoji || ''}),
+    },
+    level_roles: {
+        // The key is the milestone. `min` is 2 because level 2 is the lowest a
+        // member can reach, and the API refuses anything below it.
+        key: {kind: 'number', label: 'dashboard.level_roles_level', min: 2,
+              max: 1000},
+        columns: [{name: 'role', kind: 'role', label: 'dashboard.level_roles_role'}],
+        unpack: (entry) => ({role: entry}),
+        pack: (columns) => columns.role || '0',
+    },
+    lfg_channels: {
+        // A team-finding post goes in a text channel, so the picker is narrowed
+        // the way every other channel selector is. Presentational only, as
+        // `channel_types` always is: deciding a channel's kind needs live
+        // Discord state and a save must not start failing while Discord is
+        // unreachable.
+        key: {kind: 'channel', label: 'dashboard.lfg_channel',
+              channelTypes: ['text', 'news']},
+        columns: [{name: 'role', kind: 'role', label: 'dashboard.lfg_role'}],
+        unpack: (entry) => ({role: entry}),
+        pack: (columns) => columns.role || '0',
+    },
+    factions: {
+        key: {kind: 'text', label: 'dashboard.faction_key'},
+        columns: [
+            {name: 'leader_role_id', kind: 'role',
+             label: 'dashboard.faction_leader'},
+            {name: 'manageable_ids', kind: 'role_list',
+             label: 'dashboard.faction_managed'},
+        ],
+        unpack: (entry) => (entry && typeof entry === 'object') ? entry : {},
+        pack: (columns) => ({
+            leader_role_id: columns.leader_role_id || '0',
+            manageable_ids: columns.manageable_ids || [],
+        }),
+    },
+};
+
+/** A row editor for a shaped JSON setting.
  *
- *  Role ids stay strings throughout. A Discord id is 64-bit and a JavaScript
- *  number holds 53 bits, so calling Number() on one here would round it and the
- *  save would write a role that does not exist.
+ *  The load-bearing decision, the same one the resource picker documents: **a
+ *  hidden textarea stays the value carrier**. `readSettingInput`,
+ *  `collectSettingChanges`, the dirty-state check and a native form reset all
+ *  act on a real form control, so this adds a way to *edit* the value without
+ *  becoming a second way to *save* it.
+ *
+ *  Ids stay strings throughout. A Discord id is 64-bit and a JavaScript number
+ *  holds 53 bits, so calling Number() on one here would round it and the save
+ *  would write a role that does not exist.
  *
  *  Entry order is preserved, because `collectSettingChanges` compares
  *  JSON.stringify against the loaded value and a reordered object would read as
  *  a change nobody made.
  */
-function roleMenuEditor(definition, value) {
+function jsonRowEditor(definition, value) {
+    const shape = JSON_ROW_SHAPES[definition.json_shape];
     const entries = (value && typeof value === 'object' && !Array.isArray(value))
         ? value : {};
 
-    const wrapper = element('div', 'role-menu-editor');
+    const wrapper = element('div', 'json-row-editor');
     const carrier = document.createElement('textarea');
     carrier.className = 'menu-carrier';
     carrier.hidden = true;
@@ -1379,53 +1437,85 @@ function roleMenuEditor(definition, value) {
     const rows = element('div', 'menu-rows');
     wrapper.appendChild(rows);
 
+    /** One field, by kind. A picker field returns the ids it holds. */
+    const field = (spec, current) => {
+        if (spec.kind === 'role' || spec.kind === 'channel'
+                || spec.kind === 'role_list') {
+            const valueType = spec.kind === 'role_list' ? 'role_list' : spec.kind;
+            // A synthetic definition, so every picker in the page is the same
+            // one rather than a second implementation. The key is suffixed
+            // because `applyPermissionNotes` matches findings on it and a
+            // per-row note would have nowhere sensible to go.
+            const picker = resourcePicker(
+                {...definition, key: `${definition.key}.${spec.name}`,
+                 value_type: valueType,
+                 channel_types: spec.channelTypes || definition.channel_types},
+                current,
+            );
+            picker.dataset.column = spec.name;
+            return picker;
+        }
+        const input = document.createElement('input');
+        input.type = spec.kind === 'number' ? 'number' : 'text';
+        if (spec.min !== undefined) input.min = spec.min;
+        if (spec.max !== undefined) input.max = spec.max;
+        input.className = spec.narrow ? 'row-field narrow' : 'row-field';
+        input.dataset.column = spec.name;
+        input.placeholder = tr(spec.label);
+        input.value = current ?? '';
+        return input;
+    };
+
+    const readField = (node, spec) => {
+        if (spec.kind === 'role' || spec.kind === 'channel') {
+            const carrierNode = node.querySelector('.picker-carrier');
+            return [...carrierNode.selectedOptions].map((o) => o.value)[0] || '';
+        }
+        if (spec.kind === 'role_list') {
+            const carrierNode = node.querySelector('.picker-carrier');
+            return [...carrierNode.selectedOptions].map((o) => o.value);
+        }
+        return node.value.trim();
+    };
+
     const serialise = () => {
         const collected = {};
         rows.querySelectorAll('.menu-row').forEach((row) => {
-            const label = row.querySelector('.menu-label').value.trim();
-            if (!label) return;
-            const picker = row.querySelector('.picker-carrier');
-            const chosen = [...picker.selectedOptions].map((option) => option.value);
-            collected[label] = {
-                id: chosen[0] || '0',
-                emoji: row.querySelector('.menu-emoji').value.trim(),
-            };
+            const keyNode = row.querySelector('[data-column="__key"]');
+            const key = readField(keyNode, shape.key);
+            if (!key) return;
+            const columns = {};
+            shape.columns.forEach((spec) => {
+                columns[spec.name] = readField(
+                    row.querySelector(`[data-column="${spec.name}"]`), spec);
+            });
+            collected[key] = shape.pack(columns);
         });
         carrier.value = JSON.stringify(collected);
-        // Dispatched from the carrier so the dirty-state listener, which is
-        // bound to the real control, sees it.
-        carrier.dispatchEvent(new Event('change', { bubbles: true }));
+        // Dispatched from the carrier, because the dirty-state listener is
+        // bound to the real control.
+        carrier.dispatchEvent(new Event('change', {bubbles: true}));
     };
 
-    const addRow = (label, entry) => {
+    const addRow = (key, entry) => {
         const row = element('div', 'menu-row');
+        row.style.setProperty('--row-columns', String(shape.columns.length + 1));
 
-        const labelInput = document.createElement('input');
-        labelInput.type = 'text';
-        labelInput.className = 'menu-label';
-        labelInput.value = label;
-        labelInput.placeholder = tr('dashboard.role_menu_label');
-        labelInput.addEventListener('input', serialise);
-        row.appendChild(labelInput);
+        const keyNode = field({...shape.key, name: '__key'}, key);
+        keyNode.dataset.column = '__key';
+        row.appendChild(keyNode);
 
-        // A synthetic single-role definition, so the picker is the same one every
-        // other role field uses rather than a second implementation. The key is
-        // suffixed because `applyPermissionNotes` matches findings on it and a
-        // per-row note would have nowhere sensible to go.
-        const picker = resourcePicker(
-            { ...definition, key: `${definition.key}.entry`, value_type: 'role' },
-            entry && entry.id && String(entry.id) !== '0' ? String(entry.id) : null,
-        );
-        picker.querySelector('.picker-carrier').addEventListener('change', serialise);
-        row.appendChild(picker);
-
-        const emojiInput = document.createElement('input');
-        emojiInput.type = 'text';
-        emojiInput.className = 'menu-emoji';
-        emojiInput.value = (entry && entry.emoji) || '';
-        emojiInput.placeholder = tr('dashboard.role_menu_emoji');
-        emojiInput.addEventListener('input', serialise);
-        row.appendChild(emojiInput);
+        const columns = shape.unpack(entry);
+        shape.columns.forEach((spec) => {
+            const current = columns[spec.name];
+            row.appendChild(field(
+                spec,
+                spec.kind === 'role_list'
+                    ? (current || []).map(String)
+                    : (current !== undefined && current !== null
+                        && String(current) !== '0' ? String(current) : null),
+            ));
+        });
 
         const remove = element('button', 'menu-remove icon-button');
         remove.type = 'button';
@@ -1434,11 +1524,16 @@ function roleMenuEditor(definition, value) {
         remove.addEventListener('click', () => { row.remove(); serialise(); });
         row.appendChild(remove);
 
+        row.querySelectorAll('input').forEach(
+            (input) => input.addEventListener('input', serialise));
+        row.querySelectorAll('.picker-carrier').forEach(
+            (node) => node.addEventListener('change', serialise));
+
         rows.appendChild(row);
         return row;
     };
 
-    Object.entries(entries).forEach(([label, entry]) => addRow(label, entry));
+    Object.entries(entries).forEach(([key, entry]) => addRow(key, entry));
 
     const add = element('button', 'menu-add btn-ghost');
     add.type = 'button';
@@ -1446,7 +1541,8 @@ function roleMenuEditor(definition, value) {
     add.appendChild(document.createTextNode(tr('dashboard.role_menu_add')));
     add.addEventListener('click', () => {
         const row = addRow('', null);
-        row.querySelector('.menu-label').focus();
+        const first = row.querySelector('input, button');
+        if (first) first.focus();
     });
     wrapper.appendChild(add);
 
@@ -1674,8 +1770,8 @@ function settingInput(definition, storedValue) {
     // A JSON setting whose shape the registry declares gets a typed editor
     // instead of a text box full of braces. The shape is declared server-side so
     // the API validates the same structure this renders.
-    if (definition.json_shape === 'role_menu') {
-        return roleMenuEditor(definition, value);
+    if (JSON_ROW_SHAPES[definition.json_shape]) {
+        return jsonRowEditor(definition, value);
     }
 
     if (['string_list', 'json'].includes(definition.value_type)) {
@@ -1712,7 +1808,7 @@ function readSettingInput(definition, field) {
     let input = field;
     if (field.classList?.contains('resource-picker')) {
         input = field.querySelector('.picker-carrier');
-    } else if (field.classList?.contains('role-menu-editor')) {
+    } else if (field.classList?.contains('json-row-editor')) {
         input = field.querySelector('.menu-carrier');
     }
     if (definition.value_type === 'boolean') return input.checked;

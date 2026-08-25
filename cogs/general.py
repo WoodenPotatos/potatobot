@@ -10,7 +10,7 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from discord.ext import commands
-from cogs.utils import BoundedCooldownMap, t, config
+from cogs.utils import BoundedCooldownMap, t, guild_setting_sync
 from version import REPOSITORY_URL, release_channel, version_display
 from feature_access import require_interaction_feature
 
@@ -148,19 +148,23 @@ def get_help_data():
     }
 
 class HelpSelect(discord.ui.Select):
-    def __init__(self, user_roles, is_admin):
+    def __init__(self, user_roles, is_admin, guild_id=None):
         options = []
         help_data = get_help_data()
         
         for key, data in help_data.items():
             if data.get("hidden", False):
-                if key == "staff" and not (is_admin or any(r.id in config["roles"]["admin"] for r in user_roles)):
+                staff_roles = guild_setting_sync(guild_id, "admin_roles") if guild_id else []
+                if key == "staff" and not (is_admin or any(r.id in staff_roles for r in user_roles)):
                     continue
                 if key == "admin" and not is_admin:
                     continue
                 
                 # Read faction leadership live so permission changes apply after reload.
-                leader_roles = [f_data.get("leader_role_id") for f_data in config.get("factions", {}).values() if f_data.get("leader_role_id")]
+                factions = (guild_setting_sync(guild_id, "factions") or {}) if guild_id else {}
+                leader_roles = [f_data.get("leader_role_id")
+                                for f_data in factions.values()
+                                if isinstance(f_data, dict) and f_data.get("leader_role_id")]
                 if key == "leaders" and not (is_admin or any(r.id in leader_roles for r in user_roles)):
                     continue
 
@@ -191,9 +195,9 @@ class HelpSelect(discord.ui.Select):
         await interaction.response.edit_message(embed=embed)
 
 class HelpView(discord.ui.View):
-    def __init__(self, user_roles, is_admin):
+    def __init__(self, user_roles, is_admin, guild_id=None):
         super().__init__()
-        self.add_item(HelpSelect(user_roles, is_admin))
+        self.add_item(HelpSelect(user_roles, is_admin, guild_id))
 
 class LFGView(discord.ui.View):
     def __init__(self, host: discord.Member, game_info, needed: int):
@@ -299,7 +303,7 @@ class General(commands.Cog):
         # used to be an operator-editable setting and it drifted from the real
         # one. The channel is derived from the version, so a build cannot claim
         # to be stable while carrying a prerelease suffix.
-        is_maintenance = config.get("bot_settings", {}).get("maintenance", False)
+        is_maintenance = guild_setting_sync(None, "maintenance")
         maint_text = t("general.version_maint_true") if is_maintenance else t("general.version_maint_false")
 
         channel = release_channel()
@@ -318,8 +322,9 @@ class General(commands.Cog):
     @commands.hybrid_command(name="search", description=t("general.cmd_search"))
     @commands.cooldown(1, 120, commands.BucketType.user)
     async def search(self, ctx, needed: int = 0, *, game: str = None):
-        lfg_channels = config.get("lfg_channels", {})
-        other_games_channel_id = str(config.get("channels", {}).get("other_games_channel", "")) 
+        lfg_channels = guild_setting_sync(ctx.guild.id, "lfg_channels") or {}
+        other_games = guild_setting_sync(ctx.guild.id, "other_games_channel")
+        other_games_channel_id = str(other_games or "")
         channel_id_str = str(ctx.channel.id)
 
         if channel_id_str in lfg_channels:
@@ -368,7 +373,7 @@ class General(commands.Cog):
         roles = ctx.author.roles
         is_admin = ctx.author.guild_permissions.administrator
     
-        view = HelpView(roles, is_admin)
+        view = HelpView(roles, is_admin, ctx.guild.id)
     
         embed = discord.Embed(
             title=t("general.help_title"),

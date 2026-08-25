@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.2.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.2.0-beta.2** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -51,7 +51,7 @@ Requires Python 3.12–3.14. The full walkthrough — Discord application, inten
 - OAuth-authenticated experimental dashboard designed to run behind private HTTPS
 - Typed, categorized guild dashboard with feature-aware navigation, safe Discord
   selectors, audit history, gacha/banner controls, content builders, and safe shop templates
-- Every value in `config.json` editable from the dashboard, with a ten-minute idle
+- Every guild setting editable from the dashboard, with a ten-minute idle
   timeout, a permission diagnostic, and the release changelog on their own pages
 - Toggleable Potato Gacha in its own cog with several named banners per guild,
   explicit one/ten-pull choices, every-tenth-pull 4-star guarantee, persistent
@@ -78,8 +78,9 @@ Runtime dependencies are pinned in `requirements.lock`; development and security
 
 Environment variables own credentials and deployment settings. Typed guild settings,
 feature revisions, gacha state, inventory, vouchers, and dashboard audit records live in
-SQLite. During the private-deployment transition, typed updates for the legacy guild are
-also applied to `config.json` so existing cogs continue to hot-reload safely.
+SQLite, which is the only thing that writes them. `config.json` is a read-only fallback
+for a setting an installation has never saved; `python scripts/import_config.py` gives
+each of those a row, after which the file is unused.
 
 Important environment variables are documented in `.env.example`. In particular:
 
@@ -200,17 +201,17 @@ Do not machine-translate the generated empty values.
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
-### 2.2.0-beta.1
+### 2.2.0-beta.2
 
+- Stopped writing every log line twice. `waitress.serve` calls `logging.basicConfig()`, which adds a root handler when nothing else has one, so every record that propagated was emitted again in Python's default format; and `bot.run()` was configuring the `discord` logger the bot had already set up. A 500 MB journal cap was being spent at twice the rate, and any count of errors or reconnects in it read double.
+- No setting is edited as hand-written JSON any more. The level ladder, the LFG map and the faction map were the last three, and they looked like editing a config file that happened to live in a form. Each has a row editor now — a level and the role it grants, a channel and the role to ping, a faction name with its leader role and the roles it manages — built from one engine driven by a declared spec rather than four near-copies, and each shape is validated server-side so a malformed map is refused instead of failing later inside a button callback. The level ladder still accepts a role *name* as well as an id, because it always has.
+- Retired `config.json` as a source the bot writes. Every cog reads its settings through the in-memory cache now, so a dashboard save is visible without `?reloadconfig` and a setting can be genuinely per-guild. The mirror is gone with it: `_apply_legacy_config_values`, `reconcile_legacy_config_mirror` and the lock that made their read-modify-write safe are deleted, and `/maintenance` writes the same row the dashboard writes instead of rewriting the file. The file survives as the fallback for a setting an installation has never saved, which is what makes the one-time import something an operator does when they choose rather than a prerequisite for upgrading.
+- Fixed three things the conversion turned up. A role-menu button had its role id baked in at construction on a view shared by every message, so it could only ever be right for one guild; it resolves the role per click now. Both social polling loops read one notification channel for the whole installation and now iterate guilds. And the inactivity scanner read its log channel outside the guild loop, so one guild's channel received every guild's report.
+- Fixed the inactivity ignore list, which would have stopped ignoring anyone the moment it was saved from the dashboard. It holds Discord ids, is a string list because a snowflake cannot cross to a browser as a number, and was compared against `member.id` directly — true only while the value came from `config.json`, where it is stored as integers. It is compared as ids now, and the one-time import converts the legacy shape and says that it did.
+- Made YouTube notifications reachable. `socials.youtube_channels` was read by the polling loop and existed in neither the registry nor the example config, so it always resolved empty — the feature could not be switched on from anywhere. It is a typed setting now.
 - Gave installation-wide settings a home. **Schema 11** adds `instance_settings`, keyed by setting alone, and `language`, `currency_emoji`, `maintenance`, `command_prefix` and `data_retention_days` now live there rather than being stored per guild while being installation-wide in fact. The scope is a structural fact now, not a convention: an instance setting cannot be written per guild at all. Pre-existing rows are moved across, and a key that was stored for several guilds keeps its most recent value and says which it discarded.
 - Added `settings_cache`, so a command path no longer reads SQLite for a setting. `is_channel` resolves a setting key through it — one change that moved all 22 channel gates — and `maintenance_blocks` reads it too. It falls back to `config.json` and then the registry default rather than to nothing, which is what keeps maintenance failing *open*: an unreadable setting must not be an outage, and that is the opposite of how the feature gate fails.
-- A dashboard save in a separate process is now visible to the bot without `?reloadconfig`. The rows are projected back into the in-process configuration on every poll, so every remaining reader is live; a key with no row keeps what the file holds, and the file itself is never written by the bot.
-- Added `scripts/import_config.py`, which gives every value in `config.json` a database row once — idempotent, audited, with a dry run, never overwriting a row somebody saved, and writing through the same validated path the dashboard uses instead of being a second way in.
-- Role menus are edited as rows now, not as hand-written JSON: a label, a real role picker and an emoji per entry, with the shape declared in the registry so the API refuses a malformed menu instead of storing one that fails later in a button callback. The role ids inside that JSON cross the wire as strings, for the same reason every other snowflake does.
-- A setting that applies to the whole installation now says so on the form. The API cannot reject a legitimate save, so an operator changing the language on one server's page and finding it changed everywhere had no way to know.
-- Added tagged warnings and per-tag consequences. **Schema 10** is purely additive: `warnings.tag`, gated on table shape so re-running repairs itself, with every existing row keeping a NULL tag and counting under the default one — it is what those warnings have always effectively been. `/warn` takes a kind from a fixed list, `/modlogs` shows it, and each kind carries its own threshold, consequence and timeout length as typed settings. Every threshold ships at 0, meaning never act, so an upgrade applies nothing nobody asked for.
-- Split alerting from acting: `moderation_warn_alerts` posts a crossed threshold to the new moderation log channel, `moderation_warn_actions` applies the consequence, and alerting works with actions off. Actions ship **disabled**, never touch the guild owner or an administrator, and never attempt somebody above the bot. The warning and the count it is compared against are written in one transaction, so two moderators warning at once cannot both miss the threshold.
-- …and 14 more, in [CHANGELOG.md](CHANGELOG.md).
+- …and 20 more, in [CHANGELOG.md](CHANGELOG.md).
 
 ### 2.0.0-rc.1 - Unreleased
 

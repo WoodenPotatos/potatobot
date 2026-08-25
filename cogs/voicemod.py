@@ -14,7 +14,7 @@ import database
 from feature_access import is_enabled, require_interaction_feature
 from discord.ext import commands
 
-from cogs.utils import (BoundedCooldownMap, t, config,
+from cogs.utils import (BoundedCooldownMap, t, guild_setting_sync,
                         member_faction_role_ids, all_faction_role_ids)
 
 voice_logger = logging.getLogger("PotatoBot.VoiceMod")
@@ -279,7 +279,7 @@ class VoiceControlView(discord.ui.View):
         await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=ev_ow)
         
         # The configured member role may otherwise override the default-role denial.
-        member_role_id = config.get("roles", {}).get("member")
+        member_role_id = guild_setting_sync(interaction.guild.id, "member_role")
         if member_role_id:
             member_role = interaction.guild.get_role(member_role_id)
             if member_role:
@@ -303,7 +303,7 @@ class VoiceControlView(discord.ui.View):
         # nothing has to be persisted about how the room was locked. This runs
         # before the member-role restore below, which therefore wins if an
         # operator has made the member role a faction role too.
-        faction_ids = all_faction_role_ids()
+        faction_ids = all_faction_role_ids(interaction.guild.id)
         for target, overwrite in list(interaction.channel.overwrites.items()):
             if isinstance(target, discord.Role) and target.id in faction_ids:
                 overwrite.update(connect=None)
@@ -315,7 +315,7 @@ class VoiceControlView(discord.ui.View):
         await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=ev_ow)
         
         # Explicitly restore the configured member role's connection permission.
-        member_role_id = config.get("roles", {}).get("member")
+        member_role_id = guild_setting_sync(interaction.guild.id, "member_role")
         if member_role_id:
             member_role = interaction.guild.get_role(member_role_id)
             if member_role:
@@ -355,7 +355,7 @@ class VoiceControlView(discord.ui.View):
         ev_ow.update(connect=False)
         await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=ev_ow)
 
-        member_role_id = config.get("roles", {}).get("member")
+        member_role_id = guild_setting_sync(interaction.guild.id, "member_role")
         if member_role_id:
             member_role = interaction.guild.get_role(member_role_id)
             if member_role:
@@ -436,7 +436,7 @@ class VoiceControlView(discord.ui.View):
     async def hide(self, interaction: discord.Interaction):
         # Hiding a room is restricted to current staff configuration.
         is_admin = interaction.user.guild_permissions.administrator
-        staff_roles = config.get("roles", {}).get("admin", [])
+        staff_roles = guild_setting_sync(interaction.guild.id, "admin_roles")
         is_staff_role = any(role.id in staff_roles for role in interaction.user.roles)
         
         if not (is_admin or is_staff_role):
@@ -448,7 +448,7 @@ class VoiceControlView(discord.ui.View):
         await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=ev_ow)
         
         # Also deny the member role, which may have an explicit visibility grant.
-        member_role_id = config.get("roles", {}).get("member")
+        member_role_id = guild_setting_sync(interaction.guild.id, "member_role")
         if member_role_id:
             member_role = interaction.guild.get_role(member_role_id)
             if member_role:
@@ -461,7 +461,7 @@ class VoiceControlView(discord.ui.View):
     async def unhide(self, interaction: discord.Interaction):
         # Unhiding a room is restricted to current staff configuration.
         is_admin = interaction.user.guild_permissions.administrator
-        staff_roles = config.get("roles", {}).get("admin", [])
+        staff_roles = guild_setting_sync(interaction.guild.id, "admin_roles")
         is_staff_role = any(role.id in staff_roles for role in interaction.user.roles)
         
         if not (is_admin or is_staff_role):
@@ -473,7 +473,7 @@ class VoiceControlView(discord.ui.View):
         await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=ev_ow)
         
         # Restore explicit visibility for the configured member role.
-        member_role_id = config.get("roles", {}).get("member")
+        member_role_id = guild_setting_sync(interaction.guild.id, "member_role")
         if member_role_id:
             member_role = interaction.guild.get_role(member_role_id)
             if member_role:
@@ -492,7 +492,8 @@ class VoiceMods(commands.Cog):
     async def on_voice_state_update(self, member, before, after):
         if not is_enabled(member.guild.id, "temporary_voice"):
             return
-        if after.channel and after.channel.id in config["channels"]["join_to_create"]:
+        if after.channel and after.channel.id in guild_setting_sync(
+                member.guild.id, "temporary_voice_lobbies"):
             guild = member.guild
             category = after.channel.category
         
@@ -543,7 +544,7 @@ class VoiceMods(commands.Cog):
                 overwrites[guild.default_role] = everyone_ow
                 
                 # Deny the member role without discarding unrelated explicit permissions.
-                member_role_id = config.get("roles", {}).get("member")
+                member_role_id = guild_setting_sync(guild.id, "member_role")
                 if member_role_id:
                     member_role = guild.get_role(member_role_id)
                     if member_role:

@@ -16,7 +16,8 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 import database
-from cogs.utils import can_self_assign_role, config, is_channel, t
+from cogs.utils import (can_self_assign_role, guild_setting_sync,
+                        is_channel, t)
 from feature_access import is_enabled, maintenance_blocks
 
 gacha_logger = logging.getLogger("PotatoBot.Gacha")
@@ -49,7 +50,7 @@ async def revoke_entitlement(guild, entitlement) -> bool:
     try:
         if kind == "premium":
             member = guild.get_member(entitlement["user_id"])
-            role_id = config.get("roles", {}).get("premium_role")
+            role_id = guild_setting_sync(guild.id, "premium_role")
             role = guild.get_role(role_id) if role_id else None
             if member and role:
                 await member.remove_roles(
@@ -224,7 +225,7 @@ class Gacha(commands.Cog):
                 t(f"gacha.redeem_{result['reason']}"), ephemeral=True
             )
         if result["kind"] == "premium":
-            role_id = config.get("roles", {}).get("premium_role")
+            role_id = guild_setting_sync(ctx.guild.id, "premium_role")
             role = ctx.guild.get_role(role_id) if role_id else None
             if not role or not can_self_assign_role(ctx.guild, role):
                 await database.run_write(
