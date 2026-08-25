@@ -211,6 +211,11 @@ class ConfigurationSecurityTests(unittest.TestCase):
 
     def test_known_history_exposures_are_recorded(self):
         """Each accepted historical finding must say whether it needs rotating."""
+        # Both files record *this* repository's accepted history exposures and
+        # are deliberately not published, so there is nothing to check in a
+        # snapshot — and nothing being wrong there either.
+        if not (ROOT / ".gitleaksignore").exists():
+            self.skipTest("not a development checkout")
         ignore = (ROOT / ".gitleaksignore").read_text(encoding="utf-8")
         security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
 
@@ -287,7 +292,8 @@ class ConfigurationSecurityTests(unittest.TestCase):
             path.name for path in ROOT.glob("*.md")
             if path.name.lower().startswith("todo")
         )
-        self.assertEqual(todo_files, ["todo.md"])
+        # The backlog is not published, so a snapshot correctly has none.
+        self.assertEqual(todo_files, ["todo.md"] if (ROOT / "todo.md").exists() else [])
 
 
 if __name__ == "__main__":

@@ -2,12 +2,20 @@
 
 ![PotatoBot avatar](botdata/pfp/potatobotpfp.png)
 
-PotatoBot is a Hungarian-first Discord community bot that combines economy and profile systems, casino and daily guessing games, music, moderation, tickets, onboarding, self-assignable roles, temporary voice rooms, activity rewards, and Twitch/YouTube notifications.
+Hi! My name is Woody.
 
-The project is under active private development. Its dashboard and multi-guild storage foundations are alpha-stage, and the repository is not ready to be made public from its existing Git history. See [Development status](#development-status) before deploying it beyond a private test environment.
+This is my self-created and self-hosted Discord bot written in Python. I originally created this project as a vibe coded bot to skip using multiple different bots on my server and to skip paying for features i want. Later it expanded into an AI assisted setup where i wrote most of the things but an AI assisted me in many things. The version you see here however is a way more expanded version which is now heavily AI coder generated.
+
+That being said i would like to share this project with you all whom are weird enough like me and want to skip using big bots and want something that is ours. The bot is still in active development and has way more bugs and problems that i currently have records of so please be aware of them and report anything that you find to help me fix them.
+
+For the moment i wont share any file that is related to the AI in question. The bot's biggest feature is that it has a central web based dashboard where basically everything is modifiable. The features itselves are all toggleable so even tho the bot has more features than a swiss army knife, everyone can customize it to their own needs. I don't and won't have anything locked behind anything. 
+
+The bot's main language is Hungarian but it has a full English localization, and it is quite easy to add other languages. However i would be really happy if you could help me translate to other languages so that i could also add them to the repo for others to use. 
+
+Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.1.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.1.0-beta.2** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -192,7 +200,7 @@ Do not machine-translate the generated empty values.
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
-### 2.1.0-beta.1
+### 2.1.0-beta.2
 
 - Moved the version to `pyproject.toml` as its only source, read at runtime. The operator-editable `release_version` and `release_date` settings are gone, along with `bot_settings.version` and `bot_settings.release_date`: two sources, one of them a form, is why the file said 1.9 while the packaging metadata said 2.0.0-rc.1.
 - Derived the release channel from the version rather than declaring it, so a build cannot claim to be stable while carrying a prerelease suffix. `/version` now shows the channel and the public repository, and no longer shows a release date.
@@ -219,7 +227,5 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
 ## Development status
 
 PotatoBot is production-bound for one private deployment, so database compatibility and safe rollout take priority over rapid breaking changes. Remaining major work includes fully guild-scoping runtime storage, separating dashboard supervision for non-private deployments, rehearsing managed deployment, packaging, and publishing only a sanitized clean-history release.
-
-The private source history contains a historical token-shaped value. Do not change this repository's visibility or mirror its Git refs. A future public version must be exported to a separate clean-history repository after secret scanning and removal of private deployment data.
 
 New sanitized releases are licensed under AGPL-3.0-only; see [LICENSE](LICENSE).

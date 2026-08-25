@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.1.0-beta.1
+## 2.1.0-beta.2
 
 - Moved the version to `pyproject.toml` as its only source, read at runtime. The
   operator-editable `release_version` and `release_date` settings are gone, along
