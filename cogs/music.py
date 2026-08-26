@@ -327,9 +327,11 @@ class MusicPanelView(discord.ui.View):
         music_queues[interaction.guild.id] = [] 
         await vc.disconnect()
     
-        for child in self.children:
-            child.disabled = True
-        await interaction.response.edit_message(view=self)
+        # Never `edit_message(view=self)` here: this class is persistent and one
+        # instance is registered with `bot.add_view`, shared by every panel it
+        # serves, so disabling its children would permanently dead-panel that
+        # shared instance. Dropping the view is what the message needs anyway.
+        await interaction.response.edit_message(view=None)
         await interaction.channel.send(t("music.stopped_by_owner"), delete_after=20)
 
     async def search_btn(self, interaction: discord.Interaction):

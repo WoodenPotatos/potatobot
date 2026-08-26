@@ -25,9 +25,21 @@ useDefault = true
 #
 # Adding a reward whose name does not fit these shapes will fail the scan until
 # the pattern below is extended. That is deliberate: the list stays explicit.
+#
+# Both quoting styles are covered because the same reward names appear in a
+# JavaScript test that transcribes the chance formula: `key: 'sticker_180d'`.
+# What constrains the allowlist is the enumerated *value* shapes, not the
+# punctuation around them, so accepting the second style lets no credential
+# through — and the alternative was renaming the field in the transcription,
+# which would have made it no longer a transcription.
+#
+# Note when verifying: `gitleaks git .` scans committed history, not the working
+# tree, so a new file passes this gate before its commit and can fail after it.
+# Re-run the scan after committing, or scan the tree with `gitleaks dir .`.
 [allowlist]
 description = "Gacha reward identifiers are item names, not credentials"
 regexTarget = "match"
 regexes = [
-    '''key":\s*"(loaded_die|lockpick|coins_\d+|emoji_\d+d|sticker_\d+d|sound_\d+d|vault_\w+|(small|med|big)_vault|premium_\d+d|streak_freeze)"''',
+    '''key":\s*"(loaded_die|lockpick|coins_\d+|emoji_\d+d|sticker_\d+d|sound_\d+d|vault_\w+|(small|med|big)_vault|premium_\d+d|streak_freeze|stacked_deck|lucky_charm|metal_detector)"''',
+    '''key:\s*'(loaded_die|lockpick|coins_\d+|emoji_\d+d|sticker_\d+d|sound_\d+d|vault_\w+|(small|med|big)_vault|premium_\d+d|streak_freeze|stacked_deck|lucky_charm|metal_detector)'''',
 ]

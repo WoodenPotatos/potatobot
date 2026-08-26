@@ -1,5 +1,157 @@
 # Changelog
 
+## 2.6.0-beta.1
+
+- **Four casino items, and the loaded die now works in roulette.** A stacked deck
+  deals your blackjack hand twice and keeps the better one, a lucky charm spins
+  the slots twice and keeps the better payout, and a metal detector marks a
+  minesweeper tile safe before you start. All four are buyable and drawable, and
+  each is spent only by a paid round that actually resolves — win or lose. Getting
+  there meant moving roulette's and slots' outcomes into their settlement
+  transactions, which makes those two games atomic whether or not you own
+  anything.
+- **`/pity`** shows your pity on a banner and the last five 5-stars you pulled,
+  with the pity each one landed at. `/profile` gains a pity line too. The data has
+  been recorded since the gacha shipped and nothing had ever read it.
+- **The item creator is rebuilt.** Four of its six kinds used to hand you an empty
+  JSON box and expect you to type a role id and a shape nothing told you about;
+  now every kind has real fields, a role picker, and no JSON anywhere. Items can
+  be edited rather than only enabled, disabled or deleted.
+- **One list of every item.** Built-in items were visible only as a price field
+  called "Loaded die price" — there was no way to see what an item does, or which
+  ones the gacha can give, without reading the bot's own code. The page now reads
+  the way `/shop` does, in your dashboard language, with your own items alongside.
+- **A custom item can have English text.** It was stored under Hungarian whatever
+  your language setting said, so an English server showed Hungarian for its own
+  items while every built-in had both. English is optional per field and falls
+  back, so you are never made to translate.
+- **Redeems is its own page**, with the queue waiting on staff and a list of
+  everything the server is currently granting and how long is left on each. It is
+  not tied to the shop feature: a redemption may have come from the gacha, and a
+  member has paid for it either way.
+- **Redeeming a voucher for an emoji, sticker or sound opens a ticket**, so you
+  and the member can agree what to make instead of a request id appearing in a
+  queue with no conversation attached. With tickets off it behaves as before.
+- Ticket creation lived in two hand-written copies that had already drifted apart;
+  there is one now, and rental tickets are finally typed as rentals.
+
+- **`/mydata` never worked.** It acknowledged an interaction the command tree
+  had already acknowledged, so it raised on every invocation and the export
+  never ran — a member asking for their own data got a command error. A test now
+  walks every command body for a second `defer`, because that failure is
+  invisible until somebody runs the command.
+- **"Message could not be loaded" above the bot's embeds.** `/gacha` declared
+  itself a private command, so the tree acknowledged it ephemerally and the
+  public result then forced the reply to be deleted and re-sent — leaving
+  Discord's "used /gacha" header pointing at a message that no longer existed,
+  on every single pull. `/gacha` is a public command now. `/modlogs` had the same
+  shape and posts to the channel instead, carrying the requesting moderator in
+  the footer. A test forbids the combination outright.
+- **Turning the shop off hid the shop editor.** It also hid the fulfillment
+  queue — including gacha-sourced requests that members had already paid for —
+  because the page was gated on the feature it configures. A feature flag decides
+  what members can do, not whether staff can configure it, so those pages stay
+  reachable and say the feature is off instead. Six pages had the same wiring.
+- **A switched-off feature stopped things expiring.** Premium roles, rented
+  emoji, stickers, sounds and timed roles were only revoked while the feature
+  that created them was enabled, so turning the gacha or the shop off left
+  members holding grants that could never run out. Expiry no longer asks.
+- The dashboard could not tell "Discord rejected this token" from "Discord did
+  not answer" — both produced the same warning and both kept the session alive
+  on its cached permissions. A rejection now ends the session; only an outage
+  serves the last known answer, and the log says which it was.
+- Logging configuration moved out of `main.py`, so a dashboard running as its own
+  service gets the project's format and rotating file instead of whatever
+  `waitress` set up for it. Its thread pool went from four to eight, since a
+  request can block for the length of a Discord call.
+
+- **Gacha banners can feature a reward.** A banner may mark one 4-star and one
+  5-star as featured, and a `featured_split` per banner — shipped at 50 — decides
+  how often a rare pull awards it. Lose that split and you draw from the standard
+  banner's pool instead, and the *next* rare of that same tier from that banner is
+  guaranteed to be the featured one. The two tiers guarantee independently, so a
+  4-star loss never spends a 5-star guarantee. The standard banner cannot feature
+  anything — it is the pool a loss draws from — and if it is disabled there is no
+  split at all: rares then come only from the banner's own table. The reward table
+  shows each row's real chance rather than its share of the tier, which is a
+  different number entirely once a split is in play, and warns when a featured
+  reward is still in the standard pool, because a loss can then award the very
+  thing you were chasing. Schema 14, purely additive.
+- **`/modlogs` is a staff-channel command now, not an ephemeral one.** Inside the
+  configured admin category the reply is public, so every moderator in the room
+  sees the lookup; anywhere else it is refused. The gate binds administrators
+  too — a channel an administrator can step around is not a boundary, and the
+  whole point is that the reply is readable. An installation with no admin
+  category configured keeps the ephemeral reply it had.
+- **A member who asked to be erased might not have been.** `revoke_entitlement`
+  treated any unrecognised entitlement as a soundboard sound and read an id that
+  a custom-shop timed role does not have, so `/deletemydata` raised before the
+  erasure ran, the daily retention sweep aborted and skipped every later
+  candidate, and an operator-requested erasure settled as an internal error. All
+  three now complete, and the path finally has tests.
+- **Four background loops could die for good.** A `tasks.loop` stops on an
+  unhandled exception; the entitlement and rental cleanups start in `__init__`
+  and so had no revival path at all, meaning one transient database error stopped
+  premium roles and rented assets expiring until a restart. All four are
+  supervised now, through one shared helper.
+- **Twitch marked a stream announced before it announced it**, so one bad channel
+  permission suppressed that go-live for as long as the stream ran — the same
+  defect the YouTube path already documented fixing.
+- **A dashboard feature toggle could switch on everything else.** After a failed
+  startup load, applying one change marked the whole guild loaded, so every other
+  feature began answering from its registry default instead of staying disabled.
+  A startup read failure also aborted the rest of `on_ready`, which left the
+  control-action outbox with nothing draining it.
+- Three admin commands swallowed every exception and logged a class name with no
+  traceback, and `/update_rules_group` reported failure for a database write that
+  had in fact landed. Narrowed, with the write separated from the Discord edit.
+- Five unused economy helpers that took a pre-computed balance and wrote it with
+  no guard are deleted, and the one live path that discarded a refused debit now
+  honours it. Three silent economy readers finally log.
+- Smaller fixes: the LFG join button acknowledges before it announces, the No. 1
+  role resolves its new holder before stripping the old one, the music panel no
+  longer disables the shared persistent view, and two dead casino branches that
+  would have become a phantom payout are closed.
+
+- **Three commands were broken and nobody knew.** One refactor removed three
+  names and left four references behind: Twitch go-live announcements (which also
+  stopped the poll loop), YouTube new-video announcements (silently), `/checkperms`
+  and `/manage`. All four raised `NameError` the moment the line ran. Fixed, and
+  a new test walks the whole runtime tree with `symtable` for names that do not
+  exist — it reports exactly those four against the previous code.
+- **Warnings can have their own channel.** `warn_announce_channel` publishes the
+  `/warn` embed where members can read it, separately from the moderation log
+  that carries the filtered word and the threshold reports. Unset, the warning
+  appears where the moderator used the command, exactly as before.
+- **`/modlogs` is private to staff.** It was staff-only to run but its reply was
+  not ephemeral, so in a public channel it printed a member's whole history,
+  every moderator's name, and the account intel the code marks staff-only. The
+  public warning embed still names no moderator — which is the split you wanted:
+  members cannot see who warned whom, moderators can.
+- **The vault glove is a ⚒️ vault drill.** A glove cannot break a vault. Its
+  description also overstated the effect — the 25% is added to the pool the steal
+  roll is then taken from, not handed over whole — and the lockpick's break
+  message used a wrench where the item is a padlock.
+- **The dashboard is ready for guild admins.** Installation-wide settings
+  (`language`, `currency_emoji`, `maintenance`, `command_prefix`,
+  `data_retention_days`) are host-only now; without that, any one guild's admin
+  could have stopped the bot everywhere. Guild reads re-check Discord
+  permissions too, so a demoted admin loses access in about thirty seconds
+  instead of up to twelve hours — and a Discord outage still leaves the dashboard
+  readable, because only writes fail closed.
+- A rental whose asset is not in this guild is no longer deleted from the
+  database while the emoji lives on, and a transient Discord error keeps the row
+  for the next pass instead of destroying the record.
+- A warning with no guild provenance counts toward no threshold rather than every
+  guild's, while staying visible in `/modlogs` and removable. Where the guild is
+  unambiguous, the upgrade attributes it.
+- Two guilds watching the same streamer or YouTube channel are both notified;
+  before, only whichever was polled first ever was. A YouTube video is marked
+  seen after the announcement lands, so a failed send is retried.
+- Shipping both `.containerignore` and `.dockerignore`, byte-identical. Only the
+  first existed, and Docker reads only the second — so a Docker build would have
+  baked `.env` into an image layer.
+
 ## 2.4.0-beta.1
 
 - **Five public betas shipped with a private heading on the front page.**

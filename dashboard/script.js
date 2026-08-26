@@ -26,6 +26,7 @@ let activeBannerKey = null;
 // The shared built-in item catalog. Identical for every guild, so it is fetched
 // once and reused by the gacha reward picker and the shop item builder.
 let itemCatalog = [];
+let itemList = [];
 let activePage = 'overview';
 let resources = {channels: [], roles: []};
 // The setup report, cached per guild: findings indexed by the setting they
@@ -144,12 +145,28 @@ class ApiError extends Error {
     }
 }
 
+// A request that never settles renders as a skeleton that never goes away, with
+// nothing on screen or in the console to say why — "it loads endlessly". A
+// dashboard request should never take this long: the slowest thing behind one is
+// a live Discord permission refresh, which the server itself gives ten seconds.
+// Past that the request has not been slow, it has been lost, and an error the
+// operator can see beats a spinner that cannot end.
+const REQUEST_TIMEOUT_MS = 20000;
+
 async function api(path, options = {}) {
     let response;
+    const controller = new AbortController();
+    const expiry = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-        response = await fetch(`${API}${path}`, options);
+        response = await fetch(`${API}${path}`, {...options, signal: controller.signal});
     } catch (error) {
-        throw new ApiError(tr('dashboard.network_error'), 0);
+        throw new ApiError(
+            tr(error.name === 'AbortError'
+                ? 'dashboard.request_timeout' : 'dashboard.network_error'),
+            0,
+        );
+    } finally {
+        clearTimeout(expiry);
     }
 
     // A reverse proxy error page is not JSON, so never assume a parsable body.
@@ -605,9 +622,6 @@ function bindShell() {
     document.getElementById('gacha-form').addEventListener('submit', saveGacha);
     document.getElementById('gacha-banner-form').addEventListener('submit', createGachaBanner);
     document.getElementById('work-response-form').addEventListener('submit', createWorkResponse);
-    const shopItemForm = document.getElementById('shop-item-form');
-    shopItemForm.addEventListener('submit', createShopItem);
-    shopItemForm.template_type.addEventListener('change', renderShopItemTemplate);
     document.getElementById('erasure-form').addEventListener('submit', eraseMember);
 
 }
@@ -821,8 +835,17 @@ function categoryHasVisibleSettings(category) {
 }
 
 function updateNavigation() {
+    // An editor page is NOT hidden by the feature it edits. It used to be, and
+    // the consequence was that turning off `shop` — which exists to gate the
+    // `/shop` command — removed staff's only way to edit items and, worse, to
+    // see and complete fulfillment requests members had already paid for,
+    // including gacha-sourced ones that have nothing to do with the shop flag.
+    // The routes behind these pages enforce no feature check at all, so the
+    // interface was hiding working functionality. The flag is shown as a muted
+    // nav item plus a notice on the page instead.
     document.querySelectorAll('.nav-item[data-feature]').forEach((button) => {
-        button.classList.toggle('hidden', featureState[button.dataset.feature]?.enabled === false);
+        button.classList.toggle(
+            'nav-item-off', featureState[button.dataset.feature]?.enabled === false);
     });
 
     document.querySelectorAll('.nav-item[data-category]').forEach((button) => {
@@ -841,8 +864,24 @@ function updateNavigation() {
     if (current && current.classList.contains('hidden')) activePage = 'overview';
 }
 
+/** Say so when the page you are on configures a switched-off feature. */
+function updateFeatureNotice(page) {
+    const host = document.getElementById('feature-notice');
+    if (!host) return;
+    const item = document.querySelector(`.nav-item[data-page="${page}"][data-feature]`);
+    const feature = item?.dataset.feature;
+    const off = Boolean(feature) && featureState[feature]?.enabled === false;
+    host.classList.toggle('hidden', !off);
+    host.replaceChildren();
+    if (!off) return;
+    host.appendChild(element('span', null, format('dashboard.feature_off_notice', {
+        feature: tr(`dashboard.features.${feature}`),
+    })));
+}
+
 async function showPage(page) {
     activePage = page;
+    updateFeatureNotice(page);
     // Not awaited: navigation must not wait on the network, and the pages that
     // do fetch will slide the deadline themselves anyway.
     keepSessionAlive();
@@ -881,6 +920,7 @@ async function showPage(page) {
     }
     if (page === 'work-responses') await loadWorkResponses();
     if (page === 'shop-builder') await loadShopItems();
+    if (page === 'redeems') await loadRedeems();
     if (MANAGED_PAGES[page]) await loadManaged(page);
     if (page === 'audit') await loadAudit();
     if (page === 'permissions') await loadPermissionReport();
@@ -1219,13 +1259,19 @@ function renderSettings(category) {
                 tr(`dashboard.apply_${definition.apply_behavior}`));
             group.appendChild(badge);
             // An installation-wide setting is edited from a guild page but is
-            // not that guild's. Saying so is the only way the interface can
-            // express it — the API cannot reject a legitimate save, and an
-            // operator changing "the language" for one server and finding it
-            // changed everywhere would be right to call that a bug.
+            // not that guild's, so the badge says so — an operator changing "the
+            // language" for one server and finding it changed everywhere would
+            // be right to call that a bug. The API refuses the save for anyone
+            // but the host now, so a guild admin is shown the control disabled
+            // rather than being allowed to try and then told no.
             if (definition.scope === 'instance') {
                 group.appendChild(element('small', 'field-scope',
                     tr('dashboard.scope_instance')));
+                if (!isHost) {
+                    const control = group.querySelector(
+                        'input, textarea, select, .picker-trigger');
+                    if (control) control.disabled = true;
+                }
             }
             grid.appendChild(group);
         });
@@ -2086,8 +2132,15 @@ async function saveSettings(event) {
 
 const GACHA_INTEGER_FIELDS = [
     'cost', 'hard_pity', 'soft_pity_start', 'soft_pity_multiplier',
-    'four_star_guarantee_interval', 'duplicate_percent',
+    'four_star_guarantee_interval', 'duplicate_percent', 'featured_split',
 ];
+/** The standard banner is the pool a lost featured chance draws *from*, so it
+ *  cannot itself feature a reward. The server refuses it; this hides the column
+ *  rather than offering a control that can only be rejected. */
+const DEFAULT_BANNER_KEY = 'standard';
+function bannerCanFeature() {
+    return Boolean(gacha) && gacha.banner_key !== DEFAULT_BANNER_KEY;
+}
 const GACHA_TIER_FIELDS = ['tier_3', 'tier_4', 'tier_5'];
 const TIER_SCALE = 1000;
 
@@ -2216,21 +2269,26 @@ function renderGacha() {
     });
 
     const rewardGroup = element('div', 'input-group wide');
+    const featuredNotice = element('div', 'field-hint');
+    featuredNotice.id = 'gacha-featured-notice';
     rewardGroup.append(
         element('span', 'field-label', tr('dashboard.gacha_rewards')),
         element('span', 'field-hint', tr('dashboard.gacha_amount_hint')),
+        featuredNotice,
         renderRewardTable(config.rewards),
     );
     grid.appendChild(rewardGroup);
 
     const multiplier = document.querySelector('#gacha-grid [name="soft_pity_multiplier"]');
     if (multiplier) multiplier.addEventListener('input', updateGachaTotal);
+    const splitInput = document.querySelector('#gacha-grid [name="featured_split"]');
+    if (splitInput) splitInput.addEventListener('input', updateRewardChances);
     updateGachaTotal();
 }
 
 const REWARD_KINDS = ['coins', 'item', 'vault', 'voucher'];
 
-const REWARD_COLUMNS = 7;
+const REWARD_COLUMNS = 8;
 
 /** Editable reward rows, replacing the raw JSON textarea.
  *
@@ -2283,8 +2341,8 @@ function renderRewardTable(rewards) {
     const node = table([
         'dashboard.column_reward_key', 'dashboard.column_reward_kind',
         'dashboard.column_reward_amount', 'dashboard.column_reward_weight',
-        'dashboard.column_reward_chance', 'dashboard.column_status',
-        'dashboard.column_actions',
+        'dashboard.column_reward_chance', 'dashboard.column_featured',
+        'dashboard.column_status', 'dashboard.column_actions',
     ]);
     const body = node.querySelector('tbody');
 
@@ -2344,6 +2402,31 @@ function rewardRow(tier, entry, isNew) {
     row.appendChild(numberCell('amount', entry.amount, 1));
     row.appendChild(numberCell('weight', entry.weight, 1));
     row.appendChild(element('td', 'cell-mono reward-chance', ''));
+
+    // A radio rather than a checkbox: a tier features at most one reward, so
+    // "guaranteed featured" names exactly one thing. Tier 3 never splits, and
+    // the standard banner never features, so both render an empty cell — the
+    // column still exists so every row has the same shape.
+    const featuredCell = element('td', 'cell-featured');
+    if (tier !== '3' && bannerCanFeature()) {
+        const mark = document.createElement('input');
+        mark.type = 'radio';
+        mark.name = `featured_${tier}`;
+        mark.dataset.field = 'featured';
+        mark.checked = entry.featured === true;
+        mark.setAttribute('aria-label', tr('dashboard.column_featured'));
+        // Radios cannot be unset by clicking, and a tier is allowed to feature
+        // nothing, so a second click on the checked one clears it.
+        mark.addEventListener('click', () => {
+            if (mark.dataset.wasChecked === 'true') mark.checked = false;
+            [...document.querySelectorAll(`input[name="featured_${tier}"]`)]
+                .forEach((other) => { other.dataset.wasChecked = String(other.checked); });
+            updateRewardChances();
+        });
+        mark.dataset.wasChecked = String(mark.checked);
+        featuredCell.appendChild(mark);
+    }
+    row.appendChild(featuredCell);
 
     const statusCell = element('td');
     const switchWrap = element('span', 'switch');
@@ -2477,15 +2560,46 @@ function numberCell(field, value, minimum) {
     return cell;
 }
 
-/** Show each row's real draw chance within its tier, enabled rows only. */
+/** The standard banner's enabled rewards for one tier, as this guild has saved
+ *  them — the pool a lost featured chance actually draws from.
+ *
+ *  Read from `gachaBanners`, not from `shippedRewards`: the operator curates the
+ *  standard banner, so the shipped table is the wrong answer the moment they do.
+ *  Returns null when there is no split — the standard banner is disabled, or is
+ *  the banner being edited. An *absent* standard banner still splits, against
+ *  the shipped table, which is what the server does.
+ */
+function standardPoolFor(tier) {
+    if (!bannerCanFeature()) return null;
+    const standard = gachaBanners.find((banner) => banner.banner_key === DEFAULT_BANNER_KEY);
+    if (standard && !standard.enabled) return null;
+    const rewards = standard?.config?.rewards || shippedRewards;
+    const pool = (rewards?.[tier] || []).filter((entry) => entry.enabled !== false);
+    return pool.length ? pool : null;
+}
+
+/** Show each row's real draw chance within its tier, enabled rows only.
+ *
+ *  With a featured reward in the tier, `weight / Σweight` is simply not the
+ *  probability any more: the featured row takes the split, and every other row
+ *  shares what is left *in proportion to the standard banner's* weights, not to
+ *  this banner's. A column labelled "chance within the tier" showing the old
+ *  number would be a lie on exactly the banners an operator most wants to check.
+ */
 function updateRewardChances() {
     const rows = [...document.querySelectorAll('#gacha-grid tbody tr[data-tier]')];
+    const split = Number(document.querySelector('#gacha-grid [name="featured_split"]')?.value ?? 50);
     const totals = {};
+    const featuredKeys = {};
     rows.forEach((row) => {
         if (!row.querySelector('[data-field="enabled"]').checked) return;
         const weight = Number(row.querySelector('[data-field="weight"]').value) || 0;
         totals[row.dataset.tier] = (totals[row.dataset.tier] || 0) + weight;
+        if (row.querySelector('[data-field="featured"]')?.checked) {
+            featuredKeys[row.dataset.tier] = row.dataset.key || readRewardKey(row);
+        }
     });
+
     rows.forEach((row) => {
         const target = row.querySelector('.reward-chance');
         const enabled = row.querySelector('[data-field="enabled"]').checked;
@@ -2495,10 +2609,67 @@ function updateRewardChances() {
             return;
         }
         row.classList.remove('reward-disabled');
+        const tier = row.dataset.tier;
         const weight = Number(row.querySelector('[data-field="weight"]').value) || 0;
-        const total = totals[row.dataset.tier] || 0;
+
+        const pool = featuredKeys[tier] ? standardPoolFor(tier) : null;
+        if (pool) {
+            // This tier splits. The featured row is the split itself; every other
+            // row is only reachable through a loss, against the standard pool.
+            if (row.querySelector('[data-field="featured"]')?.checked) {
+                target.textContent = `${split.toFixed(2)} %`;
+                target.classList.add('reward-chance-featured');
+                return;
+            }
+            target.classList.remove('reward-chance-featured');
+            const key = row.dataset.key || readRewardKey(row);
+            const poolTotal = pool.reduce((sum, entry) => sum + (entry.weight || 0), 0);
+            const match = pool.find((entry) => entry.key === key);
+            if (!match || !poolTotal) {
+                // Not in the standard pool at all, so a loss can never award it
+                // and a win never does either: this row is unreachable here.
+                target.textContent = tr('dashboard.gacha_chance_unreachable');
+                return;
+            }
+            const share = (100 - split) * (match.weight / poolTotal);
+            target.textContent = `${share.toFixed(2)} %`;
+            return;
+        }
+
+        target.classList.remove('reward-chance-featured');
+        const total = totals[tier] || 0;
         target.textContent = total ? `${((weight / total) * 100).toFixed(2)} %` : '—';
     });
+
+    updateFeaturedNotice(featuredKeys);
+}
+
+/** Warn when a featured key is still enabled in the standard pool.
+ *
+ *  Not a refusal. The design is that an operator curates the standard banner
+ *  down and runs the remainder as featured items, so overlapping is a state
+ *  they may pass through deliberately. But while it holds, a loss can award the
+ *  very item the split is for — pushing the real rate above the configured one
+ *  and arming a guarantee for something already won — and that is invisible
+ *  from the table alone.
+ */
+function updateFeaturedNotice(featuredKeys) {
+    // Its own container rather than the totals readout, which `updateGachaTotal`
+    // clears with replaceChildren on every tier-weight keystroke.
+    const host = document.getElementById('gacha-featured-notice');
+    if (!host) return;
+    const clashes = Object.entries(featuredKeys).filter(([tier, key]) => {
+        const pool = standardPoolFor(tier);
+        return pool && pool.some((entry) => entry.key === key);
+    });
+    host.replaceChildren();
+    if (!clashes.length) return;
+    host.appendChild(element(
+        'span', 'featured-notice',
+        format('dashboard.gacha_featured_in_standard', {
+            rewards: clashes.map(([, key]) => key).join(', '),
+        }),
+    ));
 }
 
 /** Rebuild the rewards object from the table.
@@ -2518,6 +2689,11 @@ function readRewardTable() {
             amount: Number(row.querySelector('[data-field="amount"]').value),
             weight: Number(row.querySelector('[data-field="weight"]').value),
             enabled: row.querySelector('[data-field="enabled"]').checked,
+            // Emitted on every row, exactly as `enabled` is, so a row's shape
+            // does not depend on which tier it happens to be in. The validator
+            // accepts `featured: false` anywhere and refuses `true` outside the
+            // rare tiers.
+            featured: Boolean(row.querySelector('[data-field="featured"]')?.checked),
         });
     });
     return rewards;
@@ -2570,7 +2746,15 @@ async function saveGacha(event) {
     const form = new FormData(event.target);
     const config = structuredClone(gacha.config);
 
-    GACHA_INTEGER_FIELDS.forEach((key) => { config[key] = Number(form.get(key)); });
+    // Fall back to what was loaded rather than to Number('') === 0. A scalar a
+    // stored banner predates renders as an empty input, and reading that as zero
+    // is how `featured_split` would silently become "always lose the split".
+    GACHA_INTEGER_FIELDS.forEach((key) => {
+        const raw = form.get(key);
+        config[key] = raw === null || raw === ''
+            ? gacha.config[key] ?? config[key]
+            : Number(raw);
+    });
     config.tiers = readGachaTiers();
     config.rewards = readRewardTable();
 
@@ -2815,31 +2999,46 @@ async function createWorkResponse(event) {
 
 /* ------------------------------------------------------------- shop items */
 
+/** Which item the creator is open on: undefined for the list, null for a new
+ *  one, an item for an edit. Mirrors how the managed-message pages track it. */
+let itemEditorTarget;
+
 async function loadShopItems() {
     const itemsHost = document.getElementById('shop-items');
-    const requestsHost = document.getElementById('fulfillment-list');
+    const listCard = document.getElementById('shop-item-list-card');
+    const editor = document.getElementById('shop-item-editor');
     renderSkeleton(itemsHost, 3);
-    renderSkeleton(requestsHost, 2);
-    renderShopItemTemplate();
+    listCard.classList.remove('hidden');
+    editor.classList.add('hidden');
+    editor.replaceChildren();
 
-    let items;
+    let payload;
     try {
-        const [itemResult, fulfillmentResult] = await Promise.all([
-            api(`/guilds/${guildId}/shop-items`),
-            api(`/guilds/${guildId}/fulfillment`),
-        ]);
-        items = itemResult.data;
-        fulfillmentRequests = fulfillmentResult.data;
+        payload = await api(
+            `/guilds/${guildId}/items?lang=${encodeURIComponent(activeLanguage)}`);
     } catch (error) {
         handleApiError(error);
         itemsHost.replaceChildren(emptyState('dashboard.load_failed', 'ic-alert'));
-        requestsHost.replaceChildren();
         return;
     }
+    itemList = payload.data;
 
-    setSubtitle('dashboard.subtitle_shop_items', {count: items.length});
-    renderShopItemTable(itemsHost, items);
-    renderFulfillmentTable(requestsHost);
+    const custom = payload.custom_count;
+    setSubtitle('dashboard.subtitle_shop_items',
+                {count: itemList.length, custom, limit: payload.limit});
+    renderItemTable(itemsHost, itemList);
+
+    // One owner of the page-action slot: every render clears it and adds exactly
+    // one action, or they accumulate one per save.
+    const host = document.getElementById('page-actions');
+    host.replaceChildren();
+    const create = element('button', 'btn btn-primary', tr('dashboard.item_new'));
+    create.type = 'button';
+    create.disabled = custom >= payload.limit;
+    if (create.disabled) create.title = format('dashboard.item_limit_reached',
+                                               {limit: payload.limit});
+    create.addEventListener('click', () => renderItemEditor(null));
+    host.appendChild(create);
 }
 
 /** A 409 means someone else changed the row; show them the current state rather
@@ -2853,82 +3052,228 @@ async function handleWriteConflict(error, reload) {
     await reload();
 }
 
-function renderShopItemTable(host, items) {
+/** Every item this guild can sell, built-in and custom, the way `/shop` reads.
+ *
+ * Built-ins were visible only as a price field on the settings page, named
+ * "Loaded die price" and nothing else — an operator could not see what any item
+ * actually does without reading the bot's own catalog. The endpoint merges the
+ * mechanics, the locale text and the guild's live prices, because none of the
+ * three is reachable from the browser on its own.
+ */
+function renderItemTable(host, items) {
     const node = table([
-        'dashboard.column_item_key', 'dashboard.column_template',
-        'dashboard.column_price', 'dashboard.column_status', 'dashboard.column_actions',
+        'dashboard.column_item', 'dashboard.column_item_effect',
+        'dashboard.column_price', 'dashboard.column_available',
+        'dashboard.column_status', 'dashboard.column_actions',
     ]);
     const body = node.querySelector('tbody');
+    if (!items.length) emptyRow(body, 6, 'dashboard.shop_items_empty');
 
-    if (!items.length) emptyRow(body, 5, 'dashboard.shop_items_empty');
     items.forEach((item) => {
         const row = element('tr');
-        row.appendChild(element('td', 'cell-key', item.item_key));
-        row.appendChild(element('td', null, tr(`dashboard.template_${item.template_type}`)));
-        row.appendChild(element('td', 'cell-mono',
-            `${item.price} ${tr('dashboard.currency_short')}`));
+        row.classList.toggle('reward-disabled', !item.enabled);
+
+        const identity = element('td');
+        identity.appendChild(element('div', 'item-name', item.name));
+        if (item.description) {
+            identity.appendChild(element('div', 'item-desc', item.description));
+        }
+        identity.appendChild(element('div', 'cell-key', item.item_key));
+        row.appendChild(identity);
+
+        row.appendChild(element('td', null, item.source === 'builtin'
+            ? tr(`dashboard.item_effects.${item.effect}`)
+            : tr(`dashboard.item_templates.${item.effect}`)));
+        row.appendChild(element('td', 'cell-mono', item.price === null
+            ? '—' : `${item.price} ${tr('dashboard.currency_short')}`));
+
+        // Where it comes from, which is the question the old table could not
+        // answer at all: several items are drawable but not for sale.
+        const sources = element('td');
+        if (item.in_shop) sources.appendChild(pill('dashboard.source_shop', 'on'));
+        if (item.in_gacha) sources.appendChild(pill('dashboard.source_gacha', 'on'));
+        if (!item.in_shop && !item.in_gacha) {
+            sources.appendChild(pill('dashboard.source_none', 'off'));
+        }
+        row.appendChild(sources);
+
         const status = element('td');
-        status.appendChild(pill(item.enabled ? 'dashboard.status_enabled' : 'dashboard.status_disabled',
-            item.enabled ? 'on' : 'off'));
+        status.appendChild(pill(
+            item.source === 'builtin' ? 'dashboard.source_builtin'
+                : item.enabled ? 'dashboard.status_enabled' : 'dashboard.status_disabled',
+            item.source === 'builtin' ? 'neutral' : item.enabled ? 'on' : 'off'));
         row.appendChild(status);
 
         const actions = element('td', 'cell-actions');
+        if (item.editable) {
+            const edit = element('button', 'btn btn-outline', tr('dashboard.edit'));
+            edit.type = 'button';
+            edit.addEventListener('click', () => renderItemEditor(item));
+            actions.appendChild(edit);
 
-        const toggle = element('button', 'btn btn-outline',
-            tr(item.enabled ? 'dashboard.disable' : 'dashboard.enable'));
-        toggle.type = 'button';
-        toggle.addEventListener('click', async () => {
-            toggle.disabled = true;
-            try {
-                const saved = await api(`/guilds/${guildId}/shop-items/${encodeURIComponent(item.item_key)}`, {
-                    method: 'PATCH',
-                    headers: headers(),
-                    body: JSON.stringify({
-                        template_type: item.template_type,
-                        enabled: !item.enabled,
-                        price: item.price,
-                        config: item.config,
-                        hu: {name: item.name || item.item_key, description: item.description || ''},
-                        revision: item.revision,
-                    }),
-                });
-                toast(saved.message);
-                await loadShopItems();
-            } catch (error) {
-                await handleWriteConflict(error, loadShopItems);
-                toggle.disabled = false;
-            }
-        });
+            const toggle = element('button', 'btn btn-outline',
+                tr(item.enabled ? 'dashboard.disable' : 'dashboard.enable'));
+            toggle.type = 'button';
+            toggle.addEventListener('click', () => toggleItem(item, toggle));
+            actions.appendChild(toggle);
 
-        const remove = element('button', 'btn-icon danger', '');
-        remove.type = 'button';
-        remove.title = tr('dashboard.delete');
-        remove.setAttribute('aria-label', tr('dashboard.delete'));
-        remove.appendChild(icon('ic-trash', 'ic ic-sm'));
-        remove.addEventListener('click', async () => {
-            const accepted = await confirmAction(
-                format('dashboard.shop_item_delete_confirm', {item: item.item_key}),
-            );
-            if (!accepted) return;
-            remove.disabled = true;
-            try {
-                const removed = await api(`/guilds/${guildId}/shop-items/${encodeURIComponent(item.item_key)}`, {
-                    method: 'DELETE', headers: headers(),
-                    body: JSON.stringify({revision: item.revision}),
-                });
-                toast(removed.message);
-                await loadShopItems();
-            } catch (error) {
-                await handleWriteConflict(error, loadShopItems);
-                remove.disabled = false;
-            }
-        });
-
-        actions.append(toggle, remove);
+            const remove = element('button', 'btn-icon danger', '');
+            remove.type = 'button';
+            remove.title = tr('dashboard.delete');
+            remove.setAttribute('aria-label', tr('dashboard.delete'));
+            remove.appendChild(icon('ic-trash', 'ic ic-sm'));
+            remove.addEventListener('click', () => deleteItem(item, remove));
+            actions.appendChild(remove);
+        } else if (item.price_setting) {
+            // A built-in's only editable field is its price, and that is a
+            // registered setting — so this links to it rather than growing a
+            // second way to write the same row.
+            const link = element('button', 'btn btn-ghost', tr('dashboard.edit_price'));
+            link.type = 'button';
+            link.addEventListener('click', () => showPage('economy'));
+            actions.appendChild(link);
+        }
         row.appendChild(actions);
         body.appendChild(row);
     });
+    host.replaceChildren(node);
+}
 
+async function toggleItem(item, button) {
+    button.disabled = true;
+    try {
+        const saved = await api(
+            `/guilds/${guildId}/shop-items/${encodeURIComponent(item.item_key)}`, {
+                method: 'PATCH', headers: headers(),
+                body: JSON.stringify(itemPatchBody(item, {enabled: !item.enabled})),
+            });
+        toast(saved.message);
+        await loadShopItems();
+    } catch (error) {
+        await handleWriteConflict(error, loadShopItems);
+        button.disabled = false;
+    }
+}
+
+/** The full body a PATCH needs, unchanged except for what the caller overrides.
+ *  The route reuses the creation validator, so a partial body is refused. */
+function itemPatchBody(item, changes) {
+    const texts = item.texts || {};
+    const body = {
+        template_type: item.effect,
+        enabled: item.enabled,
+        price: item.price,
+        config: item.config,
+        hu: {name: (texts.hu || {}).name || item.name || item.item_key,
+             description: (texts.hu || {}).description || item.description || ''},
+        revision: item.revision,
+        ...changes,
+    };
+    if (texts.en) body.en = texts.en;
+    return body;
+}
+
+async function deleteItem(item, button) {
+    const accepted = await confirmAction(
+        format('dashboard.shop_item_delete_confirm', {item: item.name || item.item_key}),
+    );
+    if (!accepted) return;
+    button.disabled = true;
+    try {
+        const removed = await api(
+            `/guilds/${guildId}/shop-items/${encodeURIComponent(item.item_key)}`, {
+                method: 'DELETE', headers: headers(),
+                body: JSON.stringify({revision: item.revision}),
+            });
+        toast(removed.message);
+        await loadShopItems();
+    } catch (error) {
+        await handleWriteConflict(error, loadShopItems);
+        button.disabled = false;
+    }
+}
+
+/* ------------------------------------------------------------- redeems */
+
+/* Its own page, and deliberately not gated on the shop.
+ *
+ * The fulfillment queue used to sit inside the shop item editor, so turning the
+ * shop feature off hid requests that members had already paid for — including
+ * gacha-sourced ones, which have nothing to do with the shop at all.
+ */
+async function loadRedeems() {
+    const requestsHost = document.getElementById('fulfillment-list');
+    const activeHost = document.getElementById('active-entitlements');
+    renderSkeleton(requestsHost, 2);
+    renderSkeleton(activeHost, 3);
+
+    let active;
+    try {
+        const [fulfillment, entitlements] = await Promise.all([
+            api(`/guilds/${guildId}/fulfillment`),
+            api(`/guilds/${guildId}/entitlements`),
+        ]);
+        fulfillmentRequests = fulfillment.data;
+        active = entitlements.data;
+    } catch (error) {
+        handleApiError(error);
+        requestsHost.replaceChildren(emptyState('dashboard.load_failed', 'ic-alert'));
+        activeHost.replaceChildren();
+        return;
+    }
+
+    const open = fulfillmentRequests.filter((item) => item.status === 'open').length;
+    setSubtitle('dashboard.subtitle_redeems', {open, active: active.length});
+    renderFulfillmentTable(requestsHost);
+    renderActiveEntitlements(activeHost, active);
+}
+
+/** Whole units only, largest first: "3d 11h" rather than a raw second count.
+ *  Under a minute reads as "under a minute" — a countdown to zero on a page
+ *  nobody is watching is precision with no purpose. */
+function formatRemaining(seconds) {
+    if (seconds === null || seconds === undefined) return '—';
+    if (seconds < 60) return tr('dashboard.remaining_soon');
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (days) return format('dashboard.remaining_days', {days, hours});
+    if (hours) return format('dashboard.remaining_hours', {hours, minutes});
+    return format('dashboard.remaining_minutes', {minutes});
+}
+
+function renderActiveEntitlements(host, rows) {
+    const node = table([
+        'dashboard.column_user', 'dashboard.column_grant',
+        'dashboard.column_source', 'dashboard.column_remaining',
+        'dashboard.column_expires',
+    ]);
+    const body = node.querySelector('tbody');
+    if (!rows.length) emptyRow(body, 5, 'dashboard.active_empty');
+
+    rows.forEach((row) => {
+        const line = element('tr');
+        line.appendChild(element('td', 'cell-mono', row.user_id));
+
+        // `role:<id>` is the only composite kind; everything else is a plain
+        // name the locale family covers.
+        const kind = row.kind.startsWith('role:') ? 'role' : row.kind;
+        const grant = element('td');
+        grant.appendChild(element('div', null, tr(`dashboard.grant_kinds.${kind}`)));
+        if (row.discord_item_id) {
+            grant.appendChild(element('div', 'cell-key', row.discord_item_id));
+        }
+        line.appendChild(grant);
+
+        line.appendChild(element('td', null, row.source_type
+            ? tr(`dashboard.source_${row.source_type}`)
+            : tr('dashboard.source_none')));
+        line.appendChild(element('td', 'cell-mono',
+                                 formatRemaining(row.remaining_seconds)));
+        line.appendChild(element('td', 'cell-mono',
+                                 (row.expires_at || '').slice(0, 16).replace('T', ' ')));
+        body.appendChild(line);
+    });
     host.replaceChildren(node);
 }
 
@@ -2944,7 +3289,7 @@ function renderFulfillmentTable(host) {
     open.forEach((item) => {
         const row = element('tr');
         row.appendChild(element('td', 'cell-key', `#${item.request_id}`));
-        row.appendChild(element('td', null, tr(`dashboard.asset_${item.asset_type}`)));
+        row.appendChild(element('td', null, tr(`dashboard.item_asset_types.${item.asset_type}`)));
         row.appendChild(element('td', 'cell-mono', String(item.user_id)));
 
         const inputCell = element('td');
@@ -2973,7 +3318,7 @@ function renderFulfillmentTable(host) {
                     body: JSON.stringify({discord_item_id: input.value.trim()}),
                 });
                 toast(saved.message);
-                await loadShopItems();
+                await loadRedeems();
             } catch (error) {
                 handleApiError(error);
                 button.disabled = false;
@@ -2987,77 +3332,269 @@ function renderFulfillmentTable(host) {
     host.replaceChildren(node);
 }
 
-/** Templates whose whole configuration is one built-in item, so the operator
- *  picks from the shared catalog instead of guessing a key in raw JSON. */
-const CATALOG_TEMPLATE_EFFECTS = {consumable: 'inventory', vault: 'vault'};
+/* ------------------------------------------------------- the item creator */
 
-function renderShopItemTemplate() {
-    const form = document.getElementById('shop-item-form');
-    const effect = CATALOG_TEMPLATE_EFFECTS[form.template_type.value];
-    const picker = document.getElementById('shop-item-picker');
-    const rawConfig = document.getElementById('shop-item-config');
+/* Six templates, declared rather than branched.
+ *
+ * This was one form with a raw JSON textarea: two of the six templates got a
+ * picker and the other four expected the operator to type
+ * `{"role_id": 1469…, "duration_days": 30}` correctly first time, with no role
+ * picker and nothing in the interface saying what shape was wanted. The same
+ * visible slot silently changed meaning, because `form.config.required` was
+ * toggled on a hidden field. It is the shape `MANAGED_KINDS` already uses, for
+ * the same reason.
+ *
+ * `fields` are the config's own fields; the identity, price and text fields are
+ * shared by every template and rendered once. `pack` builds the `config` object
+ * the server validates, and `unpack` turns a stored row back into form values,
+ * so opening an item and saving it unchanged writes back what was there.
+ */
+const SHOP_TEMPLATE_FIELDS = {
+    role_id: {kind: 'role', label: 'dashboard.item_role',
+              localeKey: 'dashboard.item_role', required: true,
+              hint: 'item_role'},
+    duration_days: {kind: 'number', label: 'dashboard.item_duration', min: 1,
+                    max: 3650, default: 30, required: true,
+                    hint: 'item_duration'},
+    vault_item: {kind: 'catalog', label: 'dashboard.item_vault', effect: 'vault',
+                 required: true, hint: 'item_vault'},
+    consumable_item: {kind: 'catalog', label: 'dashboard.item_consumable',
+                      effect: 'inventory', required: true,
+                      hint: 'item_consumable'},
+    coin_amount: {kind: 'number', label: 'dashboard.item_coin_amount', min: 0,
+                  default: 1000, required: true, hint: 'item_coin_amount'},
+    repeatable: {kind: 'checkbox', label: 'dashboard.item_repeatable',
+                 default: false, hint: 'item_repeatable'},
+    asset_type: {kind: 'choice', label: 'dashboard.item_asset_type',
+                 options: ['emoji', 'sticker', 'sound'], default: 'emoji',
+                 optionLabels: 'dashboard.item_asset_types',
+                 hint: 'item_asset_type'},
+};
 
-    picker.hidden = !effect;
-    rawConfig.hidden = Boolean(effect);
-    // A hidden required textarea blocks submission, so requiredness follows use.
-    form.config.required = !effect;
-    if (!effect) return;
+const SHOP_TEMPLATES = {
+    fixed_role: {
+        fields: ['role_id'],
+        unpack: (config) => ({role_id: config.role_id ? String(config.role_id) : null}),
+        pack: (values) => ({role_id: values.role_id}),
+    },
+    timed_role: {
+        fields: ['role_id', 'duration_days'],
+        unpack: (config) => ({role_id: config.role_id ? String(config.role_id) : null,
+                              duration_days: config.duration_days}),
+        pack: (values) => ({role_id: values.role_id,
+                            duration_days: values.duration_days}),
+    },
+    vault: {
+        fields: ['vault_item'],
+        // Stored as an amount, chosen as an item: the reserve a vault protects
+        // is the catalog's to decide, and the server refuses a mismatch.
+        unpack: (config) => ({vault_item: vaultKeyForAmount(config.amount)}),
+        pack: (values) => ({amount: vaultAmountForKey(values.vault_item)}),
+    },
+    consumable: {
+        fields: ['consumable_item'],
+        unpack: (config) => ({consumable_item: config.item_key}),
+        pack: (values) => ({item_key: values.consumable_item}),
+    },
+    coin_bundle: {
+        fields: ['coin_amount', 'repeatable'],
+        unpack: (config) => ({coin_amount: config.amount,
+                              repeatable: Boolean(config.repeatable)}),
+        pack: (values) => ({amount: values.coin_amount,
+                            repeatable: Boolean(values.repeatable)}),
+    },
+    fulfillment_voucher: {
+        fields: ['asset_type', 'duration_days'],
+        unpack: (config) => ({asset_type: config.asset_type,
+                              duration_days: config.duration_days}),
+        pack: (values) => ({asset_type: values.asset_type,
+                            duration_days: values.duration_days}),
+    },
+};
 
-    const select = form.catalog_item;
-    select.replaceChildren();
-    itemCatalog
-        .filter((item) => item.effect === effect)
-        .forEach((item) => {
-            const option = document.createElement('option');
-            option.value = item.key;
-            option.textContent = item.key;
-            select.appendChild(option);
+function vaultKeyForAmount(amount) {
+    const match = (itemList || []).find(
+        (item) => item.effect === 'vault' && item.value === amount);
+    return match ? match.item_key : null;
+}
+
+function vaultAmountForKey(key) {
+    const match = (itemList || []).find((item) => item.item_key === key);
+    return match ? match.value : null;
+}
+
+/** The item creator, in place of the list. Same shape as the content builders:
+ *  numbered sections, a Back action, and no raw JSON anywhere. */
+function renderItemEditor(existing) {
+    const host = document.getElementById('shop-item-editor');
+    const listCard = document.getElementById('shop-item-list-card');
+    if (!host || !listCard) return;
+    listCard.classList.add('hidden');
+    host.classList.remove('hidden');
+    host.replaceChildren();
+
+    const isNew = !existing;
+    const template = existing ? existing.template_type : 'fixed_role';
+    const readers = {};
+    const form = element('form', 'stack');
+
+    const identity = itemEditorSection(1, 'dashboard.item_section_identity');
+    const grid = element('div', 'form-grid');
+    addEditorField(grid, readers, 'item_key', {
+        kind: 'text', label: 'dashboard.item_key', max: 64, required: true,
+        immutableAfterCreate: true, hint: 'item_key',
+    }, existing ? existing.item_key : '', isNew);
+    addEditorField(grid, readers, 'template_type', {
+        kind: 'choice', label: 'dashboard.item_template',
+        options: Object.keys(SHOP_TEMPLATES), default: template,
+        optionLabels: 'dashboard.item_templates', hint: 'item_template',
+    }, template, isNew);
+    addEditorField(grid, readers, 'price', {
+        kind: 'number', label: 'dashboard.item_price', min: 0, default: 1000,
+        required: true, hint: 'item_price',
+    }, existing ? existing.price : undefined, isNew);
+    identity.appendChild(grid);
+    form.appendChild(identity);
+
+    const text = itemEditorSection(2, 'dashboard.item_section_text');
+    const textGrid = element('div', 'form-grid');
+    const stored = existing ? (existing.texts || {}) : {};
+    addEditorField(textGrid, readers, 'name_hu', {
+        kind: 'text', label: 'dashboard.item_name_hu', max: 100, required: true,
+        hint: 'item_name_hu',
+    }, (stored.hu || {}).name || '', isNew);
+    addEditorField(textGrid, readers, 'name_en', {
+        kind: 'text', label: 'dashboard.item_name_en', max: 100,
+        hint: 'item_name_en',
+    }, (stored.en || {}).name || '', isNew);
+    addEditorField(textGrid, readers, 'description_hu', {
+        kind: 'multiline', label: 'dashboard.item_description_hu', max: 400,
+        required: true, wide: true,
+    }, (stored.hu || {}).description || '', isNew);
+    addEditorField(textGrid, readers, 'description_en', {
+        kind: 'multiline', label: 'dashboard.item_description_en', max: 400,
+        wide: true,
+    }, (stored.en || {}).description || '', isNew);
+    text.appendChild(textGrid);
+    form.appendChild(text);
+
+    // Section three is the only part that changes with the template, so it is
+    // rebuilt in place when the choice changes rather than the whole form.
+    const configSection = itemEditorSection(3, 'dashboard.item_section_config');
+    const configGrid = element('div', 'form-grid');
+    configSection.appendChild(configGrid);
+    form.appendChild(configSection);
+
+    const configReaders = {};
+    const drawConfig = () => {
+        Object.keys(configReaders).forEach((key) => delete configReaders[key]);
+        configGrid.replaceChildren();
+        const chosen = readers.template_type();
+        const spec = SHOP_TEMPLATES[chosen];
+        const values = existing && existing.template_type === chosen
+            ? spec.unpack(existing.config || {}) : {};
+        spec.fields.forEach((name) => {
+            addEditorField(configGrid, configReaders, name,
+                           SHOP_TEMPLATE_FIELDS[name], values[name], isNew);
         });
+    };
+    drawConfig();
+    form.addEventListener('change', (event) => {
+        if (event.target.closest('.field')?.dataset.field === 'template_type') {
+            drawConfig();
+        }
+    });
+
+    const actions = element('div', 'form-actions');
+    const submit = element('button', 'btn btn-primary',
+                           tr(isNew ? 'dashboard.create' : 'dashboard.save'));
+    submit.type = 'submit';
+    actions.appendChild(submit);
+    form.appendChild(actions);
+
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        saveItem(existing, readers, configReaders, submit);
+    });
+    host.appendChild(form);
+
+    const back = element('button', 'btn btn-ghost', tr('dashboard.back'));
+    back.type = 'button';
+    back.addEventListener('click', () => { itemEditorTarget = undefined; loadShopItems(); });
+    document.getElementById('page-actions').replaceChildren(back);
 }
 
-/** Build the config object a catalog-backed template expects. */
-function shopItemConfigFromCatalog(template, itemKey) {
-    if (template === 'consumable') return {item_key: itemKey};
-    const item = itemCatalog.find((entry) => entry.key === itemKey);
-    return {amount: item ? item.value : 0};
+function itemEditorSection(index, labelKey) {
+    const node = element('fieldset', 'managed-section');
+    node.appendChild(element('legend', null, `${index}. ${tr(labelKey)}`));
+    return node;
 }
 
-async function createShopItem(event) {
-    event.preventDefault();
-    const submit = event.target.querySelector('button[type="submit"]');
-    const data = new FormData(event.target);
-    const template = data.get('template_type');
+/** One labelled field, registering its reader under `name`. */
+function addEditorField(host, readers, name, spec, value, isNew) {
+    const control = managedFieldControl(name, spec, value, isNew);
+    const wrapper = managedFieldWrapper(spec, control.node);
+    wrapper.dataset.field = name;
+    if (spec.wide) wrapper.classList.add('wide');
+    host.appendChild(wrapper);
+    readers[name] = control.read;
+}
 
-    let payload;
-    try {
-        payload = {
-            item_key: data.get('item_key'),
-            template_type: template,
-            enabled: true,
-            price: Number(data.get('price')),
-            config: CATALOG_TEMPLATE_EFFECTS[template]
-                ? shopItemConfigFromCatalog(template, data.get('catalog_item'))
-                : JSON.parse(data.get('config')),
-            hu: {name: data.get('name'), description: data.get('description')},
-        };
-    } catch (error) {
-        toast(tr('dashboard.invalid_json'), true);
+async function saveItem(existing, readers, configReaders, submit) {
+    const values = {};
+    Object.entries(readers).forEach(([name, read]) => { values[name] = read(); });
+    const config = {};
+    Object.entries(configReaders).forEach(([name, read]) => { config[name] = read(); });
+
+    const template = values.template_type;
+    const packed = SHOP_TEMPLATES[template].pack(config);
+    // An incomplete row must not be packed into a value the server will reject
+    // for a reason the operator cannot see. Say which field is missing instead.
+    const missing = SHOP_TEMPLATES[template].fields.find(
+        (name) => SHOP_TEMPLATE_FIELDS[name].required
+            && (config[name] === null || config[name] === undefined
+                || config[name] === ''));
+    if (missing) {
+        toast(format('dashboard.item_field_required',
+                     {field: tr(SHOP_TEMPLATE_FIELDS[missing].label)}), true);
         return;
+    }
+
+    const payload = {
+        template_type: template,
+        enabled: existing ? existing.enabled : true,
+        price: values.price,
+        config: packed,
+        hu: {name: values.name_hu, description: values.description_hu},
+    };
+    // English is optional per field and falls back to Hungarian, so an empty one
+    // is omitted rather than stored as an empty string that would render blank.
+    if (values.name_en || values.description_en) {
+        payload.en = {
+            name: values.name_en || values.name_hu,
+            description: values.description_en || values.description_hu,
+        };
     }
 
     submit.disabled = true;
     try {
-        const result = await api(`/guilds/${guildId}/shop-items`, {
-            method: 'POST', headers: headers(), body: JSON.stringify(payload),
-        });
-        toast(result.message);
-        event.target.reset();
-        // reset() restores the default template, so the config controls have to
-        // follow it back.
-        renderShopItemTemplate();
+        if (existing) {
+            payload.revision = existing.revision;
+            const result = await api(
+                `/guilds/${guildId}/shop-items/${encodeURIComponent(existing.item_key)}`,
+                {method: 'PATCH', headers: headers(), body: JSON.stringify(payload)});
+            toast(result.message);
+        } else {
+            payload.item_key = values.item_key;
+            const result = await api(`/guilds/${guildId}/shop-items`, {
+                method: 'POST', headers: headers(), body: JSON.stringify(payload),
+            });
+            toast(result.message);
+        }
+        itemEditorTarget = undefined;
         await loadShopItems();
     } catch (error) {
-        handleApiError(error);
+        await handleWriteConflict(error, loadShopItems);
     } finally {
         submit.disabled = false;
     }
@@ -3420,6 +3957,50 @@ function managedFieldControl(name, spec, value, isNew) {
         input.value = value ?? '';
         if (spec.max) input.maxLength = spec.max;
         return {node: input, read: () => input.value};
+    }
+    if (spec.kind === 'number') {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = value ?? (spec.default ?? '');
+        if (spec.min !== undefined) input.min = spec.min;
+        if (spec.max !== undefined) input.max = spec.max;
+        if (spec.required) input.required = true;
+        // An empty numeric field reads as null, not 0. Zero is a legitimate
+        // price and "not filled in" must stay distinguishable from it, or a
+        // half-finished row saves as free.
+        return {node: input, read: () => (
+            input.value === '' ? null : Number(input.value))};
+    }
+    if (spec.kind === 'choice') {
+        const select = document.createElement('select');
+        (spec.options || []).forEach((option) => {
+            const node = document.createElement('option');
+            node.value = option;
+            // Options are stable English identifiers, so an unlabelled one reads
+            // as itself rather than as a bracketed placeholder.
+            node.textContent = spec.optionLabels
+                ? tr(`${spec.optionLabels}.${option}`) : option;
+            select.appendChild(node);
+        });
+        if (value !== undefined && value !== null) select.value = value;
+        else if (spec.default !== undefined) select.value = spec.default;
+        return {node: select, read: () => select.value};
+    }
+    if (spec.kind === 'catalog') {
+        // The consumable picker. It listed raw keys like `loaded_die`, because
+        // /api/item-catalog carries no names; the item list endpoint does, so
+        // this reads them from there.
+        const select = document.createElement('select');
+        (itemList || []).filter((item) => item.source === 'builtin'
+                                && item.effect === spec.effect)
+            .forEach((item) => {
+                const node = document.createElement('option');
+                node.value = item.item_key;
+                node.textContent = item.name;
+                select.appendChild(node);
+            });
+        if (value) select.value = value;
+        return {node: select, read: () => select.value || null};
     }
     const input = document.createElement('input');
     input.type = 'text';

@@ -41,3 +41,4 @@ todo*
 
 # Dashboard design reference: local screenshots, several megabytes each.
 dashboard-reference/
+node_modules/

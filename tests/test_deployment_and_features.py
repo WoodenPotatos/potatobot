@@ -20,7 +20,7 @@ from feature_access import (
     is_enabled,
     refresh_feature_cache,
     refresh_feature_cache_async,
-    update_cached_feature,
+    seed_cached_feature,
 )
 from settings_registry import (
     FEATURE_DEFINITIONS,
@@ -109,7 +109,7 @@ class FeaturePersistenceTests(unittest.TestCase):
         database.set_feature_state(123, "social_twitch", False, 42, 0)
         refresh_feature_cache(123)
         self.assertFalse(is_enabled(123, "social_twitch"))
-        update_cached_feature(123, "social_twitch", True)
+        seed_cached_feature(123, "social_twitch", True)
         self.assertTrue(is_enabled(123, "social_twitch"))
 
     def test_uninitialized_feature_cache_fails_closed(self):
@@ -269,7 +269,7 @@ MEMBER = SimpleNamespace(
 
 class InteractionAcknowledgementTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        update_cached_feature(987654321, "general", True)
+        seed_cached_feature(987654321, "general", True)
 
     async def test_regular_application_command_is_deferred_immediately(self):
         deferred = []

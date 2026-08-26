@@ -12,7 +12,8 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 import database
-from feature_access import is_enabled, require_interaction_feature
+from feature_access import require_interaction_feature
+from support_tickets import open_ticket
 from item_catalog import SHOP_ITEMS, ItemEffect
 
 from discord.ext import commands, tasks
@@ -20,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from cogs.tickets import TicketControl
 from cogs.utils import (can_self_assign_role, currency_emoji,
                         currency_select_emoji, guild_setting_sync,
-                        is_channel, t)
+                        handle_loop_error, is_channel, t)
 
 shop_logger = logging.getLogger("PotatoBot.Shop")
 
@@ -252,34 +253,26 @@ class ShopView(discord.ui.View):
                 )
                 if not purchase["purchased"]:
                     return await interaction.edit_original_response(content=t("shop.not_enough_money"), embed=None, view=self)
+                ticket_name = f"{item_data['ticket_prefix']}-{interaction.user.name.lower()}"
+                # Typed "rental" now. It recorded no ticket_type at all, which
+                # is why the shared helper takes one: a redeem ticket, a rental
+                # ticket and a support ticket are three different queues.
+                channel = await open_ticket(
+                    guild, interaction.user, ticket_name, "rental")
+                if channel is None:
+                    await database.run_write(
+                        database.refund_balance, user_id, item_data["price"])
+                    return await interaction.edit_original_response(
+                        content=t("shop.ticket_failed"), embed=None, view=None)
                 try:
-                    ticket_name = f"{item_data['ticket_prefix']}-{interaction.user.name.lower()}"
-                    category = guild.get_channel(
-                        guild_setting_sync(guild.id, "ticket_category"))
-                    overwrites = {
-                        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                        interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True),
-                        guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-                    }
-                    for r_id in guild_setting_sync(guild.id, "admin_roles"):
-                        role = guild.get_role(r_id)
-                        if role:
-                            overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-                    channel = await guild.create_text_channel(name=ticket_name, category=category, overwrites=overwrites)
-                    await database.run(
-                        database.add_ticket, channel.id, interaction.user.id,
-                        interaction.guild.id,
-                    )
                     embed = discord.Embed(title=t("shop.ticket_title", item_name=item_name), description=t("shop.ticket_desc"), color=discord.Color.gold())
                     await channel.send(embed=embed, view=TicketControl())
-                except Exception:
-                    await database.run(database.refund_balance, user_id, item_data["price"])
-                    if "channel" in locals() and channel is not None:
-                        try:
-                            await channel.delete(reason=t("shop.audit_reason_setup_failed"))
-                        except discord.HTTPException:
-                            pass
-                    raise
+                except discord.HTTPException:
+                    # The channel is open and recorded, so the purchase stands;
+                    # only its opening message is missing.
+                    shop_logger.exception(
+                        "Could not post into a rental ticket (channel_id=%s)",
+                        channel.id)
                 self.purchase_complete = True
                 return await interaction.edit_original_response(content=t("shop.ticket_opened", channel=channel.mention), embed=None, view=None)
 
@@ -355,7 +348,10 @@ class Shop(commands.Cog):
         )
         prices, custom = await asyncio.gather(
             database.run_read(database.get_shop_prices, ctx.guild.id),
-            database.run_read(database.get_shop_item_definitions, ctx.guild.id),
+            # In the language the bot speaks, so a custom item follows the
+            # `language` setting the way every built-in already does.
+            database.run_read(database.get_shop_item_definitions, ctx.guild.id,
+                              guild_setting_sync(None, "language")),
         )
         view = ShopView(
             ctx.author.id,
@@ -369,8 +365,9 @@ class Shop(commands.Cog):
         # Read per guild rather than installation-wide, so no guild's cleanup pass
         # can ever see, let alone delete, another guild's rented asset.
         for guild in list(self.bot.guilds):
-            if not is_enabled(guild.id, "rentals"):
-                continue
+            # Not gated on `rentals`, same rule as the entitlement pass below: a
+            # flag decides whether a member may rent something, never whether a
+            # rental that has already run out is allowed to end.
             rentals = await database.run(database.get_all_rentals, guild.id)
             await self._expire_guild_rentals(guild, rentals)
         # Entitlements already carry their own guild, so this pass stays global.
@@ -382,26 +379,49 @@ class Shop(commands.Cog):
             now = datetime.now(expire_date.tzinfo) if expire_date.tzinfo else datetime.now()
             if now >= expire_date:
 
+                # Whether the asset was actually found *in this guild*. A
+                # rental with no provenance is handed to every guild's pass, so
+                # without this the first guild to run deleted the row while the
+                # asset lived on in whichever guild owned it — one silently, two
+                # after logging a misleading "failed to delete".
+                found = False
                 try:
                     if item_type == "emoji":
                         emoji = guild.get_emoji(int(discord_item_id))
+                        found = emoji is not None
                         if emoji:
                             await emoji.delete(reason=t("shop.rent_expired_reason"))
-                    
                     elif item_type == "sound":
                         sound = await guild.fetch_soundboard_sound(int(discord_item_id))
+                        found = sound is not None
                         if sound:
                             await sound.delete(reason=t("shop.rent_expired_reason"))
                     elif item_type == "sticker":
                         sticker = await guild.fetch_sticker(int(discord_item_id))
+                        found = sticker is not None
                         if sticker:
                             await sticker.delete(reason=t("shop.rent_expired_reason"))
+                except discord.NotFound:
+                    # Gone from Discord: the row is stale and may be cleared.
+                    found = False
                 except Exception:
+                    # An unknown failure — a transient HTTP error, a permission
+                    # problem — is not evidence the asset is absent, so keep the
+                    # row and retry on the next pass rather than losing the
+                    # record of a rental that is still live.
                     shop_logger.exception(
                         "Failed to delete expired %s with Discord ID %s.",
                         item_type,
                         discord_item_id,
                     )
+                    continue
+
+                if guild_id is None and not found:
+                    # An unattributed row needs positive evidence that the asset
+                    # is ours before its record is destroyed. A row that names
+                    # this guild is cleared either way: a missing asset there is
+                    # the ordinary "already deleted by hand" case.
+                    continue
 
                 await database.run(database.delete_rental, r_id)
                 shop_logger.info(
@@ -416,8 +436,12 @@ class Shop(commands.Cog):
         )
         for entitlement in entitlements:
             guild = self.bot.get_guild(entitlement["guild_id"])
-            if not guild or not is_enabled(guild.id, "shop"):
+            if not guild:
                 continue
+            # Not gated on `shop`, for the reason the gacha loop records: expiry
+            # of an obligation already made must not depend on the flag that
+            # created it, or turning the shop off makes every timed role
+            # permanent.
             kind = entitlement["entitlement_key"]
             if kind.startswith("role:"):
                 member = guild.get_member(entitlement["user_id"])
@@ -467,6 +491,13 @@ class Shop(commands.Cog):
     @rental_cleanup.before_loop
     async def before_rental_cleanup(self):
         await self.bot.wait_until_ready()
+
+    @rental_cleanup.error
+    async def rental_cleanup_error(self, error):
+        # Started in __init__, so there is no reconnect that brings it back.
+        await handle_loop_error(
+            self.bot, self.rental_cleanup, "rental_cleanup", error, shop_logger,
+        )
 
 async def setup(bot):
     await bot.add_cog(Shop(bot))

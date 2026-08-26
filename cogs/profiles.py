@@ -14,7 +14,7 @@ import database
 from discord.ext import commands
 from datetime import datetime
 from cogs.utils import display_member_name, guild_member_ids, is_channel, t
-from feature_access import require_interaction_feature
+from feature_access import is_enabled, require_interaction_feature
 
 # These views are built per invocation and are not persistent, so a finite
 # timeout is what lets discord.py drop them from its message view store.
@@ -156,6 +156,22 @@ class ProfileView(discord.ui.View):
         rate = (wins / total_games * 100) if total_games > 0 else 0
         embed.add_field(name=t("profiles.casino_stats_label"), 
                         value=t("profiles.casino_stats_value", wins=wins, losses=losses, rate=rate), inline=False)
+
+        # Pity, if this member has ever pulled. Everything above comes from the
+        # global `users` row; pity is per guild *and* per banner, so this is
+        # deliberately narrowed to this guild's standard banner and the field
+        # name says so rather than implying it covers every banner.
+        if is_enabled(self.member.guild.id, "shop_gacha"):
+            pity = await database.run_read(
+                database.get_gacha_pity, self.member.guild.id, self.member.id)
+            if pity["total_pulls"]:
+                embed.add_field(
+                    name=t("profiles.pity_label"),
+                    value=t("profiles.pity_value", pity=pity["pity"],
+                            five_stars=pity["five_stars"],
+                            total=pity["total_pulls"]),
+                    inline=False,
+                )
         return embed
 
     async def refresh_btn(self, interaction: discord.Interaction):

@@ -16,7 +16,8 @@ from feature_access import is_enabled
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta
 from cogs.utils import (apply_database_result, guild_setting_sync,
-                        mark_top_ranker_dirty, update_user_data, t)
+                        handle_loop_error, mark_top_ranker_dirty,
+                        update_user_data, t)
 
 event_logger = logging.getLogger("PotatoBot.ServerEvents")
 
@@ -44,21 +45,9 @@ class ServerEvents(commands.Cog):
         if self.inactivity_scanner.is_running():
             self.inactivity_scanner.cancel()
 
-    def _restart_loop(self, loop, name):
-        if self.bot.is_closed() or loop.is_running():
-            return
-        try:
-            loop.restart()
-            event_logger.warning("Background loop restarted (loop=%s)", name)
-        except RuntimeError:
-            event_logger.exception("Background loop restart failed (loop=%s)", name)
-
     async def _handle_loop_error(self, loop, name, error):
-        event_logger.exception(
-            "Background loop failed; restart scheduled (loop=%s, error=%s)",
-            name, type(error).__name__, exc_info=error,
-        )
-        self.bot.loop.call_later(30, self._restart_loop, loop, name)
+        # The implementation moved to cogs.utils once four cogs needed it.
+        await handle_loop_error(self.bot, loop, name, error, event_logger)
 
     def _daily_activity_pending(self, activity_key, today_str) -> bool:
         """Report whether today's activity write is still outstanding.

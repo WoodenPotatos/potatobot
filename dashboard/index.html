@@ -139,6 +139,15 @@
                         <svg class="ic" aria-hidden="true"><use href="#ic-shop"></use></svg>
                         <span data-i18n="dashboard.nav_shop_builder"></span>
                     </button>
+                    <!-- Deliberately carries no data-feature. A redemption
+                         waiting on staff may have come from the gacha or from
+                         the shop, and a member has already paid for it either
+                         way, so no feature flag may hide the queue that clears
+                         it. -->
+                    <button type="button" class="nav-item" data-page="redeems">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-inbox"></use></svg>
+                        <span data-i18n="dashboard.nav_redeems"></span>
+                    </button>
                 </div>
 
                 <div class="nav-group" data-group="games">
@@ -247,6 +256,12 @@
             </header>
 
             <div class="page-body">
+                <!-- Filled by showPage when the active editor page configures a
+                     feature that is currently switched off. The page stays
+                     usable: the flag gates what members can do, not whether
+                     staff can configure it or clear obligations already made. -->
+                <div id="feature-notice" class="feature-notice hidden"></div>
+
                 <section id="overview" class="page">
                     <div class="quick-actions" id="overview-actions"></div>
                     <div class="stat-grid" id="overview-stats"></div>
@@ -380,68 +395,38 @@
                 </section>
 
                 <section id="shop-builder" class="page hidden">
-                    <div class="card">
+                    <div class="card" id="shop-item-list-card">
                         <div class="card-head">
-                            <div><h2 class="display" data-i18n="dashboard.shop_items_heading"></h2></div>
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.shop_items_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.shop_items_hint"></p>
+                            </div>
                         </div>
                         <div class="table-wrap" id="shop-items"></div>
                     </div>
+                    <!-- The creator renders in place of the list, the way the
+                         content builders do. -->
+                    <div class="card accented hidden" id="shop-item-editor"></div>
+                </section>
+
+                <section id="redeems" class="page hidden">
                     <div class="card">
                         <div class="card-head">
-                            <div><h2 class="display" data-i18n="dashboard.fulfillment_heading"></h2></div>
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.fulfillment_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.fulfillment_hint"></p>
+                            </div>
                         </div>
                         <div class="table-wrap" id="fulfillment-list"></div>
                     </div>
-                    <div class="card accented">
+                    <div class="card">
                         <div class="card-head">
                             <div>
-                                <h2 class="display" data-i18n="dashboard.shop_builder_heading"></h2>
-                                <p class="card-hint" data-i18n="dashboard.shop_builder_hint"></p>
+                                <h2 class="display" data-i18n="dashboard.active_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.active_hint"></p>
                             </div>
                         </div>
-                        <form id="shop-item-form">
-                            <div class="form-grid">
-                                <label class="input-group">
-                                    <span class="field-label" data-i18n="dashboard.item_key"></span>
-                                    <input name="item_key" type="text" required>
-                                </label>
-                                <label class="input-group">
-                                    <span class="field-label" data-i18n="dashboard.template_type"></span>
-                                    <select name="template_type">
-                                        <option value="fixed_role" data-i18n="dashboard.template_fixed_role"></option>
-                                        <option value="timed_role" data-i18n="dashboard.template_timed_role"></option>
-                                        <option value="vault" data-i18n="dashboard.template_vault"></option>
-                                        <option value="consumable" data-i18n="dashboard.template_consumable"></option>
-                                        <option value="coin_bundle" data-i18n="dashboard.template_coin_bundle"></option>
-                                        <option value="fulfillment_voucher" data-i18n="dashboard.template_fulfillment_voucher"></option>
-                                    </select>
-                                </label>
-                                <label class="input-group">
-                                    <span class="field-label" data-i18n="dashboard.price"></span>
-                                    <input name="price" type="number" min="0" required>
-                                </label>
-                                <label class="input-group">
-                                    <span class="field-label" data-i18n="dashboard.item_name_hu"></span>
-                                    <input name="name" type="text" required>
-                                </label>
-                                <label class="input-group wide">
-                                    <span class="field-label" data-i18n="dashboard.item_description_hu"></span>
-                                    <textarea name="description" required></textarea>
-                                </label>
-                                <label class="input-group wide" id="shop-item-picker" hidden>
-                                    <span class="field-label" data-i18n="dashboard.item_config_item"></span>
-                                    <select name="catalog_item"></select>
-                                    <span class="field-hint" data-i18n="dashboard.item_config_item_hint"></span>
-                                </label>
-                                <label class="input-group wide" id="shop-item-config">
-                                    <span class="field-label" data-i18n="dashboard.item_config"></span>
-                                    <textarea name="config" required>{}</textarea>
-                                </label>
-                            </div>
-                            <div class="form-footer">
-                                <button type="submit" class="btn btn-primary" data-i18n="dashboard.create_shop_item"></button>
-                            </div>
-                        </form>
+                        <div class="table-wrap" id="active-entitlements"></div>
                     </div>
                 </section>
 

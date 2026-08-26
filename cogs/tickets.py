@@ -17,6 +17,7 @@ from cogs.utils import BoundedCooldownMap, t, guild_setting_sync
 import database
 from feature_access import require_interaction_feature
 from managed_messages import render_managed_message
+from support_tickets import open_ticket
 
 TICKET_OPEN_COOLDOWN = 300
 TRANSCRIPT_MESSAGE_LIMIT = 50_000
@@ -115,37 +116,15 @@ class TicketLauncher(discord.ui.View):
         ticket_open_times[interaction.user.id] = now
         await interaction.response.defer(ephemeral=True)
 
-        overwrites = {
-            interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, attach_files=True),
-            interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True),
-        }
-
-        for r_id in guild_setting_sync(interaction.guild.id, "admin_roles"):
-            role = interaction.guild.get_role(r_id)
-            if role:
-                overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-
-        category_id = guild_setting_sync(interaction.guild.id, "ticket_category")
-        category = interaction.guild.get_channel(category_id)
-
-        channel = None
-        try:
-            channel = await interaction.guild.create_text_channel(
-                name=ticket_name,
-                category=category,
-                overwrites=overwrites,
-            )
-            await database.run(
-                database.add_ticket, channel.id, interaction.user.id,
-                interaction.guild.id, "support",
-            )
-        except Exception:
+        channel = await open_ticket(
+            interaction.guild, interaction.user, ticket_name, "support")
+        if channel is None:
+            # The cooldown is released: nothing was opened, so the member has
+            # not used their attempt.
             ticket_open_times.pop(interaction.user.id, None)
-            if channel is not None:
-                await channel.delete(reason=t("tickets.audit_reason_setup_failed"))
-            raise
-        
+            return await interaction.followup.send(
+                t("tickets.open_failed"), ephemeral=True)
+
         embed = discord.Embed(
             title=t("tickets.created_title"), 
             description=t("tickets.created_desc"), 

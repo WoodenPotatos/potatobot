@@ -3,6 +3,7 @@ import os
 import tempfile
 import time
 import unittest
+import requests
 from urllib.parse import parse_qs, urlparse
 
 import dashboard_api
@@ -269,6 +270,144 @@ class DashboardSecurityTests(unittest.TestCase):
                     headers=headers,
                 )
                 self.assertEqual(response.status_code, 400)
+
+    def _authenticate_guild_admin(self):
+        """A non-host with live authority over guild 123.
+
+        The permission cache is seeded so `recheck_mutation_guild_permissions`
+        answers from it rather than calling Discord — the same shape the logout
+        and recheck tests use.
+        """
+        self.authenticate(user_id="999")
+        with self.client.session_transaction() as session:
+            session["authorized_guild_ids"] = ["123"]
+        dashboard_api._oauth_tokens["server-session"] = {
+            "access_token": "a", "refresh_token": "r", "expires_at": 2 ** 31,
+        }
+        dashboard_api._permission_cache.put("server-session", ["123"])
+
+    def test_an_instance_setting_is_refused_for_a_non_host(self):
+        """An instance setting has no guild dimension, so a guild admin saving
+        one changes the whole installation and files the audit row under their
+        own guild, where the guilds it affected cannot see it.
+
+        Unreachable while the profile is `private`, which refuses every non-host
+        login — which is exactly why it is gated here rather than later: the
+        change that lets guild admins in is the change that would expose it.
+        """
+        self._authenticate_guild_admin()
+        response = self.client.patch(
+            "/api/guilds/123/settings",
+            json={"changes": [{"key": "maintenance", "value": True,
+                               "revision": 0}]},
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
+        self.assertEqual(400, response.status_code, response.get_data(as_text=True))
+        self.assertNotIn("maintenance", database.get_instance_settings())
+
+    def test_the_host_may_still_change_an_instance_setting(self):
+        """Guards the premise: a gate that refuses everyone is not a gate."""
+        self.authenticate()  # user_id 42 == ADMIN_ID
+        response = self.client.patch(
+            "/api/guilds/123/settings",
+            json={"changes": [{"key": "maintenance", "value": True,
+                               "revision": 0}]},
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+        self.assertTrue(database.get_instance_settings()["maintenance"]["value"])
+
+    def test_one_instance_key_refuses_the_whole_batch(self):
+        """`set_guild_settings` is a single transaction, so a partial apply
+        would be worse than a refusal."""
+        self._authenticate_guild_admin()
+        response = self.client.patch(
+            "/api/guilds/123/settings",
+            json={"changes": [
+                {"key": "join_channel", "value": "1420070400000000001",
+                 "revision": 0},
+                {"key": "command_prefix", "value": "!", "revision": 0},
+            ]},
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
+        self.assertEqual(400, response.status_code)
+        stored = database.get_guild_settings(123)
+        self.assertNotIn("join_channel", stored,
+                         "the guild-scoped half must not have been applied")
+
+    def test_a_guild_setting_is_still_allowed_for_a_non_host(self):
+        self._authenticate_guild_admin()
+        response = self.client.patch(
+            "/api/guilds/123/settings",
+            json={"changes": [{"key": "join_channel",
+                               "value": "1420070400000000001", "revision": 0}]},
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+
+    def test_a_guild_read_refreshes_permissions_too(self):
+        """The idle window slides on every request, so a demoted admin who kept
+        clicking held read access until the twelve-hour cap."""
+        self._authenticate_guild_admin()
+        dashboard_api._permission_cache._entries.clear()
+        calls = []
+
+        def revoked(session_id):
+            calls.append(session_id)
+            return []            # Discord says: no guilds you may manage.
+
+        original = dashboard_api._refresh_authorized_guilds
+        dashboard_api._refresh_authorized_guilds = revoked
+        try:
+            response = self.client.get("/api/guilds/123/settings")
+        finally:
+            dashboard_api._refresh_authorized_guilds = original
+        self.assertEqual(["server-session"], calls,
+                         "a guild read must consult Discord")
+        # 401, not 403: the client treats it as the session ending, which is the
+        # right outcome for authority that has just been taken away.
+        self.assertEqual(401, response.status_code)
+
+    def test_a_guild_read_survives_discord_being_unreachable(self):
+        """A read falls back to the session's snapshot. Refusing would trade a
+        thirty-second stale window for the dashboard being unreadable."""
+        self._authenticate_guild_admin()
+        dashboard_api._permission_cache._entries.clear()
+
+        def unreachable(session_id):
+            raise requests.RequestException("discord is down")
+
+        original = dashboard_api._refresh_authorized_guilds
+        dashboard_api._refresh_authorized_guilds = unreachable
+        try:
+            read = self.client.get("/api/guilds/123/settings")
+            write = self.client.patch(
+                "/api/guilds/123/settings",
+                json={"changes": [{"key": "join_channel",
+                                   "value": "1420070400000000001",
+                                   "revision": 0}]},
+                headers={"X-CSRF-Token": "csrf-token"},
+            )
+        finally:
+            dashboard_api._refresh_authorized_guilds = original
+        self.assertEqual(200, read.status_code, "a read must still be served")
+        self.assertEqual(503, write.status_code,
+                         "a write must still refuse on a stale snapshot")
+
+    def test_a_session_route_is_not_gated_on_a_permission_refresh(self):
+        """It has to keep working while a refresh cannot."""
+        self._authenticate_guild_admin()
+        dashboard_api._permission_cache._entries.clear()
+
+        def unreachable(session_id):
+            raise AssertionError("a session route must not consult Discord")
+
+        original = dashboard_api._refresh_authorized_guilds
+        dashboard_api._refresh_authorized_guilds = unreachable
+        try:
+            self.assertEqual(200, self.client.get("/api/session/touch").status_code)
+        finally:
+            dashboard_api._refresh_authorized_guilds = original
 
     def test_fulfillment_identifier_is_length_bounded(self):
         headers = self._headers()

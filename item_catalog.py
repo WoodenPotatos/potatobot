@@ -83,6 +83,19 @@ def _definitions() -> tuple[ItemDefinition, ...]:
         # of days, so the mechanic reads from the catalog like every other one.
         ItemDefinition("streak_freeze", ItemEffect.INVENTORY, value=1,
                        shop_price=60000, gacha_kind="item"),
+        # Casino helpers. Each one is the loaded die's bargain in a different
+        # game: it improves one paid round and is spent by it, win or lose. They
+        # are plain INVENTORY items, so the shop purchase path, the gacha "item"
+        # grant and the dashboard's consumable validation all pick them up from
+        # this declaration with no further wiring. `value` is the mechanic's own
+        # number where it has one.
+        ItemDefinition("stacked_deck", ItemEffect.INVENTORY,
+                       shop_price=12000, gacha_kind="item"),
+        ItemDefinition("lucky_charm", ItemEffect.INVENTORY,
+                       shop_price=10000, gacha_kind="item"),
+        # Reveals this many safe tiles before a minesweeper round starts.
+        ItemDefinition("metal_detector", ItemEffect.INVENTORY, value=1,
+                       shop_price=14000, gacha_kind="item"),
         ItemDefinition("bodyguard", ItemEffect.BODYGUARD, value=0.7,
                        shop_price=15000),
         # Fixed reserves, not percentages. A higher tier replaces a lower one.

@@ -1,4 +1,5 @@
 import discord
+import logging
 import os
 import sys
 import time
@@ -13,6 +14,8 @@ from discord.ext import commands
 from cogs.utils import BoundedCooldownMap, t, guild_setting_sync
 from version import REPOSITORY_URL, release_channel, version_display
 from feature_access import require_interaction_feature
+
+general_logger = logging.getLogger("PotatoBot.General")
 
 lfg_interaction_times = BoundedCooldownMap()
 
@@ -48,6 +51,7 @@ def get_help_data():
                 t("general.usage_shop"): t("general.cmd_shop"),
                 t("general.usage_gacha"): t("general.cmd_gacha"),
                 t("general.usage_inventory"): t("general.cmd_inventory"),
+                t("general.usage_pity"): t("general.cmd_pity"),
                 t("general.usage_redeem"): t("general.cmd_redeem")
             }
         },
@@ -271,13 +275,29 @@ class LFGView(discord.ui.View):
             return await interaction.response.send_message(t("general.lfg_err_full"), ephemeral=True)
 
         self.joined.append(interaction.user.id)
-        
-        if self.needed > 0 and len(self.joined) == self.needed:
+
+        full = self.needed > 0 and len(self.joined) == self.needed
+        if full:
             self.children[0].disabled = True
-            game_name = self.game_info.name if isinstance(self.game_info, discord.Role) else self.game_info
-            await interaction.channel.send(t("general.lfg_success_full", host=self.host.mention, game=game_name), delete_after=60)
-            
+
+        # Acknowledge first. The "party is full" announcement used to be sent
+        # before this, so a refused channel send left the member joined, the
+        # interaction unacknowledged, and "This interaction failed" on screen.
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+        if full:
+            game_name = self.game_info.name if isinstance(self.game_info, discord.Role) else self.game_info
+            try:
+                await interaction.channel.send(
+                    t("general.lfg_success_full", host=self.host.mention,
+                      game=game_name),
+                    delete_after=60,
+                )
+            except discord.HTTPException:
+                general_logger.exception(
+                    "Could not announce a full LFG party (guild_id=%s)",
+                    interaction.guild.id,
+                )
 
     async def leave_btn(self, interaction: discord.Interaction):
         if interaction.user.id not in self.joined:

@@ -12,6 +12,7 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 import database
+import item_catalog
 
 from discord.ext import commands
 from datetime import datetime, timedelta
@@ -140,16 +141,20 @@ class UniversalNewBetModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         if not await require_casino_feature(interaction, self.game_launcher):
             return
+        # Only the conversion is guarded. The whole game launch used to sit inside
+        # this handler, so any ValueError raised anywhere inside a game start was
+        # reported to the member as "that is not a number".
+        val = self.new_bet.value.lower()
         try:
-            val = self.new_bet.value.lower()
             bet_amount = val if val == "all" else int(val)
-            
-            if isinstance(bet_amount, int) and bet_amount <= 0:
-                return await interaction.response.send_message(t("casino.err_bet_min"), ephemeral=True)
-            
-            await self.game_launcher(interaction, bet_amount, *self.args)
         except ValueError:
-            await interaction.response.send_message(t("casino.err_invalid_number_all"), ephemeral=True)
+            return await interaction.response.send_message(
+                t("casino.err_invalid_number_all"), ephemeral=True)
+
+        if isinstance(bet_amount, int) and bet_amount <= 0:
+            return await interaction.response.send_message(t("casino.err_bet_min"), ephemeral=True)
+
+        await self.game_launcher(interaction, bet_amount, *self.args)
 
 # Shared replay view; each game callback still performs its own atomic wager reservation.
 class PlayAgainView(discord.ui.View):
@@ -210,11 +215,12 @@ async def start_bj_game(ctx_or_int, bet):
     guild = ctx_or_int.guild
     bet = int(bet)
     wager_id = secrets.token_urlsafe(24)
-    remaining_balance = await database.run(
+    reservation = await database.run_write(
         database.begin_interactive_wager,
         wager_id, guild.id, user.id, "blackjack", bet,
+        consume_item="stacked_deck",
     )
-    if remaining_balance is None:
+    if reservation is None:
         bal = await database.run(database.get_user_balance, user.id)
         msg = t("casino.err_poor", bal=bal)
         if isinstance(ctx_or_int, discord.Interaction):
@@ -222,8 +228,10 @@ async def start_bj_game(ctx_or_int, bet):
         else:
             return await ctx_or_int.send(msg, ephemeral=True)
 
-    view = BlackjackView(user, bet, remaining_balance, wager_id)
-    
+    remaining_balance = reservation["balance"]
+    view = BlackjackView(user, bet, remaining_balance, wager_id,
+                         stacked_deck=reservation["consumed"])
+
     p_score = calc_score(view.player_hand)
     if p_score == 21:
         view.settled = True
@@ -261,8 +269,17 @@ async def start_bj_game(ctx_or_int, bet):
         )
         raise
 
+def better_opening_hand(first, second):
+    """The stacked deck's rule: keep whichever opening hand is worth more.
+
+    "Worth more" is the closest 21 without going over — two cards cannot bust,
+    so this is simply the higher score, and a natural 21 wins outright.
+    """
+    return first if calc_score(first) >= calc_score(second) else second
+
+
 class BlackjackView(discord.ui.View):
-    def __init__(self, user, bet, balance, wager_id):
+    def __init__(self, user, bet, balance, wager_id, stacked_deck=False):
         super().__init__(timeout=60.0) 
         self.user = user 
         self.bet = bet
@@ -270,10 +287,23 @@ class BlackjackView(discord.ui.View):
         self.wager_id = wager_id
         self.deck = create_deck() 
         self.settled = False
+        self.stacked_deck = stacked_deck
         self.action_lock = asyncio.Lock()
         self.settlement_lock = asyncio.Lock()
-        
+
         self.player_hand = [self.deck.pop(), self.deck.pop()]
+        if stacked_deck:
+            # The item was already consumed by the wager reservation, so this
+            # runs only when one was genuinely spent. The discarded hand is kept
+            # for the embed: an item whose effect is invisible reads as broken.
+            alternative = [self.deck.pop(), self.deck.pop()]
+            self.discarded_hand = (
+                alternative if better_opening_hand(self.player_hand, alternative)
+                is self.player_hand else self.player_hand
+            )
+            self.player_hand = better_opening_hand(self.player_hand, alternative)
+        else:
+            self.discarded_hand = None
         self.dealer_hand = [self.deck.pop(), self.deck.pop()]
 
         self.btn_hit = discord.ui.Button(label=t("casino.bj_btn_hit"), style=discord.ButtonStyle.primary, custom_id="bj_hit")
@@ -301,7 +331,15 @@ class BlackjackView(discord.ui.View):
             if d_visible_score == 11:
                 d_visible_score = t("casino.bj_ace_score")
             embed.add_field(name=t("casino.bj_dealer_hand_hidden", score=d_visible_score), value=format_hand(self.dealer_hand, hidden=True), inline=False)
-            
+
+        if self.discarded_hand:
+            embed.add_field(
+                name=t("casino.bj_stacked_deck_label"),
+                value=t("casino.bj_stacked_deck_value",
+                        hand=format_hand(self.discarded_hand),
+                        score=calc_score(self.discarded_hand)),
+                inline=False,
+            )
         embed.set_footer(text=t("casino.bj_footer", bet=self.bet))
         return embed
 
@@ -480,33 +518,34 @@ async def start_roulette_game(ctx_or_int, bet, choice):
     ):
         msg = t("casino.roulette_err_choice")
         return await (ctx_or_int.response.send_message(msg, ephemeral=True) if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.send(msg, ephemeral=True))
-    result_num = RNG.randint(0, 36)
-    red_nums = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]
-    
-    if result_num == 0: result_color, emoji = "green", "🟢"
-    elif result_num in red_nums: result_color, emoji = "red", "🔴"
-    else: result_color, emoji = "black", "⚫"
-
-    won, payout = False, 0
-    if selected_color is not None:
-        if selected_color == result_color:
-            won, payout = True, bet * (14 if selected_color == "green" else 1)
-    elif choice.isdigit():
-        if int(choice) == result_num:
-            won, payout = True, bet * 35 
-    if won:
-        result = await database.run(database.resolve_instant_wager, user.id, bet, credit=bet + payout, win_inc=1)
-        title, desc, color = t("casino.roulette_win_title"), t("casino.roulette_win_desc", emoji=emoji, num=result_num, color=t(f"casino.roulette_color_{result_color}").upper(), payout=payout), discord.Color.green()
-    else:
-        result = await database.run(database.resolve_instant_wager, user.id, bet, loss_inc=1)
-        title, desc, color = t("casino.roulette_loss_title"), t("casino.roulette_loss_desc", emoji=emoji, num=result_num, color=t(f"casino.roulette_color_{result_color}").upper(), bet=bet), discord.Color.red()
+    # The spin happens inside the settlement transaction, because a loaded die
+    # has to be consumed by the same write that debits the stake. See
+    # database.resolve_roulette_wager.
+    result = await database.run_write(
+        database.resolve_roulette_wager, ctx_or_int.guild.id, user.id, bet,
+        selected_color, int(choice) if selected_color is None else None,
+    )
     if result is None:
         bal = await database.run(database.get_user_balance, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True) if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.send(msg, ephemeral=True))
+    result_num, result_color, payout = (
+        result["number"], result["colour"], result["payout"]
+    )
+    emoji = {"green": "🟢", "red": "🔴", "black": "⚫"}[result_color]
+    if result["outcome"] == "win":
+        title, desc, color = t("casino.roulette_win_title"), t("casino.roulette_win_desc", emoji=emoji, num=result_num, color=t(f"casino.roulette_color_{result_color}").upper(), payout=payout), discord.Color.green()
+    else:
+        title, desc, color = t("casino.roulette_loss_title"), t("casino.roulette_loss_desc", emoji=emoji, num=result_num, color=t(f"casino.roulette_color_{result_color}").upper(), bet=bet), discord.Color.red()
     new_bal, _, _, _, _ = await apply_database_result(user, result)
 
     embed = discord.Embed(title=title, description=desc, color=color)
+    if result["loaded_die"]:
+        desc_colour = t(f"casino.roulette_color_{result['second_colour']}")
+        embed.description += t(
+            "casino.roulette_loaded_die",
+            second=result["second_number"], colour=desc_colour,
+        )
     embed.set_footer(text=t("casino.roulette_footer", bet=bet, choice=choice, bal=new_bal))
     
     view = PlayAgainView(user, bet, start_roulette_game, choice)
@@ -527,27 +566,30 @@ async def start_slots_game(ctx_or_int, bet):
     
     slots_cooldowns[user.id] = now
     bet = int(bet)
-    symbols = ["🍒", "🍋", "🍇", "💎", "7️⃣", "🔔", "🍉", "⭐", "🍊"]
-    s1, s2, s3 = RNG.choice(symbols), RNG.choice(symbols), RNG.choice(symbols)
-
-    if s1 == s2 == s3:
-        winnings = bet * (50 if s1 == "7️⃣" else 10)
-        result = await database.run(database.resolve_instant_wager, user.id, bet, credit=bet + winnings, win_inc=1)
-        title, desc, color = t("casino.slots_jackpot_title"), t("casino.slots_jackpot_desc", s1=s1, s2=s2, s3=s3, winnings=winnings), discord.Color.gold()
-    elif s1 == s2 or s2 == s3 or s1 == s3:
-        winnings = int(bet * 1.5)
-        result = await database.run(database.resolve_instant_wager, user.id, bet, credit=bet + winnings, win_inc=1)
-        title, desc, color = t("casino.slots_win_title"), t("casino.slots_win_desc", s1=s1, s2=s2, s3=s3, winnings=winnings), discord.Color.green()
-    else:
-        result = await database.run(database.resolve_instant_wager, user.id, bet, loss_inc=1)
-        title, desc, color = t("casino.slots_loss_title"), t("casino.slots_loss_desc", s1=s1, s2=s2, s3=s3, bet=bet), discord.Color.dark_gray()
+    # Reels are spun inside the settlement transaction so a lucky charm is
+    # consumed by the same write that debits the stake.
+    result = await database.run_write(
+        database.resolve_slots_wager, ctx_or_int.guild.id, user.id, bet)
     if result is None:
         bal = await database.run(database.get_user_balance, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True) if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.send(msg, ephemeral=True))
+    s1, s2, s3 = result["reels"]
+    winnings = result["payout"]
+    if s1 == s2 == s3:
+        title, desc, color = t("casino.slots_jackpot_title"), t("casino.slots_jackpot_desc", s1=s1, s2=s2, s3=s3, winnings=winnings), discord.Color.gold()
+    elif winnings:
+        title, desc, color = t("casino.slots_win_title"), t("casino.slots_win_desc", s1=s1, s2=s2, s3=s3, winnings=winnings), discord.Color.green()
+    else:
+        title, desc, color = t("casino.slots_loss_title"), t("casino.slots_loss_desc", s1=s1, s2=s2, s3=s3, bet=bet), discord.Color.dark_gray()
     new_bal, _, _, _, _ = await apply_database_result(user, result)
 
     embed = discord.Embed(title=title, description=desc, color=color)
+    if result["lucky_charm"]:
+        embed.description += t(
+            "casino.slots_lucky_charm",
+            reels=" ".join(result["second_reels"]),
+        )
     embed.set_footer(text=t("casino.slots_footer", bet=bet, bal=new_bal))
     
     view = PlayAgainView(user, bet, start_slots_game)
@@ -563,12 +605,13 @@ class MineButton(discord.ui.Button):
         self.y = y
         self.is_mine = is_mine
         self.is_revealed = False
+        self.is_detected = False
 
     async def callback(self, interaction: discord.Interaction):
         await self.view.handle_click(self, interaction)
 
 class MinesweeperView(discord.ui.View):
-    def __init__(self, user, bet, start_func, wager_id):
+    def __init__(self, user, bet, start_func, wager_id, detector_tiles=0):
         super().__init__(timeout=120.0)
         self.user = user
         self.bet = bet
@@ -578,6 +621,7 @@ class MinesweeperView(discord.ui.View):
         self.mines_count = 3
         self.total_tiles = 20
         self.settled = False
+        self.detector_tiles = detector_tiles
         self.action_lock = asyncio.Lock()
         self.settlement_lock = asyncio.Lock()
 
@@ -591,6 +635,19 @@ class MinesweeperView(discord.ui.View):
             btn = MineButton(x, y, self.is_mine_list[i])
             self.tiles.append(btn)
             self.add_item(btn)
+
+        # The metal detector marks tiles it knows are safe. It does not reveal
+        # them — clicking one still counts as a click and still pays, so the item
+        # buys certainty rather than a free multiplier step. The item was already
+        # consumed by the wager reservation, so this runs only when one was spent.
+        self.detected = []
+        if detector_tiles:
+            safe = [tile for tile in self.tiles if not tile.is_mine]
+            RNG.shuffle(safe)
+            for tile in safe[:detector_tiles]:
+                tile.is_detected = True
+                tile.emoji = "🔎"
+                self.detected.append(tile)
 
         self.cashout_btn = discord.ui.Button(style=discord.ButtonStyle.success, label=t("casino.btn_cashout"), row=4, disabled=True, emoji="💰")
         self.cashout_btn.callback = self.cashout_callback
@@ -732,6 +789,11 @@ class MinesweeperView(discord.ui.View):
         
         embed = discord.Embed(title=t("casino.mines_embed_title"), color=discord.Color.blue())
         embed.description = t("casino.mines_embed_desc", mult=mult, next_mult=next_mult)
+        if self.detected:
+            # Say what the item did, or a member who spent one sees a board that
+            # looks exactly like a board they did not spend one on.
+            embed.description += t("casino.mines_metal_detector",
+                                   count=len(self.detected))
         embed.add_field(name=t("casino.mines_field_bet"), value=f"{self.bet}{currency_emoji()}")
         embed.add_field(
             name=t("casino.mines_field_mines"),
@@ -744,16 +806,22 @@ async def start_mines_game(ctx_or_int, bet):
     guild = ctx_or_int.guild
     bet = int(bet)
     wager_id = secrets.token_urlsafe(24)
-    remaining_balance = await database.run(
+    reservation = await database.run_write(
         database.begin_interactive_wager,
         wager_id, guild.id, user.id, "mines", bet,
+        consume_item="metal_detector",
     )
-    if remaining_balance is None:
+    if reservation is None:
         bal = await database.run(database.get_user_balance, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True) if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.send(msg, ephemeral=True))
 
-    view = MinesweeperView(user, bet, start_mines_game, wager_id)
+    detector_tiles = (
+        int(item_catalog.ITEM_DEFINITIONS["metal_detector"].value)
+        if reservation["consumed"] else 0
+    )
+    view = MinesweeperView(user, bet, start_mines_game, wager_id,
+                           detector_tiles=detector_tiles)
     embed = view.build_embed()
 
     try:
@@ -940,13 +1008,16 @@ class Casino(commands.Cog):
             now.isoformat(), coin_rw, xp_rw, once_per_day=True,
         )
         if not result["claimed"]:
-            last_daily_time = datetime.fromisoformat(result["last_claim"])
-            if last_daily_time.date() == now.date():
-                midnight = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-                time_left = midnight - now
-                h, remainder = divmod(int(time_left.total_seconds()), 3600)
-                m, _ = divmod(remainder, 60)
-                return await ctx.send(t("casino.daily_cooldown", h=h, m=m), ephemeral=True)
+            # Returns unconditionally. A refused claim never pays, so falling
+            # through would announce `coin_rw` as though it had been credited and
+            # then raise KeyError('stats') inside apply_database_result. With
+            # once_per_day the inner date check is always true today, which is
+            # exactly what made the fall-through invisible.
+            midnight = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            time_left = midnight - now
+            h, remainder = divmod(int(time_left.total_seconds()), 3600)
+            m, _ = divmod(remainder, 60)
+            return await ctx.send(t("casino.daily_cooldown", h=h, m=m), ephemeral=True)
         new_bal, _, _, _, _ = await apply_database_result(ctx.author, result)
 
         embed = discord.Embed(title=t("casino.daily_title"), description=t("casino.daily_desc", amount=coin_rw), color=0xFFD700)

@@ -766,3 +766,94 @@ class NavigationReachabilityTests(unittest.TestCase):
         linked = set(re.findall(r'data-category="([a-z]+)"', self.html))
         self.assertEqual(set(), self.categories - linked,
                          "a settings category with no sidebar entry")
+
+    def test_an_editor_page_is_not_hidden_by_the_feature_it_edits(self):
+        """The same class of bug, one attribute over.
+
+        `data-feature` used to hide its nav item outright. Every page carrying
+        one is an *editor* for that feature, so turning the feature off removed
+        the only way to configure it — and for the shop, the only way to see and
+        complete fulfillment requests members had already paid for, including
+        gacha-sourced ones. The routes behind these pages enforce no feature
+        check at all, so the interface was hiding working functionality. A
+        switched-off feature is shown, not hidden.
+        """
+        script = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        start = script.index("function updateNavigation()")
+        end = script.index("\n}", start)
+        body = script[start:end]
+        self.assertIn("data-feature", body, "the premise: it still reads them")
+        feature_line = next(
+            line for line in body.splitlines()
+            if "dataset.feature" in line or "nav-item-off" in line
+        )
+        self.assertIn("nav-item-off", feature_line)
+        self.assertNotIn(
+            "'hidden', featureState", body,
+            "an editor page must not be hidden by the feature it edits",
+        )
+
+    def test_the_off_notice_names_a_real_locale_family(self):
+        """The notice is the only thing telling an operator the feature is off."""
+        import json
+        import re
+
+        script = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        self.assertIn("dashboard.feature_off_notice", script)
+        features = set(re.findall(r'data-feature="([a-z_]+)"', self.html))
+        self.assertTrue(features, "the premise: there are feature pages")
+        for path in ("hu", "en"):
+            catalog = json.loads(
+                (ROOT / "locales" / f"{path}.json").read_text(encoding="utf-8")
+            )["dashboard"]
+            self.assertTrue(catalog.get("feature_off_notice"))
+            for feature in features:
+                self.assertTrue(catalog["features"].get(feature),
+                                f"{path}: no label for feature {feature}")
+
+
+class StartupWiringTests(unittest.TestCase):
+    """Every element the startup wiring binds to must exist in the markup.
+
+    `document.getElementById('shop-item-form').addEventListener(...)` survived
+    the markup it referred to being replaced. `getElementById` returns null, the
+    property access throws, and because this runs during initialisation the
+    throw took the *whole dashboard* down — "Cannot read properties of null",
+    and no page at all.
+
+    Nothing caught it. `node --check` parses and does not execute, no test drives
+    the page, and the functions it named had been deleted too — so the only
+    evidence was an operator opening the dashboard. This is the second time a
+    throw during initialisation cost the entire interface; the first was a
+    picker built from a definition missing its locale key.
+    """
+
+    def setUp(self):
+        self.script = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        self.html = (ROOT / "dashboard" / "index.html").read_text(encoding="utf-8")
+
+    def test_the_premise_holds(self):
+        """A pattern that matches nothing would pass whatever the markup said."""
+        import re
+        self.assertGreater(
+            len(re.findall(r"getElementById\('([a-z0-9-]+)'\)\.", self.script)), 5)
+
+    def test_every_directly_dereferenced_element_exists(self):
+        """Only the unguarded ones. `const x = getElementById(...)` followed by a
+        null check is a deliberate optional element and stays allowed."""
+        import re
+
+        # An id the client creates itself counts: the gacha banner name field is
+        # built in `renderGachaBannerBar` rather than written in the markup.
+        created = set(re.findall(r"\.id = '([a-z0-9-]+)'", self.script))
+        missing = []
+        for name in sorted(set(re.findall(
+                r"getElementById\('([a-z0-9-]+)'\)\.", self.script))):
+            if f'id="{name}"' not in self.html and name not in created:
+                missing.append(name)
+        self.assertEqual(
+            [], missing,
+            "these are dereferenced without a null check but exist in neither "
+            "the markup nor the client; getElementById returns null and the "
+            "throw takes the whole page down if it happens during startup",
+        )

@@ -27,46 +27,15 @@ import settings_cache
 if deployment_settings.dashboard_enabled:
     import dashboard_api
 
+import logging_setup
 from cogs.utils import config, reload_config, t
 from discord.ext import commands
 
-# Configure logging before the bot starts so startup and migration failures are captured.
-LOG_DIR = os.path.join(BASE_DIR, "logs")
-os.makedirs(LOG_DIR, exist_ok=True)
-
-log_format = logging.Formatter('%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
-                               datefmt='%Y-%m-%d %H:%M:%S')
-
-# Rotate local logs to prevent an unattended deployment from exhausting disk space.
-file_handler = logging.handlers.RotatingFileHandler(
-    filename=os.path.join(LOG_DIR, 'bot.log'),
-    encoding='utf-8',
-    maxBytes=5 * 1024 * 1024,
-    backupCount=10
-)
-file_handler.setFormatter(log_format)
-
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(log_format)
-
-def configure_logger(name: str) -> logging.Logger:
-    """Give one logger the project's handlers, and stop it propagating.
-
-    `propagate = False` is the load-bearing half. Without it every record also
-    reaches the root logger, and something *will* put a handler there:
-    `waitress.serve` calls `logging.basicConfig()` — documented as "idempotent
-    if logging has already been set up", which means it adds a root handler when
-    nothing else has. The result was every line in the journal twice, once in
-    this format and once in Python's default, which halves a 500 MB journal cap
-    for nothing and makes a grep count read double.
-    """
-    configured = logging.getLogger(name)
-    configured.setLevel(logging.INFO)
-    configured.addHandler(file_handler)
-    configured.addHandler(console_handler)
-    configured.propagate = False
-    return configured
-
+# Configure logging before the bot starts so startup and migration failures are
+# captured. The handlers live in `logging_setup` so that `python dashboard_api.py`
+# — the two-process split — gets the same configuration without importing main.
+LOG_DIR = logging_setup.LOG_DIR
+configure_logger = logging_setup.configure_logger
 
 logger = configure_logger('discord')
 bot_logger = configure_logger('PotatoBot')
@@ -213,8 +182,19 @@ async def on_ready():
     bot_logger.info("Connected as %s (ID: %s)", bot.user, bot.user.id)
 
     for guild in bot.guilds:
-        await database_layer.run_write(database_layer.register_guild, guild.id, guild.name)
-        await refresh_feature_cache_async(guild.id, force=True)
+        # Guarded per guild. `refresh_feature_cache_async` re-raises on a read
+        # failure, and this loop runs before the background tasks are created —
+        # so one guild's transient error used to abort the rest of on_ready and
+        # leave the feature poller, the lag monitor and the control-action
+        # worker unstarted, which stops the outbox draining. The guild is left
+        # in its FAILED state, which fails closed, and the poller reconciles it.
+        try:
+            await database_layer.run_write(
+                database_layer.register_guild, guild.id, guild.name)
+            await refresh_feature_cache_async(guild.id, force=True)
+        except Exception:
+            bot_logger.exception(
+                "Initial feature cache load failed (guild_id=%s)", guild.id)
 
     try:
         await settings_cache.refresh([guild.id for guild in bot.guilds], force=True)

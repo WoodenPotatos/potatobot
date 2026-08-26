@@ -56,8 +56,15 @@ COMMAND_POLICIES = {
     "rob": _command("economy"),
     "pay": _command("economy"),
     "shop": _command("shop", ResponsePolicy.PRIVATE),
-    "gacha": _command("shop_gacha", ResponsePolicy.PRIVATE),
+    # PUBLIC because the result embed *is* the command. Declared PRIVATE, the
+    # tree deferred ephemerally and the public success branch made
+    # PotatoContext.send delete the original response — stranding Discord's
+    # "used /gacha" header above every single pull as "Message could not be
+    # loaded". The three refusal branches now take the swap instead, which is
+    # rare and costs a brief public placeholder rather than a permanent artefact.
+    "gacha": _command("shop_gacha"),
     "inventory": _command("economy", ResponsePolicy.PRIVATE),
+    "pity": _command("shop_gacha", ResponsePolicy.PRIVATE),
     "redeem": _command("shop_gacha", ResponsePolicy.PRIVATE),
     "bj": _command("casino_blackjack"),
     "dice": _command("casino_dice"),
@@ -241,18 +248,32 @@ async def refresh_feature_cache_async(guild_id: int, *, force: bool = False):
     return True
 
 
-def update_cached_feature(guild_id: int, feature_key: str, enabled: bool):
+def seed_cached_feature(guild_id: int, feature_key: str, enabled: bool):
+    """Seed one flag *and* mark the guild loaded. For tests and seeding only.
+
+    Deliberately does what `update_cached_features` must not: it promotes the
+    guild to READY. It was named `update_cached_feature`, one character from the
+    function the dashboard calls, which is how the promotion ended up in both.
+    """
     with _FEATURE_CACHE_LOCK:
         _FEATURE_CACHE.setdefault(int(guild_id), {})[feature_key] = enabled
         _FEATURE_CACHE_STATES[int(guild_id)] = FeatureCacheState.READY
 
 
 def update_cached_features(guild_id: int, changes: dict[str, dict]):
-    """Apply a committed group of feature changes to the in-process cache."""
+    """Apply a committed group of feature changes to the in-process cache.
+
+    A change never *promotes* the cache to READY. It used to, and the consequence
+    was the opposite of the fail-closed rule: after a failed startup load,
+    toggling one feature from the dashboard marked the whole guild loaded, so
+    `is_enabled` began answering every other key from its registry default and
+    silently switched on every default-on feature for a guild whose rows had
+    never been read. A change to an unloaded guild is recorded and left for the
+    next poll to reconcile against the database.
+    """
     guild_id = int(guild_id)
     with _FEATURE_CACHE_LOCK:
         guild_cache = _FEATURE_CACHE.setdefault(guild_id, {})
-        _FEATURE_CACHE_STATES[guild_id] = FeatureCacheState.READY
         for feature_key, change in changes.items():
             guild_cache[feature_key] = bool(change["enabled"])
 

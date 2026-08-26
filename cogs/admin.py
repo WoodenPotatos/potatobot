@@ -18,8 +18,10 @@ from discord.ext import commands
 from datetime import datetime, timedelta
 from cogs.utils import (
     BoundedCooldownMap, can_self_assign_role, currency_emoji,
-    guild_setting_sync, is_staff, set_guild_setting, t, update_user_data,
+    guild_setting_sync, guild_settings_sync, is_staff, set_guild_setting, t,
+    update_user_data,
 )
+from settings_registry import SETTING_DEFINITIONS
 from feature_access import require_interaction_feature
 
 onboarding_interaction_times = BoundedCooldownMap()
@@ -349,16 +351,19 @@ class Admin(commands.Cog):
         diagnostics endpoint also uses, so the two can never disagree about what
         this installation needs.
         """
-        feature_states, stored_settings = await asyncio.gather(
-            database.run_read(database.get_feature_states, ctx.guild.id),
-            database.run_read(database.get_guild_settings, ctx.guild.id),
-        )
+        feature_states = await database.run_read(
+            database.get_feature_states, ctx.guild.id)
         report = permission_audit.build_report(
             ctx.guild, feature_states,
-            # `config` is not optional here: `guild_settings` is sparse, so
-            # without the legacy mirror every channel and role resolves to
-            # nothing and the report is clean because it checked nothing.
-            permission_audit.resolved_settings(stored_settings, config),
+            # Resolved through the settings cache, which owns the same fallback
+            # chain `permission_audit.resolved_settings` reproduces by hand —
+            # stored row, then `config.json`, then the registry default. That
+            # fallback is not optional: `guild_settings` is sparse, so without it
+            # every channel and role resolves to nothing and the report comes
+            # back clean because it checked nothing. This command used to pass
+            # `config` directly and the name stopped being imported, so it raised
+            # instead.
+            guild_settings_sync(ctx.guild.id, SETTING_DEFINITIONS),
         )
 
         blocking = report.blocking
@@ -530,11 +535,12 @@ class Admin(commands.Cog):
                 return await ctx.send(t("admin.operation_failed"), ephemeral=True)
             await message.edit(embeds=embeds, view=view)
             await ctx.send(t("admin.airlock_updated"), ephemeral=True)
-        except Exception as exc:
-            admin_logger.warning(
-                "Airlock message update failed (guild_id=%s, error=%s)",
-                ctx.guild.id, type(exc).__name__,
-            )
+        except (discord.HTTPException, ValueError, TypeError):
+            # Narrow, and `.exception` rather than `.warning`: the old handler
+            # logged only the exception's class name, which is how a NameError in
+            # here would have been reported as five characters and nothing else.
+            admin_logger.exception(
+                "Airlock message update failed (guild_id=%s)", ctx.guild.id)
             await ctx.send(t("admin.operation_failed"), ephemeral=True)
 
     @commands.hybrid_command(name="rules_group", description=t("general.cmd_rules_group"))
@@ -566,10 +572,10 @@ class Admin(commands.Cog):
     async def getraw(self, ctx, message_id: str):
         try:
             msg = await ctx.channel.fetch_message(int(message_id.strip()))
-            # A code block preserves raw markup instead of rendering Discord entities.
-            await ctx.send(f"```text\n{msg.content}\n```", ephemeral=True)
-        except Exception as e:
-            await ctx.send(t("admin.raw_message_not_found"), ephemeral=True)
+        except (discord.HTTPException, ValueError):
+            return await ctx.send(t("admin.raw_message_not_found"), ephemeral=True)
+        # A code block preserves raw markup instead of rendering Discord entities.
+        await ctx.send(f"```text\n{msg.content}\n```", ephemeral=True)
 
     @commands.hybrid_command(name="update_rules_group", description=t("general.cmd_update_rules_group"))
     @discord.app_commands.default_permissions(administrator=True)
@@ -597,18 +603,24 @@ class Admin(commands.Cog):
                        if existing.get("channel_id") else ctx.channel)
             message = await (channel or ctx.channel).fetch_message(
                 int(existing["message_id"]))
-            stored = await store_rules_panel(ctx, color_hex, add_button, locals())
-            embeds, view = render_managed_message(ctx.guild, stored)
-            if embeds is None:
-                return await ctx.send(t("admin.operation_failed"), ephemeral=True)
+        except (discord.HTTPException, ValueError, TypeError):
+            admin_logger.exception(
+                "Rules message could not be fetched (guild_id=%s)", ctx.guild.id)
+            return await ctx.send(t("admin.rules_not_posted"), ephemeral=True)
+        # The row is written outside the edit's handler on purpose. It used to sit
+        # inside one `except Exception`, so an edit that failed reported
+        # "operation failed" for a write that had in fact landed.
+        stored = await store_rules_panel(ctx, color_hex, add_button, locals())
+        embeds, view = render_managed_message(ctx.guild, stored)
+        if embeds is None:
+            return await ctx.send(t("admin.operation_failed"), ephemeral=True)
+        try:
             await message.edit(embeds=embeds, view=view)
-            await ctx.send(t("admin.rules_updated"), ephemeral=True)
-        except Exception as exc:
-            admin_logger.warning(
-                "Rules message update failed (guild_id=%s, error=%s)",
-                ctx.guild.id, type(exc).__name__,
-            )
-            await ctx.send(t("admin.operation_failed"), ephemeral=True)
+        except discord.HTTPException:
+            admin_logger.exception(
+                "Rules message edit failed (guild_id=%s)", ctx.guild.id)
+            return await ctx.send(t("admin.rules_saved_edit_failed"), ephemeral=True)
+        await ctx.send(t("admin.rules_updated"), ephemeral=True)
 
     @commands.hybrid_command(name="rules_verify", description=t("general.cmd_rules_verify"))
     @discord.app_commands.default_permissions(administrator=True)

@@ -303,6 +303,34 @@ class ConfigurationSecurityTests(unittest.TestCase):
         # Music playback needs ffmpeg present in the image.
         self.assertIn("ffmpeg", containerfile)
 
+    def test_both_ignore_files_exist_and_agree(self):
+        """podman reads `.containerignore`; Docker BuildKit reads only
+        `.dockerignore`. `compose.yaml` offers `docker compose up -d` as an
+        equivalent, so a missing second file means a Docker build copies `.env`
+        into an image layer — the bot token, the Discord client secret and the
+        Twitch credentials, unremovable by a later `RUN rm`.
+
+        This is the build failure that *succeeds*, which is why it is asserted
+        rather than left to whoever next edits one of the two files.
+        """
+        container = ROOT / ".containerignore"
+        docker = ROOT / ".dockerignore"
+        for path in (container, docker):
+            with self.subTest(path=path.name):
+                self.assertTrue(path.exists(), f"{path.name} is missing")
+        self.assertEqual(container.read_text(encoding="utf-8"),
+                         docker.read_text(encoding="utf-8"),
+                         "the two ignore files must stay byte-identical")
+
+    def test_the_ignore_files_exclude_every_secret_and_data_path(self):
+        """Named explicitly, because the cost of one omission is a credential in
+        a published image layer."""
+        text = (ROOT / ".containerignore").read_text(encoding="utf-8")
+        for pattern in (".env", "*.db", "*.db-wal", "backups/", "logs/",
+                        ".dashboard_session_secret", "venv/", ".git"):
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, text)
+
     def test_license_carries_the_canonical_agpl_text(self):
         text = (Path(__file__).resolve().parents[1] / "LICENSE").read_text(encoding="utf-8")
         self.assertIn("GNU AFFERO GENERAL PUBLIC LICENSE", text)

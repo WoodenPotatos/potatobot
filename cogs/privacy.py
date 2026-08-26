@@ -112,7 +112,10 @@ class Privacy(commands.Cog):
     @commands.hybrid_command(name="mydata", description=t("general.cmd_mydata"))
     @commands.cooldown(1, REQUEST_COOLDOWN_SECONDS, commands.BucketType.user)
     async def mydata(self, ctx):
-        await ctx.defer(ephemeral=True)
+        # No defer here. `PotatoCommandTree.interaction_check` has already
+        # acknowledged this interaction using the command's PRIVATE policy, so a
+        # second defer raised InteractionResponded every single time and the
+        # export never ran — a member asking for their data got a command error.
         export = await database.run_read(database.export_user_data, ctx.author.id)
         payload = json.dumps(export, indent=2, ensure_ascii=False, sort_keys=True)
         attachment = discord.File(
@@ -220,7 +223,10 @@ class Privacy(commands.Cog):
                     database.anonymize_user, user_id, self.bot.user.id, 0,
                     "retention_policy",
                 )
-            except database.DatabaseOperationError:
+            except Exception:
+                # One candidate must not abort the sweep. A narrow catch here
+                # meant an unexpected error skipped every later candidate and
+                # recurred on the next daily pass forever.
                 privacy_logger.exception("Retention erasure failed.")
                 continue
             erased += 1

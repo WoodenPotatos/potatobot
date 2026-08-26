@@ -6,11 +6,13 @@ that reads the count on a second connection lets two moderators both miss the
 threshold. And a filter that acts on its own staff is worse than no filter.
 """
 
+import ast
 import os
 import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,6 +25,18 @@ from settings_registry import (
     WARN_DEFAULT_TAG,
     WARN_TAGS,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _function_source(source: str, name: str) -> str:
+    """The source of one function, so a test can assert about its body alone."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == name):
+            return ast.get_source_segment(source, node) or ""
+    raise AssertionError(f"no function named {name!r}")
 
 
 class WarnRegistryTests(unittest.TestCase):
@@ -496,6 +510,111 @@ class WordFilterListenerTests(unittest.IsolatedAsyncioTestCase):
                 await cog.on_message(message)
         self.assertEqual(1, reader.await_count,
                          "the filter configuration must be cached per guild")
+
+
+class WarnDestinationTests(unittest.TestCase):
+    """Where a warning is published, and where it is not.
+
+    The embed carries the member, the type, the reason and the counts — and
+    deliberately no moderator — so it is safe in a channel members read. The
+    threshold alert and the filter's staff alert are not: the alert names counts
+    and thresholds, and the filter quotes the term it just deleted.
+    """
+
+    def test_the_setting_is_member_readable_and_the_log_is_not(self):
+        announce = SETTING_DEFINITIONS["warn_announce_channel"]
+        log = SETTING_DEFINITIONS["moderation_log_channel"]
+
+        # How this codebase says "members read this one".
+        self.assertIn("view_channel", announce.member_channel_permissions)
+        self.assertEqual((), log.member_channel_permissions)
+
+        # The bot has to be able to post in both.
+        for definition in (announce, log):
+            with self.subTest(key=definition.key):
+                self.assertIn("send_messages", definition.bot_channel_permissions)
+                self.assertIn("embed_links", definition.bot_channel_permissions)
+
+    def test_it_is_owned_by_moderation_not_by_the_alert_flag(self):
+        """A warning must still be published with threshold alerts switched off;
+        `moderation_warn_alerts` governs the alert, not the record."""
+        self.assertEqual("moderation",
+                         SETTING_DEFINITIONS["warn_announce_channel"].owner_feature)
+        self.assertEqual("moderation_warn_alerts",
+                         SETTING_DEFINITIONS["moderation_log_channel"].owner_feature)
+
+    def test_it_defaults_to_unset_so_an_upgrade_changes_nothing(self):
+        self.assertIsNone(SETTING_DEFINITIONS["warn_announce_channel"].default)
+
+    def test_warn_publishes_to_the_configured_channel(self):
+        source = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
+        warn = _function_source(source, "warn")
+        self.assertIn('guild_setting_sync(ctx.guild.id, "warn_announce_channel")',
+                      warn)
+        # Unset falls back to the invoking channel. This is the one place where
+        # the project's usual "unset means skip" is wrong: a /warn that published
+        # nowhere would look like a broken command.
+        self.assertIn("if announce is None or announce == ctx.channel:", warn)
+        self.assertIn("await ctx.send(embed=embed)", warn)
+
+    def test_a_failed_publish_does_not_fall_back(self):
+        """Falling back would post into the channel the operator chose not to
+        use, which is the opposite of what setting it meant."""
+        source = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
+        warn = _function_source(source, "warn")
+        self.assertIn("except (discord.Forbidden, discord.HTTPException):", warn)
+        self.assertIn("moderation_logger.exception", warn)
+
+    def test_the_filter_alert_still_goes_only_to_the_log(self):
+        """It quotes the matched term. Publishing that would re-post the word the
+        guild just deleted."""
+        source = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
+        report = _function_source(source, "_report_filter_match")
+        self.assertIn("moderation_log_channel", report)
+        self.assertNotIn("warn_announce_channel", report)
+
+    def test_the_escalation_alert_still_goes_only_to_the_log(self):
+        source = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
+        escalation = _function_source(source, "apply_warn_escalation")
+        self.assertIn("moderation_log_channel", escalation)
+        self.assertNotIn("warn_announce_channel", escalation)
+
+    def test_modlogs_is_gated_on_the_staff_category(self):
+        """Public inside the staff category, ephemeral without one, refused
+        elsewhere — and the gate binds administrators too, which is what makes
+        the channel a boundary rather than a suggestion."""
+        source = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
+        modlogs = _function_source(source, "modlogs")
+        self.assertIn('guild_setting_sync(ctx.guild.id, "admin_category")', modlogs)
+        self.assertIn("moderation.modlogs_wrong_channel", modlogs)
+        # The staff-channel branch posts to the channel, not as the interaction
+        # reply: a PRIVATE command replying publicly takes the visibility swap,
+        # which deletes the deferred original and strands the "used /modlogs"
+        # header above the embed. Both branches must stay swap-free.
+        self.assertIn("await ctx.channel.send(embed=embed)", modlogs)
+        self.assertIn("ctx.send(embed=embed, ephemeral=True)", modlogs)
+        self.assertIn("moderation.modlogs_requested_by", modlogs)
+        # The absence assertions read code only. A comment explaining why a name
+        # is not used would otherwise read as the name being used.
+        code = "\n".join(line for line in modlogs.splitlines()
+                         if not line.lstrip().startswith("#"))
+        # No administrator escape hatch anywhere in the gate.
+        self.assertNotIn("guild_permissions.administrator", code)
+        # `is_channel` must not be used here: it cannot resolve a category and
+        # it lets administrators past before it looks at the channel.
+        self.assertNotIn("is_channel", code)
+
+    def test_modlogs_stays_a_private_response_policy(self):
+        """PRIVATE keeps the pre-command defer ephemeral, so a refusal in the
+        wrong channel never flashes a public placeholder there."""
+        from feature_access import COMMAND_POLICIES, ResponsePolicy
+        self.assertIs(ResponsePolicy.PRIVATE, COMMAND_POLICIES["modlogs"].response)
+
+    def test_the_public_embed_still_names_no_moderator(self):
+        """What makes it safe to publish where members read."""
+        source = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
+        warn = _function_source(source, "warn")
+        self.assertNotIn("moderation.mod_label", warn)
 
 
 if __name__ == "__main__":

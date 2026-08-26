@@ -7,6 +7,8 @@ its own values, and that a leaderboard ranks only the members who are present.
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import database
 
@@ -192,6 +194,144 @@ class GuildScopingTests(unittest.TestCase):
             )
         self.assertEqual({row[2] for row in database.get_all_rentals(111)}, {"3"})
         self.assertEqual({row[2] for row in database.get_all_rentals(222)}, {"3"})
+
+
+class LegacyProvenanceTests(unittest.TestCase):
+    """A row that carries no guild must not count against every guild.
+
+    Pre-schema-8 warnings have no provenance. Counting them everywhere meant one
+    installation's history could push a member over a threshold in a guild it
+    never happened in — and a threshold can ban.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.initialize_database()
+        for guild_id, name in ((111, "first"), (222, "second")):
+            database.register_guild(guild_id, name)
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def add_legacy_warning(self, user_id):
+        with database.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO warnings (user_id, mod_id, reason, date, guild_id, tag) "
+                "VALUES (?, 9, 'legacy', '2026-01-01T00:00:00', NULL, NULL)",
+                (user_id,))
+
+    def test_a_legacy_warning_counts_toward_no_threshold(self):
+        self.add_legacy_warning(7)
+        record = database.record_warning(7, 9, "new one",
+                                        "2026-08-26T00:00:00", 111, "general")
+        self.assertEqual(1, record["total"],
+                         "only the warning filed in this guild may count")
+        self.assertEqual(1, record["tag_count"])
+        self.assertEqual(0, database.get_warning_count(7, 222))
+
+    def test_a_legacy_warning_is_still_visible_and_removable(self):
+        """Counting nowhere must not mean disappearing: invisible history is a
+        worse failure than an uncounted row."""
+        self.add_legacy_warning(7)
+        listed = database.get_warnings(7, 111)
+        self.assertEqual(1, len(listed), f"the row must still be listed: {listed}")
+        warning_id = listed[0][0]
+        self.assertIsNotNone(
+            database.remove_warning(warning_id, 7, 111, 9),
+            "a legacy row must stay clearable by the guild it counts against")
+
+    def test_the_repair_attributes_them_when_there_is_one_guild(self):
+        with database.get_connection() as conn:
+            conn.execute("UPDATE guilds SET active = 0 WHERE guild_id = 222")
+        self.add_legacy_warning(7)
+        with database.get_connection() as conn:
+            self.assertEqual(1, database.repair_warning_provenance(conn))
+        record = database.record_warning(7, 9, "new one",
+                                        "2026-08-26T00:00:00", 111, "general")
+        self.assertEqual(2, record["total"],
+                         "once attributed, the legacy row counts here")
+
+    def test_the_repair_refuses_to_guess_with_two_guilds(self):
+        """Guessing would move somebody's moderation history into a guild it
+        never happened in."""
+        self.add_legacy_warning(7)
+        with database.get_connection() as conn:
+            self.assertEqual(0, database.repair_warning_provenance(conn))
+            remaining = conn.execute(
+                "SELECT COUNT(*) FROM warnings WHERE guild_id IS NULL").fetchone()[0]
+        self.assertEqual(1, remaining)
+
+    def test_the_repair_is_idempotent(self):
+        with database.get_connection() as conn:
+            conn.execute("UPDATE guilds SET active = 0 WHERE guild_id = 222")
+        self.add_legacy_warning(7)
+        with database.get_connection() as conn:
+            self.assertEqual(1, database.repair_warning_provenance(conn))
+            self.assertEqual(0, database.repair_warning_provenance(conn))
+
+
+class RentalCleanupCogTests(unittest.IsolatedAsyncioTestCase):
+    """The cog half of rental cleanup, which the query-level test cannot see.
+
+    `get_all_rentals` correctly hands an unattributed rental to every guild — its
+    own docstring says no guild deletes another's asset "because `delete_rental`
+    is only reached for an asset this guild owns". The cog made that false: a
+    missing emoji raised nothing, control fell through, and the row was deleted
+    while the asset lived on in the guild that owned it.
+    """
+
+    async def asyncSetUp(self):
+        from cogs.shop import Shop
+        self.deleted = []
+        self.shop = Shop.__new__(Shop)          # no bot, no cog machinery needed
+
+        async def fake_run(function, *args):
+            if function is database.delete_rental:
+                self.deleted.append(args[0])
+
+        self.patcher = patch.object(database, "run", fake_run)
+        self.patcher.start()
+        self.addCleanup(self.patcher.stop)
+
+    def guild(self, *, has_asset):
+        guild = MagicMock()
+        asset = None
+        if has_asset:
+            asset = MagicMock()
+            asset.delete = AsyncMock()      # awaited by the cog
+        guild.get_emoji.return_value = asset
+        return guild
+
+    def expired(self, guild_id):
+        past = (datetime.now() - timedelta(days=1)).isoformat()
+        return [(42, "emoji", 1420070400000000001, past, guild_id)]
+
+    async def test_an_unattributed_rental_is_kept_when_the_asset_is_elsewhere(self):
+        await self.shop._expire_guild_rentals(self.guild(has_asset=False),
+                                              self.expired(None))
+        self.assertEqual([], self.deleted,
+                         "the row is the only record of a live rental")
+
+    async def test_an_unattributed_rental_is_cleared_by_the_guild_that_has_it(self):
+        await self.shop._expire_guild_rentals(self.guild(has_asset=True),
+                                              self.expired(None))
+        self.assertEqual([42], self.deleted)
+
+    async def test_an_attributed_rental_is_cleared_even_if_the_asset_is_gone(self):
+        """The ordinary case: somebody deleted the emoji by hand."""
+        await self.shop._expire_guild_rentals(self.guild(has_asset=False),
+                                              self.expired(111))
+        self.assertEqual([42], self.deleted)
+
+    async def test_a_transient_discord_error_keeps_the_row_for_the_next_pass(self):
+        guild = MagicMock()
+        guild.get_emoji.side_effect = RuntimeError("discord had a moment")
+        await self.shop._expire_guild_rentals(guild, self.expired(111))
+        self.assertEqual([], self.deleted,
+                         "an unknown failure is not evidence the asset is gone")
 
 
 if __name__ == "__main__":

@@ -734,6 +734,17 @@ table.data tbody tr[data-tier] input[readonly] { opacity: .7; }
 /* A row added but not yet saved, so it is visibly not part of the live banner. */
 table.data tbody tr.reward-new td { background: var(--surface-raised); }
 .reward-chance { white-space: nowrap; }
+/* The featured row's chance is the split itself rather than a share of a tier,
+   so it is marked as a different kind of number. */
+.reward-chance-featured { font-weight: 600; color: var(--accent); }
+.cell-featured { text-align: center; }
+/* A warning, not a rejection: an operator may deliberately pass through a state
+   where the featured reward is still in the standard pool. */
+.featured-notice {
+    display: block;
+    margin-top: 6px;
+    color: var(--warning);
+}
 
 /* Status pills */
 .pill {
@@ -1754,4 +1765,27 @@ input[type="color"] { width: 100%; height: 38px; padding: 2px; cursor: pointer; 
 .field-scope {
   color: var(--warning);
   font-weight: 600;
+}
+
+/* An editor page whose feature is switched off. The page stays usable — the
+   flag gates what members can do, not whether staff can configure it — so this
+   says so rather than the nav item disappearing. */
+.feature-notice {
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-md);
+    background: var(--warning-soft);
+    color: var(--text);
+    font-size: .84rem;
+}
+.nav-item-off > span { opacity: .55; }
+.nav-item-off::after {
+    content: "";
+    width: 6px;
+    height: 6px;
+    margin-left: auto;
+    border-radius: 50%;
+    background: var(--warning);
+    flex: 0 0 auto;
 }

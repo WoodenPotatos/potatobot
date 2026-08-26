@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import copy
+import hashlib
 import os
 import hmac
 import re
@@ -26,9 +27,11 @@ from cogs.utils import (
     t,
 )
 from dotenv import load_dotenv
-from flask import (Flask, jsonify, redirect, request, send_from_directory,
+from flask import (Flask, g, jsonify, redirect, request, send_from_directory,
                    session)
 from werkzeug.middleware.proxy_fix import ProxyFix
+
+import version
 
 import database
 import managed_messages
@@ -44,9 +47,11 @@ from feature_access import is_enabled, update_cached_features
 # Imported by name, not as a module: a route below is called
 # `settings_registry` and would shadow it.
 from settings_registry import (FEATURE_GROUP_ORDER, SETTING_DEFINITIONS,
-                               SettingValueType, wire_json_shape)
+                               SettingScope, SettingValueType, wire_json_shape)
 from settings_registry import legacy_config_value as settings_registry_legacy_config_value
 from version import version_display
+
+import logging_setup
 
 dashboard_logger = logging.getLogger("PotatoBot.Dashboard")
 
@@ -318,10 +323,58 @@ def brand_avatar():
                                max_age=86400)
 
 
+# The client files a browser must re-fetch when this installation changes.
+VERSIONED_ASSETS = ("script.js", "style.css", "theme.js")
+_shell_cache: dict[str, str] = {}
+
+
+def _asset_version() -> str:
+    """A token that changes whenever the served client changes.
+
+    The release version alone is not enough — a development edit does not bump
+    it — so the client files' own size and mtime go in too.
+    """
+    parts = [version.raw_version()]
+    for name in VERSIONED_ASSETS:
+        path = os.path.join(dashboard_dir, name)
+        try:
+            stat = os.stat(path)
+            parts.append(f"{name}:{stat.st_size}:{int(stat.st_mtime)}")
+        except OSError:
+            parts.append(f"{name}:missing")
+    return hashlib.blake2s("|".join(parts).encode("utf-8"), digest_size=6).hexdigest()
+
+
 @app.route("/")
 def index():
-    """Serve the static shell; JavaScript fills it from the active locale."""
-    return app.send_static_file("index.html")
+    """Serve the shell with its asset URLs stamped by the running version.
+
+    Without the stamp, nothing tells a browser that a deploy happened. This
+    installation sits behind a CDN that rewrote the origin's `no-cache` into
+    `max-age=14400`, so a browser held a **four-hour-old** `script.js` — and a
+    client fixed on the server stayed broken on the operator's screen, with the
+    old error still on it. A stamped URL is the only half of that we control:
+    the filename changes, so the cached copy is not a candidate at all, whatever
+    any CDN decides about TTLs.
+
+    The shell itself is `no-store`, because a cached shell would keep pointing at
+    the previous stamp and defeat the whole arrangement.
+    """
+    token = _asset_version()
+    rendered = _shell_cache.get(token)
+    if rendered is None:
+        with open(os.path.join(dashboard_dir, "index.html"), encoding="utf-8") as handle:
+            rendered = handle.read()
+        for name in VERSIONED_ASSETS:
+            rendered = rendered.replace(f'"{name}"', f'"{name}?v={token}"')
+        # Keyed by the token, so it is rebuilt exactly when the client changes
+        # and never grows beyond the versions seen since start.
+        _shell_cache.clear()
+        _shell_cache[token] = rendered
+    response = app.make_response(rendered)
+    response.headers["Content-Type"] = "text/html; charset=utf-8"
+    response.headers["Cache-Control"] = "no-store, must-revalidate"
+    return response
 
 
 @app.route("/api/locale")
@@ -634,16 +687,65 @@ def _refresh_authorized_guilds(session_id: str) -> list[str] | None:
     )
 
 
+# A read is refreshed too, but it must never be the thing that takes the
+# dashboard down. The two differ only in what happens when Discord is
+# unreachable: a write refuses, a read serves the last known answer.
+_MUTATION_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _refreshable_read(path: str) -> bool:
+    """A GET whose answer depends on this session's guild authority.
+
+    Only the per-guild API. `/api/session/touch`, `/auth/status`, the changelog,
+    the registry and every static file are either identity-free or need to work
+    while a permission refresh cannot.
+    """
+    return path.startswith("/api/guilds/")
+
+
+def _permission_refresh_unavailable(mutating: bool, cause: str):
+    """Discord did not answer. A read serves stale, a write refuses.
+
+    The cause is logged because the line without it said nothing: sixty-two
+    identical warnings in one evening named no status, no exception and no
+    session, so there was no way to tell an expired grant from an outage.
+    """
+    if mutating:
+        dashboard_logger.warning(
+            "Live Discord permission refresh failed for a dashboard mutation "
+            "(cause=%s); refusing.", cause,
+        )
+        return jsonify({"status": "error",
+                        "message": t("dashboard.permission_refresh_failed")}), 503
+    # A read falls back to the snapshot in the cookie. Refusing here would mean
+    # an unreachable Discord made the dashboard unreadable, which trades a
+    # thirty-second stale-permission window for a total outage — a worse
+    # failure, and one the operator cannot fix.
+    dashboard_logger.warning(
+        "Discord permission refresh failed for a dashboard read (cause=%s); "
+        "serving the session's last known guild list.", cause,
+    )
+    return None
+
+
 @app.before_request
 def recheck_mutation_guild_permissions():
-    """Do not authorize a mutation from a stale Discord permission snapshot.
+    """Do not authorize an action from a stale Discord permission snapshot.
 
     Hosts are re-derived from ADMIN_DISCORD_ID per request and their authority is
     installation-wide, so there is no per-guild grant to refresh for them. Every
     other session is refreshed at most once per PERMISSION_CACHE_SECONDS, which
     keeps a burst of saves from making one blocking Discord call each.
+
+    Guild **reads** are refreshed on the same schedule, because the idle window
+    slides on every request: without it an administrator who had just been
+    demoted kept reading a guild's settings and audit log until the twelve-hour
+    absolute cap, simply by continuing to click. What a read must not do is fail
+    closed — see `_read_only`.
     """
-    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+    mutating = request.method in _MUTATION_METHODS
+    if not mutating and not (request.method == "GET"
+                             and _refreshable_read(request.path)):
         return None
     if session.get("logged_in") is not True:
         return None
@@ -670,9 +772,25 @@ def recheck_mutation_guild_permissions():
 
     try:
         authorized = _refresh_authorized_guilds(session_id)
-    except (requests.RequestException, ValueError):
-        dashboard_logger.warning("Live Discord permission refresh failed for dashboard mutation.")
-        return jsonify({"status": "error", "message": t("dashboard.permission_refresh_failed")}), 503
+    except requests.HTTPError as exc:
+        # Discord answered, and the answer was no. A 401 means the grant is gone
+        # and a 403 means it is not allowed to ask — neither improves by waiting,
+        # so serving the cookie's snapshot would keep a revoked session working
+        # until the twelve-hour cap. This used to be swallowed by the same
+        # RequestException handler as a timeout, which is why an invalid token
+        # and an unreachable Discord were indistinguishable in the journal.
+        status = getattr(exc.response, "status_code", None)
+        if status is not None and 400 <= status < 500:
+            dashboard_logger.warning(
+                "Discord rejected a permission refresh (status=%s); ending the "
+                "session.", status,
+            )
+            _forget_session(session_id)
+            session.clear()
+            return unauthorized_response()
+        return _permission_refresh_unavailable(mutating, f"status={status}")
+    except (requests.RequestException, ValueError) as exc:
+        return _permission_refresh_unavailable(mutating, type(exc).__name__)
 
     if authorized is None:
         _forget_session(session_id)
@@ -682,6 +800,53 @@ def recheck_mutation_guild_permissions():
     _permission_cache.put(session_id, authorized)
     session["authorized_guild_ids"] = authorized
     return None
+
+
+# Above this, a dashboard request has stopped being slow and started being a
+# fault worth a line in the journal. The page reports "the server did not answer
+# in time" at twenty seconds, so anything approaching that is what an operator
+# will be asking about — and without this there was nothing to answer them with.
+SLOW_REQUEST_SECONDS = 3.0
+
+
+@app.before_request
+def record_request_start():
+    g.request_started_at = time.monotonic()
+
+
+@app.after_request
+def log_slow_requests(response):
+    """Name a request that took long enough for somebody to notice.
+
+    Path, method, status and duration only — never the body, the query string or
+    the session, which is the same rule the bot's timing logs follow.
+    """
+    started = getattr(g, "request_started_at", None)
+    if started is None:
+        return response
+    elapsed = time.monotonic() - started
+    if elapsed >= SLOW_REQUEST_SECONDS:
+        dashboard_logger.warning(
+            "Slow dashboard request (method=%s, path=%s, status=%s, duration_ms=%s)",
+            request.method, request.path, response.status_code,
+            round(elapsed * 1000),
+        )
+    return response
+
+
+@app.after_request
+def add_asset_cache_headers(response):
+    """A stamped asset is immutable; anything else is revalidated.
+
+    Long-caching is safe *because* the URL carries the version: the next deploy
+    asks for a different one. Without the stamp the same header would be the
+    bug it is replacing.
+    """
+    if request.args.get("v") and request.path.rsplit("/", 1)[-1] in VERSIONED_ASSETS:
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif request.path.endswith((".html", "/")):
+        response.headers.setdefault("Cache-Control", "no-store, must-revalidate")
+    return response
 
 
 @app.after_request
@@ -1220,6 +1385,78 @@ def settings_registry():
     })
 
 
+@app.route("/api/guilds/<int:guild_id>/items")
+def guild_item_list(guild_id):
+    """Every item this guild can sell, built-in and custom, in one list.
+
+    Nothing could assemble this before. `/api/item-catalog` serves mechanics with
+    no names, because `ItemDefinition` has no name field — a built-in item's text
+    lives in the `shop.items.<key>.*` locale family — and `/api/locale`
+    deliberately serves only the `dashboard` namespace, so the browser cannot
+    reach that text at all. The merge therefore happens here, which is also the
+    only place that can read a guild's live prices and its custom rows together.
+
+    It reads the way `/shop` reads in Discord, deliberately: the point is to see
+    what a member sees, in one place, instead of inferring it from a price field
+    on the settings page and a key in a table.
+    """
+    if not is_guild_authorized(guild_id):
+        return unauthorized_response()
+    language = request.args.get("lang", "")
+    if language not in available_languages():
+        language = settings_cache.setting(None, "language")
+    catalog = get_dashboard_locale_catalog(language).get("shop", {})
+    texts = catalog.get("items", {})
+
+    prices = database.run_read_sync(database.get_shop_prices, guild_id)
+    custom = database.run_read_sync(
+        database.get_shop_item_definitions, guild_id, language)
+
+    items = []
+    for key, definition in item_catalog.ITEM_DEFINITIONS.items():
+        entry = texts.get(key, {})
+        items.append({
+            "item_key": key,
+            "source": "builtin",
+            "name": entry.get("name") or key,
+            "description": entry.get("description") or entry.get("desc") or "",
+            "effect": definition.effect.value,
+            "value": definition.value,
+            # An unpriced built-in is not for sale, which is a real state: the
+            # gacha-only items have no shop price at all.
+            "price": prices.get(key, definition.shop_price),
+            "in_shop": definition.sold_in_shop,
+            "in_gacha": definition.drawable_in_gacha,
+            "enabled": True,
+            "editable": False,
+            "price_setting": f"shop_price_{key}" if definition.sold_in_shop else None,
+        })
+    for item in custom:
+        items.append({
+            "item_key": item["item_key"],
+            "source": "custom",
+            "name": item["name"] or item["item_key"],
+            "description": item["description"] or "",
+            "effect": item["template_type"],
+            "value": None,
+            "price": item["price"],
+            "in_shop": True,
+            "in_gacha": False,
+            "enabled": item["enabled"],
+            "editable": True,
+            "price_setting": None,
+            "revision": item["revision"],
+            # The editor and the enable/disable path both need these: the PATCH
+            # route reuses the creation validator, so a partial body is refused
+            # and every field has to be sent back unchanged.
+            "config": item["config"],
+            "texts": item["texts"],
+        })
+    return jsonify({"status": "success", "data": items,
+                    "limit": SHOP_ITEM_LIMIT,
+                    "custom_count": len(custom)})
+
+
 @app.route("/api/item-catalog")
 def item_catalog_registry():
     """Serve the shared built-in item catalog to the shop and gacha editors.
@@ -1305,6 +1542,23 @@ def guild_settings(guild_id):
                 raise RequestValidationError("dashboard.errors.changes_invalid")
             require_setting_key(change["key"])
             require_revision(change["revision"])
+            # An instance setting has no guild dimension: `set_guild_settings`
+            # routes it on the registry's word, not the caller's, so a guild
+            # admin saving `maintenance` here would stop the bot everywhere and
+            # file the audit row under their own guild, where the guilds it
+            # affected cannot see it. Refused for anyone but the host. Checked
+            # before the write rather than inside it, so one instance key in a
+            # batch refuses the batch — `set_guild_settings` is a single
+            # transaction and a partial apply would be worse.
+            # `.get`, because `require_setting_key` validates the shape of a key
+            # and not its membership — an unknown key reaches here and is
+            # rejected by `set_guild_settings`, which owns that judgement.
+            definition = SETTING_DEFINITIONS.get(change["key"])
+            if (definition is not None
+                    and definition.scope is SettingScope.INSTANCE
+                    and not is_host_session()):
+                raise RequestValidationError(
+                    "dashboard.errors.instance_setting_host_only")
         result = database.set_guild_settings(
             guild_id, actor_id(), payload["changes"]
         )
@@ -1659,7 +1913,15 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
     fields = {"template_type", "enabled", "price", "config", "hu"}
     if require_key:
         fields.add("item_key")
-    if set(payload) != fields or payload["template_type"] not in SAFE_SHOP_TEMPLATES:
+    # `en` is the one optional field. Hungarian is the primary language and what
+    # everything falls back to, exactly as in the shipped catalogs, so an
+    # installation is never forced to translate its own shop — but a custom item
+    # used to be stored under 'hu' whatever the language setting said, which made
+    # an English installation show Hungarian text for its own items while every
+    # built-in had both.
+    allowed = fields | {"en"}
+    if (not fields <= set(payload) <= allowed
+            or payload["template_type"] not in SAFE_SHOP_TEMPLATES):
         raise RequestValidationError("dashboard.errors.shop_template_invalid")
 
     key = None
@@ -1707,11 +1969,17 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
         or not 1 <= item_config["duration_days"] <= 3650
     ):
         raise RequestValidationError("dashboard.errors.shop_config_voucher")
-    hu = payload["hu"]
-    if not isinstance(hu, dict) or set(hu) != {"name", "description"} or not all(
-        isinstance(hu[field], str) and hu[field].strip() for field in hu
-    ):
-        raise RequestValidationError("dashboard.errors.shop_localization_required")
+    texts = {}
+    for language in database.CUSTOM_ITEM_LANGUAGES:
+        if language not in payload:
+            continue
+        entry = payload[language]
+        if not isinstance(entry, dict) or set(entry) != {"name", "description"} or not all(
+            isinstance(entry[field], str) and entry[field].strip() for field in entry
+        ):
+            raise RequestValidationError("dashboard.errors.shop_localization_required")
+        texts[language] = {"name": entry["name"].strip(),
+                           "description": entry["description"].strip()}
     if template == "coin_bundle":
         if set(item_config) != {"amount", "repeatable"} or not isinstance(item_config.get("repeatable"), bool):
             raise RequestValidationError("dashboard.errors.shop_config_coin_bundle")
@@ -1725,7 +1993,7 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
         "enabled": payload["enabled"],
         "price": price,
         "config": item_config,
-        "hu": {"name": hu["name"].strip(), "description": hu["description"].strip()},
+        **texts,
     }
 
 
@@ -1735,7 +2003,7 @@ def create_guild_shop_item(guild_id):
         return unauthorized_response()
     try:
         item = _validate_shop_item(require_json_object(), require_key=True)
-        key, price, hu = item["item_key"], item["price"], item["hu"]
+        key, price = item["item_key"], item["price"]
         payload = item
         timestamp = datetime.now(timezone.utc).isoformat()
         with database.get_connection() as conn:
@@ -1755,11 +2023,16 @@ def create_guild_shop_item(guild_id):
                 (guild_id, key, payload["template_type"], int(payload["enabled"]), price,
                  json.dumps(payload["config"], sort_keys=True), actor_id(), timestamp),
             )
-            conn.execute(
-                "INSERT INTO shop_item_localizations "
-                "(guild_id, item_key, language, name, description) VALUES (?, ?, 'hu', ?, ?)",
-                (guild_id, key, hu["name"].strip(), hu["description"].strip()),
-            )
+            for language in database.CUSTOM_ITEM_LANGUAGES:
+                if language not in payload:
+                    continue
+                conn.execute(
+                    "INSERT INTO shop_item_localizations "
+                    "(guild_id, item_key, language, name, description) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (guild_id, key, language, payload[language]["name"],
+                     payload[language]["description"]),
+                )
             # Written on the same connection so the item and its audit row
             # commit together; a separate write could leave the item unaudited.
             database.write_settings_audit(
@@ -2317,6 +2590,49 @@ def guild_fulfillment(guild_id):
     return jsonify({"status": "success", "data": database.run_read_sync(database.get_fulfillment_requests, guild_id)})
 
 
+@app.route("/api/guilds/<int:guild_id>/entitlements", methods=["GET"])
+def guild_entitlements(guild_id):
+    """What this server is currently paying out, and for how much longer.
+
+    Only `timed_entitlements` has both a member and a real expiry. `rented_items`
+    has an expiry but **no user column at all**, so those rows cannot be
+    attributed to anyone and are deliberately not merged in here; and
+    `user_inventory` has no time dimension — a loaded die is a quantity, not a
+    countdown — so consumables are not entitlements and belong on the item page.
+    """
+    if not is_guild_authorized(guild_id):
+        return unauthorized_response()
+    now = datetime.now(timezone.utc)
+    rows = database.run_read_sync(
+        database.get_active_entitlements, guild_id, now.isoformat())
+    data = []
+    for row in rows:
+        try:
+            expires = datetime.fromisoformat(row["expires_at"])
+        except (TypeError, ValueError):
+            # A row with an unreadable expiry is a data fault, not a reason to
+            # fail the page: show it with no countdown rather than hiding it.
+            dashboard_logger.warning(
+                "Entitlement has an unreadable expiry (entitlement_id=%s)",
+                row["entitlement_id"])
+            remaining = None
+        else:
+            remaining = max(0, int((expires - now).total_seconds()))
+        data.append({
+            "entitlement_id": row["entitlement_id"],
+            # A snowflake crosses the wire as a string.
+            "user_id": str(row["user_id"]),
+            "kind": row["entitlement_key"],
+            "reward_key": row["reward_key"],
+            "source_type": row["source_type"],
+            "discord_item_id": (str(row["discord_item_id"])
+                                if row["discord_item_id"] else None),
+            "expires_at": row["expires_at"],
+            "remaining_seconds": remaining,
+        })
+    return jsonify({"status": "success", "data": data})
+
+
 @app.route("/api/guilds/<int:guild_id>/fulfillment/<int:request_id>", methods=["POST"])
 def complete_guild_fulfillment(guild_id, request_id):
     if not is_guild_authorized(guild_id):
@@ -2341,6 +2657,11 @@ def complete_guild_fulfillment(guild_id, request_id):
 
 
 def run_api():
+    # Standalone only: started from main.py the loggers are already configured,
+    # and configure_logger is idempotent so this is a no-op there. Without it a
+    # separate dashboard process had no handlers at all, and waitress.serve's
+    # own basicConfig() then decided the format of every line it emitted.
+    logging_setup.configure_dashboard_logging()
     dashboard_logger.info(
         "Dashboard API is starting on %s:%s.",
         deployment_settings.dashboard_host,
@@ -2351,7 +2672,11 @@ def run_api():
         app,
         host=deployment_settings.dashboard_host,
         port=deployment_settings.dashboard_port,
-        threads=4,
+        # Eight rather than four. A request thread can block for the length of a
+        # Discord call — the per-guild permission refresh allows ten seconds —
+        # so four threads is four concurrent page loads before the rest queue,
+        # which is what the journal's "Task queue depth is 3" warnings were.
+        threads=8,
     )
 
 
@@ -2395,7 +2720,9 @@ async def execute_member_erasure(bot, action) -> str | None:
         )
     except database.ValidationError:
         return "invalid_subject"
-    except database.DatabaseOperationError:
+    except Exception:
+        # Broad on purpose: this settles one outbox action, and an escaping
+        # exception would leave the operator with no error code at all.
         dashboard_logger.exception("Operator-requested erasure failed.")
         return "internal_error"
     dashboard_logger.info(

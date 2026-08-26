@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.4.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.6.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -131,7 +131,7 @@ rare-tier totals while reducing the 3-star pool, and pull 100 guarantees a 5-sta
 `/inventory` lists consumables and vouchers; `/redeem` activates premium or creates an
 asset-fulfillment request.
 
-The shop and the gacha hand out the same goods. Lockpicks, loaded dice and vault gloves
+The shop and the gacha hand out the same goods. Lockpicks, loaded dice and vault drills
 are one stackable inventory item either way, and a vault protects the same reserve
 whichever system granted it. Only the way you get one differs: buying a vault you already
 own is refused and costs nothing, while pulling a duplicate pays the configured
@@ -172,6 +172,18 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.6.0-beta.1
+
+- **Four casino items, and the loaded die now works in roulette.** A stacked deck deals your blackjack hand twice and keeps the better one, a lucky charm spins the slots twice and keeps the better payout, and a metal detector marks a minesweeper tile safe before you start. All four are buyable and drawable, and each is spent only by a paid round that actually resolves — win or lose. Getting there meant moving roulette's and slots' outcomes into their settlement transactions, which makes those two games atomic whether or not you own anything.
+- **`/pity`** shows your pity on a banner and the last five 5-stars you pulled, with the pity each one landed at. `/profile` gains a pity line too. The data has been recorded since the gacha shipped and nothing had ever read it.
+- **The item creator is rebuilt.** Four of its six kinds used to hand you an empty JSON box and expect you to type a role id and a shape nothing told you about; now every kind has real fields, a role picker, and no JSON anywhere. Items can be edited rather than only enabled, disabled or deleted.
+- **One list of every item.** Built-in items were visible only as a price field called "Loaded die price" — there was no way to see what an item does, or which ones the gacha can give, without reading the bot's own code. The page now reads the way `/shop` does, in your dashboard language, with your own items alongside.
+- **A custom item can have English text.** It was stored under Hungarian whatever your language setting said, so an English server showed Hungarian for its own items while every built-in had both. English is optional per field and falls back, so you are never made to translate.
+- **Redeems is its own page**, with the queue waiting on staff and a list of everything the server is currently granting and how long is left on each. It is not tied to the shop feature: a redemption may have come from the gacha, and a member has paid for it either way.
+- **Redeeming a voucher for an emoji, sticker or sound opens a ticket**, so you and the member can agree what to make instead of a request id appearing in a queue with no conversation attached. With tickets off it behaves as before.
+- Ticket creation lived in two hand-written copies that had already drifted apart; there is one now, and rental tickets are finally typed as rentals.
+- …and 24 more, in [CHANGELOG.md](CHANGELOG.md).
+
 ### 2.4.0-beta.1
 
 - **Five public betas shipped with a private heading on the front page.** `README.md` renders the three most recent changelog sections, and promotion renamed only the top one, so a stale `2.0.0-rc.1 - Unreleased` sat under every release and 2.1 and 2.2 were never mentioned at all. Promotion now merges the whole leading run of unreleased sections, and the publisher refuses a snapshot where an `Unreleased` survives, where the README does not name the release, or where it has lost one of its generated blocks.
@@ -195,18 +207,6 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - A reward row on a banner nobody has saved yet is editable, like one you added. The synthesised standard banner rendered its rows as committed, which is why they behaved differently from your own. And the reward table explains what "amount" means, which depends on the kind.
 - Casino and Everydle are one master toggle each, with the individual games as sub-toggles on their own settings page. Eight near-identical games in the flat Features list pushed everything else off it; the list is 27 entries instead of 35. A child depends on its master, so the existing cascade switches the games off with it — `parent` is only where it renders.
 - …and 41 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.0.0-rc.1
-
-- Added transactional schema-4 wager recovery and atomic booster reward claims.
-- Made feature policy fail closed until its guild cache is ready.
-- Hardened YouTube extraction, music queues, ticket transcripts, moderation validation, interaction permissions, and bounded runtime state.
-- Added typed data-scope resolution foundations and explicit legacy-guild adoption for multi-guild migration.
-- Replaced Flask's development server path with Waitress and added dashboard rate limits and response security headers.
-- Added pinned dependencies, Python 3.12-3.14 CI, security policy, threat model, privacy notes, and release checklist.
-- Added schema-5 typed settings, configurable shop templates, fixed vault reserves, inventory, vouchers, timed entitlements, fulfillment, builder drafts, and a permission-rechecked dashboard action outbox.
-- Added toggleable Potato Gacha with atomic one/ten pulls, 75-pull soft pity, 100-pull hard pity, immutable pull history, loaded dice, robbery gloves, and duplicate-vault compensation.
-- …and 73 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

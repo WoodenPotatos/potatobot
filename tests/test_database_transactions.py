@@ -78,8 +78,10 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(result["stats"][0], 110)
 
     def test_interactive_wager_settles_exactly_once(self):
-        balance = database.begin_interactive_wager("wager-1", 10, 1, "mines", 20)
-        self.assertEqual(balance, 80)
+        reservation = database.begin_interactive_wager("wager-1", 10, 1, "mines", 20)
+        self.assertEqual(reservation["balance"], 80)
+        # No item asked for, so none was spent.
+        self.assertFalse(reservation["consumed"])
         results = self.run_parallel(
             lambda: database.resolve_interactive_wager(
                 "wager-1", 1, credit=40, win_inc=1, outcome="cashout"

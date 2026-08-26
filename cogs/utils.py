@@ -365,10 +365,17 @@ async def update_top_ranker_role(guild):
     if current_leader and current_leader.id == top_user_id:
         return 
 
+    # Resolve the new holder *before* stripping the old one. A NotFound from
+    # fetch_member used to leave the role on nobody until the next XP change.
+    try:
+        new_leader = (guild.get_member(top_user_id)
+                      or await guild.fetch_member(top_user_id))
+    except discord.HTTPException:
+        return
+
     if current_leader:
         await current_leader.remove_roles(role)
-        
-    new_leader = guild.get_member(top_user_id) or await guild.fetch_member(top_user_id)
+
     if new_leader:
         await new_leader.add_roles(role)
         
@@ -718,4 +725,38 @@ def can_self_assign_role(guild, role):
             getattr(role.permissions, permission, False)
             for permission in privileged_permissions
         )
+    )
+
+
+# --- Background loop supervision -------------------------------------------
+#
+# A discord.py `tasks.loop` stops permanently on an unhandled exception. Loops
+# started from `on_ready` at least come back on a gateway reconnect; loops
+# started in a cog's `__init__` have no revival path at all, so one transient
+# database error silently ends premium-role revocation or rental cleanup for the
+# lifetime of the process. Every loop therefore gets an `@<loop>.error` handler
+# routed through here.
+
+LOOP_RESTART_DELAY_SECONDS = 30
+
+
+def restart_background_loop(bot, loop, name, logger):
+    """Restart a stopped loop, unless the bot is shutting down."""
+    if bot.is_closed() or loop.is_running():
+        return
+    try:
+        loop.restart()
+        logger.warning("Background loop restarted (loop=%s)", name)
+    except RuntimeError:
+        logger.exception("Background loop restart failed (loop=%s)", name)
+
+
+async def handle_loop_error(bot, loop, name, error, logger):
+    """Log a loop's fatal exception and schedule it to come back."""
+    logger.exception(
+        "Background loop failed; restart scheduled (loop=%s, error=%s)",
+        name, type(error).__name__, exc_info=error,
+    )
+    bot.loop.call_later(
+        LOOP_RESTART_DELAY_SECONDS, restart_background_loop, bot, loop, name, logger
     )

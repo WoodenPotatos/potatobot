@@ -529,6 +529,18 @@ SETTING_DEFINITIONS = {
                  feature="moderation_warn_alerts",
                  channel_types=TEXT_CHANNEL_TYPES,
                  bot_permissions=("send_messages", "embed_links")),
+        # Where the /warn embed is published. A member-readable channel, which is
+        # why it declares member permissions where moderation_log_channel
+        # deliberately does not: that one carries the filter's matched term and
+        # threshold reports and is staff-only. Owned by `moderation` rather than
+        # `moderation_warn_alerts`, because that flag governs the alert and a
+        # warning must still be published with alerts switched off. Unset means
+        # the invoking channel, which is what /warn did before this existed.
+        _setting("warn_announce_channel", "moderation", "warnings",
+                 SettingValueType.CHANNEL, None, feature="moderation",
+                 channel_types=TEXT_CHANNEL_TYPES,
+                 bot_permissions=("send_messages", "embed_links"),
+                 member_permissions=("view_channel",)),
         # Roles the filter never acts on. Recognition only — the bot reads these
         # roles and never grants them, so the selector must not hide a role that
         # sits above the bot.

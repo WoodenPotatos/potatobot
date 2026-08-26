@@ -8,8 +8,10 @@ lifetime. Each test here pins one of those behaviours.
 
 import ast
 import asyncio
+import builtins
 import json
 import os
+import symtable
 import tempfile
 import threading
 import unittest
@@ -25,7 +27,7 @@ from feature_access import (
     is_enabled,
     maintenance_blocks,
     require_interaction_feature,
-    update_cached_feature,
+    seed_cached_feature,
 )
 from settings_registry import FEATURE_DEFINITIONS
 
@@ -87,21 +89,21 @@ class MaintenanceGateTests(unittest.TestCase):
             self.assertFalse(maintenance_blocks(GUILD, MEMBER, command_name))
 
     def test_component_callbacks_are_refused_during_maintenance(self):
-        update_cached_feature(GUILD.id, "economy", True)
+        seed_cached_feature(GUILD.id, "economy", True)
         interaction = fake_interaction()
         allowed = asyncio.run(require_interaction_feature(interaction, "economy"))
         self.assertFalse(allowed)
         self.assertEqual(len(interaction.response.messages), 1)
 
     def test_already_acknowledged_interactions_are_refused_via_followup(self):
-        update_cached_feature(GUILD.id, "economy", True)
+        seed_cached_feature(GUILD.id, "economy", True)
         interaction = fake_interaction(done=True)
         allowed = asyncio.run(require_interaction_feature(interaction, "economy"))
         self.assertFalse(allowed)
         self.assertEqual(len(interaction.followup.messages), 1)
 
     def test_maintenance_outranks_an_enabled_feature(self):
-        update_cached_feature(GUILD.id, "economy", True)
+        seed_cached_feature(GUILD.id, "economy", True)
         self.assertTrue(is_enabled(GUILD.id, "economy"))
         interaction = fake_interaction()
         self.assertFalse(asyncio.run(require_interaction_feature(interaction, "economy")))
@@ -112,7 +114,7 @@ class MaintenanceGateTests(unittest.TestCase):
 
     def test_normal_operation_allows_the_same_component(self):
         config["bot_settings"]["maintenance"] = False
-        update_cached_feature(GUILD.id, "economy", True)
+        seed_cached_feature(GUILD.id, "economy", True)
         interaction = fake_interaction()
         self.assertTrue(asyncio.run(require_interaction_feature(interaction, "economy")))
 
@@ -284,14 +286,48 @@ class ConfigSnapshotTests(unittest.TestCase):
         configured. The result halved a 500 MB journal cap for nothing and made
         a grep count read double.
         """
-        source = (ROOT / "main.py").read_text(encoding="utf-8")
-        self.assertIn("configured.propagate = False", source,
+        setup = (ROOT / "logging_setup.py").read_text(encoding="utf-8")
+        self.assertIn("configured.propagate = False", setup,
                       "a configured logger must not also reach the root logger")
+        source = (ROOT / "main.py").read_text(encoding="utf-8")
         self.assertIn("bot.run(TOKEN, log_handler=None)", source,
                       "discord.py must not configure the `discord` logger too")
         # And every logger the bot configures goes through the one helper.
         for name in ("'discord'", "'PotatoBot'", "'waitress'"):
             self.assertIn(f"configure_logger({name})", source)
+
+    def test_a_standalone_dashboard_configures_its_own_logging(self):
+        """The two-process split got no configuration at all.
+
+        The handlers lived in `main.py`, so `python dashboard_api.py` — the
+        split this codebase prefers beyond the private deployment — started with
+        none of them, and `waitress.serve`'s `basicConfig()` then decided the
+        format of every line it emitted, with no rotating file behind it. A cog
+        cannot import `main` and neither can the dashboard, so the setup lives in
+        a module both reach.
+        """
+        api = (ROOT / "dashboard_api.py").read_text(encoding="utf-8")
+        self.assertIn("logging_setup.configure_dashboard_logging()", api)
+        setup = (ROOT / "logging_setup.py").read_text(encoding="utf-8")
+        for name in ('"PotatoBot"', '"waitress"'):
+            self.assertIn(f"configure_logger({name})", setup)
+
+    def test_configuring_a_logger_twice_does_not_double_it(self):
+        """Both entry points may configure the same logger in one process."""
+        import logging
+
+        import logging_setup
+
+        name = "PotatoBot.TestDoubleConfigure"
+        try:
+            first = logging_setup.configure_logger(name)
+            count = len(first.handlers)
+            self.assertGreater(count, 0)
+            again = logging_setup.configure_logger(name)
+            self.assertEqual(count, len(again.handlers))
+            self.assertFalse(again.propagate)
+        finally:
+            logging.getLogger(name).handlers.clear()
 
     def test_nothing_in_the_dashboard_writes_config_json(self):
         """The mirror is gone, and this is what stops it coming back.
@@ -397,5 +433,201 @@ class DashboardReadPathTests(unittest.TestCase):
         self.assertEqual([], offenders)
 
 
+class UndefinedNameTests(unittest.TestCase):
+    """A name a module reads must actually exist.
+
+    Three features were broken at once by this, all from one refactor that
+    removed a name and left a reference: `/checkperms` passed a `config` that was
+    no longer imported, `/manage` read a `ctx` it never had, and the socials
+    loops read a `social_cfg` that was deleted. Each raised `NameError` the moment
+    the line ran, and `compileall` cannot see any of them because a free variable
+    is resolved at call time.
+
+    Nothing in the suite caught them. `tests/test_cog_loading.py` executes module
+    scope and `__init__` only. The nearest check,
+    `test_settings_cache.NoCogReadsTheLegacyFileTests`, is what *forced* the
+    `config` import out of the cogs — and it matches `config[...]` and
+    `config.get(...)`, so a bare `config` passed as an argument was invisible to
+    the very test that created the hole.
+
+    `symtable` does the scoping properly, and needs no new dependency.
+    """
+
+    # `logs`-style module dunders resolve as globals and are always present at
+    # runtime; they are not what this test is looking for.
+    ALLOWED = frozenset({"__file__", "__name__", "__doc__", "__package__",
+                         "__spec__", "__loader__", "__builtins__",
+                         "__conditional_annotations__"})
+
+    def modules(self):
+        """The runtime tree. Tests are excluded: they legitimately reference
+        names a harness injects."""
+        roots = [ROOT / name for name in (
+            "main.py", "database.py", "dashboard_api.py", "managed_messages.py",
+            "settings_cache.py", "settings_registry.py", "feature_access.py",
+            "permission_audit.py", "item_catalog.py", "deployment.py",
+            "bounded.py", "minigame_data.py", "version.py",
+        )]
+        return sorted(ROOT.glob("cogs/*.py")) + [p for p in roots if p.exists()]
+
+    def undefined(self, path):
+        source = path.read_text(encoding="utf-8")
+        table = symtable.symtable(source, str(path), "exec")
+        module_level = {symbol.get_name() for symbol in table.get_symbols()}
+        found = []
+
+        def walk(scope):
+            for symbol in scope.get_symbols():
+                name = symbol.get_name()
+                # `is_local()` and `is_free()` are load-bearing: on Python 3.14 an
+                # ordinary parameter reports `is_global()` as well, so without
+                # them every function argument is a false positive.
+                if (symbol.is_global()
+                        and not symbol.is_local()
+                        and not symbol.is_free()
+                        and symbol.is_referenced()
+                        and name not in module_level
+                        and name not in self.ALLOWED
+                        and not hasattr(builtins, name)):
+                    found.append(f"{path.name}:{scope.get_name()}() reads "
+                                 f"undefined {name!r}")
+            for child in scope.get_children():
+                walk(child)
+
+        walk(table)
+        return found
+
+    def test_the_modules_were_actually_found(self):
+        """Guards the premise: an empty file list would pass vacuously."""
+        names = [path.name for path in self.modules()]
+        self.assertIn("socials.py", names)
+        self.assertIn("dashboard_api.py", names)
+        self.assertGreater(len(names), 20)
+
+    def test_no_module_reads_a_name_that_does_not_exist(self):
+        problems = [problem for path in self.modules()
+                    for problem in self.undefined(path)]
+        self.assertEqual([], problems)
+
+    def test_the_check_would_catch_a_planted_reference(self):
+        """A check that never fires is worse than no check."""
+        with tempfile.TemporaryDirectory() as scratch:
+            planted = Path(scratch) / "planted.py"
+            planted.write_text(
+                "def handler(guild):\n"
+                "    return social_cfg.get('twitch_role_id')\n",
+                encoding="utf-8")
+            self.assertEqual(
+                ["planted.py:handler() reads undefined 'social_cfg'"],
+                self.undefined(planted))
+
+    def test_an_ordinary_parameter_is_not_a_finding(self):
+        """The false-positive case the `is_local()` condition exists for."""
+        with tempfile.TemporaryDirectory() as scratch:
+            innocent = Path(scratch) / "innocent.py"
+            innocent.write_text(
+                "import json\n"
+                "TOP = 1\n"
+                "def handler(self, ctx, *args, **kwargs):\n"
+                "    view = json.dumps(TOP)\n"
+                "    return [view for _ in ctx]\n",
+                encoding="utf-8")
+            self.assertEqual([], self.undefined(innocent))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+def _command_functions():
+    """Every hybrid or application command body in `cogs/`, as (path, node)."""
+    for path in sorted((ROOT / "cogs").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                dumped = ast.dump(decorator)
+                if "hybrid_command" in dumped or (
+                    "app_commands" in dumped and "command" in dumped
+                ):
+                    yield path, node
+                    break
+
+
+class InteractionAcknowledgementTests(unittest.TestCase):
+    """A command body must not acknowledge its own interaction.
+
+    `PotatoCommandTree.interaction_check` defers every non-modal application
+    command using its declared `COMMAND_POLICIES` visibility, before the body
+    runs. A second `ctx.defer()` therefore raises `InteractionResponded` and the
+    command never executes — which is exactly what `/mydata` did, on every
+    invocation, until it showed up in the deployment's journal. Nothing catches
+    it: the body compiles, the tests that load cogs only execute module scope,
+    and the failure needs someone to actually run the command.
+
+    Component and modal callbacks are *separate* interactions and must keep
+    acknowledging themselves, so this looks only at command bodies.
+    """
+
+    def test_the_premise_holds(self):
+        """A scan that finds no commands would pass regardless."""
+        self.assertGreater(len(list(_command_functions())), 30)
+
+    def test_no_command_body_defers(self):
+        offenders = []
+        for path, node in _command_functions():
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call):
+                    continue
+                if getattr(call.func, "attr", "") != "defer":
+                    continue
+                offenders.append(
+                    f"{path.relative_to(ROOT)}:{call.lineno} in {node.name}"
+                )
+        self.assertEqual([], offenders)
+
+
+class ResponseVisibilityTests(unittest.TestCase):
+    """A PRIVATE command must not reply publicly through `ctx.send`.
+
+    That direction is what strands a message reference. The tree defers
+    ephemerally, the body sends publicly, and `PotatoContext.send` resolves the
+    mismatch by deleting the original response — leaving Discord's "used
+    /command" header above the reply pointing at a message that no longer
+    exists, which the client draws as "Message could not be loaded". It happened
+    on every successful `/gacha` pull.
+
+    The opposite direction — a PUBLIC command with ephemeral refusals — is the
+    intended, rare use of the swap and stays allowed.
+    """
+
+    def test_no_private_command_sends_publicly(self):
+        from feature_access import COMMAND_POLICIES, ResponsePolicy
+
+        offenders = []
+        for path, node in _command_functions():
+            policy = COMMAND_POLICIES.get(node.name)
+            if policy is None or policy.response is not ResponsePolicy.PRIVATE:
+                continue
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call):
+                    continue
+                func = call.func
+                if not (getattr(func, "attr", "") == "send"
+                        and isinstance(getattr(func, "value", None), ast.Name)
+                        and func.value.id == "ctx"):
+                    continue
+                ephemeral = None
+                for keyword in call.keywords:
+                    if keyword.arg == "ephemeral":
+                        ephemeral = keyword.value
+                # Anything that is not a literal True. A conditional is flagged
+                # too, because a PRIVATE command that *can* reply publicly hits
+                # the swap on exactly the branch where it does.
+                if not (isinstance(ephemeral, ast.Constant)
+                        and ephemeral.value is True):
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}:{call.lineno} in {node.name}"
+                    )
+        self.assertEqual([], offenders)

@@ -294,16 +294,20 @@ class LocaleLookupTests(unittest.TestCase):
 class JavaScriptIsActuallyRunTests(unittest.TestCase):
     """A test that skips itself is a test that does not exist.
 
-    Four tests drive `dashboard/script.js` through Node and call `skipTest` when
-    it is missing. CI installed no Node, so all four skipped and reported green —
-    and they are precisely the checks guarding the defects that reached the
-    deployment. This asserts the workflow installs it, because the failure mode
-    of the guard is silence.
+    Several tests drive `dashboard/script.js` through Node and call `skipTest`
+    when it is missing. CI installed no Node, so all of them skipped and reported
+    green — and they are precisely the checks guarding the defects that reached
+    the deployment. This asserts the workflow installs it, because the failure
+    mode of the guard is silence. Any new Node-driven test belongs in the list
+    below, or it inherits exactly the invisibility this exists to prevent.
     """
 
     def test_ci_installs_node(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("actions/setup-node", workflow)
+        # And the one test-only package, or the boot test skips in CI —
+        # which is the silence this whole class exists to prevent.
+        self.assertIn("npm install", workflow)
 
     def test_the_skip_is_the_only_reason_they_would_not_run(self):
         """If Node is here, none of them may skip — a skip then means the
@@ -314,6 +318,9 @@ class JavaScriptIsActuallyRunTests(unittest.TestCase):
             "tests.test_settings_cache.RowEditorReportsCleanTests",
             "tests.test_localization_policy.LocaleLookupTests",
             "tests.test_managed_messages.CreatorRoundTripTests",
+            "tests.test_gacha.FeaturedChanceFormulaTests",
+            "tests.test_item_creator.TemplateRoundTripTests",
+            "tests.test_dashboard_boot.DashboardBootTests",
         ])
         result = unittest.TestResult()
         suite.run(result)

@@ -13,7 +13,7 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from discord.ext import commands, tasks
-from cogs.utils import guild_setting_sync, t
+from cogs.utils import guild_setting_sync, handle_loop_error, t
 from feature_access import is_enabled
 
 social_logger = logging.getLogger("PotatoBot.Socials")
@@ -30,9 +30,13 @@ class Socials(commands.Cog):
         # guild is known. It is reported from the poll instead, once per guild.
         self._warned_missing_credentials = set()
         
-        # In-memory notification state prevents duplicate announcements between polls.
+        # In-memory notification state prevents duplicate announcements between
+        # polls. Both are keyed by (guild_id, …): the loops iterate guilds, so a
+        # bare streamer login or channel id meant two guilds watching the same
+        # source announced it only in whichever was polled first — and the
+        # second's own check was already satisfied, so it never caught up.
         self.live_twitch = set()
-        self.latest_videos = {} 
+        self.latest_videos = {}
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -109,6 +113,9 @@ class Socials(commands.Cog):
         channel_id = guild_setting_sync(guild.id, "social_notification_channel")
         channel = guild.get_channel(channel_id) if channel_id else None
         twitch_streamers = guild_setting_sync(guild.id, "twitch_streamers")
+        # Read once per poll, not once per live stream. The key is `twitch_role`;
+        # `twitch_role_id` was the `config.json` path this cog stopped reading.
+        role_id = guild_setting_sync(guild.id, "twitch_role")
         if not channel or not twitch_streamers:
             return
         if not (self.twitch_client_id and self.twitch_client_secret):
@@ -138,8 +145,7 @@ class Socials(commands.Cog):
 
                 for stream_info in streams:
                     streamer_login = stream_info['user_name'].lower()
-                    if streamer_login not in self.live_twitch:
-                        self.live_twitch.add(streamer_login)
+                    if (guild.id, streamer_login) not in self.live_twitch:
                         embed = discord.Embed(
                             title=t("socials.twitch_live_title", streamer=stream_info['user_name']),
                             description=t("socials.twitch_live_desc", title=stream_info['title'], game=stream_info['game_name']),
@@ -149,8 +155,12 @@ class Socials(commands.Cog):
                         thumb_url = stream_info['thumbnail_url'].replace("{width}", "1280").replace("{height}", "720")
                         embed.set_image(url=thumb_url)
 
-                        role_id = social_cfg.get("twitch_role_id")
                         ping_msg = f"<@&{role_id}>" if role_id else ""
+                        # Marked live only *after* the send lands, exactly as the
+                        # YouTube path below. Recording it first meant a single
+                        # Forbidden from a mis-permissioned channel suppressed
+                        # that stream's go-live notice for as long as it stayed
+                        # live, with the traceback as the only trace of it.
                         await channel.send(
                             content=ping_msg,
                             embed=embed,
@@ -158,14 +168,23 @@ class Socials(commands.Cog):
                                 everyone=False, roles=True, users=False
                             ),
                         )
+                        self.live_twitch.add((guild.id, streamer_login))
 
-                for saved_streamer in list(self.live_twitch):
-                    if saved_streamer not in currently_live_logins:
-                        self.live_twitch.remove(saved_streamer)
+                for tracked in [entry for entry in self.live_twitch
+                                if entry[0] == guild.id]:
+                    if tracked[1] not in currently_live_logins:
+                        self.live_twitch.discard(tracked)
 
     @twitch_check_loop.before_loop
     async def before_twitch_check(self):
         await self.bot.wait_until_ready()
+
+    @twitch_check_loop.error
+    async def twitch_check_loop_error(self, error):
+        await handle_loop_error(
+            self.bot, self.twitch_check_loop, "twitch_check_loop", error,
+            social_logger,
+        )
 
     # YouTube RSS polling.
     @tasks.loop(minutes=5)
@@ -180,6 +199,7 @@ class Socials(commands.Cog):
         channel_id = guild_setting_sync(guild.id, "social_notification_channel")
         channel = guild.get_channel(channel_id) if channel_id else None
         yt_channels = guild_setting_sync(guild.id, "youtube_channels")
+        role_id = guild_setting_sync(guild.id, "youtube_role")
         if not channel or not yt_channels:
             return
 
@@ -203,10 +223,13 @@ class Socials(commands.Cog):
                         title = entry.find('atom:title', ns).text
                         link = entry.find('atom:link', ns).attrib['href']
 
-                        if yt_id not in self.latest_videos:
-                            self.latest_videos[yt_id] = video_id
-                        elif self.latest_videos[yt_id] != video_id:
-                            self.latest_videos[yt_id] = video_id
+                        seen = self.latest_videos.get((guild.id, yt_id))
+                        if seen is None:
+                            # First sight of this channel in this guild: remember
+                            # where it is rather than announcing whatever the
+                            # back catalogue happens to end with.
+                            self.latest_videos[(guild.id, yt_id)] = video_id
+                        elif seen != video_id:
                             embed = discord.Embed(
                                 title=t("socials.youtube_new_video_title", channel=channel_name),
                                 description=t("socials.youtube_new_video_desc", title=title),
@@ -215,8 +238,11 @@ class Socials(commands.Cog):
                             )
                             embed.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
 
-                            role_id = social_cfg.get("youtube_role_id")
                             ping_msg = f"<@&{role_id}>" if role_id else ""
+                            # Marked seen only *after* the send lands. It used to
+                            # be recorded first, so an announcement that failed
+                            # was never retried — the video stayed "seen" and the
+                            # traceback was the only trace of it.
                             await channel.send(
                                 content=ping_msg,
                                 embed=embed,
@@ -224,6 +250,7 @@ class Socials(commands.Cog):
                                     everyone=False, roles=True, users=False
                                 ),
                             )
+                            self.latest_videos[(guild.id, yt_id)] = video_id
                 except Exception:
                     social_logger.exception(
                         "YouTube RSS processing failed for channel %s.", yt_id
@@ -232,6 +259,13 @@ class Socials(commands.Cog):
     @youtube_rss_loop.before_loop
     async def before_youtube_rss_check(self):
         await self.bot.wait_until_ready()
+
+    @youtube_rss_loop.error
+    async def youtube_rss_loop_error(self, error):
+        await handle_loop_error(
+            self.bot, self.youtube_rss_loop, "youtube_rss_loop", error,
+            social_logger,
+        )
 
 async def setup(bot):
     await bot.add_cog(Socials(bot))

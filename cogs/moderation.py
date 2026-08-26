@@ -459,7 +459,27 @@ class Moderation(commands.Cog):
                                 count=record["total"],
                                 tag_count=record["tag_count"]))
     
-        await ctx.send(embed=embed)
+        # Published to the configured warnings channel when there is one, so a
+        # guild can let members read their own record without also handing them
+        # the staff log. Unset means the invoking channel, which is what this did
+        # before the setting existed — the one place where the usual "unset means
+        # skip" would be wrong, because a /warn that produced no visible output
+        # would look like a broken command.
+        announce_id = guild_setting_sync(ctx.guild.id, "warn_announce_channel")
+        announce = ctx.guild.get_channel(announce_id) if announce_id else None
+        if announce is None or announce == ctx.channel:
+            await ctx.send(embed=embed)
+        else:
+            try:
+                await announce.send(embed=embed)
+            except (discord.Forbidden, discord.HTTPException):
+                # Deliberately not falling back to the invoking channel: that
+                # would publish into a channel the operator chose not to use.
+                moderation_logger.exception(
+                    "Could not publish a warning to the configured channel "
+                    "(guild_id=%s, channel_id=%s).", ctx.guild.id, announce_id)
+            await ctx.send(t("moderation.warn_published", channel=announce.mention),
+                           ephemeral=True)
 
         # After the public result, so a member sees the warning even when the
         # consequence cannot be applied.
@@ -493,6 +513,34 @@ class Moderation(commands.Cog):
     @discord.app_commands.default_permissions(moderate_members=True)
     @is_staff()
     async def modlogs(self, ctx, member: discord.Member):
+        # Where this may be run, and therefore who may read it.
+        #
+        # `is_channel` cannot express this and must not be stretched to. It
+        # compares `ctx.channel.id` against the setting, so a *category* id
+        # matches nothing; and it returns True for any administrator before it
+        # looks at the channel at all, which is fine for the member-facing
+        # commands that use it and fatal here — with a public reply, an
+        # administrator running this in a general channel would publish a
+        # member's whole history, every moderator's name and the account intel
+        # below. So the gate is strict: it binds administrators too.
+        #
+        # Unset is deliberately not an empty gate. A guild that never configured
+        # a staff category would otherwise lose the command entirely, so it keeps
+        # the ephemeral reply it has always had and configuring the category is
+        # what upgrades it. Same shape as `warn_announce_channel`: the upgrade
+        # changes nothing until an operator opts in.
+        admin_category = guild_setting_sync(ctx.guild.id, "admin_category")
+        if admin_category:
+            if getattr(ctx.channel, "category_id", None) != int(admin_category):
+                return await ctx.send(
+                    t("moderation.modlogs_wrong_channel",
+                      category=f"<#{int(admin_category)}>"),
+                    ephemeral=True,
+                )
+            visible_to_staff = True
+        else:
+            visible_to_staff = False
+
         warnings = await database.run(database.get_warnings, member.id, ctx.guild.id)
         user_intel = await database.run(database.get_user_intel, member.id)
     
@@ -551,8 +599,36 @@ class Moderation(commands.Cog):
                             reason=reason),
                     inline=False,
                 )
-        
-        await ctx.send(embed=embed)
+
+        # Inside the staff category the embed goes to the channel itself, so every
+        # moderator present sees the lookup; anywhere else it stays ephemeral,
+        # because staff-only to *invoke* was never staff-only to *read* — run in
+        # a public channel this prints a member's whole history, every
+        # moderator's name and the account intel above.
+        #
+        # `ctx.channel.send` rather than `ctx.send(ephemeral=False)`: the command
+        # is PRIVATE, so a public reply would hit PotatoContext.send's visibility
+        # swap, which deletes the deferred original and strands the "used
+        # /modlogs" header above the embed as "Message could not be loaded". This
+        # way neither branch swaps. The cost is losing that header's attribution,
+        # so the requesting moderator goes in the footer — which is better for a
+        # staff-audit surface anyway, since a footer is part of the record and a
+        # header is not.
+        if not visible_to_staff:
+            return await ctx.send(embed=embed, ephemeral=True)
+
+        embed.set_footer(text=t("moderation.modlogs_requested_by",
+                                moderator=ctx.author.display_name))
+        try:
+            await ctx.channel.send(embed=embed)
+        except discord.HTTPException:
+            moderation_logger.exception(
+                "Could not publish a modlogs lookup (guild_id=%s, channel_id=%s)",
+                ctx.guild.id, ctx.channel.id,
+            )
+            return await ctx.send(t("moderation.modlogs_publish_failed"),
+                                  ephemeral=True)
+        await ctx.send(t("moderation.modlogs_published"), ephemeral=True)
 
     @discord.app_commands.command(name="manage", description=t("general.cmd_manage"))
     @discord.app_commands.checks.cooldown(1, 3, key=lambda interaction: interaction.user.id)
@@ -572,7 +648,7 @@ class Moderation(commands.Cog):
             return await interaction.response.send_message(t("moderation.role_not_found"), ephemeral=True)
 
         is_authorized = False
-        factions_config = guild_setting_sync(ctx.guild.id, "factions")
+        factions_config = guild_setting_sync(interaction.guild.id, "factions")
 
         if interaction.user.guild_permissions.administrator:
             is_authorized = True

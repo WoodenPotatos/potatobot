@@ -54,6 +54,7 @@ READ_ONLY_OPERATIONS = {
     "get_top_xp_user", "get_full_user_data", "get_streak_data",
     "get_shop_price", "get_shop_prices", "get_reward", "get_config_id",
     "get_gacha_banner", "list_gacha_banners", "get_work_responses",
+    "get_five_star_history", "get_gacha_pity", "get_active_entitlements",
     "get_user_inventory",
     "get_user_vouchers",
     "get_guild_settings", "get_instance_settings", "get_schema_version",
@@ -160,7 +161,7 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 13
+LATEST_SCHEMA_VERSION = 14
 
 # A claimed control action is re-queued only once its lease expires. The worker
 # renews the lease as it runs, so slowness never causes a duplicate Discord post.
@@ -234,6 +235,13 @@ DEFAULT_GACHA_CONFIG = {
     "soft_pity_multiplier": 3,
     "four_star_guarantee_interval": 10,
     "duplicate_percent": 10,
+    # The featured split, as a percentage. Consulted only when a tier has a
+    # featured reward, so the shipped banner — which has none, and must not gain
+    # one — is unaffected. `featured` itself is deliberately absent from every
+    # shipped reward: `missing_shipped_rewards` matches on the key alone and
+    # pushes these dicts straight into an operator's table, so a shipped flag
+    # would leak into every banner and could never be reconciled away.
+    "featured_split": 50,
     "tiers": {"3": 97800, "4": 1600, "5": 600},
     "rewards": {
         "3": [
@@ -752,6 +760,8 @@ def _create_control_plane_v5_schema(conn):
             banner_key TEXT NOT NULL,
             pulls_since_five_star INTEGER NOT NULL DEFAULT 0,
             pulls_toward_four_star INTEGER NOT NULL DEFAULT 0,
+            guaranteed_featured_five INTEGER NOT NULL DEFAULT 0,
+            guaranteed_featured_four INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL,
             PRIMARY KEY (guild_id, user_id, banner_key)
         );
@@ -768,6 +778,8 @@ def _create_control_plane_v5_schema(conn):
             soft_pity INTEGER NOT NULL CHECK (soft_pity IN (0, 1)),
             hard_pity INTEGER NOT NULL CHECK (hard_pity IN (0, 1)),
             four_star_guarantee INTEGER NOT NULL DEFAULT 0 CHECK (four_star_guarantee IN (0, 1)),
+            featured INTEGER NOT NULL DEFAULT 0 CHECK (featured IN (0, 1)),
+            featured_guaranteed INTEGER NOT NULL DEFAULT 0 CHECK (featured_guaranteed IN (0, 1)),
             created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_gacha_pulls_user
@@ -905,11 +917,42 @@ def _create_control_plane_v5_schema(conn):
             "ALTER TABLE gacha_pity ADD COLUMN pulls_toward_four_star "
             "INTEGER NOT NULL DEFAULT 0"
         )
+    if "guaranteed_featured_five" not in pity_columns:
+        # Schema 14, purely additive. A banner may now feature one 4-star and one
+        # 5-star; losing that split sets a per-tier guarantee that the next rare
+        # of that tier from that banner is the featured reward. Two columns
+        # rather than one because the tiers guarantee independently. The grain is
+        # already right: gacha_pity is keyed (guild_id, user_id, banner_key).
+        # An existing row defaults to 0 — no guarantee held — which is truthful
+        # for pulls made before any banner could feature anything.
+        conn.execute(
+            "ALTER TABLE gacha_pity ADD COLUMN guaranteed_featured_five "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+    if "guaranteed_featured_four" not in pity_columns:
+        conn.execute(
+            "ALTER TABLE gacha_pity ADD COLUMN guaranteed_featured_four "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
     pull_columns = {row[1] for row in conn.execute("PRAGMA table_info(gacha_pulls)")}
     if "four_star_guarantee" not in pull_columns:
         conn.execute(
             "ALTER TABLE gacha_pulls ADD COLUMN four_star_guarantee "
             "INTEGER NOT NULL DEFAULT 0 CHECK (four_star_guarantee IN (0, 1))"
+        )
+    if "featured" not in pull_columns:
+        # Schema 14. Guarantee markers of the same kind as four_star_guarantee:
+        # whether this pull awarded the banner's featured reward, and whether a
+        # held guarantee is what decided it. Immutable history, so an existing
+        # row reading 0/0 is correct rather than merely defaulted.
+        conn.execute(
+            "ALTER TABLE gacha_pulls ADD COLUMN featured "
+            "INTEGER NOT NULL DEFAULT 0 CHECK (featured IN (0, 1))"
+        )
+    if "featured_guaranteed" not in pull_columns:
+        conn.execute(
+            "ALTER TABLE gacha_pulls ADD COLUMN featured_guaranteed "
+            "INTEGER NOT NULL DEFAULT 0 CHECK (featured_guaranteed IN (0, 1))"
         )
     banner_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(gacha_banners)")
@@ -1014,6 +1057,30 @@ def widen_managed_message_kinds(conn) -> bool:
     conn.execute("DROP TABLE managed_messages")
     conn.execute("ALTER TABLE managed_messages_rebuilt RENAME TO managed_messages")
     return True
+
+
+def repair_warning_provenance(conn) -> int:
+    """Attribute pre-schema-8 rows that carry no guild, where that is knowable.
+
+    `adopt_legacy_database` already does this, but only in the `private` profile
+    and only once — so an installation that upgraded under another profile keeps
+    rows a threshold cannot count. Gated on there being exactly one active guild:
+    with several, a NULL row is genuinely unattributable and guessing would move
+    somebody's moderation history into a guild it never happened in.
+
+    Idempotent, and a no-op wherever adoption has already run.
+    """
+    guilds = [row[0] for row in conn.execute(
+        "SELECT guild_id FROM guilds WHERE active = 1")]
+    if len(guilds) != 1:
+        return 0
+    repaired = 0
+    for table in ("warnings", "tickets", "rented_items"):
+        repaired += conn.execute(
+            f"UPDATE {table} SET guild_id = ? WHERE guild_id IS NULL",
+            (guilds[0],),
+        ).rowcount
+    return repaired
 
 
 def rename_managed_option_keys(conn) -> int:
@@ -1254,6 +1321,11 @@ def initialize_database():
                         "WHERE guild_id = ? AND banner_key = ?",
                         (json.dumps(banner_config, sort_keys=True), guild_id, banner_key),
                     )
+            attributed = repair_warning_provenance(conn)
+            if attributed:
+                db_logger.info(
+                    "Attributed %s legacy row(s) with no guild provenance.",
+                    attributed)
             renamed = rename_setting_rows(conn)
             if renamed:
                 db_logger.info("Moved %s setting row(s) to a new key.", renamed)
@@ -1394,8 +1466,17 @@ def settle_wager(user_id: int, credit: int = 0, win_inc: int = 0,
 
 
 def begin_interactive_wager(wager_id: str, guild_id: int, user_id: int,
-                            game_key: str, stake: int):
-    """Reserve funds and persist a recoverable interactive wager atomically."""
+                            game_key: str, stake: int, consume_item: str = None):
+    """Reserve funds and persist a recoverable interactive wager atomically.
+
+    Returns ``{"balance", "consumed"}`` or None when the stake could not be
+    reserved. ``consume_item`` spends one of a guild-local consumable **in this
+    same transaction** and reports whether one was there — which is the only
+    place a modifier for an interactive game can safely be spent. Blackjack and
+    mines both decide their layout in the cog, after this call has already
+    committed, so consuming the item separately would leave a spent item with no
+    wager, or a wager with a free item, whenever one of the two writes failed.
+    """
     if not wager_id or not guild_id or stake <= 0:
         return None
     created_at = datetime.now(timezone.utc).isoformat()
@@ -1417,11 +1498,14 @@ def begin_interactive_wager(wager_id: str, guild_id: int, user_id: int,
                 "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
                 (wager_id, guild_id, user_id, game_key, stake, created_at),
             )
+            # After the debit, so an unaffordable wager never spends an item.
+            consumed = bool(consume_item) and _consume_inventory_item(
+                conn, guild_id, user_id, consume_item, created_at)
             balance = conn.execute(
                 "SELECT balance FROM users WHERE user_id = ?", (user_id,)
             ).fetchone()[0]
             conn.commit()
-            return balance
+            return {"balance": balance, "consumed": consumed}
     except sqlite3.IntegrityError as exc:
         db_logger.warning("Interactive wager identity collision (wager_id=%s)", wager_id)
         raise DatabaseOperationError("interactive wager identity collision") from exc
@@ -1671,6 +1755,149 @@ def resolve_dice_wager(guild_id: int, user_id: int, stake: int,
         raise DatabaseOperationError("dice wager failed") from exc
 
 
+# Roulette's own arithmetic, here rather than in the cog, because the item that
+# changes the outcome has to be consumed in the same transaction that settles it.
+ROULETTE_RED_NUMBERS = frozenset(
+    {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
+)
+SLOT_SYMBOLS = ("🍒", "🍋", "🍇", "💎", "7️⃣", "🔔", "🍉", "⭐", "🍊")
+SLOT_JACKPOT_SYMBOL = "7️⃣"
+
+
+def _roulette_spin(rng) -> tuple[int, str]:
+    number = rng.randint(0, 36)
+    if number == 0:
+        return number, "green"
+    return number, "red" if number in ROULETTE_RED_NUMBERS else "black"
+
+
+def _roulette_payout(stake: int, number: int, colour: str,
+                     selected_colour: str | None, selected_number: int | None) -> int:
+    """What this spin pays, or 0. Green pays 14 to 1 and a straight number 35."""
+    if selected_colour is not None and selected_colour == colour:
+        return stake * (14 if selected_colour == "green" else 1)
+    if selected_number is not None and selected_number == number:
+        return stake * 35
+    return 0
+
+
+def _slots_payout(stake: int, reels: tuple[str, str, str]) -> int:
+    first, second, third = reels
+    if first == second == third:
+        return stake * (50 if first == SLOT_JACKPOT_SYMBOL else 10)
+    if first == second or second == third or first == third:
+        return int(stake * 1.5)
+    return 0
+
+
+def resolve_roulette_wager(guild_id: int, user_id: int, stake: int,
+                           selected_colour: str | None,
+                           selected_number: int | None, rng=None):
+    """Spin, settle, and consume a loaded die only after a valid paid wager.
+
+    The spin happens *inside* the transaction that debits the stake, which is
+    what the loaded die requires: consuming the item from the cog would be a
+    second, separately-committed write, so a crash between them leaves either a
+    spent item with no wager or a wager with a free item. `resolve_dice_wager` is
+    the same shape and the reason this one exists.
+
+    A loaded die spins twice and keeps whichever spin matches the bet — the
+    roulette reading of "keeps the higher of two rolls". It is spent whether or
+    not the second spin helped, exactly as in dice.
+    """
+    if stake <= 0 or (selected_colour is None and selected_number is None):
+        return None
+    if selected_colour is not None and selected_colour not in {"red", "black", "green"}:
+        return None
+    if selected_number is not None and not 0 <= selected_number <= 36:
+        return None
+    rng = rng or secrets.SystemRandom()
+    try:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            _ensure_user(conn, user_id)
+            if conn.execute(
+                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                (stake, user_id, stake),
+            ).rowcount != 1:
+                conn.rollback()
+                return None
+            number, colour = _roulette_spin(rng)
+            payout = _roulette_payout(stake, number, colour,
+                                      selected_colour, selected_number)
+            # Only now, and only when the item is actually there, is a second
+            # spin drawn — so a member without one consumes no extra randomness.
+            loaded = _consume_inventory_item(conn, guild_id, user_id, "loaded_die")
+            second_number = second_colour = None
+            if loaded:
+                second_number, second_colour = _roulette_spin(rng)
+                second_payout = _roulette_payout(
+                    stake, second_number, second_colour,
+                    selected_colour, selected_number)
+                if second_payout > payout:
+                    number, colour, payout = second_number, second_colour, second_payout
+            won = payout > 0
+            result = _apply_stats_locked(
+                conn, user_id, stake + payout if won else 0, 0,
+                1 if won else 0, 0 if won else 1, clamp_balance=False,
+            )
+            conn.commit()
+            result.update({"outcome": "win" if won else "loss", "number": number,
+                           "colour": colour, "payout": payout,
+                           "loaded_die": loaded,
+                           "second_number": second_number,
+                           "second_colour": second_colour})
+            return result
+    except sqlite3.Error as exc:
+        db_logger.exception("Roulette wager failed (guild=%s, user=%s)",
+                            guild_id, user_id)
+        raise DatabaseOperationError("roulette wager failed") from exc
+
+
+def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None):
+    """Spin, settle, and consume a lucky charm only after a valid paid wager.
+
+    Same reasoning as roulette. A lucky charm spins a second set of reels and
+    keeps whichever pays more, and is spent either way.
+    """
+    if stake <= 0:
+        return None
+    rng = rng or secrets.SystemRandom()
+    try:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            _ensure_user(conn, user_id)
+            if conn.execute(
+                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                (stake, user_id, stake),
+            ).rowcount != 1:
+                conn.rollback()
+                return None
+            reels = tuple(rng.choice(SLOT_SYMBOLS) for _ in range(3))
+            payout = _slots_payout(stake, reels)
+            charm = _consume_inventory_item(conn, guild_id, user_id, "lucky_charm")
+            second_reels = None
+            if charm:
+                second_reels = tuple(rng.choice(SLOT_SYMBOLS) for _ in range(3))
+                if _slots_payout(stake, second_reels) > payout:
+                    reels, payout = second_reels, _slots_payout(stake, second_reels)
+            won = payout > 0
+            result = _apply_stats_locked(
+                conn, user_id, stake + payout if won else 0, 0,
+                1 if won else 0, 0 if won else 1, clamp_balance=False,
+            )
+            conn.commit()
+            result.update({"outcome": "win" if won else "loss",
+                           "reels": list(reels), "payout": payout,
+                           "lucky_charm": charm,
+                           "second_reels": list(second_reels) if second_reels else None})
+            return result
+    except sqlite3.Error as exc:
+        db_logger.exception("Slots wager failed (guild=%s, user=%s)",
+                            guild_id, user_id)
+        raise DatabaseOperationError("slots wager failed") from exc
+
+
 def transfer_balance(sender_id: int, recipient_id: int, amount: int,
                      sender_xp: int = 0):
     """Moves funds between two users in one transaction."""
@@ -1789,6 +2016,24 @@ def claim_timed_reward(user_id: int, cooldown_column: str, timestamp: str,
     except (sqlite3.Error, ValueError) as exc:
         db_logger.exception("Timed reward failed (user=%s, cooldown=%s)", user_id, cooldown_column)
         raise DatabaseOperationError("timed reward failed") from exc
+
+
+def _consume_inventory_item(conn, guild_id: int, user_id: int, item_key: str,
+                            timestamp: str = None) -> bool:
+    """Spend one of a guild-local consumable, reporting whether one was there.
+
+    Takes the caller's connection rather than opening its own, so it commits with
+    the action that spent it — the property that makes "consumed only by a valid
+    paid wager" structurally true rather than a convention someone has to
+    remember. The decrement is conditional on `quantity > 0` and the rowcount is
+    the answer, so two concurrent settlements cannot spend one item.
+    """
+    return conn.execute(
+        "UPDATE user_inventory SET quantity = quantity - 1, updated_at = ? "
+        "WHERE guild_id = ? AND user_id = ? AND item_key = ? AND quantity > 0",
+        (timestamp or datetime.now(timezone.utc).isoformat(),
+         int(guild_id), int(user_id), item_key),
+    ).rowcount == 1
 
 
 def _consume_streak_freeze(conn, guild_id: int, user_id: int,
@@ -2574,25 +2819,6 @@ def get_user_balance(user_id: int) -> int:
         db_logger.error(f"Failed to read user balance (User: {user_id}): {e}")
         return 0
 
-def add_user_balance(user_id: int, amount: int):
-    """Apply a direct balance delta for legacy callers."""
-    try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO users (user_id, balance) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?
-            """, (user_id, amount, amount))
-            conn.commit()
-    except Exception as e:
-        db_logger.error(
-            "Failed to apply balance delta (user_id=%s, amount=%s): %s",
-            user_id,
-            amount,
-            e,
-        )
-        raise DatabaseOperationError("balance update failed") from e
-
 # ==========================================
 # Temporary voice-room persistence
 # ==========================================
@@ -2928,7 +3154,16 @@ def record_warning(user_id: int, mod_id: int, reason: str, date: str,
                 (int(user_id), int(mod_id), reason, date, int(guild_id), tag),
             )
             warning_id = cursor.lastrowid
-            scope = "user_id = ? AND (guild_id = ? OR guild_id IS NULL)"
+            # Guild-scoped only, deliberately. A pre-schema-8 warning carries
+            # no provenance, and counting it in every guild meant one
+            # installation's history could push a member over a threshold in a
+            # guild it never happened in. A threshold can ban, so it fails safe:
+            # unattributable evidence counts nowhere. `get_warnings` and
+            # `remove_warning` still match NULL, so the row stays visible in
+            # /modlogs and stays removable — invisible history would be worse.
+            # `repair_warning_provenance` attributes these on any installation
+            # where the answer is unambiguous, so this is a no-op there.
+            scope = "user_id = ? AND guild_id = ?"
             total = conn.execute(
                 f"SELECT COUNT(*) FROM warnings WHERE {scope}",
                 (int(user_id), int(guild_id)),
@@ -2958,9 +3193,12 @@ def get_warning_count(user_id: int, guild_id: int = None,
                     (user_id, *parameters),
                 )
             else:
+                # Guild-scoped for the same reason `record_warning` is: this
+                # is the count a member is told after an /unwarn, and it has to
+                # agree with the number the threshold compares against.
                 cursor = conn.execute(
                     "SELECT COUNT(*) FROM warnings WHERE user_id = ? "
-                    f"AND (guild_id = ? OR guild_id IS NULL){clause}",
+                    f"AND guild_id = ?{clause}",
                     (user_id, guild_id, *parameters),
                 )
             result = cursor.fetchone()
@@ -3209,36 +3447,15 @@ def create_new_user(user_id: int, timestamp: str):
 # Shop and economy legacy helpers
 # ==========================================
 
-def set_user_balance(user_id: int, new_balance: int):
-    """Set a balance directly for compatibility with older callers."""
-    try:
-        with get_connection() as conn:
-            conn.execute("UPDATE users SET balance = ? WHERE user_id = ?", (new_balance, user_id))
-    except Exception as e:
-        db_logger.error(f"Failed to set user balance: {e}")
-        raise DatabaseOperationError("balance set failed") from e
-
-def buy_vault(user_id: int, new_balance: int, protected_reserve: int):
-    """Persist a vault upgrade and its already-calculated balance."""
-    try:
-        with get_connection() as conn:
-            conn.execute("UPDATE users SET balance = ?, protected_reserve = ? WHERE user_id = ?", (new_balance, int(protected_reserve), user_id))
-    except Exception as e:
-        db_logger.error(f"Failed to save vault purchase: {e}")
-        raise DatabaseOperationError("vault purchase failed") from e
-
-# ``get_user_rob_bonus``, ``buy_lockpick`` and ``break_lockpick`` were removed
-# with the shop's column-backed lockpick. They had no callers, and buy_lockpick
-# was the split read/modify/write economy pattern the hardening baseline forbids.
-
-def buy_bodyguard(user_id: int, new_balance: int, expire_time: str):
-    """Persist bodyguard protection and its already-calculated balance."""
-    try:
-        with get_connection() as conn:
-            conn.execute("UPDATE users SET balance = ?, rob_defense = 0.7, bodyguard_until = ? WHERE user_id = ?", (new_balance, expire_time, user_id))
-    except Exception as e:
-        db_logger.error(f"Failed to save bodyguard purchase: {e}")
-        raise DatabaseOperationError("bodyguard purchase failed") from e
+# ``set_user_balance``, ``add_user_balance``, ``buy_vault``, ``buy_bodyguard``,
+# ``save_user_stats``, ``get_user_rob_bonus``, ``buy_lockpick`` and
+# ``break_lockpick`` were all removed together. Each took a balance the caller
+# had already computed and wrote it with no ``balance >= ?`` predicate — the
+# split read/modify/write the hardening baseline forbids — and none of them had
+# a caller anywhere, including the tests. ``set_user_balance`` in particular was
+# the most convenient-looking name in this module and the one function certain
+# to silently destroy a concurrent write. Money moves through
+# ``_apply_stats_locked`` and the conditional-UPDATE purchase paths.
 
 def get_all_rentals(guild_id: int):
     """Return one guild's rented assets for the expiry cleanup task.
@@ -3376,7 +3593,21 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
                 attacker_result = _apply_stats_locked(
                     conn, attacker_id, amount, 30, win_inc=1, clamp_balance=False
                 )
-                _apply_stats_locked(conn, victim_id, -amount, clamp_balance=False)
+                # `clamp_balance=False` means `_apply_stats_locked` writes nothing
+                # and returns None rather than going negative. Discarding that
+                # return would credit the attacker while the victim kept their
+                # coins — a mint. Today `amount <= stealable <= victim balance`
+                # makes it unreachable, but the arithmetic that guarantees it sits
+                # sixty lines away, so the refusal is honoured rather than assumed.
+                if _apply_stats_locked(
+                        conn, victim_id, -amount, clamp_balance=False) is None:
+                    conn.rollback()
+                    db_logger.error(
+                        "Robbery debit refused; settlement rolled back "
+                        "(attacker_id=%s, victim_id=%s, amount=%s)",
+                        attacker_id, victim_id, amount,
+                    )
+                    return {"resolved": False, "reason": "victim_poor"}
             else:
                 amount = int(attacker[0] * 0.10)
                 attacker_result = _apply_stats_locked(
@@ -3466,16 +3697,6 @@ def get_full_user_data(user_id: int):
         db_logger.error(f"Failed to read full user data: {e}")
         return None
         
-def save_user_stats(user_id: int, bal: int, xp: int, lvl: int, wins: int, losses: int):
-    """Persist already-calculated account statistics for legacy callers."""
-    try:
-        with get_connection() as conn:
-            conn.execute("""UPDATE users SET balance = ?, xp = ?, level = ?, 
-                            bj_wins = ?, bj_losses = ? WHERE user_id = ?""", 
-                         (bal, xp, lvl, wins, losses, user_id))
-    except Exception as e:
-        db_logger.error(f"Failed to save user statistics: {e}")
-        raise DatabaseOperationError("user stats update failed") from e
 
 def get_streak_data(user_id: int):
     """Return the user's daily streak state."""
@@ -3522,7 +3743,15 @@ def get_shop_price(guild_id: int, item_id: str, default: int = 0) -> int:
             )
             res = cursor.fetchone()
             return res[0] if res and res[0] >= 0 else default
-    except Exception: return default
+    except Exception:
+        # Logged, unlike every other reader in this module until now. This value
+        # renders a dashboard form default, so a swallowed error showed the
+        # operator a price of 0 with nothing in the journal to explain it.
+        db_logger.exception(
+            "Failed to read a shop price (guild_id=%s, item_id=%s)",
+            guild_id, item_id,
+        )
+        return default
 
 def get_shop_prices(guild_id: int) -> dict[str, int]:
     """Return this guild's effective shop prices in one read transaction."""
@@ -3548,7 +3777,12 @@ def get_reward(guild_id: int, activity_id: str, def_coin: int = 0, def_xp: int =
             if res and res[0] >= 0 and res[1] >= 0:
                 return res
             return (def_coin, def_xp)
-    except Exception: return (def_coin, def_xp)
+    except Exception:
+        db_logger.exception(
+            "Failed to read an activity reward (guild_id=%s, activity_id=%s)",
+            guild_id, activity_id,
+        )
+        return (def_coin, def_xp)
 
 def get_config_id(guild_id: int, config_key: str) -> int:
     """Return a configured Discord snowflake as an integer."""
@@ -3561,7 +3795,12 @@ def get_config_id(guild_id: int, config_key: str) -> int:
             )
             res = cursor.fetchone()
             return int(res[0]) if res and res[0].isdigit() else None
-    except Exception: return None
+    except Exception:
+        db_logger.exception(
+            "Failed to read a configured id (guild_id=%s, config_key=%s)",
+            guild_id, config_key,
+        )
+        return None
 
 
 # ==========================================
@@ -3712,13 +3951,24 @@ def get_settings_audit(guild_id: int, limit: int = 100) -> list[dict]:
             for row in rows]
 
 
-def _validated_gacha_config(config_value: dict) -> dict:
+def _validated_gacha_config(config_value: dict, banner_key: str | None = None) -> dict:
+    """Validate and normalise one banner's configuration.
+
+    ``banner_key`` is supplied by the write paths only. The standard banner may
+    not carry a featured reward — it is the pool a lost split draws *from*, and
+    a rate-up on it would have nothing to fall back to — but that rule is
+    enforced on save rather than on load, so a config written by some other
+    build can never make a live banner unpullable.
+    """
     if not isinstance(config_value, dict):
         raise ValidationError("gacha_config_not_object", "gacha config must be an object")
     value = json.loads(json.dumps(config_value))
+    # Defaulted rather than required: every banner stored before schema 14 lacks
+    # it, and a missing split is not a misconfiguration.
+    value.setdefault("featured_split", DEFAULT_GACHA_CONFIG["featured_split"])
     integer_keys = ("cost", "hard_pity", "soft_pity_start",
                     "soft_pity_multiplier", "four_star_guarantee_interval",
-                    "duplicate_percent")
+                    "duplicate_percent", "featured_split")
     if any(isinstance(value.get(key), bool) or not isinstance(value.get(key), int)
            for key in integer_keys):
         raise ValidationError("gacha_numbers_not_integers", "gacha numeric settings must be integers")
@@ -3732,6 +3982,9 @@ def _validated_gacha_config(config_value: dict) -> dict:
         raise ValidationError("gacha_guarantee_interval_range", "four-star guarantee interval is out of range")
     if not 0 <= value["duplicate_percent"] <= 100:
         raise ValidationError("gacha_duplicate_percent_range", "duplicate compensation is out of range")
+    if not 0 <= value["featured_split"] <= 100:
+        raise ValidationError("gacha_featured_split_range",
+                              "the featured split is out of range")
     tiers = value.get("tiers")
     if not isinstance(tiers, dict) or set(tiers) != {"3", "4", "5"}:
         raise ValidationError("gacha_tiers_invalid", "gacha tiers are invalid")
@@ -3751,17 +4004,21 @@ def _validated_gacha_config(config_value: dict) -> dict:
         if not isinstance(entries, list) or not entries:
             raise ValidationError("gacha_tier_empty", "each gacha tier needs rewards")
         for entry in entries:
-            # `enabled` is optional so older stored banners stay valid; absent
-            # means enabled. It is the only field a row may add.
+            # `enabled` and `featured` are optional so older stored banners stay
+            # valid; absent means enabled and not featured. They are the only
+            # fields a row may add.
             if not isinstance(entry, dict) or not (
                 {"key", "kind", "amount", "weight"} <= set(entry)
-                <= {"key", "kind", "amount", "weight", "enabled"}
+                <= {"key", "kind", "amount", "weight", "enabled", "featured"}
             ):
                 raise ValidationError("gacha_reward_fields", "gacha reward has unexpected fields")
             if entry["kind"] not in {"coins", "item", "vault", "voucher"}:
                 raise ValidationError("gacha_reward_kind", "gacha reward kind is invalid")
             if "enabled" in entry and not isinstance(entry["enabled"], bool):
                 raise ValidationError("gacha_reward_enabled", "gacha reward enabled must be boolean")
+            if "featured" in entry and not isinstance(entry["featured"], bool):
+                raise ValidationError("gacha_reward_featured",
+                                      "gacha reward featured must be boolean")
             # A key names a locale entry and is written into every pull row, so
             # an empty or oddly shaped one would persist as unrenderable history.
             if not isinstance(entry["key"], str) or not _GACHA_REWARD_KEY.fullmatch(
@@ -3799,6 +4056,26 @@ def _validated_gacha_config(config_value: dict) -> dict:
             # A tier can still be drawn, so it must have something to award.
             raise ValidationError("gacha_tier_all_disabled",
                                   "each gacha tier needs one enabled reward")
+    for tier, entries in rewards.items():
+        featured = [entry for entry in entries if entry.get("featured")]
+        if not featured:
+            continue
+        if tier == "3":
+            # Only the rare tiers split. A 3-star rate-up would be a rate-up on
+            # the pool nobody is chasing, and the loss branch has no meaning.
+            raise ValidationError("gacha_featured_tier",
+                                  "only the 4-star and 5-star tiers may feature a reward")
+        if len(featured) > 1:
+            # "Guaranteed featured" has to name one reward, or the guarantee is
+            # a second lottery rather than a guarantee.
+            raise ValidationError("gacha_featured_duplicate",
+                                  "a tier may feature at most one reward")
+        if not reward_is_enabled(featured[0]):
+            raise ValidationError("gacha_featured_disabled",
+                                  "a featured reward cannot be disabled")
+        if banner_key == DEFAULT_GACHA_BANNER_KEY:
+            raise ValidationError("gacha_featured_on_standard",
+                                  "the standard banner cannot feature a reward")
     return value
 
 
@@ -4166,13 +4443,31 @@ def validate_gacha_banner_name(display_name) -> str:
     return display_name
 
 
+# The scalars a stored config may predate. A reader must fill these in, because
+# a banner saved before one existed simply has no key for it — and the dashboard
+# builds a number input per scalar, so an absent one renders empty and saves back
+# as 0. That is how `featured_split` would have silently become "always lose the
+# split" on the first save of every banner that already existed. Defaulted here
+# rather than by running `_validated_gacha_config` on read, which can raise and
+# would take the whole page down over one unreadable banner.
+_GACHA_SCALAR_DEFAULTS = ("featured_split",)
+
+
+def _gacha_config_for_read(config_value: dict) -> dict:
+    if not isinstance(config_value, dict):
+        return config_value
+    for key in _GACHA_SCALAR_DEFAULTS:
+        config_value.setdefault(key, DEFAULT_GACHA_CONFIG[key])
+    return config_value
+
+
 def _banner_row_dict(row) -> dict:
     """Shape one gacha_banners row, defaulting a pre-schema-9 name to its key."""
     return {
         "banner_key": row["banner_key"],
         "display_name": row["display_name"] or row["banner_key"],
         "enabled": bool(row["enabled"]),
-        "config": json.loads(row["config_json"]),
+        "config": _gacha_config_for_read(json.loads(row["config_json"])),
         "revision": row["revision"],
         "updated_at": row["updated_at"],
         "is_default": row["banner_key"] == DEFAULT_GACHA_BANNER_KEY,
@@ -4227,6 +4522,68 @@ def get_gacha_banner(guild_id: int, banner_key: str = DEFAULT_GACHA_BANNER_KEY) 
                 "is_default": True,
                 "config": json.loads(json.dumps(DEFAULT_GACHA_CONFIG))}
     return _banner_row_dict(row)
+
+
+def get_five_star_history(guild_id: int, user_id: int, limit: int = 5) -> list[dict]:
+    """A member's most recent 5-star pulls, newest first.
+
+    `gacha_pulls` has recorded everything this needs since schema 5 and nothing
+    has ever read it — the only pity a member could see was the number returned
+    by the pull they had just made.
+
+    **`pity_before` is the pity *before* the pull**, so the count it landed at is
+    `pity_before + 1`. That off-by-one would be invisible in the interface and
+    wrong forever, so it is resolved here rather than at each display site.
+    """
+    limit = max(1, min(int(limit), 25))
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT banner_key, reward_key, pity_before, hard_pity, featured, "
+            "featured_guaranteed, created_at FROM gacha_pulls "
+            "WHERE guild_id = ? AND user_id = ? AND rarity = 5 "
+            "ORDER BY pull_id DESC LIMIT ?",
+            (int(guild_id), int(user_id), limit),
+        ).fetchall()
+    return [
+        {"banner_key": row[0], "reward_key": row[1], "pity": row[2] + 1,
+         "hard_pity": bool(row[3]), "featured": bool(row[4]),
+         "featured_guaranteed": bool(row[5]), "created_at": row[6]}
+        for row in rows
+    ]
+
+
+def get_gacha_pity(guild_id: int, user_id: int,
+                   banner_key: str = DEFAULT_GACHA_BANNER_KEY) -> dict:
+    """One member's live pity on one banner, for a profile line.
+
+    A member with no row has pulled nothing on it, which is zero rather than
+    absent — every counter starts there.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT pulls_since_five_star, pulls_toward_four_star, "
+            "guaranteed_featured_five, guaranteed_featured_four FROM gacha_pity "
+            "WHERE guild_id = ? AND user_id = ? AND banner_key = ?",
+            (int(guild_id), int(user_id), banner_key),
+        ).fetchone()
+        total = conn.execute(
+            "SELECT COUNT(*) FROM gacha_pulls WHERE guild_id = ? AND user_id = ?",
+            (int(guild_id), int(user_id)),
+        ).fetchone()[0]
+        five_stars = conn.execute(
+            "SELECT COUNT(*) FROM gacha_pulls "
+            "WHERE guild_id = ? AND user_id = ? AND rarity = 5",
+            (int(guild_id), int(user_id)),
+        ).fetchone()[0]
+    return {
+        "banner_key": banner_key,
+        "pity": row[0] if row else 0,
+        "four_star_counter": row[1] if row else 0,
+        "guaranteed_featured_five": bool(row[2]) if row else False,
+        "guaranteed_featured_four": bool(row[3]) if row else False,
+        "total_pulls": total,
+        "five_stars": five_stars,
+    }
 
 
 def shipped_reward_table() -> dict:
@@ -4293,7 +4650,7 @@ def create_gacha_banner(guild_id: int, actor_id: int, banner_key: str,
     display_name = validate_gacha_banner_name(display_name)
     if not isinstance(enabled, bool):
         raise ValidationError("gacha_enabled_not_boolean", "banner enabled must be boolean")
-    config_value = _validated_gacha_config(config_value)
+    config_value = _validated_gacha_config(config_value, banner_key)
     timestamp = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -4336,7 +4693,7 @@ def set_gacha_banner(guild_id: int, actor_id: int, enabled: bool,
     banner_key = validate_gacha_banner_key(banner_key)
     if display_name is not None:
         display_name = validate_gacha_banner_name(display_name)
-    config_value = _validated_gacha_config(config_value)
+    config_value = _validated_gacha_config(config_value, banner_key)
     timestamp = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -4482,6 +4839,70 @@ def _grant_gacha_reward_locked(conn, guild_id: int, user_id: int,
     return granted
 
 
+def _resolve_featured_pools(conn, guild_id: int, banner_key: str,
+                            config_value: dict) -> tuple[dict, dict]:
+    """Work out, per rare tier, what a won and a lost split award.
+
+    Returns ``(featured_entries, standard_pools)`` keyed by "4"/"5". A tier is
+    absent from ``featured_entries`` when the banner features nothing there, and
+    absent from ``standard_pools`` when there is no standard pool to lose to. The
+    caller runs the ordinary weighted draw unless *both* are present, which is
+    what keeps a banner without a rate-up byte-for-byte unchanged — including its
+    RNG consumption.
+
+    The standard banner has four distinct states and only one of them supports a
+    split:
+
+    * it *is* the banner being pulled — no split, because standard has no
+      rate-up and all its rares are one rate;
+    * stored and enabled — split against its saved pool;
+    * stored and **disabled** — no split, so rares come only from this banner's
+      own table;
+    * **absent** — split against the shipped table. `get_gacha_banner` and
+      `list_gacha_banners` already synthesise an absent standard banner as
+      enabled, so a guild that has simply never pulled it still gets a working
+      event banner. The row is deliberately not created here: another banner's
+      pull must not conjure one.
+    """
+    featured_entries = {}
+    for tier in ("4", "5"):
+        for entry in config_value["rewards"].get(tier, []):
+            if entry.get("featured") and reward_is_enabled(entry):
+                featured_entries[tier] = entry
+                break
+    if not featured_entries or banner_key == DEFAULT_GACHA_BANNER_KEY:
+        return featured_entries, {}
+
+    row = conn.execute(
+        "SELECT enabled, config_json FROM gacha_banners "
+        "WHERE guild_id = ? AND banner_key = ?",
+        (int(guild_id), DEFAULT_GACHA_BANNER_KEY),
+    ).fetchone()
+    if row is None:
+        standard_config = DEFAULT_GACHA_CONFIG
+    elif not row[0]:
+        return featured_entries, {}
+    else:
+        try:
+            standard_config = _validated_gacha_config(json.loads(row[1]))
+        except (ValidationError, ValueError):
+            # A standard banner this build cannot read is not a reason to fail a
+            # pull on a different banner. No pool means no split.
+            db_logger.exception(
+                "Standard banner config is unreadable; no featured split applied "
+                "(guild_id=%s)", guild_id,
+            )
+            return featured_entries, {}
+
+    standard_pools = {}
+    for tier in featured_entries:
+        pool = [entry for entry in standard_config["rewards"].get(tier, [])
+                if reward_is_enabled(entry)]
+        if pool:
+            standard_pools[tier] = pool
+    return featured_entries, standard_pools
+
+
 def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
                         banner_key: str = DEFAULT_GACHA_BANNER_KEY,
                         rng=None) -> dict:
@@ -4527,12 +4948,23 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
                 conn.rollback()
                 return {"purchased": False, "reason": "insufficient_funds"}
             pity_row = conn.execute(
-                "SELECT pulls_since_five_star, pulls_toward_four_star FROM gacha_pity "
+                "SELECT pulls_since_five_star, pulls_toward_four_star, "
+                "guaranteed_featured_five, guaranteed_featured_four FROM gacha_pity "
                 "WHERE guild_id = ? AND user_id = ? AND banner_key = ?",
                 (int(guild_id), int(user_id), banner_key),
             ).fetchone()
             pity = pity_row[0] if pity_row else 0
             four_counter = pity_row[1] if pity_row else 0
+            guaranteed = {"5": bool(pity_row[2]) if pity_row else False,
+                          "4": bool(pity_row[3]) if pity_row else False}
+            # Resolved once for the whole batch, on this connection: reading the
+            # standard banner through get_gacha_banner would open a second
+            # connection and see a different snapshot mid-transaction, and would
+            # raise on an unknown key. It must also never *create* the standard
+            # row as a side effect of another banner's pull.
+            featured_entries, standard_pools = _resolve_featured_pools(
+                conn, int(guild_id), banner_key, config_value)
+            split = config_value["featured_split"]
             results = []
             for _ in range(count):
                 pity_before, pull_number = pity, pity + 1
@@ -4556,13 +4988,39 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
                                                for key, weight in tiers.items()], rng)["key"]
                 if four_guarantee and rarity == "3":
                     rarity = "4"
-                # A disabled row keeps its history and weight on record but is
-                # never drawn. The validator guarantees each tier keeps one.
-                reward = _weighted_choice(
-                    [entry for entry in config_value["rewards"][rarity]
-                     if reward_is_enabled(entry)],
-                    rng,
-                )
+                # Everything above decided the *tier*; everything below decides
+                # the reward's *identity*. Hard pity, soft pity and the tenth-pull
+                # floor stay orthogonal to the split, and nothing here can change
+                # `rarity`, so the 97.8/1.6/0.6 totals are untouched.
+                featured_entry = featured_entries.get(rarity)
+                standard_pool = standard_pools.get(rarity)
+                featured_hit = featured_from_guarantee = False
+                if featured_entry is not None and standard_pool:
+                    if guaranteed.get(rarity):
+                        reward = featured_entry
+                        featured_hit = featured_from_guarantee = True
+                        guaranteed[rarity] = False
+                    elif rng.randrange(100) < split:
+                        reward = featured_entry
+                        featured_hit = True
+                    else:
+                        # A loss draws the standard banner's pool as it stands.
+                        # No exclusion: the operator curates that pool, and the
+                        # dashboard warns when a featured key is still in it.
+                        reward = _weighted_choice(standard_pool, rng)
+                        guaranteed[rarity] = True
+                else:
+                    # No featured reward in this tier, or no standard pool to lose
+                    # to: exactly the draw this made before the split existed, and
+                    # crucially with no extra RNG consumed.
+                    #
+                    # A disabled row keeps its history and weight on record but is
+                    # never drawn. The validator guarantees each tier keeps one.
+                    reward = _weighted_choice(
+                        [entry for entry in config_value["rewards"][rarity]
+                         if reward_is_enabled(entry)],
+                        rng,
+                    )
                 granted = _grant_gacha_reward_locked(conn, int(guild_id), int(user_id),
                                                      reward, config_value, timestamp)
                 pity = 0 if rarity == "5" else pity + 1
@@ -4571,31 +5029,46 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
                     "INSERT INTO gacha_pulls "
                     "(guild_id, user_id, banner_key, banner_revision, rarity, reward_key, "
                     "reward_json, pity_before, soft_pity, hard_pity, "
-                    "four_star_guarantee, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "four_star_guarantee, featured, featured_guaranteed, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (int(guild_id), int(user_id), banner_key, revision, int(rarity),
                      reward["key"], json.dumps(granted, sort_keys=True), pity_before,
-                     int(soft), int(hard), int(four_guarantee), timestamp),
+                     int(soft), int(hard), int(four_guarantee), int(featured_hit),
+                     int(featured_from_guarantee), timestamp),
                 )
                 results.append({"rarity": int(rarity), "soft_pity": soft,
                                 "hard_pity": hard,
                                 "four_star_guarantee": four_guarantee,
-                                "four_star_counter_before": four_before, **granted})
+                                "four_star_counter_before": four_before,
+                                "featured": featured_hit,
+                                "featured_guaranteed": featured_from_guarantee,
+                                "guarantee_held": guaranteed.get(rarity, False),
+                                **granted})
             conn.execute(
                 "INSERT INTO gacha_pity "
                 "(guild_id, user_id, banner_key, pulls_since_five_star, "
-                "pulls_toward_four_star, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(guild_id, user_id, banner_key) "
+                "pulls_toward_four_star, guaranteed_featured_five, "
+                "guaranteed_featured_four, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id, banner_key) "
                 "DO UPDATE SET pulls_since_five_star = excluded.pulls_since_five_star, "
                 "pulls_toward_four_star = excluded.pulls_toward_four_star, "
+                "guaranteed_featured_five = excluded.guaranteed_featured_five, "
+                "guaranteed_featured_four = excluded.guaranteed_featured_four, "
                 "updated_at = excluded.updated_at",
-                (int(guild_id), int(user_id), banner_key, pity, four_counter, timestamp),
+                (int(guild_id), int(user_id), banner_key, pity, four_counter,
+                 int(guaranteed["5"]), int(guaranteed["4"]), timestamp),
             )
             balance = conn.execute("SELECT balance FROM users WHERE user_id = ?", (int(user_id),)).fetchone()[0]
             conn.commit()
             return {"purchased": True, "cost": total_cost, "balance": balance,
                     "pity": pity, "four_star_counter": four_counter,
                     "four_star_interval": config_value["four_star_guarantee_interval"],
+                    "featured_split": split,
+                    "featured_tiers": sorted(
+                        tier for tier in featured_entries if standard_pools.get(tier)),
+                    "guaranteed_featured": {tier: value for tier, value
+                                            in guaranteed.items() if value},
                     "results": results, "banner_revision": revision,
                     "banner_key": banner_key, "banner_name": banner_name}
     except (sqlite3.Error, TypeError) as exc:
@@ -4776,6 +5249,34 @@ def fulfill_voucher_request(guild_id: int, request_id: int, actor_id: int,
         return {"fulfilled": True, "expires_at": expires.isoformat()}
 
 
+def get_active_entitlements(guild_id: int, timestamp: str) -> list[dict]:
+    """Every live grant in one guild, soonest to expire first.
+
+    Nothing read this before. `get_expired_entitlements` is a one-way filter for
+    the cleanup loops — it returns only what is already past — and
+    `get_active_entitlements_for_user` is cross-guild and exists for erasure. So
+    an operator could see what a member had *bought*, in the audit feed, but
+    never what the server was currently paying out or for how much longer.
+
+    `expires_at` is a real timestamp on every row, so the remaining time is a
+    subtraction rather than a window that has to be known; the caller does it,
+    because "how long is left" depends on when you ask.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT e.entitlement_id, e.user_id, e.entitlement_key, e.starts_at, "
+            "e.expires_at, e.discord_item_id, v.source_type, v.reward_key "
+            "FROM timed_entitlements e "
+            "LEFT JOIN reward_vouchers v ON v.voucher_id = e.source_voucher_id "
+            "WHERE e.guild_id = ? AND e.status = 'active' AND e.expires_at > ? "
+            "ORDER BY e.expires_at ASC",
+            (int(guild_id), timestamp),
+        ).fetchall()
+    keys = ("entitlement_id", "user_id", "entitlement_key", "starts_at",
+            "expires_at", "discord_item_id", "source_type", "reward_key")
+    return [dict(zip(keys, row)) for row in rows]
+
+
 def get_expired_entitlements(timestamp: str) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
@@ -4821,19 +5322,52 @@ def consume_inventory_item(guild_id: int, user_id: int, item_key: str) -> bool:
     return changed == 1
 
 
-def get_shop_item_definitions(guild_id: int) -> list[dict]:
+# A custom item's operator-authored text. Hungarian is the primary language and
+# the one everything falls back to, exactly as in the shipped catalogs; English
+# is optional per item, so an installation is never forced to translate its own
+# shop. `name`/`description` stay on the row as the *effective* text so every
+# existing reader keeps working unchanged.
+CUSTOM_ITEM_LANGUAGES = ("hu", "en")
+
+
+def get_shop_item_definitions(guild_id: int, language: str = None) -> list[dict]:
+    """Every custom item, with its text in one language and in all of them.
+
+    ``language`` picks which text lands on ``name``/``description``, falling back
+    to Hungarian per field — so an item translated into English shows English and
+    one that is not still reads, rather than going blank. ``texts`` carries every
+    stored language so the dashboard's editor can show both fields at once.
+    """
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT d.item_key, d.template_type, d.enabled, d.price, d.config_json, "
-            "d.revision, l.name, l.description FROM shop_item_definitions d "
-            "LEFT JOIN shop_item_localizations l ON l.guild_id = d.guild_id "
-            "AND l.item_key = d.item_key AND l.language = 'hu' "
-            "WHERE d.guild_id = ? ORDER BY d.item_key", (int(guild_id),)
+            "SELECT item_key, template_type, enabled, price, config_json, revision "
+            "FROM shop_item_definitions WHERE guild_id = ? ORDER BY item_key",
+            (int(guild_id),),
         ).fetchall()
-    return [{"item_key": row[0], "template_type": row[1], "enabled": bool(row[2]),
-             "price": row[3], "config": json.loads(row[4]), "revision": row[5],
-             "name": row[6], "description": row[7]}
-            for row in rows]
+        localized = conn.execute(
+            "SELECT item_key, language, name, description "
+            "FROM shop_item_localizations WHERE guild_id = ?", (int(guild_id),)
+        ).fetchall()
+    texts = {}
+    for item_key, lang, name, description in localized:
+        texts.setdefault(item_key, {})[lang] = {"name": name,
+                                                "description": description}
+    wanted = language if language in CUSTOM_ITEM_LANGUAGES else "hu"
+    items = []
+    for row in rows:
+        stored = texts.get(row[0], {})
+        primary = stored.get("hu", {})
+        chosen = stored.get(wanted, {})
+        items.append({
+            "item_key": row[0], "template_type": row[1], "enabled": bool(row[2]),
+            "price": row[3], "config": json.loads(row[4]), "revision": row[5],
+            # Per field, not per row: an item with an English name and no English
+            # description shows the English name and the Hungarian description.
+            "name": chosen.get("name") or primary.get("name"),
+            "description": chosen.get("description") or primary.get("description"),
+            "texts": stored,
+        })
+    return items
 
 
 def update_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
@@ -4868,13 +5402,25 @@ def update_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
                  json.dumps(item["config"], sort_keys=True), revision,
                  int(actor_id), timestamp, int(guild_id), item_key),
             )
-            conn.execute(
-                "INSERT INTO shop_item_localizations "
-                "(guild_id, item_key, language, name, description) VALUES (?, ?, 'hu', ?, ?) "
-                "ON CONFLICT(guild_id, item_key, language) DO UPDATE SET "
-                "name = excluded.name, description = excluded.description",
-                (int(guild_id), item_key, item["hu"]["name"], item["hu"]["description"]),
-            )
+            for language in CUSTOM_ITEM_LANGUAGES:
+                if language not in item:
+                    # Absent means "no longer translated", so the row goes rather
+                    # than lingering as text nothing can reach or edit.
+                    conn.execute(
+                        "DELETE FROM shop_item_localizations WHERE guild_id = ? "
+                        "AND item_key = ? AND language = ?",
+                        (int(guild_id), item_key, language),
+                    )
+                    continue
+                conn.execute(
+                    "INSERT INTO shop_item_localizations "
+                    "(guild_id, item_key, language, name, description) "
+                    "VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(guild_id, item_key, language) DO UPDATE SET "
+                    "name = excluded.name, description = excluded.description",
+                    (int(guild_id), item_key, language, item[language]["name"],
+                     item[language]["description"]),
+                )
             write_settings_audit(conn, int(guild_id), int(actor_id),
                                  "shop_item.update", item_key, previous, item)
             conn.commit()

@@ -469,3 +469,84 @@ class SubjectTableCoverageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EntitlementRevocationTests(unittest.IsolatedAsyncioTestCase):
+    """The Discord half of an erasure must not be able to abort the database half.
+
+    ``revoke_entitlement`` used to fall through to ``fetch_soundboard_sound`` for
+    any key it did not recognise, reading ``discord_item_id``. A custom-shop
+    ``role:<id>`` entitlement leaves that column NULL, so ``int(None)`` raised a
+    TypeError past the ``except discord.HTTPException`` — and every caller is an
+    erasure path, so the member asked to be erased and was not.
+    """
+
+    def setUp(self):
+        import cogs.gacha as gacha
+        self.gacha = gacha
+        self.guild = _RevocationGuild()
+
+    def _entitlement(self, key, item_id=None, entitlement_id=1):
+        return {
+            "entitlement_id": entitlement_id,
+            "guild_id": 111,
+            "user_id": 7,
+            "entitlement_key": key,
+            "discord_item_id": item_id,
+            "status": "active",
+        }
+
+    async def test_custom_shop_role_is_revoked_rather_than_raising(self):
+        member = _RevocationMember()
+        role = object()
+        self.guild.member = member
+        self.guild.roles[4242] = role
+        ok = await self.gacha.revoke_entitlement(
+            self.guild, self._entitlement("role:4242"))
+        self.assertTrue(ok)
+        self.assertEqual([role], member.removed)
+
+    async def test_unknown_key_reports_success_rather_than_blocking_erasure(self):
+        # Nothing here knows how to reach it, and returning False would make the
+        # retention sweep retry the same row every day forever.
+        ok = await self.gacha.revoke_entitlement(
+            self.guild, self._entitlement("something_new"))
+        self.assertTrue(ok)
+
+    async def test_asset_entitlement_without_a_discord_id_does_not_raise(self):
+        ok = await self.gacha.revoke_entitlement(
+            self.guild, self._entitlement("sticker", item_id=None))
+        self.assertTrue(ok)
+
+    async def test_a_type_error_is_caught_and_reported_as_a_failure(self):
+        # Belt and braces: the handler catches TypeError/ValueError too, so a
+        # future malformed row is a False rather than an aborted erasure.
+        ok = await self.gacha.revoke_entitlement(
+            self.guild, self._entitlement("emoji", item_id="not-an-id"))
+        self.assertFalse(ok)
+
+
+class _RevocationMember:
+    def __init__(self):
+        self.removed = []
+        self.roles = []
+
+    async def remove_roles(self, role, reason=None):
+        self.removed.append(role)
+
+
+class _RevocationGuild:
+    id = 111
+
+    def __init__(self):
+        self.member = None
+        self.roles = {}
+
+    def get_member(self, user_id):
+        return self.member
+
+    def get_role(self, role_id):
+        return self.roles.get(role_id)
+
+    def get_emoji(self, emoji_id):
+        return None
