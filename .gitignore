@@ -42,3 +42,7 @@ todo*
 # Dashboard design reference: local screenshots, several megabytes each.
 dashboard-reference/
 node_modules/
+
+# Screenshots dropped in the tree to point at a defect. They are
+# working notes, and one of them is a picture of the live dashboard.
+Screenshot*.png

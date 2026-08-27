@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.7.0-beta.2
+
+- **The shop item editor follows the kind you pick.** Choosing "Vault" and
+  still being asked which role to grant is fixed properly this time: the redraw
+  was wired through the surrounding form and matched on an attribute, which had
+  already broken twice in the same way, so it is wired straight to the Kind
+  dropdown instead. There is nothing left in between to go wrong.
+- **Editing an item now shows what the item is set to.** The fields were the
+  right ones but arrived empty — a vault opened reading "Nothing selected", and
+  saving it wrote that back. All six kinds keep their stored values now.
+
 ## 2.7.0-beta.1
 
 - **The five new casino items can be pulled at all now.** The lucky charm,

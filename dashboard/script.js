@@ -3516,7 +3516,7 @@ function renderItemEditor(existing) {
         kind: 'text', label: 'dashboard.item_key', max: 64, required: true,
         immutableAfterCreate: true, hint: 'item_key',
     }, existing ? existing.item_key : '', isNew);
-    addEditorField(grid, readers, 'template_type', {
+    const templateControl = addEditorField(grid, readers, 'template_type', {
         kind: 'choice', label: 'dashboard.item_template',
         options: Object.keys(SHOP_TEMPLATES), default: template,
         optionLabels: 'dashboard.item_templates', hint: 'item_template',
@@ -3556,7 +3556,11 @@ function renderItemEditor(existing) {
         configGrid.replaceChildren();
         const chosen = readers.template_type();
         const spec = SHOP_TEMPLATES[chosen];
-        const values = existing && existing.template_type === chosen
+        // `effect`, not `template_type`: that is the field `/items` serves a
+        // custom item's kind under. Comparing the wrong name was always false,
+        // so editing an item drew section three *empty* — a vault whose reserve
+        // read "Nothing selected", which saving would then have written back.
+        const values = existing && existing.effect === chosen
             ? spec.unpack(existing.config || {}) : {};
         spec.fields.forEach((name) => {
             addEditorField(configGrid, configReaders, name,
@@ -3564,14 +3568,17 @@ function renderItemEditor(existing) {
         });
     };
     drawConfig();
-    // `[data-field]`, not `.field`: `managedFieldWrapper` gives the wrapper the
-    // class `input-group`, so the old selector matched nothing and section three
-    // never redrew — every template kept asking for a role, whichever kind you
-    // had picked.
-    form.addEventListener('change', (event) => {
-        if (event.target.closest('[data-field]')?.dataset.field === 'template_type') {
-            drawConfig();
-        }
+    // Bound to the kind control itself. This was a delegated listener on the
+    // form that matched the event's ancestor — first on `.field`, which
+    // `managedFieldWrapper` never sets, and then on `[data-field]`. Both times
+    // the symptom was identical and silent: section three kept asking for a
+    // role whichever kind you picked, so a vault could not be created at all.
+    // A redraw that depends on an event reaching an ancestor and matching a
+    // selector has two ways to fail; binding to the control has none. `input`
+    // as well as `change` because a keyboard-driven select fires `input` first
+    // and some browsers coalesce the `change`.
+    ['change', 'input'].forEach((name) => {
+        templateControl.addEventListener(name, drawConfig);
     });
 
     const actions = element('div', 'form-actions');
@@ -3607,6 +3614,10 @@ function addEditorField(host, readers, name, spec, value, isNew) {
     if (spec.wide) wrapper.classList.add('wide');
     host.appendChild(wrapper);
     readers[name] = control.read;
+    // Returned so a caller that must react to *this* field can bind to the
+    // control itself rather than delegating from an ancestor and matching on
+    // `data-field` — an indirection that has already silently broken twice.
+    return control.node;
 }
 
 async function saveItem(existing, readers, configReaders, submit) {

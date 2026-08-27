@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.7.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.7.0-beta.2** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -172,6 +172,11 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.7.0-beta.2
+
+- **The shop item editor follows the kind you pick.** Choosing "Vault" and still being asked which role to grant is fixed properly this time: the redraw was wired through the surrounding form and matched on an attribute, which had already broken twice in the same way, so it is wired straight to the Kind dropdown instead. There is nothing left in between to go wrong.
+- **Editing an item now shows what the item is set to.** The fields were the right ones but arrived empty — a vault opened reading "Nothing selected", and saving it wrote that back. All six kinds keep their stored values now.
+
 ### 2.7.0-beta.1
 
 - **The five new casino items can be pulled at all now.** The lucky charm, stacked deck, marked card, metal detector and parachute were marked drawable but were never added to the shipped gacha table, so no banner could award them — and because "add missing rewards" compares your banner against that shipped table, it correctly reported nothing missing. The only route to them was "reset rewards", which throws away your own table. They are in the shipped 3-star tier now, so the button offers them.
@@ -195,18 +200,6 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - **Redeeming a voucher for an emoji, sticker or sound opens a ticket**, so you and the member can agree what to make instead of a request id appearing in a queue with no conversation attached. With tickets off it behaves as before.
 - Ticket creation lived in two hand-written copies that had already drifted apart; there is one now, and rental tickets are finally typed as rentals.
 - …and 24 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.4.0-beta.1
-
-- **Five public betas shipped with a private heading on the front page.** `README.md` renders the three most recent changelog sections, and promotion renamed only the top one, so a stale `2.0.0-rc.1 - Unreleased` sat under every release and 2.1 and 2.2 were never mentioned at all. Promotion now merges the whole leading run of unreleased sections, and the publisher refuses a snapshot where an `Unreleased` survives, where the README does not name the release, or where it has lost one of its generated blocks.
-- **The plain embed sender is a creator like the others.** It was the last thing still writing drafts: a name and a JSON textarea, posted and then unreachable forever. It is now a list and a creator with 1–10 numbered embeds, a colour, a banner image and a live preview — and no buttons, no drafts and nothing else around it, because an embed is the message itself. Post it, and it stays editable; press Update and the same message changes. It carries **no feature toggle**, since there is nothing there anybody would switch off.
-- Schema 13 rebuilds `managed_messages` so it can hold an embed. SQLite cannot alter a CHECK constraint, so this is a create-copy-drop-rename of the kind schema 8 used, gated on the table's own SQL: re-running is a no-op and an interrupted upgrade repairs itself. Rehearsed against a copy of the live database — every row, every column and every id survives.
-- `dashboard_documents` keeps no reader. Dropping the table is a destructive migration with nothing to gain, so it stays the way `server_config` does.
-- CI installs Node. Four tests drive the dashboard's JavaScript through it and skip themselves without a runtime, so all four had been reporting green while running nothing — and they are the checks guarding the defects that reached the deployment. A test asserts both halves now, because the failure mode of a guard is silence.
-- **You can take over the panels you have already posted** instead of recreating them. Paste a message link into a creator and the bot reads that message, fills the form from it and records the link, so Update edits that exact message from then on — your rules panel, ticket launcher and entry gate stay where they are, with their pins and their place in the channel. The schema-12 migration always left this half undone: it says a menu already posted keeps working "until it is re-posted **or told which message it is**", and only the re-posting half existed. Your three role menus need only the link: their content — all 19 role and emoji pairs — was already imported by that migration, and a role menu's buttons are deliberately *not* read back from the message, because a button carries no role id and the database is the only place those live. It refuses a message the bot did not post rather than accepting it and failing on every Update, refuses a link from another server, and refuses a message another item already owns.
-- The rules panel takes a **banner image**, which is what `/rules_verify` posts. Without it, adopting one of those messages would have stripped the banner on the first Update, silently.
-- **The `/work` editor says what you may type.** There are two tokens, `{earnings}` and `{coin}`, and the hints named only the first, so the currency symbol was undiscoverable. The page now lists both with the rules that apply — 500 characters, line breaks and formatting work, mentions cannot ping anyone, and any other braced text stays exactly as written. The hint claiming the shipped responses are "not editable" was also out of date; editing one adopts that tier into your server.
-- …and 16 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

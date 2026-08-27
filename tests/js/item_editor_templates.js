@@ -18,6 +18,26 @@ const script = fs.readFileSync(path.join(repo, 'dashboard/script.js'), 'utf8');
 const locale = JSON.parse(fs.readFileSync(path.join(repo, 'locales/en.json'), 'utf8'));
 
 const ROLE = '1420070400000000002';
+
+/* The `catalog` field kinds — the vault and consumable pickers — build their
+ * options from this list, filtered on `source === 'builtin'` and on `effect`.
+ * `effect` here is `ItemEffect.value`, lowercase, because that is what
+ * `guild_item_list` sends; stubbing it uppercase leaves those two selects empty
+ * and the test passes while proving nothing about them. */
+const BUILTINS = [
+    {item_key: 'small_vault', source: 'builtin', name: 'Small vault',
+     description: '', effect: 'vault', value: 25000, price: 500000,
+     in_shop: true, in_gacha: true, enabled: true, editable: false,
+     price_setting: 'shop_price_small_vault'},
+    {item_key: 'med_vault', source: 'builtin', name: 'Medium vault',
+     description: '', effect: 'vault', value: 100000, price: 1500000,
+     in_shop: true, in_gacha: true, enabled: true, editable: false,
+     price_setting: 'shop_price_med_vault'},
+    {item_key: 'stacked_deck', source: 'builtin', name: 'Stacked deck',
+     description: '', effect: 'inventory', value: null, price: 12000,
+     in_shop: true, in_gacha: true, enabled: true, editable: false,
+     price_setting: 'shop_price_stacked_deck'},
+];
 const dom = new JSDOM(html, {url: 'https://d.test/', runScripts: 'outside-only'});
 const { window } = dom;
 window.potatoLanguage = {current: () => 'en', set: () => {}};
@@ -42,7 +62,7 @@ window.fetch = async (url) => {
              managed: false, manageable: true}]}});
     }
     if (u.includes('/items')) {
-        return ok({status: 'success', data: [], limit: 8, custom_count: 0});
+        return ok({status: 'success', data: BUILTINS, limit: 8, custom_count: 0});
     }
     return ok({status: 'success', data: []});
 };
@@ -106,7 +126,7 @@ const EXPECTED = {
         fixed_role: {role_id: ROLE},
         timed_role: {role_id: ROLE, duration_days: 30},
         vault: {amount: 25000},
-        consumable: {item_key: 'loaded_die'},
+        consumable: {item_key: 'stacked_deck'},
         coin_bundle: {amount: 100, repeatable: false},
         fulfillment_voucher: {asset_type: 'emoji', duration_days: 180},
     };
@@ -125,6 +145,24 @@ const EXPECTED = {
             `editing a ${template} opened as ${chosen.value}`);
         assert.deepStrictEqual(labels(), EXPECTED[template],
             `editing a ${template} asked for ${JSON.stringify(labels())}`);
+
+        /* And the fields must carry the stored values. Comparing the wrong
+         * field name made `values` empty for every kind, so a vault opened
+         * reading "Nothing selected" and saving it wrote that back. Right
+         * fields with blank values is the more dangerous half of this bug,
+         * because the form looks correct. */
+        const filled = [...window.document.querySelectorAll(
+            '#shop-item-editor fieldset:nth-of-type(3) [data-field]')]
+            .map((wrap) => {
+                const input = wrap.querySelector('select, input, textarea');
+                if (!input) return [wrap.dataset.field, null];
+                return [wrap.dataset.field,
+                        input.type === 'checkbox' ? input.checked : input.value];
+            });
+        for (const [field, value] of filled) {
+            assert.ok(value !== '' && value !== null && value !== undefined,
+                `editing a ${template} left ${field} empty`);
+        }
         // The key is the row's identity and cannot be edited after creation.
         const keyInput = window.document.querySelector(
             '#shop-item-editor input[name="item_key"], #shop-item-editor [data-field="item_key"] input');
@@ -133,6 +171,20 @@ const EXPECTED = {
                 `editing a ${template} left the item key editable`);
         }
     }
+
+    /* The redraw must not depend on delegation. It was a listener on the form
+     * matching the event's ancestor, and that broke twice — first on a class
+     * `managedFieldWrapper` never sets, then on the `data-field` attribute.
+     * Both times a vault could not be created, silently. A non-bubbling event
+     * dispatched straight at the control still has to redraw. */
+    await window.eval('renderItemEditor(null)');
+    await new Promise((r) => setTimeout(r, 20));
+    const kind = window.document.querySelector('#shop-item-editor select');
+    kind.value = 'vault';
+    kind.dispatchEvent(new window.Event('change', {bubbles: false}));
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepStrictEqual(labels(), EXPECTED.vault,
+        'the redraw still relies on the event bubbling to an ancestor');
 
     console.log('ok');
 })();
