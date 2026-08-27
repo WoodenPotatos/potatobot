@@ -96,6 +96,17 @@ def _definitions() -> tuple[ItemDefinition, ...]:
         # Reveals this many safe tiles before a minesweeper round starts.
         ItemDefinition("metal_detector", ItemEffect.INVENTORY, value=1,
                        shop_price=14000, gacha_kind="item"),
+        # One wrong call in higher-or-lower is redrawn instead of ending the run.
+        ItemDefinition("marked_card", ItemEffect.INVENTORY,
+                       shop_price=13000, gacha_kind="item"),
+        # `value` is the multiplier in hundredths that a crash cannot burst
+        # before, so the mechanic reads from the catalog like every other one.
+        # 195 rather than a round 200 because it is exactly the third step of
+        # the 1.25x ladder: a floor between two steps would promise 2.00x and
+        # always pay 2.44x, and a promise that is quietly generous is still a
+        # promise that does not describe what happens.
+        ItemDefinition("parachute", ItemEffect.INVENTORY, value=195,
+                       shop_price=16000, gacha_kind="item"),
         ItemDefinition("bodyguard", ItemEffect.BODYGUARD, value=0.7,
                        shop_price=15000),
         # Fixed reserves, not percentages. A higher tier replaces a lower one.

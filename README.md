@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.6.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.7.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -172,6 +172,18 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.7.0-beta.1
+
+- **The five new casino items can be pulled at all now.** The lucky charm, stacked deck, marked card, metal detector and parachute were marked drawable but were never added to the shipped gacha table, so no banner could award them — and because "add missing rewards" compares your banner against that shipped table, it correctly reported nothing missing. The only route to them was "reset rewards", which throws away your own table. They are in the shipped 3-star tier now, so the button offers them.
+- **The gacha page's buttons follow the banner you are looking at.** They were built once when you opened the page, so switching banners in the picker left them describing the previous one — a banner that was missing rewards showed no "add missing" button at all.
+- **The audit log shows its entries again.** It drew the count in the header and then stopped, leaving the list loading forever, because the code that turns a timestamp into "3 hours ago" used a table that was never defined.
+- **Editing a shop item opens the right kind.** Every existing item opened as "Permanent role" asking which role to grant, whatever it actually was — so editing a vault and saving would have turned it into a role grant.
+- **Russian roulette.** `/russian` opens a lobby other members join; when the host starts it, one player takes the round and everybody else splits the pot. Up to ten players, and the house takes its 2% off the pot once rather than per player, so a bigger table is better odds and not worse.
+- Every ante is its own reserved wager, so a lobby nobody starts costs nothing: the antes come back when it expires, and again at the next start if the bot went down while it was open.
+- **Two channel games the bot keeps honest.** A **counting** channel and a **word chain** channel: people play, and the bot removes a message that breaks the rule and tells only its author why, so the channel still reads as the chain. Accents and capitals are ignored when words are compared, and a message that is not an attempt at all is left alone.
+- The same person cannot take two turns in a row unless you allow it, two people posting at once cannot both count, and every hundredth turn gets a 🏆.
+- …and 11 more, in [CHANGELOG.md](CHANGELOG.md).
+
 ### 2.6.0-beta.1
 
 - **Four casino items, and the loaded die now works in roulette.** A stacked deck deals your blackjack hand twice and keeps the better one, a lucky charm spins the slots twice and keeps the better payout, and a metal detector marks a minesweeper tile safe before you start. All four are buyable and drawable, and each is spent only by a paid round that actually resolves — win or lose. Getting there meant moving roulette's and slots' outcomes into their settlement transactions, which makes those two games atomic whether or not you own anything.
@@ -195,18 +207,6 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - The rules panel takes a **banner image**, which is what `/rules_verify` posts. Without it, adopting one of those messages would have stripped the banner on the first Update, silently.
 - **The `/work` editor says what you may type.** There are two tokens, `{earnings}` and `{coin}`, and the hints named only the first, so the currency symbol was undiscoverable. The page now lists both with the rules that apply — 500 characters, line breaks and formatting work, mentions cannot ping anyone, and any other braced text stays exactly as written. The hint claiming the shipped responses are "not editable" was also out of date; editing one adopts that tier into your server.
 - …and 16 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.1.0-beta.1 to 2.3.0-beta.1
-
-- These notes cover five public betas — `v2.1.0b1` through `v2.3.0b1` — as one block. The changelog was a single running section then and the publisher renamed only its top heading, so the per-release boundaries were never recorded and inventing them now would be a guess; the tags are the authority on what each build contained. The 2.4.0 boundary below it *is* exact, because `git blame` can place every line against the commit that wrote it.
-- The README is an overview and a quick start again. The verification commands and the local-dashboard walkthrough moved to `docs/development.md`, which already owned that ground, and it says what it runs on: a headless Linux server under systemd behind a reverse proxy, which the README never stated. Corrected the stale facts too — it claimed schema 8 while announcing schema 11 fourteen lines below, called the dashboard experimental where `CLAUDE.md` explicitly says it is load-bearing, and said `/work` falls back to shipped *Hungarian locale lines* when the shipped set is English database rows.
-- `docs/development.md` said schema 6, called the dashboard a typed alpha, and documented a `/work` fallback deleted some time ago. `docs/release_checklist.md` pinned schema 6 in a step that has to be true at every release, so it names the constant now instead of a number.
-- A stored gacha banner can pick up rewards the bot shipped after it was saved. Nothing ever reconciled the two, so a banner was frozen at the shipped set of the day it was first saved — which is how the streak freeze reached the shop and the shipped 4-star tier while being unobtainable from the banner a guild actually pulls on. **Add missing rewards** appends only what the table lacks and leaves your weights and your deliberate omissions alone; **Reset rewards** replaces the whole table with the shipped one. Both exist because neither can stand in for the other.
-- A new banner starts with one placeholder reward per tier instead of a copy of all eighteen, so the first thing you do with it is not pruning. It cannot be literally empty: a tier can still be rolled and has to have something to award.
-- The banner key says what it wants. The message you got was the browser's own "please match the requested format", which blocks submitting and so never let the server's descriptive message through; the field now carries the same words as a hint and a tooltip.
-- A reward row on a banner nobody has saved yet is editable, like one you added. The synthesised standard banner rendered its rows as committed, which is why they behaved differently from your own. And the reward table explains what "amount" means, which depends on the kind.
-- Casino and Everydle are one master toggle each, with the individual games as sub-toggles on their own settings page. Eight near-identical games in the flat Features list pushed everything else off it; the list is 27 entries instead of 35. A child depends on its master, so the existing cascade switches the games off with it — `parent` is only where it renders.
-- …and 41 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

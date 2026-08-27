@@ -559,8 +559,15 @@ def is_staff():
         return False
     return commands.check(predicate)
 
-def is_channel(allowed_ids):
+def is_channel(allowed_ids, fallback=None):
     """Restrict a command to the channels one typed setting names.
+
+    `fallback` is a second setting key used only when the first resolves to
+    nothing. That is how a guild gets "the casino lives wherever the economy
+    does, unless I say otherwise": leaving `casino_channels` empty inherits
+    `economy_channels` rather than locking everyone out, because an empty
+    channel gate admits nobody but an administrator and silently losing a
+    command is worse than needing one more setting.
 
     Takes a **setting key** rather than a dotted `config.json` path, and
     resolves it through `settings_cache`. This predicate runs on every
@@ -580,6 +587,8 @@ def is_channel(allowed_ids):
         resolved_ids = allowed_ids
         if isinstance(allowed_ids, str):
             resolved_ids = guild_setting_sync(ctx.guild.id, allowed_ids)
+            if not resolved_ids and fallback:
+                resolved_ids = guild_setting_sync(ctx.guild.id, fallback)
         # An unset channel setting is an empty gate, exactly as an absent
         # config path was: nobody but an administrator passes.
         if resolved_ids is None:

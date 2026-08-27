@@ -24,7 +24,51 @@ const { window } = dom;
 window.potatoLanguage = {current: () => 'en', set: () => {}};
 
 const GUILD = '1420070400000000001';
+const ROLE = '1420070400000000002';
 const ok = (body) => ({ok: true, status: 200, text: async () => JSON.stringify(body)});
+
+/* Non-empty on purpose. Every list route used to answer `[]`, so each page
+ * rendered its empty state and **no row loop ever ran** — which is how
+ * `relativeTime` came to reference a `RELATIVE_UNITS` that was declared
+ * nowhere. The audit page drew its subtitle, threw on the first row and left
+ * the skeleton spinning, and this harness reported the page fine. A row is the
+ * only thing that exercises a row renderer. */
+const AUDIT = [
+    // One per value shape the real feed carries: dict, list, int, bool, str,
+    // and a null old_value, which is the common case.
+    {audit_id: 1, action: 'setting.update', target_key: 'economy_channels',
+     actor_id: GUILD, created_at: '2026-08-26T10:00:00+00:00',
+     old_value: null, new_value: [GUILD]},
+    {audit_id: 2, action: 'feature.update', target_key: 'shop',
+     actor_id: GUILD, created_at: '2026-08-27T02:00:00+00:00',
+     old_value: false, new_value: true},
+    {audit_id: 3, action: 'shop_item.update', target_key: 'vip',
+     actor_id: GUILD, created_at: '2026-08-27T03:30:00+00:00',
+     old_value: {price: 100}, new_value: {price: 200}},
+    {audit_id: 4, action: 'setting.update', target_key: 'language',
+     actor_id: GUILD, created_at: '2026-08-27T03:59:30+00:00',
+     old_value: 'hu', new_value: 'en'},
+    // The two the privacy card pulls out of the feed into its own table.
+    {audit_id: 5, action: 'user.erase', target_key: '-1',
+     actor_id: GUILD, created_at: '2026-08-25T09:00:00+00:00',
+     old_value: null, new_value: {retained_rows: {users: 1}}},
+    {audit_id: 6, action: 'user.retention_sweep', target_key: '-2',
+     actor_id: GUILD, created_at: '2026-08-24T09:00:00+00:00',
+     old_value: null, new_value: 7},
+];
+
+/* One built-in and one custom, so the item table renders both branches: the
+ * built-in's inline price input and the custom's edit/enable/delete actions. */
+const ITEMS = [
+    {item_key: 'small_vault', source: 'builtin', name: 'Small vault',
+     description: 'Protects a reserve.', effect: 'VAULT', value: 25000,
+     price: 500000, in_shop: true, in_gacha: true, enabled: true,
+     editable: false, price_setting: 'shop_price_small_vault'},
+    {item_key: 'vip', source: 'custom', name: 'VIP', description: 'A role.',
+     effect: 'timed_role', value: null, price: 5000, in_shop: true,
+     in_gacha: false, enabled: true, editable: true, price_setting: null,
+     revision: 2, config: {role_id: ROLE, duration_days: 30}},
+];
 
 /* Shaped the way each route really answers. A stub that returns the wrong shape
  * produces a throw the real server never would, which is worse than no test. */
@@ -57,7 +101,10 @@ window.fetch = async (url) => {
         return ok({status: 'success', data: [], shipped_rewards: {}});
     }
     if (u.includes('/items')) {
-        return ok({status: 'success', data: [], limit: 10, custom_count: 0});
+        return ok({status: 'success', data: ITEMS, limit: 10, custom_count: 1});
+    }
+    if (u.includes('/audit')) {
+        return ok({status: 'success', data: AUDIT});
     }
     return ok({status: 'success', data: []});
 };

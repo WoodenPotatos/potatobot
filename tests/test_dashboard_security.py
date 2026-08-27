@@ -250,7 +250,7 @@ class DashboardSecurityTests(unittest.TestCase):
         response = self.client.post(
             "/api/guilds/123/shop-items",
             json={"item_key": "premium", "template_type": "fixed_role", "enabled": True,
-                  "price": 100, "config": {"role_id": 5}, "hu": {"name": "a", "description": "b"}},
+                  "price": 100, "config": {"role_id": 5}, "text": {"name": "a", "description": "b"}},
             headers=headers,
         )
         self.assertEqual(response.status_code, 400)
@@ -266,7 +266,7 @@ class DashboardSecurityTests(unittest.TestCase):
                     "/api/guilds/123/shop-items",
                     json={"item_key": key, "template_type": "vault", "enabled": True,
                           "price": 100, "config": {"amount": 1000},
-                          "hu": {"name": "a", "description": "b"}},
+                          "text": {"name": "a", "description": "b"}},
                     headers=headers,
                 )
                 self.assertEqual(response.status_code, 400)
@@ -426,7 +426,7 @@ class DashboardSecurityTests(unittest.TestCase):
             "/api/guilds/123/shop-items",
             json={"item_key": "vip_role", "template_type": "vault", "enabled": True,
                   "price": 100, "config": {"amount": 1000},
-                  "hu": {"name": "Vip", "description": "leiras"}},
+                  "text": {"name": "Vip", "description": "leiras"}},
             headers=headers,
         )
         self.assertEqual(created.status_code, 201, created.get_data(as_text=True))
@@ -452,7 +452,7 @@ class DashboardSecurityTests(unittest.TestCase):
             "/api/guilds/123/shop-items",
             json={"item_key": key, "template_type": "vault", "enabled": True,
                   "price": price, "config": {"amount": 1000},
-                  "hu": {"name": "Vip", "description": "leiras"}},
+                  "text": {"name": "Vip", "description": "leiras"}},
             headers=headers,
         )
 
@@ -467,7 +467,7 @@ class DashboardSecurityTests(unittest.TestCase):
             "/api/guilds/123/shop-items/vip_role",
             json={"template_type": "vault", "enabled": False, "price": 250,
                   "config": {"amount": 2000},
-                  "hu": {"name": "Vip 2", "description": "uj"}, "revision": 1},
+                  "text": {"name": "Vip 2", "description": "uj"}, "revision": 1},
             headers=headers,
         )
         self.assertEqual(disabled.status_code, 200, disabled.get_data(as_text=True))
@@ -482,7 +482,7 @@ class DashboardSecurityTests(unittest.TestCase):
             "/api/guilds/123/shop-items/vip_role",
             json={"template_type": "vault", "enabled": True, "price": 300,
                   "config": {"amount": 2000},
-                  "hu": {"name": "x", "description": "y"}, "revision": 1},
+                  "text": {"name": "x", "description": "y"}, "revision": 1},
             headers=headers,
         )
         self.assertEqual(stale.status_code, 409)
@@ -499,7 +499,7 @@ class DashboardSecurityTests(unittest.TestCase):
         response = self.client.patch(
             "/api/guilds/123/shop-items/vip_role",
             json={"template_type": "arbitrary_code", "enabled": True, "price": 1,
-                  "config": {}, "hu": {"name": "a", "description": "b"}, "revision": 1},
+                  "config": {}, "text": {"name": "a", "description": "b"}, "revision": 1},
             headers=headers,
         )
         self.assertEqual(response.status_code, 400)
@@ -511,7 +511,7 @@ class DashboardSecurityTests(unittest.TestCase):
             "/api/guilds/123/shop-items/vip_role",
             json={"item_key": "other", "template_type": "vault", "enabled": True,
                   "price": 1, "config": {"amount": 1},
-                  "hu": {"name": "a", "description": "b"}, "revision": 1},
+                  "text": {"name": "a", "description": "b"}, "revision": 1},
             headers=headers,
         )
         self.assertEqual(renamed.status_code, 400)
@@ -616,7 +616,7 @@ class DashboardSecurityTests(unittest.TestCase):
                 f"/api/guilds/123/shop-items/item_{index}",
                 json={"template_type": "vault", "enabled": False, "price": 100,
                       "config": {"amount": 1000},
-                      "hu": {"name": "a", "description": "b"}, "revision": 1},
+                      "text": {"name": "a", "description": "b"}, "revision": 1},
                 headers=headers,
             )
             self.assertEqual(disabled.status_code, 200)
@@ -786,11 +786,19 @@ class DashboardSecurityTests(unittest.TestCase):
                         "item_key": f"custom_{item_key}", "template_type": "consumable",
                         "enabled": True, "price": 100,
                         "config": {"item_key": item_key},
-                        "hu": {"name": "Teszt", "description": "Teszt"},
+                        "text": {"name": "Teszt", "description": "Teszt"},
                     },
                     headers=headers,
                 )
                 self.assertEqual(response.status_code, 201, response.get_data(as_text=True))
+                # Removed again before the next one: this is about the
+                # validator accepting every catalog consumable, not about how
+                # many custom items fit in a Discord menu, and the cap is
+                # derived — it shrinks whenever a built-in is added.
+                self.client.delete(
+                    f"/api/guilds/123/shop-items/custom_{item_key}",
+                    json={"revision": 1}, headers=headers,
+                )
 
         rejected = self.client.post(
             "/api/guilds/123/shop-items",
@@ -798,7 +806,7 @@ class DashboardSecurityTests(unittest.TestCase):
                 "item_key": "custom_unknown", "template_type": "consumable",
                 "enabled": True, "price": 100,
                 "config": {"item_key": "big_vault"},
-                "hu": {"name": "Teszt", "description": "Teszt"},
+                "text": {"name": "Teszt", "description": "Teszt"},
             },
             headers=headers,
         )

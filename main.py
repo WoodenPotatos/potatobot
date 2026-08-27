@@ -56,6 +56,7 @@ if recovery["count"]:
 # Apply a lightweight cross-command rate limit while exempting game creation.
 ANTI_SPAM_EXEMPT_COMMANDS = {
     "bj", "dice", "roulette", "slots", "mines", "freemines",
+    "hilo", "crash", "wheel", "russian",
     "loldle", "valdle", "dbdle",
 }
 command_rate_limits = commands.CooldownMapping.from_cooldown(

@@ -50,6 +50,8 @@ LORE_CHAMPS, LORE_CHAMPS_LOWER = load_game_dataset(
     "loldle", "loldlehardmode.json", "hard_mode"
 )
 AGENTS, AGENTS_LOWER = load_game_dataset("valdle", "valdle.json", "agents")
+GENSHIN, GENSHIN_LOWER = load_game_dataset(
+    "genshindle", "genshindle.json", "characters")
 DBDLE_KILLERS, DBDLE_KILLER_ALIASES = load_game_dataset(
     "dbdle", "killers.json", "killers"
 )
@@ -409,6 +411,120 @@ class ValdleModal(discord.ui.Modal):
             board_content = t("everydle.valdle_board", header=header, history="\n".join(v.guess_history))
             await interaction.edit_original_response(content=board_content, view=v)
 
+# Genshindle: one Genshin character a day, compared attribute by attribute.
+#
+# Every attribute is published by the game, so unlike Valdle and DbDle this
+# dataset carries no lore and `scripts/everydle_sources.py` can keep it current
+# on its own. `version` is the release version stored as major*100 + minor, so
+# it compares higher/lower the way Valdle's year does — "1.0" and "5.3" sort
+# wrong as text, and 1.10 would collide with 1.1 as a float.
+GENSHIN_FIELDS = ("element", "weapon", "region", "rarity", "gender",
+                  "body_type", "weekly_boss")
+
+
+def genshin_version_text(packed: int) -> str:
+    """`402` back to `4.2`, for a row a player reads."""
+    return f"{packed // 100}.{packed % 100}"
+
+
+class GenshindleModal(discord.ui.Modal):
+    def __init__(self, view_instance):
+        super().__init__(title=t("everydle.modal_genshindle_title"))
+        self.guess = discord.ui.TextInput(
+            label=t("everydle.modal_genshindle_label"),
+            placeholder=t("everydle.modal_genshindle_placeholder"),
+            min_length=2,
+        )
+        self.add_item(self.guess)
+        self.view_instance = view_instance
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await require_interaction_feature(interaction, "everydle_genshindle"):
+            return
+        await interaction.response.defer()
+        user_input = self.guess.value.strip().casefold()
+        if user_input not in GENSHIN_LOWER:
+            return await interaction.followup.send(
+                t("everydle.err_character_not_found"), ephemeral=True)
+
+        guess_id = GENSHIN_LOWER[user_input]
+        v = self.view_instance
+        target_data = GENSHIN[v.target_character]
+        guess_data = GENSHIN[guess_id]
+
+        def check_match(guess_val, target_val):
+            if guess_val == target_val:
+                return f"{guess_val}\u00A0🟩"
+            return f"{guess_val}\u00A0🟥"
+
+        row = [f"**{guess_data['_name']}**"]
+        row.extend(check_match(guess_data[field], target_data[field])
+                   for field in GENSHIN_FIELDS)
+
+        g_version, t_version = guess_data["version"], target_data["version"]
+        shown = genshin_version_text(g_version)
+        if g_version == t_version:
+            row.append(f"{shown}\u00A0🟩")
+        else:
+            row.append(f"{shown}\u00A0{'🔼' if g_version < t_version else '🔽'}")
+
+        v.guess_history.append(" | ".join(row))
+        header = t("everydle.genshindle_header")
+
+        if guess_id == v.target_character:
+            # Claim the reward transactionally before announcing a win.
+            base_coin, base_xp = await database.run(
+                database.get_reward, interaction.guild_id, "genshindle", 5000, 100
+            )
+            if not is_enabled(interaction.guild_id, "levels"):
+                base_xp = 0
+            now_iso = datetime.now().isoformat()
+            result = await database.run(
+                database.claim_everydle_reward, interaction.user.id,
+                "last_genshindle", now_iso, base_coin, base_xp,
+                interaction.guild_id,
+            )
+            if not result["claimed"]:
+                for child in v.children:
+                    child.disabled = True
+                return await interaction.edit_original_response(
+                    content=t("everydle.err_genshindle_played"), view=v)
+            reward = result["reward"]
+            await apply_database_result(interaction.user, result)
+
+            for child in v.children:
+                child.disabled = True
+            win_content = t("everydle.genshindle_win_msg", header=header,
+                            history="\n".join(v.guess_history), reward=reward)
+            await interaction.edit_original_response(content=win_content, view=v)
+            await interaction.channel.send(t(
+                "everydle.genshindle_public_win",
+                user=interaction.user.display_name,
+                count=len(v.guess_history), reward=reward))
+        else:
+            board_content = t("everydle.genshindle_board", header=header,
+                              history="\n".join(v.guess_history))
+            await interaction.edit_original_response(content=board_content, view=v)
+
+
+class GenshindleView(discord.ui.View):
+    def __init__(self, target_character):
+        super().__init__(timeout=15 * 60)
+        self.target_character = target_character
+        self.guess_history = []
+
+        btn = discord.ui.Button(label=t("everydle.btn_guess"),
+                                style=discord.ButtonStyle.primary, emoji="🎯")
+        btn.callback = self.guess_btn
+        self.add_item(btn)
+
+    async def guess_btn(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(GenshindleModal(self))
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        return await require_interaction_feature(interaction, "everydle_genshindle")
+
+
 class ValdleView(discord.ui.View):
     def __init__(self, target_agent):
         super().__init__(timeout=15 * 60)
@@ -592,6 +708,32 @@ class Everydle(commands.Cog):
         
         header = t("everydle.valdle_header")
         await ctx.send(content=t("everydle.valdle_init", header=header), view=view, ephemeral=True)
+
+    @commands.hybrid_command(name="genshindle",
+                             description=t("general.cmd_genshindle"))
+    @is_channel("everydle_channel")
+    async def genshindle(self, ctx):
+        if not GENSHIN:
+            return await ctx.send(t("everydle.err_genshindle_json"), ephemeral=True)
+
+        user_id = ctx.author.id
+        now = datetime.now()
+
+        last_play_str = await database.run(
+            database.get_cooldown, user_id, "last_genshindle")
+        if last_play_str:
+            last_play = datetime.fromisoformat(last_play_str)
+            if last_play.date() == now.date():
+                return await ctx.send(t("everydle.err_genshindle_played"),
+                                      ephemeral=True)
+
+        daily_character = await asyncio.to_thread(
+            get_daily_target, "genshindle", list(GENSHIN.keys()), GENSHIN_LOWER
+        )
+        view = GenshindleView(target_character=daily_character)
+        header = t("everydle.genshindle_header")
+        await ctx.send(content=t("everydle.genshindle_init", header=header),
+                       view=view, ephemeral=True)
 
     @commands.hybrid_command(name="dbdle", description=t("general.cmd_dbdle"))
     @is_channel("everydle_channel")

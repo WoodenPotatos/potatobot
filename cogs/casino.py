@@ -1,5 +1,6 @@
 import discord
 import asyncio
+import logging
 import secrets
 import os
 import time
@@ -23,6 +24,8 @@ from cogs.utils import (
 from feature_access import require_interaction_feature
 
 slots_cooldowns = BoundedCooldownMap()
+casino_logger = logging.getLogger("PotatoBot.Casino")
+
 RNG = secrets.SystemRandom()
 
 CASINO_LAUNCHER_FEATURES = {
@@ -32,6 +35,10 @@ CASINO_LAUNCHER_FEATURES = {
     "start_slots_game": "casino_slots",
     "start_mines_game": "casino_mines",
     "start_free_mines": "casino_mines",
+    "start_hilo_game": "casino_hilo",
+    "start_crash_game": "casino_crash",
+    "start_wheel_game": "casino_wheel",
+    "start_russian_game": "casino_russian",
 }
 
 def work_settings(stored: dict) -> dict[str, int]:
@@ -597,6 +604,704 @@ async def start_slots_game(ctx_or_int, bet):
         await ctx_or_int.response.edit_message(embed=embed, view=view)
     else:
         await ctx_or_int.send(embed=embed, view=view)
+
+# ------------------------------------------------------------ higher or lower
+
+# 2 through 10, then J Q K A. The value is what is compared; the label is what a
+# player reads.
+HILO_RANKS = ((2, "2"), (3, "3"), (4, "4"), (5, "5"), (6, "6"), (7, "7"),
+              (8, "8"), (9, "9"), (10, "10"), (11, "J"), (12, "Q"), (13, "K"),
+              (14, "A"))
+HILO_SUITS = ("♠️", "♥️", "♦️", "♣️")
+# The same 2% the mines multiplier carries, so the house edge is one number.
+CASINO_EDGE = 0.98
+
+
+def hilo_draw():
+    value, label = RNG.choice(HILO_RANKS)
+    return {"value": value, "label": f"{label}{RNG.choice(HILO_SUITS)}"}
+
+
+def hilo_payout(raw: float) -> float:
+    """The edge applied **once**, not per step.
+
+    `/mines` multiplies its whole ladder by 0.98 a single time, so a deep run
+    returns the same 98% a shallow one does and going further is a choice about
+    variance rather than a second tax. Charging per step instead would make a
+    ten-step run return 0.98**10 — 82% — which is a different game to the one
+    every other table here plays.
+    """
+    return round(CASINO_EDGE * raw, 2)
+
+
+def hilo_odds(value: int, higher: bool) -> float:
+    """The true chance this call is right, ties excluded.
+
+    A tie is a push — the card is redrawn and nothing changes — so it is left out
+    of the denominator rather than counted as a loss. That is what makes the
+    multiplier below the honest one for the bet actually being offered.
+    """
+    ranks = [rank for rank, _ in HILO_RANKS]
+    wins = sum(1 for rank in ranks if (rank > value if higher else rank < value))
+    outcomes = sum(1 for rank in ranks if rank != value)
+    return wins / outcomes if outcomes else 0.0
+
+
+class HiloView(discord.ui.View):
+    """Call the next card, or bank what you have.
+
+    A durable interactive wager, the same shape as `/mines`: the stake is
+    reserved up front and settled exactly once, so a lost view is refunded at
+    startup rather than swallowing the bet.
+    """
+
+    def __init__(self, user, bet, wager_id, marked_card=False):
+        super().__init__(timeout=120.0)
+        self.user = user
+        self.bet = bet
+        self.wager_id = wager_id
+        self.card = hilo_draw()
+        # The fair ladder, kept separate from what is paid: the edge is applied
+        # once, by `hilo_payout`, rather than compounding into every step.
+        self.raw = 1.0
+        self.multiplier = 1.0
+        self.streak = 0
+        self.marked_card = marked_card
+        self.settled = False
+        self.history = []
+        self.action_lock = asyncio.Lock()
+        self.settlement_lock = asyncio.Lock()
+
+        self.higher_btn = discord.ui.Button(
+            label=t("casino.hilo_btn_higher"), style=discord.ButtonStyle.primary,
+            emoji="🔼", custom_id="hilo_higher")
+        self.higher_btn.callback = self.higher
+        self.add_item(self.higher_btn)
+
+        self.lower_btn = discord.ui.Button(
+            label=t("casino.hilo_btn_lower"), style=discord.ButtonStyle.primary,
+            emoji="🔽", custom_id="hilo_lower")
+        self.lower_btn.callback = self.lower
+        self.add_item(self.lower_btn)
+
+        self.bank_btn = discord.ui.Button(
+            label=t("casino.btn_cashout"), style=discord.ButtonStyle.success,
+            emoji="💰", disabled=True, custom_id="hilo_bank")
+        self.bank_btn.callback = self.bank
+        self.add_item(self.bank_btn)
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        return await require_interaction_feature(interaction, "casino_hilo")
+
+    def build_embed(self, result_msg="", colour=discord.Color.blue()):
+        embed = discord.Embed(title=t("casino.hilo_title"), description=result_msg,
+                              colour=colour)
+        embed.add_field(name=t("casino.hilo_showing"),
+                        value=f"# {self.card['label']}", inline=True)
+        embed.add_field(name=t("casino.hilo_streak"),
+                        value=t("casino.hilo_streak_value", streak=self.streak,
+                                multiplier=f"{self.multiplier:.2f}"),
+                        inline=True)
+        if self.history:
+            embed.add_field(name=t("casino.hilo_history"),
+                            value=" → ".join(self.history[-12:]), inline=False)
+        if self.marked_card:
+            embed.add_field(name=t("casino.hilo_marked_label"),
+                            value=t("casino.hilo_marked_value"), inline=False)
+        embed.set_footer(text=t("casino.hilo_footer", bet=self.bet))
+        return embed
+
+    async def higher(self, interaction):
+        await self.call(interaction, True)
+
+    async def lower(self, interaction):
+        await self.call(interaction, False)
+
+    async def call(self, interaction: discord.Interaction, higher: bool):
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message(
+                t("casino.err_not_your_game"), ephemeral=True)
+        async with self.action_lock:
+            if self.settled:
+                return
+            odds = hilo_odds(self.card["value"], higher)
+            drawn = hilo_draw()
+            # A tie is a push: the card changes and nothing else does, so a
+            # player is never punished for the one outcome they cannot call.
+            while drawn["value"] == self.card["value"]:
+                drawn = hilo_draw()
+            correct = (drawn["value"] > self.card["value"]) is higher
+
+            rescued = False
+            if not correct and self.marked_card:
+                # The item's one job, spent at the reservation and used here:
+                # a wrong call is redrawn once rather than ending the run.
+                self.marked_card = False
+                rescued = True
+                replacement = hilo_draw()
+                while replacement["value"] == self.card["value"]:
+                    replacement = hilo_draw()
+                if (replacement["value"] > self.card["value"]) is higher:
+                    drawn, correct = replacement, True
+
+            self.history.append(
+                f"{self.card['label']}{'🔼' if higher else '🔽'}"
+                f"{'🟩' if correct else '🟥'}")
+            previous = self.card
+            self.card = drawn
+
+            if not correct:
+                return await self.finish(
+                    interaction, credit=0, win=False,
+                    message=t("casino.hilo_lost", card=drawn["label"],
+                              previous=previous["label"]),
+                    colour=discord.Color.red())
+
+            self.streak += 1
+            # Derived from the true odds rather than tabled, so it cannot
+            # quietly be wrong; the edge is taken once at payout.
+            self.raw /= odds
+            self.multiplier = hilo_payout(self.raw)
+            self.bank_btn.disabled = False
+            note = t("casino.hilo_rescued") if rescued else ""
+            await interaction.response.edit_message(
+                embed=self.build_embed(result_msg=note), view=self)
+
+    async def bank(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message(
+                t("casino.err_not_your_game"), ephemeral=True)
+        credit = int(self.bet * self.multiplier)
+        await self.finish(interaction, credit=credit, win=True,
+                          message=t("casino.hilo_banked",
+                                    multiplier=f"{self.multiplier:.2f}",
+                                    amount=credit),
+                          colour=discord.Color.green())
+
+    async def finish(self, interaction, credit, win, message, colour):
+        async with self.settlement_lock:
+            if self.settled:
+                return
+            self.settled = True
+            self.stop()
+            try:
+                result = await database.run(
+                    database.resolve_interactive_wager, self.wager_id,
+                    self.user.id, credit=credit, win_inc=1 if win else 0,
+                    loss_inc=0 if win else 1,
+                    outcome="banked" if win else "busted",
+                )
+            except database.DatabaseOperationError:
+                self.settled = False
+                raise
+        new_bal, _, _, _, _ = await apply_database_result(self.user, result)
+        for child in self.children:
+            child.disabled = True
+        embed = self.build_embed(result_msg=message, colour=colour)
+        embed.set_footer(text=t("casino.hilo_footer_final", bet=self.bet,
+                                bal=new_bal))
+        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.send(
+            view=PlayAgainView(self.user, self.bet, start_hilo_game),
+            embed=None, ephemeral=False)
+
+    async def on_timeout(self):
+        async with self.settlement_lock:
+            if self.settled:
+                return
+            self.settled = True
+            try:
+                # An abandoned run banks nothing: the stake was reserved and the
+                # player never called it, so it settles as a loss exactly once.
+                await database.run(
+                    database.resolve_interactive_wager, self.wager_id,
+                    self.user.id, loss_inc=1, outcome="timeout")
+            except database.DatabaseOperationError:
+                self.settled = False
+
+
+async def start_hilo_game(ctx_or_int, bet):
+    user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
+    bet = int(bet)
+    wager_id = secrets.token_urlsafe(24)
+    reservation = await database.run_write(
+        database.begin_interactive_wager, wager_id, ctx_or_int.guild.id,
+        user.id, "hilo", bet, consume_item="marked_card",
+    )
+    if reservation is None:
+        bal = await database.run(database.get_user_balance, user.id)
+        msg = t("casino.err_invalid_bet_bal", bal=bal)
+        return await (ctx_or_int.response.send_message(msg, ephemeral=True)
+                      if isinstance(ctx_or_int, discord.Interaction)
+                      else ctx_or_int.send(msg, ephemeral=True))
+
+    view = HiloView(user, bet, wager_id, marked_card=reservation["consumed"])
+    try:
+        if isinstance(ctx_or_int, discord.Interaction):
+            await ctx_or_int.response.edit_message(embed=view.build_embed(), view=view)
+            view.message = await ctx_or_int.original_response()
+        else:
+            view.message = await ctx_or_int.send(embed=view.build_embed(), view=view)
+    except Exception:
+        await database.run(database.refund_interactive_wager, wager_id,
+                           "delivery_failed")
+        raise
+
+
+# ------------------------------------------------------------------- crash
+
+# Each Continue multiplies the payout by this, so a fair survival chance is its
+# reciprocal and the house takes CASINO_EDGE off that — the same derivation the
+# mines multiplier uses, rather than a table.
+CRASH_STEP = 1.25
+# Fair: surviving a step is exactly as likely as the step pays. The house edge is
+# taken once, by `crash_multiplier`, the way `/mines` takes it — so a long run
+# returns the same 98% a short one does instead of paying the tax again per step.
+CRASH_SURVIVAL = 1 / CRASH_STEP
+# Discord redraws the message once per decision, so a run is bounded by the
+# player's patience rather than a timer. This is the ceiling past which the
+# multiplier stops being a number anybody reads.
+CRASH_MAX_STEPS = 40
+
+
+def crash_point(rng, floor: int = 0) -> int:
+    """How many steps this round survives, drawn before the first click.
+
+    Deliberately **not** a live timer. A real crash game edits its message every
+    second or two, and several concurrent rounds in one channel would meet
+    Discord's per-channel edit limit — the failure being a round that freezes
+    with a stake reserved. Pressing Continue keeps the tension at one edit per
+    decision, and reuses the settlement and startup recovery `/mines` already
+    has.
+
+    `floor` is a parachute's guaranteed multiplier in hundredths: the round
+    cannot burst before the first step that reaches it.
+    """
+    survived = 0
+    while survived < CRASH_MAX_STEPS and rng.random() < CRASH_SURVIVAL:
+        survived += 1
+    if floor:
+        # The first step that *reaches* the floor, not the last one below it.
+        guaranteed = 0
+        while (guaranteed < CRASH_MAX_STEPS
+               and crash_multiplier(guaranteed) * 100 < floor):
+            guaranteed += 1
+        survived = max(survived, guaranteed)
+    return survived
+
+
+def crash_multiplier(step: int) -> float:
+    """What `step` survived steps pays, edge included, once."""
+    if step <= 0:
+        return 1.0
+    return round(CASINO_EDGE * CRASH_STEP ** step, 2)
+
+
+class CrashView(discord.ui.View):
+    """Climb or take the money. A durable wager, settled exactly once."""
+
+    def __init__(self, user, bet, wager_id, crash_at, parachute=0):
+        super().__init__(timeout=120.0)
+        self.user = user
+        self.bet = bet
+        self.wager_id = wager_id
+        self.crash_at = crash_at
+        self.parachute = parachute
+        self.step = 0
+        self.settled = False
+        self.action_lock = asyncio.Lock()
+        self.settlement_lock = asyncio.Lock()
+
+        self.continue_btn = discord.ui.Button(
+            label=t("casino.crash_btn_continue"),
+            style=discord.ButtonStyle.primary, emoji="🚀",
+            custom_id="crash_continue")
+        self.continue_btn.callback = self.advance
+        self.add_item(self.continue_btn)
+
+        self.cashout_btn = discord.ui.Button(
+            label=t("casino.btn_cashout"), style=discord.ButtonStyle.success,
+            emoji="💰", disabled=True, custom_id="crash_cashout")
+        self.cashout_btn.callback = self.cashout
+        self.add_item(self.cashout_btn)
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        return await require_interaction_feature(interaction, "casino_crash")
+
+    def build_embed(self, result_msg="", colour=discord.Color.blue()):
+        current = crash_multiplier(self.step)
+        embed = discord.Embed(title=t("casino.crash_title"),
+                              description=result_msg, colour=colour)
+        embed.add_field(name=t("casino.crash_multiplier"),
+                        value=f"# {current:.2f}x", inline=True)
+        embed.add_field(name=t("casino.crash_next"),
+                        value=t("casino.crash_next_value",
+                                multiplier=f"{crash_multiplier(self.step + 1):.2f}",
+                                amount=int(self.bet * crash_multiplier(self.step + 1))),
+                        inline=True)
+        if self.parachute:
+            embed.add_field(
+                name=t("casino.crash_parachute_label"),
+                value=t("casino.crash_parachute_value",
+                        multiplier=f"{self.parachute / 100:.2f}"), inline=False)
+        embed.set_footer(text=t("casino.crash_footer", bet=self.bet))
+        return embed
+
+    async def advance(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message(
+                t("casino.err_not_your_game"), ephemeral=True)
+        async with self.action_lock:
+            if self.settled:
+                return
+            if self.step >= self.crash_at:
+                busted = crash_multiplier(self.step + 1)
+                return await self.finish(
+                    interaction, credit=0, win=False,
+                    message=t("casino.crash_busted",
+                              multiplier=f"{busted:.2f}"),
+                    colour=discord.Color.red())
+            self.step += 1
+            self.cashout_btn.disabled = False
+            if self.step >= CRASH_MAX_STEPS:
+                # The ceiling pays out rather than trapping the round.
+                return await self.finish(
+                    interaction, credit=int(self.bet * crash_multiplier(self.step)),
+                    win=True,
+                    message=t("casino.crash_ceiling",
+                              multiplier=f"{crash_multiplier(self.step):.2f}"),
+                    colour=discord.Color.gold())
+            await interaction.response.edit_message(embed=self.build_embed(),
+                                                    view=self)
+
+    async def cashout(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message(
+                t("casino.err_not_your_game"), ephemeral=True)
+        multiplier = crash_multiplier(self.step)
+        credit = int(self.bet * multiplier)
+        await self.finish(interaction, credit=credit, win=True,
+                          message=t("casino.crash_cashed",
+                                    multiplier=f"{multiplier:.2f}", amount=credit),
+                          colour=discord.Color.green())
+
+    async def finish(self, interaction, credit, win, message, colour):
+        async with self.settlement_lock:
+            if self.settled:
+                return
+            self.settled = True
+            self.stop()
+            try:
+                result = await database.run(
+                    database.resolve_interactive_wager, self.wager_id,
+                    self.user.id, credit=credit, win_inc=1 if win else 0,
+                    loss_inc=0 if win else 1,
+                    outcome="cashed_out" if win else "busted",
+                )
+            except database.DatabaseOperationError:
+                self.settled = False
+                raise
+        new_bal, _, _, _, _ = await apply_database_result(self.user, result)
+        for child in self.children:
+            child.disabled = True
+        embed = self.build_embed(result_msg=message, colour=colour)
+        embed.set_footer(text=t("casino.crash_footer_final", bet=self.bet,
+                                bal=new_bal))
+        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.send(
+            view=PlayAgainView(self.user, self.bet, start_crash_game),
+            ephemeral=False)
+
+    async def on_timeout(self):
+        async with self.settlement_lock:
+            if self.settled:
+                return
+            self.settled = True
+            try:
+                await database.run(
+                    database.resolve_interactive_wager, self.wager_id,
+                    self.user.id, loss_inc=1, outcome="timeout")
+            except database.DatabaseOperationError:
+                self.settled = False
+
+
+async def start_crash_game(ctx_or_int, bet):
+    user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
+    bet = int(bet)
+    wager_id = secrets.token_urlsafe(24)
+    reservation = await database.run_write(
+        database.begin_interactive_wager, wager_id, ctx_or_int.guild.id,
+        user.id, "crash", bet, consume_item="parachute",
+    )
+    if reservation is None:
+        bal = await database.run(database.get_user_balance, user.id)
+        msg = t("casino.err_invalid_bet_bal", bal=bal)
+        return await (ctx_or_int.response.send_message(msg, ephemeral=True)
+                      if isinstance(ctx_or_int, discord.Interaction)
+                      else ctx_or_int.send(msg, ephemeral=True))
+
+    floor = (int(item_catalog.ITEM_DEFINITIONS["parachute"].value)
+             if reservation["consumed"] else 0)
+    # Drawn once, before the first click, so no click can influence it. The item
+    # was already consumed by the reservation above, atomically with the stake.
+    view = CrashView(user, bet, wager_id, crash_at=crash_point(RNG, floor),
+                     parachute=floor)
+    try:
+        if isinstance(ctx_or_int, discord.Interaction):
+            await ctx_or_int.response.edit_message(embed=view.build_embed(), view=view)
+            view.message = await ctx_or_int.original_response()
+        else:
+            view.message = await ctx_or_int.send(embed=view.build_embed(), view=view)
+    except Exception:
+        await database.run(database.refund_interactive_wager, wager_id,
+                           "delivery_failed")
+        raise
+
+
+# -------------------------------------------------------- russian roulette
+
+# How long a lobby waits for people to join before it can be started.
+RUSSIAN_LOBBY_SECONDS = 180
+RUSSIAN_MAX_PLAYERS = 10
+
+
+class RussianRouletteView(discord.ui.View):
+    """A lobby, then one loser, then the pot.
+
+    Coins only: nobody is timed out or given a role, so nothing here can go
+    wrong in a way a refund cannot undo. Each player's ante is its **own**
+    durable wager, which is what makes an abandoned lobby safe — every one of
+    them is refunded by `refund_pending_wagers` at the next start, rather than
+    the bot having to remember a lobby across a restart.
+    """
+
+    def __init__(self, host, ante):
+        super().__init__(timeout=RUSSIAN_LOBBY_SECONDS)
+        self.host = host
+        self.ante = ante
+        # player id -> (member, wager_id), in join order.
+        self.players = {}
+        self.settled = False
+        self.action_lock = asyncio.Lock()
+        self.settlement_lock = asyncio.Lock()
+
+        self.join_btn = discord.ui.Button(
+            label=t("casino.russian_btn_join"), style=discord.ButtonStyle.primary,
+            emoji="🔫", custom_id="russian_join")
+        self.join_btn.callback = self.join
+        self.add_item(self.join_btn)
+
+        self.start_btn = discord.ui.Button(
+            label=t("casino.russian_btn_start"), style=discord.ButtonStyle.success,
+            emoji="▶️", disabled=True, custom_id="russian_start")
+        self.start_btn.callback = self.start
+        self.add_item(self.start_btn)
+
+        self.leave_btn = discord.ui.Button(
+            label=t("casino.russian_btn_leave"), style=discord.ButtonStyle.secondary,
+            custom_id="russian_leave")
+        self.leave_btn.callback = self.leave
+        self.add_item(self.leave_btn)
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        return await require_interaction_feature(interaction, "casino_russian")
+
+    def build_embed(self, result_msg="", colour=discord.Color.blue()):
+        embed = discord.Embed(title=t("casino.russian_title"),
+                              description=result_msg, colour=colour)
+        names = [member.display_name for member, _ in self.players.values()]
+        embed.add_field(
+            name=t("casino.russian_players", count=len(names)),
+            value="\n".join(f"· {name}" for name in names)
+                  or t("casino.russian_nobody"),
+            inline=False)
+        if len(self.players) > 1:
+            pot = self.ante * len(self.players)
+            embed.add_field(
+                name=t("casino.russian_pot"),
+                value=t("casino.russian_pot_value", pot=pot,
+                        each=int(pot * CASINO_EDGE) // (len(self.players) - 1)),
+                inline=False)
+        embed.set_footer(text=t("casino.russian_footer", ante=self.ante))
+        return embed
+
+    async def join(self, interaction: discord.Interaction):
+        async with self.action_lock:
+            if self.settled:
+                return
+            if interaction.user.id in self.players:
+                return await interaction.response.send_message(
+                    t("casino.russian_already_in"), ephemeral=True)
+            if len(self.players) >= RUSSIAN_MAX_PLAYERS:
+                return await interaction.response.send_message(
+                    t("casino.russian_full", limit=RUSSIAN_MAX_PLAYERS),
+                    ephemeral=True)
+            wager_id = secrets.token_urlsafe(24)
+            reservation = await database.run_write(
+                database.begin_interactive_wager, wager_id,
+                interaction.guild.id, interaction.user.id, "russian", self.ante)
+            if reservation is None:
+                bal = await database.run(database.get_user_balance,
+                                         interaction.user.id)
+                return await interaction.response.send_message(
+                    t("casino.err_invalid_bet_bal", bal=bal), ephemeral=True)
+            self.players[interaction.user.id] = (interaction.user, wager_id)
+            self.start_btn.disabled = len(self.players) < 2
+            await interaction.response.edit_message(embed=self.build_embed(),
+                                                    view=self)
+
+    async def leave(self, interaction: discord.Interaction):
+        async with self.action_lock:
+            if self.settled or interaction.user.id not in self.players:
+                return await interaction.response.send_message(
+                    t("casino.russian_not_in"), ephemeral=True)
+            _, wager_id = self.players.pop(interaction.user.id)
+            await database.run_write(database.refund_interactive_wager,
+                                     wager_id, "left_lobby")
+            self.start_btn.disabled = len(self.players) < 2
+            await interaction.response.edit_message(embed=self.build_embed(),
+                                                    view=self)
+
+    async def start(self, interaction: discord.Interaction):
+        if interaction.user.id != self.host.id:
+            return await interaction.response.send_message(
+                t("casino.russian_host_only"), ephemeral=True)
+        async with self.action_lock:
+            if self.settled or len(self.players) < 2:
+                return
+            await self.resolve(interaction)
+
+    async def resolve(self, interaction):
+        async with self.settlement_lock:
+            if self.settled:
+                return
+            self.settled = True
+            self.stop()
+
+            entries = list(self.players.values())
+            loser, _ = RNG.choice(entries)
+            pot = self.ante * len(entries)
+            # The house takes its 2% off the pot, once, exactly as every other
+            # table here does; the survivors split what is left.
+            share = int(pot * CASINO_EDGE) // (len(entries) - 1)
+
+            for member, wager_id in entries:
+                lost = member.id == loser.id
+                result = await database.run_write(
+                    database.resolve_interactive_wager, wager_id, member.id,
+                    credit=0 if lost else share,
+                    win_inc=0 if lost else 1, loss_inc=1 if lost else 0,
+                    outcome="shot" if lost else "survived",
+                )
+                if result is not None:
+                    await apply_database_result(member, result)
+
+        for child in self.children:
+            child.disabled = True
+        survivors = [member.display_name for member, _ in entries
+                     if member.id != loser.id]
+        embed = self.build_embed(
+            result_msg=t("casino.russian_result", loser=loser.mention,
+                         survivors=", ".join(survivors), share=share),
+            colour=discord.Color.red())
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def on_timeout(self):
+        """Nobody started it, so nobody pays. Every ante goes back."""
+        async with self.settlement_lock:
+            if self.settled:
+                return
+            self.settled = True
+            for _, wager_id in self.players.values():
+                try:
+                    await database.run_write(
+                        database.refund_interactive_wager, wager_id,
+                        "lobby_expired")
+                except database.DatabaseOperationError:
+                    casino_logger.exception(
+                        "Could not refund an expired russian roulette lobby "
+                        "(wager_id=%s)", wager_id)
+        for child in self.children:
+            child.disabled = True
+        message = getattr(self, "message", None)
+        if message is not None:
+            try:
+                await message.edit(
+                    embed=self.build_embed(
+                        result_msg=t("casino.russian_expired"),
+                        colour=discord.Color.dark_grey()),
+                    view=self)
+            except discord.HTTPException:
+                pass
+
+
+async def start_russian_game(ctx_or_int, bet):
+    user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
+    bet = int(bet)
+    view = RussianRouletteView(user, bet)
+    wager_id = secrets.token_urlsafe(24)
+    reservation = await database.run_write(
+        database.begin_interactive_wager, wager_id, ctx_or_int.guild.id,
+        user.id, "russian", bet)
+    if reservation is None:
+        bal = await database.run(database.get_user_balance, user.id)
+        msg = t("casino.err_invalid_bet_bal", bal=bal)
+        return await (ctx_or_int.response.send_message(msg, ephemeral=True)
+                      if isinstance(ctx_or_int, discord.Interaction)
+                      else ctx_or_int.send(msg, ephemeral=True))
+    # The host is in from the start, so a lobby is never empty and the ante is
+    # already taken — the same reservation everybody else's Join makes.
+    view.players[user.id] = (user, wager_id)
+
+    try:
+        if isinstance(ctx_or_int, discord.Interaction):
+            await ctx_or_int.response.edit_message(embed=view.build_embed(), view=view)
+            view.message = await ctx_or_int.original_response()
+        else:
+            view.message = await ctx_or_int.send(embed=view.build_embed(), view=view)
+    except Exception:
+        await database.run(database.refund_interactive_wager, wager_id,
+                           "delivery_failed")
+        raise
+
+
+# ------------------------------------------------------------------- wheel
+
+async def start_wheel_game(ctx_or_int, bet):
+    user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
+    bet = int(bet)
+    result = await database.run_write(
+        database.resolve_wheel_wager, ctx_or_int.guild.id, user.id, bet)
+    if result is None:
+        bal = await database.run(database.get_user_balance, user.id)
+        msg = t("casino.err_invalid_bet_bal", bal=bal)
+        return await (ctx_or_int.response.send_message(msg, ephemeral=True)
+                      if isinstance(ctx_or_int, discord.Interaction)
+                      else ctx_or_int.send(msg, ephemeral=True))
+
+    multiplier = result["multiplier"] / 100
+    if result["outcome"] == "win":
+        title = t("casino.wheel_win_title")
+        colour = discord.Color.gold() if multiplier >= 5 else discord.Color.green()
+        desc = t("casino.wheel_win_desc", multiplier=f"{multiplier:.2f}",
+                 payout=result["payout"])
+    else:
+        title, colour = t("casino.wheel_loss_title"), discord.Color.red()
+        desc = t("casino.wheel_loss_desc", bet=bet)
+    new_bal, _, _, _, _ = await apply_database_result(user, result)
+
+    embed = discord.Embed(title=title, description=desc, colour=colour)
+    if result["lucky_charm"]:
+        embed.description += t(
+            "casino.wheel_lucky_charm",
+            multiplier=f"{result['second_multiplier'] / 100:.2f}")
+    embed.set_footer(text=t("casino.wheel_footer", bet=bet, bal=new_bal))
+    view = PlayAgainView(user, bet, start_wheel_game)
+    if isinstance(ctx_or_int, discord.Interaction):
+        await ctx_or_int.response.edit_message(embed=embed, view=view)
+    else:
+        await ctx_or_int.send(embed=embed, view=view)
+
 
 class MineButton(discord.ui.Button):
     def __init__(self, x, y, is_mine):
@@ -1190,6 +1895,35 @@ class Casino(commands.Cog):
     @is_channel("economy_channels")
     async def slots(self, ctx, bet: int):
         await start_slots_game(ctx, bet)
+
+    @commands.hybrid_command(name="hilo", description=t("general.cmd_hilo"))
+    @is_channel("casino_channels", fallback="economy_channels")
+    async def hilo(self, ctx, bet: int):
+        if bet <= 0:
+            return await ctx.send(t("casino.err_bet_min"), ephemeral=True)
+        await start_hilo_game(ctx, bet)
+
+    @commands.hybrid_command(name="crash", description=t("general.cmd_crash"))
+    @is_channel("casino_channels", fallback="economy_channels")
+    async def crash(self, ctx, bet: int):
+        if bet <= 0:
+            return await ctx.send(t("casino.err_bet_min"), ephemeral=True)
+        await start_crash_game(ctx, bet)
+
+    @commands.hybrid_command(name="wheel", description=t("general.cmd_wheel"))
+    @is_channel("casino_channels", fallback="economy_channels")
+    async def wheel(self, ctx, bet: int):
+        if bet <= 0:
+            return await ctx.send(t("casino.err_bet_min"), ephemeral=True)
+        await start_wheel_game(ctx, bet)
+
+    @commands.hybrid_command(name="russian",
+                             description=t("general.cmd_russian"))
+    @is_channel("casino_channels", fallback="economy_channels")
+    async def russian(self, ctx, ante: int):
+        if ante <= 0:
+            return await ctx.send(t("casino.err_bet_min"), ephemeral=True)
+        await start_russian_game(ctx, ante)
 
     @commands.hybrid_command(name="mines", description=t("general.cmd_mines"))
     @is_channel("economy_channels")

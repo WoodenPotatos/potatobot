@@ -909,15 +909,7 @@ async function showPage(page) {
 
     if (page === 'overview') await renderOverview();
     if (page === 'features') updateFeatureSubtitle();
-    if (page === 'gacha') {
-        renderGacha();
-        const missing = Object.values(gacha?.missing_rewards || {})
-            .reduce((sum, entries) => sum + entries.length, 0);
-        if (missing) {
-            addPageAction('dashboard.gacha_add_missing', 'ic-plus', addMissingRewards);
-        }
-        addPageAction('dashboard.gacha_reset_rewards', 'ic-gacha', resetBannerRewards);
-    }
+    if (page === 'gacha') renderGacha();
     if (page === 'work-responses') await loadWorkResponses();
     if (page === 'shop-builder') await loadShopItems();
     if (page === 'redeems') await loadRedeems();
@@ -1168,6 +1160,12 @@ async function saveFeature(key, input, revision) {
 
 function visibleDefinitions(category) {
     return Object.values(registry).filter((definition) => definition.category === category
+        // A setting the registry marks as edited elsewhere is real — stored,
+        // validated, audited — but its editing surface is a better page. The
+        // shop prices are the case: a price belongs beside its item, and having
+        // them here too meant built-in prices were set on one page and custom
+        // ones on another, with neither page showing the other half.
+        && !definition.edited_elsewhere
         && (!definition.owner_feature || featureState[definition.owner_feature]?.enabled !== false));
 }
 
@@ -2230,7 +2228,28 @@ async function createGachaBanner(event) {
     }
 }
 
+/** Which page actions this banner needs.
+ *
+ *  These used to be added once per navigation, so switching banners in the
+ *  picker left them describing the banner you arrived on: a banner missing a
+ *  shipped reward showed no "add missing" button, and the only way to obtain
+ *  the reward was "reset rewards", which discards the operator's own table.
+ *  They belong to the banner, so they are rebuilt with it.
+ */
+function renderGachaPageActions() {
+    if (activePage !== 'gacha') return;
+    const host = document.getElementById('page-actions');
+    host.replaceChildren();
+    const missing = Object.values(gacha?.missing_rewards || {})
+        .reduce((sum, entries) => sum + entries.length, 0);
+    if (missing) {
+        addPageAction('dashboard.gacha_add_missing', 'ic-plus', addMissingRewards);
+    }
+    addPageAction('dashboard.gacha_reset_rewards', 'ic-gacha', resetBannerRewards);
+}
+
 function renderGacha() {
+    renderGachaPageActions();
     renderGachaBannerBar();
     const grid = document.getElementById('gacha-grid');
     grid.replaceChildren();
@@ -3084,8 +3103,33 @@ function renderItemTable(host, items) {
         row.appendChild(element('td', null, item.source === 'builtin'
             ? tr(`dashboard.item_effects.${item.effect}`)
             : tr(`dashboard.item_templates.${item.effect}`)));
-        row.appendChild(element('td', 'cell-mono', item.price === null
-            ? '—' : `${item.price} ${tr('dashboard.currency_short')}`));
+        // A built-in's price is typed here rather than on a settings page, so
+        // every item's price is in one list. It still writes the registered
+        // setting, so storage, validation and the audit row are unchanged.
+        const priceCell = element('td', 'cell-mono');
+        if (item.price === null) {
+            priceCell.textContent = '—';
+        } else if (item.source === 'builtin' && item.price_setting) {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.min = '0';
+            input.step = '1';
+            input.value = String(item.price);
+            input.className = 'price-input';
+            input.addEventListener('change', () => {
+                const price = Number(input.value);
+                if (!Number.isInteger(price) || price < 0) {
+                    toast(tr('dashboard.item_price_invalid'), true);
+                    input.value = String(item.price);
+                    return;
+                }
+                if (price !== item.price) saveBuiltinPrice(item, price, input);
+            });
+            priceCell.appendChild(input);
+        } else {
+            priceCell.textContent = `${item.price} ${tr('dashboard.currency_short')}`;
+        }
+        row.appendChild(priceCell);
 
         // Where it comes from, which is the question the old table could not
         // answer at all: several items are drawable but not for sale.
@@ -3125,18 +3169,42 @@ function renderItemTable(host, items) {
             remove.addEventListener('click', () => deleteItem(item, remove));
             actions.appendChild(remove);
         } else if (item.price_setting) {
-            // A built-in's only editable field is its price, and that is a
-            // registered setting — so this links to it rather than growing a
-            // second way to write the same row.
-            const link = element('button', 'btn btn-ghost', tr('dashboard.edit_price'));
-            link.type = 'button';
-            link.addEventListener('click', () => showPage('economy'));
-            actions.appendChild(link);
+            // A built-in's one editable field, typed here rather than on a
+            // settings page: it still writes the registered setting, so the
+            // storage, validation and audit trail are unchanged.
+            // Nothing else to do to a built-in: its price is editable in place
+            // above, and its behaviour is the bot's rather than a guild's.
+            actions.appendChild(element('span', 'cell-muted',
+                                        tr('dashboard.item_builtin_note')));
         }
         row.appendChild(actions);
         body.appendChild(row);
     });
     host.replaceChildren(node);
+}
+
+/** Write a built-in item's price through the setting that already holds it.
+ *
+ *  The same optimistic revision the settings form sends, so two people editing
+ *  the same price still conflict rather than one silently winning.
+ */
+async function saveBuiltinPrice(item, price, input) {
+    input.disabled = true;
+    try {
+        const saved = await api(`/guilds/${guildId}/settings`, {
+            method: 'PATCH', headers: headers(),
+            body: JSON.stringify({changes: [{
+                key: item.price_setting, value: price,
+                revision: settings[item.price_setting]?.revision || 0,
+            }]}),
+        });
+        toast(saved.message);
+        await loadGuild();
+        await loadShopItems();
+    } catch (error) {
+        await handleWriteConflict(error, loadShopItems);
+        input.disabled = false;
+    }
 }
 
 async function toggleItem(item, button) {
@@ -3158,19 +3226,16 @@ async function toggleItem(item, button) {
 /** The full body a PATCH needs, unchanged except for what the caller overrides.
  *  The route reuses the creation validator, so a partial body is refused. */
 function itemPatchBody(item, changes) {
-    const texts = item.texts || {};
-    const body = {
+    return {
         template_type: item.effect,
         enabled: item.enabled,
         price: item.price,
         config: item.config,
-        hu: {name: (texts.hu || {}).name || item.name || item.item_key,
-             description: (texts.hu || {}).description || item.description || ''},
+        text: {name: item.name || item.item_key,
+               description: item.description || ''},
         revision: item.revision,
         ...changes,
     };
-    if (texts.en) body.en = texts.en;
-    return body;
 }
 
 async function deleteItem(item, button) {
@@ -3434,7 +3499,14 @@ function renderItemEditor(existing) {
     host.replaceChildren();
 
     const isNew = !existing;
-    const template = existing ? existing.template_type : 'fixed_role';
+    // `effect`, not `template_type`: `/items` merges built-ins and customs into
+    // one shape and serves a custom item's template under `effect` — which is
+    // why `itemPatchBody` sends `template_type: item.effect`. Reading the wrong
+    // name gave `undefined`, the choice field fell back to its first option, and
+    // *every* item opened as "Permanent role" asking which role to grant,
+    // whatever it actually was. Editing a vault and saving would have rewritten
+    // it into a role grant.
+    const template = existing ? existing.effect : 'fixed_role';
     const readers = {};
     const form = element('form', 'stack');
 
@@ -3456,25 +3528,18 @@ function renderItemEditor(existing) {
     identity.appendChild(grid);
     form.appendChild(identity);
 
+    // One text, in whatever language this guild speaks: a custom item lives in
+    // their database and only their members read it.
     const text = itemEditorSection(2, 'dashboard.item_section_text');
     const textGrid = element('div', 'form-grid');
-    const stored = existing ? (existing.texts || {}) : {};
-    addEditorField(textGrid, readers, 'name_hu', {
-        kind: 'text', label: 'dashboard.item_name_hu', max: 100, required: true,
-        hint: 'item_name_hu',
-    }, (stored.hu || {}).name || '', isNew);
-    addEditorField(textGrid, readers, 'name_en', {
-        kind: 'text', label: 'dashboard.item_name_en', max: 100,
-        hint: 'item_name_en',
-    }, (stored.en || {}).name || '', isNew);
-    addEditorField(textGrid, readers, 'description_hu', {
-        kind: 'multiline', label: 'dashboard.item_description_hu', max: 400,
-        required: true, wide: true,
-    }, (stored.hu || {}).description || '', isNew);
-    addEditorField(textGrid, readers, 'description_en', {
-        kind: 'multiline', label: 'dashboard.item_description_en', max: 400,
-        wide: true,
-    }, (stored.en || {}).description || '', isNew);
+    addEditorField(textGrid, readers, 'name', {
+        kind: 'text', label: 'dashboard.item_name', max: 100, required: true,
+        hint: 'item_name',
+    }, existing ? existing.name || '' : '', isNew);
+    addEditorField(textGrid, readers, 'description', {
+        kind: 'multiline', label: 'dashboard.item_description', max: 400,
+        required: true, wide: true, hint: 'item_description',
+    }, existing ? existing.description || '' : '', isNew);
     text.appendChild(textGrid);
     form.appendChild(text);
 
@@ -3499,8 +3564,12 @@ function renderItemEditor(existing) {
         });
     };
     drawConfig();
+    // `[data-field]`, not `.field`: `managedFieldWrapper` gives the wrapper the
+    // class `input-group`, so the old selector matched nothing and section three
+    // never redrew — every template kept asking for a role, whichever kind you
+    // had picked.
     form.addEventListener('change', (event) => {
-        if (event.target.closest('.field')?.dataset.field === 'template_type') {
+        if (event.target.closest('[data-field]')?.dataset.field === 'template_type') {
             drawConfig();
         }
     });
@@ -3565,16 +3634,8 @@ async function saveItem(existing, readers, configReaders, submit) {
         enabled: existing ? existing.enabled : true,
         price: values.price,
         config: packed,
-        hu: {name: values.name_hu, description: values.description_hu},
+        text: {name: values.name, description: values.description},
     };
-    // English is optional per field and falls back to Hungarian, so an empty one
-    // is omitted rather than stored as an empty string that would render blank.
-    if (values.name_en || values.description_en) {
-        payload.en = {
-            name: values.name_en || values.name_hu,
-            description: values.description_en || values.description_hu,
-        };
-    }
 
     submit.disabled = true;
     try {
@@ -4536,6 +4597,14 @@ async function followAction(actionId) {
     }
     toast(tr('dashboard.action_still_running'));
 }
+
+// Largest first: the loop returns the first unit the gap has filled, and its
+// locale family is `dashboard.relative_<unit>` plus `relative_now` below a
+// minute. This was referenced by `relativeTime` and declared nowhere, so the
+// audit page rendered its subtitle and then threw before a single row —
+// `node --check` only parses, and the boot harness stubbed the feed empty, so
+// the row loop this sits in had never once run.
+const RELATIVE_UNITS = [['day', 86400], ['hour', 3600], ['minute', 60]];
 
 function relativeTime(isoTimestamp) {
     const parsed = Date.parse(isoTimestamp);

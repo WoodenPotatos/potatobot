@@ -65,6 +65,11 @@ def get_help_data():
                 t("general.usage_slots"): t("general.cmd_slots"),
                 t("general.usage_dice"): t("general.cmd_dice"),
                 t("general.usage_mines"): t("general.cmd_mines"),
+                t("general.usage_hilo"): t("general.cmd_hilo"),
+                t("general.usage_crash"): t("general.cmd_crash"),
+                t("general.usage_wheel"): t("general.cmd_wheel"),
+                t("general.usage_russian"): t("general.cmd_russian"),
+                t("general.usage_minigame_reset"): t("general.cmd_minigame_reset"),
                 t("general.usage_freemines"): t("general.cmd_freemines")
             }
         },
@@ -91,6 +96,7 @@ def get_help_data():
             "commands": {
                 t("general.usage_loldle"): t("general.cmd_loldle"),
                 t("general.usage_valdle"): t("general.cmd_valdle"),
+                t("general.usage_genshindle"): t("general.cmd_genshindle"),
                 t("general.usage_dbdle"): t("general.cmd_dbdle")
             }
         },

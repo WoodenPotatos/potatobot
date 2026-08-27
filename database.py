@@ -55,6 +55,7 @@ READ_ONLY_OPERATIONS = {
     "get_shop_price", "get_shop_prices", "get_reward", "get_config_id",
     "get_gacha_banner", "list_gacha_banners", "get_work_responses",
     "get_five_star_history", "get_gacha_pity", "get_active_entitlements",
+    "get_minigame_state",
     "get_user_inventory",
     "get_user_vouchers",
     "get_guild_settings", "get_instance_settings", "get_schema_version",
@@ -157,11 +158,11 @@ DB_PATH = os.getenv("POTATOBOT_DB_PATH", os.path.join(BASE_DIR, "economy.db"))
 VALID_COOLDOWN_COLUMNS = {
     "last_daily", "last_job", "last_rob",
     "last_loldle_easy", "last_loldle_medium", "last_loldle_hard",
-    "last_valdle", "last_dbdle_killer", "last_dbdle_survivor",
-    "last_dbdle_perk",
+    "last_valdle", "last_genshindle", "last_dbdle_killer",
+    "last_dbdle_survivor", "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 14
+LATEST_SCHEMA_VERSION = 15
 
 # A claimed control action is re-queued only once its lease expires. The worker
 # renews the lease as it runs, so slowness never causes a duplicate Discord post.
@@ -185,6 +186,7 @@ USER_COLUMNS = {
     "last_loldle_medium": "TEXT",
     "last_loldle_hard": "TEXT",
     "last_valdle": "TEXT",
+    "last_genshindle": "TEXT",
     "last_dbdle_killer": "TEXT",
     "last_dbdle_survivor": "TEXT",
     "last_dbdle_perk": "TEXT",
@@ -223,6 +225,7 @@ BUILTIN_SHOP_KEYS = frozenset(SHOP_DEFAULTS)
 REWARD_DEFAULTS = {
     "loldle_easy": (2500, 100), "loldle_medium": (5000, 100),
     "loldle_hard": (7500, 150), "valdle": (5000, 100),
+    "genshindle": (5000, 100),
     "dbdle": (5000, 100), "daily_normal": (5000, 50),
     "daily_premium": (10000, 50), "chat_message": (5, 2),
     "voice_minute_normal": (5, 5), "voice_minute_premium": (10, 10),
@@ -247,6 +250,14 @@ DEFAULT_GACHA_CONFIG = {
         "3": [
             {"key": "loaded_die", "kind": "item", "amount": 1, "weight": 400},
             {"key": "lockpick", "kind": "item", "amount": 1, "weight": 100},
+            # The casino consumables sit here rather than in tier 4 because they
+            # cost what a loaded die costs. Each ships at the lockpick's weight;
+            # a banner tunes its own table from the dashboard.
+            {"key": "lucky_charm", "kind": "item", "amount": 1, "weight": 100},
+            {"key": "stacked_deck", "kind": "item", "amount": 1, "weight": 100},
+            {"key": "marked_card", "kind": "item", "amount": 1, "weight": 100},
+            {"key": "metal_detector", "kind": "item", "amount": 1, "weight": 100},
+            {"key": "parachute", "kind": "item", "amount": 1, "weight": 100},
             {"key": "coins_250", "kind": "coins", "amount": 250, "weight": 300},
             {"key": "coins_500", "kind": "coins", "amount": 500, "weight": 100},
             {"key": "coins_1000", "kind": "coins", "amount": 1000, "weight": 70},
@@ -593,6 +604,19 @@ def _create_scoped_schema(conn):
             revision INTEGER NOT NULL DEFAULT 1,
             updated_by INTEGER,
             updated_at TEXT NOT NULL
+        );
+        -- Schema 15. One row per channel game per guild: where the chain is up
+        -- to, and who moved last. Small and hot — read on every message in a
+        -- game channel — so it is one row rather than a log.
+        CREATE TABLE IF NOT EXISTS minigame_state (
+            guild_id INTEGER NOT NULL,
+            game_key TEXT NOT NULL,
+            value TEXT NOT NULL DEFAULT '',
+            last_user_id INTEGER,
+            streak INTEGER NOT NULL DEFAULT 0,
+            best_streak INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, game_key)
         );
         CREATE TABLE IF NOT EXISTS guild_settings (
             guild_id INTEGER NOT NULL REFERENCES guilds(guild_id),
@@ -1854,6 +1878,72 @@ def resolve_roulette_wager(guild_id: int, user_id: int, stake: int,
         raise DatabaseOperationError("roulette wager failed") from exc
 
 
+# The wheel's segments, as (payout multiplier in hundredths, weight). The
+# weights are chosen so the expected return is exactly 98% — the same 2% edge
+# `/mines` derives — rather than a table somebody eyeballed:
+#
+#   0.00*54 + 1.00*19 + 1.50*12 + 2.00*7 + 3.00*4 + 5.00*3 + 20.00*1 = 98
+#
+# A change to any row has to keep that sum at 98 per 100 weight, which
+# `tests/test_casino_items.py` asserts rather than trusting.
+WHEEL_SEGMENTS = ((0, 54), (100, 19), (150, 12), (200, 7), (300, 4), (500, 3),
+                  (2000, 1))
+WHEEL_TOTAL_WEIGHT = sum(weight for _, weight in WHEEL_SEGMENTS)
+
+
+def _wheel_spin(rng) -> int:
+    """One segment's multiplier in hundredths."""
+    point = rng.randrange(WHEEL_TOTAL_WEIGHT)
+    for multiplier, weight in WHEEL_SEGMENTS:
+        point -= weight
+        if point < 0:
+            return multiplier
+    return WHEEL_SEGMENTS[-1][0]
+
+
+def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None):
+    """Spin the wheel, settle, and consume a lucky charm if one is held.
+
+    Same shape as `resolve_slots_wager`, and for the same reason: the spin has to
+    happen inside the transaction that debits the stake, or the item that changes
+    it would be a second, separately-committed write.
+    """
+    if stake <= 0:
+        return None
+    rng = rng or secrets.SystemRandom()
+    try:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            _ensure_user(conn, user_id)
+            if conn.execute(
+                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                (stake, user_id, stake),
+            ).rowcount != 1:
+                conn.rollback()
+                return None
+            multiplier = _wheel_spin(rng)
+            charm = _consume_inventory_item(conn, guild_id, user_id, "lucky_charm")
+            second = None
+            if charm:
+                second = _wheel_spin(rng)
+                multiplier = max(multiplier, second)
+            payout = stake * multiplier // 100
+            won = payout > 0
+            result = _apply_stats_locked(
+                conn, user_id, payout, 0, 1 if won else 0, 0 if won else 1,
+                clamp_balance=False,
+            )
+            conn.commit()
+            result.update({"outcome": "win" if won else "loss",
+                           "multiplier": multiplier, "payout": payout,
+                           "lucky_charm": charm, "second_multiplier": second})
+            return result
+    except sqlite3.Error as exc:
+        db_logger.exception("Wheel wager failed (guild=%s, user=%s)",
+                            guild_id, user_id)
+        raise DatabaseOperationError("wheel wager failed") from exc
+
+
 def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None):
     """Spin, settle, and consume a lucky charm only after a valid paid wager.
 
@@ -3074,6 +3164,7 @@ def reset_user_cooldowns(user_id: int):
                     last_loldle_medium = NULL,
                     last_loldle_hard = NULL,
                     last_valdle = NULL,
+                    last_genshindle = NULL,
                     last_dbdle_killer = NULL,
                     last_dbdle_survivor = NULL,
                     last_dbdle_perk = NULL,
@@ -4524,6 +4615,90 @@ def get_gacha_banner(guild_id: int, banner_key: str = DEFAULT_GACHA_BANNER_KEY) 
     return _banner_row_dict(row)
 
 
+def get_minigame_state(guild_id: int, game_key: str) -> dict:
+    """Where a channel game is up to. A guild that has never played reads as new.
+
+    Absent and "nothing yet" are the same thing here, deliberately: the first
+    message in a counting channel is the first turn either way, and inventing a
+    third state would only give the caller something else to handle.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT value, last_user_id, streak, best_streak FROM minigame_state "
+            "WHERE guild_id = ? AND game_key = ?", (int(guild_id), game_key)
+        ).fetchone()
+    if row is None:
+        return {"value": "", "last_user_id": None, "streak": 0, "best_streak": 0}
+    return {"value": row[0], "last_user_id": row[1], "streak": row[2],
+            "best_streak": row[3]}
+
+
+def advance_minigame(guild_id: int, game_key: str, value: str, user_id: int,
+                     expected: str) -> dict | None:
+    """Record one accepted turn, or None if somebody got there first.
+
+    `expected` is the value the caller believed was current. The UPDATE is
+    conditional on it, so two people posting the next number in the same instant
+    cannot both be accepted — one wins and the other is told the chain moved.
+    Without that, the check would be a read followed by a write and a fast
+    channel would let the count skip.
+    """
+    timestamp = datetime.now(timezone.utc).isoformat()
+    try:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT value, streak, best_streak FROM minigame_state "
+                "WHERE guild_id = ? AND game_key = ?", (int(guild_id), game_key)
+            ).fetchone()
+            if row is None:
+                if expected != "":
+                    conn.rollback()
+                    return None
+                streak, best = 1, 1
+                conn.execute(
+                    "INSERT INTO minigame_state (guild_id, game_key, value, "
+                    "last_user_id, streak, best_streak, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (int(guild_id), game_key, value, int(user_id), streak, best,
+                     timestamp),
+                )
+            else:
+                if row[0] != expected:
+                    conn.rollback()
+                    return None
+                streak = row[1] + 1
+                best = max(row[2], streak)
+                conn.execute(
+                    "UPDATE minigame_state SET value = ?, last_user_id = ?, "
+                    "streak = ?, best_streak = ?, updated_at = ? "
+                    "WHERE guild_id = ? AND game_key = ? AND value = ?",
+                    (value, int(user_id), streak, best, timestamp,
+                     int(guild_id), game_key, expected),
+                )
+            conn.commit()
+            return {"value": value, "streak": streak, "best_streak": best}
+    except sqlite3.Error as exc:
+        db_logger.exception("Minigame turn failed (guild=%s, game=%s)",
+                            guild_id, game_key)
+        raise DatabaseOperationError("minigame turn failed") from exc
+
+
+def reset_minigame(guild_id: int, game_key: str) -> None:
+    """Start the chain over, keeping the best streak as a record."""
+    timestamp = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO minigame_state (guild_id, game_key, value, "
+            "last_user_id, streak, best_streak, updated_at) "
+            "VALUES (?, ?, '', NULL, 0, 0, ?) "
+            "ON CONFLICT(guild_id, game_key) DO UPDATE SET value = '', "
+            "last_user_id = NULL, streak = 0, updated_at = excluded.updated_at",
+            (int(guild_id), game_key, timestamp),
+        )
+        conn.commit()
+
+
 def get_five_star_history(guild_id: int, user_id: int, limit: int = 5) -> list[dict]:
     """A member's most recent 5-star pulls, newest first.
 
@@ -5322,21 +5497,24 @@ def consume_inventory_item(guild_id: int, user_id: int, item_key: str) -> bool:
     return changed == 1
 
 
-# A custom item's operator-authored text. Hungarian is the primary language and
-# the one everything falls back to, exactly as in the shipped catalogs; English
-# is optional per item, so an installation is never forced to translate its own
-# shop. `name`/`description` stay on the row as the *effective* text so every
-# existing reader keeps working unchanged.
-CUSTOM_ITEM_LANGUAGES = ("hu", "en")
+# A custom item is written once, in whatever language the guild speaks.
+#
+# This briefly held two languages, on the reasoning that every built-in has both.
+# That was the wrong analogy: a built-in ships to every installation and must
+# therefore read in each of them, while a custom item exists only in one guild's
+# own database and is read only by that guild's members. A server with two main
+# languages would use English for both rather than maintain two columns, so the
+# second field was work with no reader. The row keeps its `language` column, so
+# nothing has to migrate and a per-guild language later costs nothing.
+CUSTOM_ITEM_LANGUAGE = "hu"
 
 
 def get_shop_item_definitions(guild_id: int, language: str = None) -> list[dict]:
-    """Every custom item, with its text in one language and in all of them.
+    """Every custom item with its operator-authored name and description.
 
-    ``language`` picks which text lands on ``name``/``description``, falling back
-    to Hungarian per field — so an item translated into English shows English and
-    one that is not still reads, rather than going blank. ``texts`` carries every
-    stored language so the dashboard's editor can show both fields at once.
+    ``language`` is accepted and ignored: a custom item has exactly one text,
+    whatever language its operator wrote it in. The parameter stays so callers
+    need not change if a guild language is ever added.
     """
     with get_connection() as conn:
         rows = conn.execute(
@@ -5352,20 +5530,17 @@ def get_shop_item_definitions(guild_id: int, language: str = None) -> list[dict]
     for item_key, lang, name, description in localized:
         texts.setdefault(item_key, {})[lang] = {"name": name,
                                                 "description": description}
-    wanted = language if language in CUSTOM_ITEM_LANGUAGES else "hu"
     items = []
     for row in rows:
         stored = texts.get(row[0], {})
-        primary = stored.get("hu", {})
-        chosen = stored.get(wanted, {})
+        # The stored language if it is there, otherwise whatever single row this
+        # item has — an item written before the column meant anything still reads.
+        written = stored.get(CUSTOM_ITEM_LANGUAGE) or next(iter(stored.values()), {})
         items.append({
             "item_key": row[0], "template_type": row[1], "enabled": bool(row[2]),
             "price": row[3], "config": json.loads(row[4]), "revision": row[5],
-            # Per field, not per row: an item with an English name and no English
-            # description shows the English name and the Hungarian description.
-            "name": chosen.get("name") or primary.get("name"),
-            "description": chosen.get("description") or primary.get("description"),
-            "texts": stored,
+            "name": written.get("name"),
+            "description": written.get("description"),
         })
     return items
 
@@ -5402,25 +5577,15 @@ def update_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
                  json.dumps(item["config"], sort_keys=True), revision,
                  int(actor_id), timestamp, int(guild_id), item_key),
             )
-            for language in CUSTOM_ITEM_LANGUAGES:
-                if language not in item:
-                    # Absent means "no longer translated", so the row goes rather
-                    # than lingering as text nothing can reach or edit.
-                    conn.execute(
-                        "DELETE FROM shop_item_localizations WHERE guild_id = ? "
-                        "AND item_key = ? AND language = ?",
-                        (int(guild_id), item_key, language),
-                    )
-                    continue
-                conn.execute(
-                    "INSERT INTO shop_item_localizations "
-                    "(guild_id, item_key, language, name, description) "
-                    "VALUES (?, ?, ?, ?, ?) "
-                    "ON CONFLICT(guild_id, item_key, language) DO UPDATE SET "
-                    "name = excluded.name, description = excluded.description",
-                    (int(guild_id), item_key, language, item[language]["name"],
-                     item[language]["description"]),
-                )
+            conn.execute(
+                "INSERT INTO shop_item_localizations "
+                "(guild_id, item_key, language, name, description) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, item_key, language) DO UPDATE SET "
+                "name = excluded.name, description = excluded.description",
+                (int(guild_id), item_key, CUSTOM_ITEM_LANGUAGE,
+                 item["text"]["name"], item["text"]["description"]),
+            )
             write_settings_audit(conn, int(guild_id), int(actor_id),
                                  "shop_item.update", item_key, previous, item)
             conn.commit()

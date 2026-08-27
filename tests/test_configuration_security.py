@@ -215,24 +215,56 @@ class ConfigurationSecurityTests(unittest.TestCase):
 
     def test_every_reward_key_matches_the_scanner_allowlist(self):
         """A new reward name outside the allowlist pattern fails CI, so keep the
-        pattern and the reward pool in step."""
+        pattern and the reward pool in step.
+
+        The pattern is **read out of `.gitleaks.toml`** rather than restated
+        here. It used to be hand-copied, and the copy had already drifted — the
+        file had learnt `stacked_deck`, `lucky_charm` and `metal_detector` and
+        this test had not, so it was asserting against a pattern that was not
+        the one CI runs. A test that duplicates the artifact it guards can only
+        ever agree with it by luck.
+        """
         import database
 
-        pattern = re.compile(
-            r"(loaded_die|lockpick|coins_\d+|emoji_\d+d|sticker_\d+d"
-            r"|sound_\d+d|vault_\w+|(small|med|big)_vault|premium_\d+d"
-            r"|streak_freeze)$"
-        )
+        # Take the allowlist's own regexes out of the file and run them the way
+        # gitleaks does — against the matched text — rather than reconstructing
+        # the alternation, which is what drifted last time.
+        config = (ROOT / ".gitleaks.toml").read_text(encoding="utf-8")
+        sources = re.findall(r"'''(.*?)'''", config, re.DOTALL)
+        patterns = [re.compile(source) for source in sources if "key" in source]
+        self.assertTrue(patterns, "no reward-key allowlist regex in .gitleaks.toml")
         unmatched = [
             entry["key"]
             for tier in database.DEFAULT_GACHA_CONFIG["rewards"].values()
             for entry in tier
-            if not pattern.match(entry["key"])
+            if not any(pattern.search(f'key": "{entry["key"]}"')
+                       for pattern in patterns)
         ]
         self.assertEqual(
             [], unmatched,
             "extend the regex in .gitleaks.toml for these reward keys",
         )
+
+    def test_every_drawable_catalog_item_is_in_the_shipped_reward_pool(self):
+        """A `gacha_kind` that reaches no banner is an unobtainable item.
+
+        Five casino consumables shipped marked drawable and were never added to
+        `DEFAULT_GACHA_CONFIG`, so no banner could award them — and because
+        `missing_shipped_rewards` compares a banner against the *shipped* table,
+        nothing was reported as missing either. The operator's only route to
+        them was "reset rewards", which discards their own table. Coverage has
+        to be diffed in both directions: what the catalog offers against what
+        the pool draws, and back.
+        """
+        import database
+        import item_catalog
+
+        shipped = {entry["key"]
+                   for tier in database.DEFAULT_GACHA_CONFIG["rewards"].values()
+                   for entry in tier}
+        self.assertEqual(
+            [], sorted(set(item_catalog.GACHA_ELIGIBLE_ITEMS) - shipped),
+            "these catalog items are drawable but no banner can award them")
 
     def test_known_history_exposures_are_recorded(self):
         """Each accepted historical finding must say whether it needs rotating."""

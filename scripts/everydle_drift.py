@@ -44,6 +44,7 @@ from everydle_sources import (  # noqa: E402
     fetch,
     fixture_opener,
     is_accepted,
+    is_excluded,
     load_local,
     merge_base_value,
 )
@@ -53,6 +54,12 @@ FIXTURE_FILES = {
         "valorant_agents.json",
     "https://dbd.tricky.lol/api/characters": "dbd_characters.json",
     "https://dbd.tricky.lol/api/dlc": "dbd_dlc.json",
+    "https://genshin-db-api.vercel.app/api/v5/characters"
+    "?query=names&matchCategories=true&verboseCategories=true":
+        "genshin_characters.json",
+    "https://genshin-db-api.vercel.app/api/v5/talents"
+    "?query=names&matchCategories=true&verboseCategories=true":
+        "genshin_talents.json",
 }
 
 
@@ -75,8 +82,18 @@ def compare(game: str, dataset: str, opener=None) -> dict:
     catalog = local.catalogs[PIVOT_LANGUAGE]["datasets"][dataset]["entities"]
 
     new_upstream = []
+    excluded_entities = []
     for entity_id in sorted(upstream_ids - local_ids):
         entity = upstream[entity_id]
+        reason = is_excluded(game, dataset, entity_id)
+        if reason:
+            # Listed, but not a finding — the same treatment an accepted
+            # divergence gets, so the decision stays visible without the report
+            # asking for it again every week.
+            excluded_entities.append({"entity_id": entity_id,
+                                      "display_name": entity.display_name,
+                                      "reason": reason})
+            continue
         new_upstream.append({
             "entity_id": entity_id,
             "display_name": entity.display_name,
@@ -168,6 +185,7 @@ def compare(game: str, dataset: str, opener=None) -> dict:
         "local_count": len(local_ids),
         "upstream_count": len(upstream_ids),
         "new_upstream": new_upstream,
+        "excluded_entities": excluded_entities,
         "missing_upstream": missing_upstream,
         "disagreements": disagreements,
         "balance_changes": balance_changes,
@@ -203,6 +221,12 @@ def print_report(reports: list[dict]) -> None:
     for report in reports:
         print(f"\n{report['game']}.{report['dataset']}: "
               f"{report['local_count']} local / {report['upstream_count']} upstream")
+
+        if report["excluded_entities"]:
+            print("\n  DELIBERATELY ABSENT — recorded decisions, not findings")
+            for entry in report["excluded_entities"]:
+                print(f"    {entry['entity_id']}  ({entry['display_name']})")
+                print(f"        {entry['reason']}")
 
         if report["new_upstream"]:
             print("\n  NEW UPSTREAM — the game has these and the dataset does not")

@@ -1,5 +1,83 @@
 # Changelog
 
+## 2.7.0-beta.1
+
+- **The five new casino items can be pulled at all now.** The lucky charm,
+  stacked deck, marked card, metal detector and parachute were marked drawable
+  but were never added to the shipped gacha table, so no banner could award them
+  — and because "add missing rewards" compares your banner against that shipped
+  table, it correctly reported nothing missing. The only route to them was
+  "reset rewards", which throws away your own table. They are in the shipped
+  3-star tier now, so the button offers them.
+- **The gacha page's buttons follow the banner you are looking at.** They were
+  built once when you opened the page, so switching banners in the picker left
+  them describing the previous one — a banner that was missing rewards showed no
+  "add missing" button at all.
+- **The audit log shows its entries again.** It drew the count in the header and
+  then stopped, leaving the list loading forever, because the code that turns a
+  timestamp into "3 hours ago" used a table that was never defined.
+- **Editing a shop item opens the right kind.** Every existing item opened as
+  "Permanent role" asking which role to grant, whatever it actually was — so
+  editing a vault and saving would have turned it into a role grant.
+
+- **Russian roulette.** `/russian` opens a lobby other members join; when the
+  host starts it, one player takes the round and everybody else splits the pot.
+  Up to ten players, and the house takes its 2% off the pot once rather than per
+  player, so a bigger table is better odds and not worse.
+- Every ante is its own reserved wager, so a lobby nobody starts costs nothing:
+  the antes come back when it expires, and again at the next start if the bot
+  went down while it was open.
+- **Two channel games the bot keeps honest.** A **counting** channel and a
+  **word chain** channel: people play, and the bot removes a message that breaks
+  the rule and tells only its author why, so the channel still reads as the
+  chain. Accents and capitals are ignored when words are compared, and a message
+  that is not an attempt at all is left alone.
+- The same person cannot take two turns in a row unless you allow it, two people
+  posting at once cannot both count, and every hundredth turn gets a 🏆.
+- `/minigame_reset` starts a chain over, which is what you need after pointing a
+  game at a channel that already had numbers in it.
+- **Casino, minigames and Everydle are one Games group** on the Features page,
+  each a master switch with its games under it.
+- Casino commands have their own channel list now. Leave it empty and they stay
+  where the economy commands are; fill it in and the casino moves without moving
+  anything else.
+
+- **Three new casino games.** `/hilo` — call the next card higher or lower and
+  bank before you miss. `/crash` — climb a multiplier and cash out before it
+  bursts. `/wheel` — one spin against a weighted wheel. Every one pays back 98%,
+  the same as minesweeper, and the multipliers are worked out from the real odds
+  rather than written into a table.
+- Crash asks you to press Continue rather than running a live timer. A ticking
+  crash edits its message every second or two, and several rounds at once in the
+  same channel would hit Discord's limit and freeze mid-round with your stake
+  already taken.
+- **Two new items to go with them.** A 🃏 **marked card** redraws one wrong call
+  in higher-or-lower instead of ending your run; a 🪂 **parachute** stops a crash
+  round bursting before 1.95x. The lucky charm now works on the wheel too, so it
+  covers slots and the wheel the way the loaded die covers dice and roulette.
+
+- **Genshindle.** Guess the day's Genshin Impact character from element, weapon,
+  region, rarity, gender, build, weekly boss and release version — the same shape
+  as Valdle, with the version working as a higher/lower clue the way Valdle's
+  year does. 120 characters, everyone the game has released.
+- It is a **managed dataset**, not a hand-written one: the roster comes from
+  Genshin's own data and `scripts/everydle_drift.py` keeps it honest, so a new
+  character shows up in the weekly report by itself. Every attribute is published
+  by the game, so unlike Valdle and DbDle nobody has to fill in lore — the only
+  thing a person adds is nicknames.
+- **The Traveller counts as every element at once** — "All" for both element and
+  weekly boss, which is true (they have a talent record per element) and reads as
+  a joke that still helps. Any future Traveller form gets it automatically.
+  Characters from no nation — Aloy, Skirk, Nicole — are **Outsiders**, which is a
+  real clue rather than a blank.
+- Only three characters are left out: two roster entries that are not playable at
+  all, and Alyosha, who has not been released. Each says why, so the weekly data
+  report stops asking about them.
+- The drift report separates recorded decisions from real findings, `draft`
+  takes a `--game` so one game can be applied while another waits, and it no
+  longer prints a line per character saying you need to supply nothing — which on
+  a hundred-character roster buried the six that did.
+
 ## 2.6.0-beta.1
 
 - **Four casino items, and the loaded die now works in roulette.** A stacked deck

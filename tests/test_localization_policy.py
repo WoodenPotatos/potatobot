@@ -321,6 +321,7 @@ class JavaScriptIsActuallyRunTests(unittest.TestCase):
             "tests.test_gacha.FeaturedChanceFormulaTests",
             "tests.test_item_creator.TemplateRoundTripTests",
             "tests.test_dashboard_boot.DashboardBootTests",
+            "tests.test_item_creator.TemplateFieldsFollowTheChoiceTests",
         ])
         result = unittest.TestResult()
         suite.run(result)
@@ -374,3 +375,43 @@ class PickerDefinitionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicateKeyTests(unittest.TestCase):
+    """A catalog may not define the same key twice.
+
+    `json.load` keeps the last of a duplicate pair and says nothing, so the file
+    parses, the audit passes, and the interface shows whichever definition
+    happened to come second. Two crept in during one session — a stale
+    `subtitle_shop_items` left behind by a rename, and an `err_not_your_game`
+    added beside one that already existed — and both worked purely by luck.
+
+    `scripts/sync_locale_keys.py` cannot catch this either: it compares the
+    catalogs against each other, and a key duplicated in *both* is consistent.
+    """
+
+    def test_no_catalog_defines_a_key_twice(self):
+        import collections
+        import json
+
+        for path in sorted((ROOT / "locales").glob("*.json")):
+            duplicates = []
+
+            def note(pairs, seen=duplicates):
+                counts = collections.Counter(key for key, _ in pairs)
+                seen.extend(key for key, n in counts.items() if n > 1)
+                return dict(pairs)
+
+            json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=note)
+            self.assertEqual(
+                [], sorted(set(duplicates)),
+                f"{path.name} defines these keys more than once; the later one "
+                f"silently wins",
+            )
+
+    def test_the_premise_holds(self):
+        """A duplicate really is invisible to a plain parse."""
+        import json
+
+        parsed = json.loads('{"a": 1, "a": 2}')
+        self.assertEqual({"a": 2}, parsed)

@@ -53,17 +53,26 @@ def _catalog_languages(local) -> tuple[str, ...]:
     return tuple(sorted(local.catalogs))
 
 
-def draft(opener=None) -> dict:
+def draft(opener=None, only_game: str | None = None) -> dict:
     """Build a patch from the current drift.
 
     Two sections. `additions` are new entities with the lore fields left null for
     a person. `updates` are balance changes on fields the game publishes, so they
     arrive already filled in — a killer that was buffed or nerfed follows the
     game, and there is nothing to decide.
+
+    `only_game` narrows the draft to one game. With three managed datasets, a
+    patch covering all of them is refused whole when any single entity anywhere
+    still needs a person — so scoping is what lets one game be applied while
+    another waits.
     """
     additions = []
     updates = []
-    for game, dataset in MANAGED_DATASETS:
+    datasets = [pair for pair in MANAGED_DATASETS
+                if only_game is None or pair[0] == only_game]
+    if only_game is not None and not datasets:
+        raise SourceError(f"no managed dataset for {only_game}")
+    for game, dataset in datasets:
         report = drift_module.compare(game, dataset, opener)
         for entry in report["balance_changes"]:
             updates.append({
@@ -343,6 +352,9 @@ def main() -> int:
     draft_parser = commands.add_parser("draft", help="write a patch to fill in")
     draft_parser.add_argument("-o", "--output", type=Path, required=True)
     draft_parser.add_argument("--fixtures", type=Path, default=None)
+    draft_parser.add_argument(
+        "--game", default=None,
+        help="draft only this game, so one can be applied while another waits")
 
     apply_parser = commands.add_parser("apply", help="apply a completed patch")
     apply_parser.add_argument("patch", type=Path)
@@ -353,17 +365,26 @@ def main() -> int:
         if arguments.command == "draft":
             opener = (drift_module.load_fixtures(arguments.fixtures)
                       if arguments.fixtures else None)
-            patch = draft(opener)
+            patch = draft(opener, arguments.game)
             arguments.output.write_text(
                 json.dumps(patch, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
             count = len(patch["additions"])
             print(f"wrote {arguments.output} with {count} addition(s)")
+            # Only the ones that need somebody. A line per entity saying "you
+            # still need to supply nothing" buried the ones that did, which on a
+            # hundred-character roster is the whole list.
+            ready = 0
             for entry in patch["additions"]:
-                todo = ", ".join(entry["needs_a_person"]) or "nothing"
+                if not entry["needs_a_person"]:
+                    ready += 1
+                    continue
+                todo = ", ".join(entry["needs_a_person"])
                 print(f"  {entry['game']}.{entry['dataset']}.{entry['entity_id']}: "
                       f"you still need to supply {todo}")
+            if ready:
+                print(f"  {ready} addition(s) need nothing from you")
             if not count:
                 print("  nothing to add; the datasets are in step with upstream")
             return 0

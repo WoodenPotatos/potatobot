@@ -702,6 +702,24 @@ table.data .cell-mono { font-family: var(--font-mono); font-size: .82rem; }
 table.data .cell-grow { width: 45%; min-width: 220px; }
 table.data .cell-grow textarea { min-height: 58px; width: 100%; }
 table.data .cell-muted { color: var(--text-muted); }
+/* The item list stacks three things in one cell — name, what it does, and the
+   stable key — so each needs its own weight, or a full-length description at
+   body size turns every row into a paragraph and the row rules read as clutter. */
+table.data td .item-name { font-weight: 600; }
+table.data td .item-desc {
+    margin-top: 2px;
+    max-width: 46ch;
+    color: var(--text-muted);
+    font-size: .8rem;
+    line-height: 1.35;
+}
+table.data td .item-desc + .cell-key { margin-top: 3px; }
+table.data td .cell-key { font-size: .72rem; font-weight: 500; }
+/* Two pills can share a cell, so they need to be laid out rather than run on. */
+table.data td .pill + .pill { margin-left: 6px; }
+table.data tbody td { vertical-align: top; }
+table.data tbody td.cell-actions,
+table.data tbody td.cell-mono { vertical-align: middle; }
 table.data .cell-actions { text-align: right; white-space: nowrap; }
 table.data td.cell-empty { text-align: center; color: var(--text-muted); padding: var(--space-6); }
 /* A feature that is missing a permission has to read as broken. */

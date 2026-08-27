@@ -77,6 +77,40 @@ The disagreements are the most useful part of this table. Three gender values an
 three base speeds differ between the local data and upstream. One of the two is
 wrong, and a tool cannot tell which — so it must show them, never overwrite them.
 
+### Genshindle — `https://genshin-db-api.vercel.app/api/v5/characters` and `.../talents`
+
+Probed 2026-08-27. Two bulk endpoints, 122 characters and 125 talent records,
+answering in one request each rather than one per character.
+
+Unlike the other two, **this source publishes every attribute the puzzle uses**:
+`elementText`, `weaponType`, `region`, `rarity`, `gender`, `bodyType` and the
+release `version`. There is no lore field, so the adapter reports nothing as
+needing a person and the only local knowledge is the aliases.
+
+Two things it does *not* publish, both settled deliberately:
+
+- **Which boss drops a talent material.** The material record's description only
+  alludes to it in prose ("the Dragon of the East"), and the domain list carries
+  no weekly-boss drops at all. So the attribute value is the material —
+  "Dvalin's Sigh" — which a player recognises just as well and which upstream
+  actually states. `GENSHIN_WEEKLY_BOSS` in `everydle_sources.py` is an empty map;
+  adding a row collapses that material into a boss name, and since a boss's three
+  materials map to the same name they remain one value. Verified against the live
+  roster: 125 of 125 characters have exactly one cost in the 113000–113999
+  material id range at talent level 10, so the drop is identified by id range
+  rather than by matching names.
+- **Whether a character has actually been released.** `version` is when they
+  entered the data, so an upcoming character already carries one — the roster
+  cannot tell you. That is the only fact a person supplies, and it is one line in
+  `EXCLUDED_ENTITIES` per character, deleted the day they arrive.
+
+What looked at first like a third gap turned out not to be one. `region` is blank
+for eleven characters, but every one of them still carries an `associationType`,
+so the nation is published under another name: `ASSOC_SNEZHNAYA_STAR` is
+Snezhnaya, `ASSOC_NODKRAI_ZIBAI` is Nod-Krai. Four associations name no nation at
+all — the Traveller, Aloy, Nicole and Skirk — and they share the value
+`Outsider`, which is the fact rather than a placeholder.
+
 ### The conclusion
 
 **Automate the diff, not the edit.** A job that says "Valorant added Miks, here is

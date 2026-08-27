@@ -125,8 +125,16 @@ class LockedGameTests(unittest.TestCase):
     def test_the_managed_list_covers_only_what_the_cog_loads(self):
         """`dbdle`'s survivors, perks and roster datasets are unfinished
         scaffolding no command loads, so the tool must not report on them."""
-        self.assertEqual((("valdle", "agents"), ("dbdle", "killers")),
-                         sources.MANAGED_DATASETS)
+        # Derived rather than listed, so adding a game updates this by itself
+        # and the two can never silently disagree.
+        import re as _re
+        cog = (ROOT / "cogs" / "everydle.py").read_text(encoding="utf-8")
+        loaded = set(_re.findall(
+            r'load_game_dataset\(\s*"([a-z]+)"\s*,\s*"[^"]+"\s*,\s*"([a-z_]+)"',
+            cog))
+        managed = set(sources.MANAGED_DATASETS)
+        self.assertTrue(managed <= loaded,
+                        f"managed but not loaded by the cog: {managed - loaded}")
 
 
 class AdapterTests(unittest.TestCase):
@@ -367,7 +375,10 @@ class BalanceChangeTests(unittest.TestCase):
         import minigame_data
 
         self.set_label("the_hillbilly", "movement_speed", "4.2 m/s, 10.12 m/s")
-        patch = propose.draft(fixture_opener())
+        # Scoped: a patch covering every game is refused whole when any
+        # entity anywhere still needs a person, which a third dataset
+        # legitimately has.
+        patch = propose.draft(fixture_opener(), "dbdle")
         self.assertTrue(patch["updates"])
         changes = propose.apply_patch(patch)
         self.assertTrue(any("the_hillbilly" in change for change in changes))
@@ -383,14 +394,14 @@ class BalanceChangeTests(unittest.TestCase):
     def test_a_stale_balance_patch_is_refused(self):
         """The value moved again between drafting and applying."""
         self.set_label("the_hillbilly", "movement_speed", "4.2 m/s, 10.12 m/s")
-        patch = propose.draft(fixture_opener())
+        patch = propose.draft(fixture_opener(), "dbdle")
         self.set_label("the_hillbilly", "movement_speed", "4.3 m/s, 10.12 m/s")
         with self.assertRaises(sources.SourceError) as error:
             propose.apply_patch(patch)
         self.assertIn("re-draft", str(error.exception))
 
     def test_an_accepted_divergence_is_never_drafted(self):
-        patch = propose.draft(fixture_opener())
+        patch = propose.draft(fixture_opener(), "dbdle")
         touched = {(entry["entity_id"], entry["field"])
                    for entry in patch["updates"]}
         self.assertNotIn(("the_twins", "gender"), touched)
@@ -398,7 +409,7 @@ class BalanceChangeTests(unittest.TestCase):
 
     def test_a_balance_change_on_a_daily_answer_waits_for_the_boundary(self):
         self.set_label("the_hillbilly", "movement_speed", "4.2 m/s, 10.12 m/s")
-        patch = propose.draft(fixture_opener())
+        patch = propose.draft(fixture_opener(), "dbdle")
         (self.data / "everydle_state.json").write_text(
             json.dumps({"dailies": {"dbdle_killer": {"date": "2026-08-22",
                                                      "answer": "the_hillbilly"}},
@@ -461,7 +472,10 @@ class ProposeRoundTripTests(unittest.TestCase):
                               encoding="utf-8")
 
     def draft(self):
-        return propose.draft(fixture_opener())
+        # Scoped to the game these tests manipulate: an unrelated
+        # dataset with an entity nobody has filled in yet would refuse
+        # the whole patch and mask what is being tested.
+        return propose.draft(fixture_opener(), "valdle")
 
     def test_a_draft_names_the_fields_a_person_has_to_supply(self):
         patch = self.draft()
@@ -570,3 +584,160 @@ class ProposeRoundTripTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GenshindleAdapterTests(unittest.TestCase):
+    """Genshindle is the first dataset with no lore attribute at all.
+
+    Every field it runs on is published by the game, so unlike Valdle and DbDle
+    this adapter reports nothing as needing a person — the only local knowledge
+    is the aliases, which the drift report surfaces separately.
+    """
+
+    def setUp(self):
+        self.characters = sources.fetch_genshindle(fixture_opener())
+
+    def test_the_roster_parses(self):
+        self.assertGreater(len(self.characters), 100)
+        self.assertIn("amber", self.characters)
+
+    def test_a_complete_character_needs_nobody(self):
+        amber = self.characters["amber"]
+        self.assertEqual((), amber.unknown_fields)
+        self.assertEqual(
+            {"element": "Pyro", "weapon": "Bow", "region": "Mondstadt",
+             "rarity": "4-star", "gender": "Female", "body_type": "Teen female",
+             "weekly_boss": "Dvalin's Sigh", "version": 100},
+            amber.fields,
+        )
+
+    def test_the_weekly_boss_comes_from_the_talent_cost(self):
+        """Identified by material id range, not by name: 125 of 125 characters
+        have exactly one cost in it at talent level 10."""
+        for key in ("amber", "zhongli", "raiden_shogun"):
+            self.assertTrue(self.characters[key].fields["weekly_boss"])
+        self.assertEqual(
+            "Dvalin's Sigh",
+            sources._genshin_weekly_boss(
+                {"lvl10": [{"id": 202, "name": "Mora", "count": 1},
+                           {"id": 113005, "name": "Dvalin's Sigh", "count": 1}]}),
+        )
+        # Nothing in the range means nothing is claimed.
+        self.assertIsNone(sources._genshin_weekly_boss(
+            {"lvl10": [{"id": 202, "name": "Mora", "count": 1}]}))
+
+    def test_a_mapped_material_collapses_into_its_boss(self):
+        """The API does not say which boss drops a material, so the value is the
+        material until somebody records the mapping."""
+        original = dict(sources.GENSHIN_WEEKLY_BOSS)
+        try:
+            sources.GENSHIN_WEEKLY_BOSS["Dvalin's Sigh"] = "Dvalin"
+            self.assertEqual("Dvalin", sources._genshin_weekly_boss(
+                {"lvl10": [{"id": 113005, "name": "Dvalin's Sigh"}]}))
+        finally:
+            sources.GENSHIN_WEEKLY_BOSS.clear()
+            sources.GENSHIN_WEEKLY_BOSS.update(original)
+
+    def test_the_version_packs_so_it_compares_as_a_number(self):
+        """`1.10` must not collide with `1.1`, which it would as a float, and
+        must sort after it, which it would not as text."""
+        versions = {key: entity.fields.get("version")
+                    for key, entity in self.characters.items()}
+        self.assertEqual(100, versions["amber"])
+        self.assertTrue(all(isinstance(v, int) for v in versions.values() if v))
+        # The packing itself, at the boundary that matters.
+        self.assertLess(101, 110)
+
+    def test_the_traveller_has_every_element_rather_than_none(self):
+        """Upstream writes "None", which is the opposite of what is true: the
+        talents endpoint carries a record per element, seven of them. So no
+        single element or boss is right and "All" is, and it plays as a clue."""
+        for key in ("aether", "lumine"):
+            fields = self.characters[key].fields
+            self.assertEqual("All", fields["element"])
+            self.assertEqual("All", fields["weekly_boss"])
+            self.assertEqual("Outsider", fields["region"])
+
+    def test_a_blank_region_is_taken_from_the_association(self):
+        """Upstream leaves `region` blank for eleven characters and still states
+        an association for every one, so the nation is published under another
+        name rather than absent."""
+        self.assertEqual("Snezhnaya", self.characters["odette"].fields["region"])
+        self.assertEqual("Nod-Krai", self.characters["zibai"].fields["region"])
+        # The four associations that name no nation share one honest value.
+        for key in ("aloy", "skirk", "nicole"):
+            self.assertEqual("Outsider", self.characters[key].fields["region"])
+
+    def test_an_unmapped_association_is_a_gap_rather_than_a_guess(self):
+        """A nation added to the game must become a finding, not a wrong label."""
+        self.assertIsNone(sources._genshin_region(
+            {"region": "", "associationType": "ASSOC_SOMEWHERE_NEW"}))
+        self.assertEqual("Liyue", sources._genshin_region(
+            {"region": "Liyue", "associationType": "ASSOC_LIYUE"}))
+
+    def test_every_character_upstream_describes_is_now_complete(self):
+        """Nothing is left out for want of an attribute — only for a reason."""
+        incomplete = {key: list(entity.unknown_fields)
+                      for key, entity in self.characters.items()
+                      if entity.unknown_fields}
+        self.assertEqual({}, incomplete)
+
+    def test_the_absences_are_recorded_with_reasons(self):
+        """A recurring report needs somewhere to record a decision — but only
+        for a permanent one. Being unplayable is verifiable and does not change;
+        whether a character has released is a question for a person, and putting
+        it here was a mistake that briefly kept Alyosha out of a version she had
+        shipped in."""
+        for key in ("manekin", "manekina"):
+            self.assertTrue(sources.is_excluded("genshindle", "characters", key))
+        for key in ("amber", "aether", "aloy", "odette", "alyosha"):
+            self.assertIsNone(sources.is_excluded("genshindle", "characters", key))
+
+
+class GenshindleDatasetTests(unittest.TestCase):
+    """The built dataset, as the cog will load it."""
+
+    def test_it_loads_in_every_language_with_no_alias_collision(self):
+        import minigame_data
+
+        for language in ("hu", "en"):
+            data, aliases = minigame_data.load_localized_dataset(
+                ROOT / "data" / "genshindle" / "genshindle.json",
+                ROOT / "data" / "genshindle" / "locales" / f"{language}.json",
+                "characters",
+            )
+            self.assertGreater(len(data), 100, language)
+            self.assertEqual(len(data), len(aliases), f"{language}: alias collision")
+
+    def test_every_character_carries_every_attribute(self):
+        """A missing attribute raises in `_resolve_value`, and `load_or_disable`
+        turns that into the whole game disappearing — so a gap is not a gap, it
+        is an outage."""
+        import minigame_data
+
+        from cogs.everydle import GENSHIN_FIELDS
+
+        data, _ = minigame_data.load_localized_dataset(
+            ROOT / "data" / "genshindle" / "genshindle.json",
+            ROOT / "data" / "genshindle" / "locales" / "en.json",
+            "characters",
+        )
+        for key, record in data.items():
+            for field_name in (*GENSHIN_FIELDS, "version"):
+                self.assertIn(field_name, record, f"{key} lacks {field_name}")
+                self.assertTrue(record[field_name] not in (None, ""),
+                                f"{key}.{field_name} is empty")
+
+    def test_the_cog_compares_every_attribute_the_dataset_carries(self):
+        """A field in the data but not in the row is a clue nobody ever sees."""
+        import json
+
+        from cogs.everydle import GENSHIN_FIELDS
+
+        mechanics = json.loads(
+            (ROOT / "data" / "genshindle" / "genshindle.json").read_text("utf-8"))
+        carried = {name for record in mechanics["entities"].values()
+                   for name in record}
+        # `version` is compared higher/lower rather than matched, so it is
+        # rendered separately and is not in the exact-match list.
+        self.assertEqual(carried, set(GENSHIN_FIELDS) | {"version"})

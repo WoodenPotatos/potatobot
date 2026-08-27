@@ -123,6 +123,14 @@ class SettingDefinition:
     # deciding a channel's type needs live Discord state and a settings save
     # must not start failing while Discord is unreachable.
     channel_types: tuple[str, ...] = ()
+    # A setting that is real — stored, validated, audited, read by the bot — but
+    # whose editing surface is somewhere better than a settings form. The 17
+    # built-in shop prices are the case: a price belongs beside the item it is
+    # for, and having them here as well meant an operator set built-in prices on
+    # one page and custom ones on another, with neither page showing the other
+    # half. The registry stays the single source of truth for the value; this
+    # only says the settings form is not where it is typed.
+    edited_elsewhere: bool = False
     # True when the bot has to *grant* this ROLE/ROLE_LIST, false when it only
     # recognises membership. The distinction decides whether a role above the
     # bot may be named: `premium_roles` and `admin_roles` are recognition, and
@@ -260,8 +268,8 @@ WARN_DEFAULT_TAG = "general"
 WARN_ACTIONS = ("none", "timeout", "kick", "ban")
 
 FEATURE_GROUP_ORDER = (
-    "core", "community", "onboarding", "economy", "casino", "everydle",
-    "rewards", "moderation", "factions", "media", "socials", "other",
+    "core", "community", "onboarding", "economy", "games", "rewards",
+    "moderation", "factions", "media", "socials", "other",
 )
 
 
@@ -288,35 +296,61 @@ FEATURE_DEFINITIONS = {
         _feature("rentals", "economy",
                  dependencies=("economy", "shop", "tickets"),
                  permissions=("manage_expressions",)),
-        _feature("casino", "casino", dependencies=("economy",),
+        _feature("casino", "games", dependencies=("economy",),
                  permissions=("embed_links",)),
-        _feature("casino_blackjack", "casino", parent="casino",
+        _feature("casino_blackjack", "games", parent="casino",
                  dependencies=("economy", "casino"),
                  permissions=("embed_links",)),
-        _feature("casino_dice", "casino", parent="casino",
+        _feature("casino_dice", "games", parent="casino",
                  dependencies=("economy", "casino"),
                  permissions=("embed_links",)),
-        _feature("casino_roulette", "casino", parent="casino",
+        _feature("casino_roulette", "games", parent="casino",
                  dependencies=("economy", "casino"),
                  permissions=("embed_links",)),
-        _feature("casino_slots", "casino", parent="casino",
+        _feature("casino_slots", "games", parent="casino",
                  dependencies=("economy", "casino"),
                  permissions=("embed_links",)),
-        _feature("casino_mines", "casino", parent="casino",
+        # Channel games: the members play them, and the bot only keeps the
+        # channel honest. They depend on nothing — no economy, no rewards — so a
+        # guild can run a counting channel without an economy at all.
+        _feature("minigames", "games",
+                 permissions=("manage_messages", "read_message_history")),
+        _feature("minigame_counting", "games", parent="minigames",
+                 dependencies=("minigames",),
+                 permissions=("manage_messages", "read_message_history")),
+        _feature("minigame_word_chain", "games", parent="minigames",
+                 dependencies=("minigames",),
+                 permissions=("manage_messages", "read_message_history")),
+        _feature("casino_russian", "games", parent="casino",
+                 dependencies=("economy", "casino"),
+                 permissions=("embed_links",)),
+        _feature("casino_hilo", "games", parent="casino",
+                 dependencies=("economy", "casino"),
+                 permissions=("embed_links",)),
+        _feature("casino_crash", "games", parent="casino",
+                 dependencies=("economy", "casino"),
+                 permissions=("embed_links",)),
+        _feature("casino_wheel", "games", parent="casino",
+                 dependencies=("economy", "casino"),
+                 permissions=("embed_links",)),
+        _feature("casino_mines", "games", parent="casino",
                  dependencies=("economy", "casino"),
                  permissions=("embed_links",)),
         # One master toggle per family of near-identical games, with the games
         # themselves as sub-toggles on the master's own settings page. Eight of
         # them in a flat list pushed everything else off the Features page.
-        _feature("everydle", "everydle", dependencies=("economy",),
+        _feature("everydle", "games", dependencies=("economy",),
                  permissions=("embed_links", "attach_files")),
-        _feature("everydle_loldle", "everydle", parent="everydle",
+        _feature("everydle_loldle", "games", parent="everydle",
                  dependencies=("economy", "everydle"),
                  permissions=("embed_links", "attach_files")),
-        _feature("everydle_valdle", "everydle", parent="everydle",
+        _feature("everydle_valdle", "games", parent="everydle",
                  dependencies=("economy", "everydle"),
                  permissions=("embed_links", "attach_files")),
-        _feature("everydle_dbdle", "everydle", parent="everydle",
+        _feature("everydle_genshindle", "games", parent="everydle",
+                 dependencies=("economy", "everydle"),
+                 permissions=("embed_links", "attach_files")),
+        _feature("everydle_dbdle", "games", parent="everydle",
                  dependencies=("economy", "everydle"),
                  permissions=("embed_links", "attach_files")),
         _feature("music", "media",
@@ -391,7 +425,8 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
              json_shape: str | None = None,
              assignable_role: bool = False,
              bot_permissions: tuple[str, ...] = (),
-             member_permissions: tuple[str, ...] = ()):
+             member_permissions: tuple[str, ...] = (),
+             edited_elsewhere: bool = False):
     return SettingDefinition(
         key=key,
         locale_key=f"dashboard.settings.{key}",
@@ -412,6 +447,7 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
         role_must_be_assignable=assignable_role,
         bot_channel_permissions=bot_permissions,
         member_channel_permissions=member_permissions,
+        edited_elsewhere=edited_elsewhere,
     )
 
 
@@ -463,6 +499,30 @@ SETTING_DEFINITIONS = {
         _setting("economy_channels", "economy", "rewards", SettingValueType.CHANNEL_LIST,
                  [], feature="economy", legacy_path=("channels", "economy"),
                  channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
+        # Left empty, the casino lives wherever the economy does. That fallback
+        # is the whole point: an empty channel gate admits nobody but an
+        # administrator, so a guild that had never heard of this setting would
+        # otherwise wake up with no casino at all.
+        # One channel each: a counting channel is a counting channel, and two of
+        # them sharing a count is not a thing anybody wants.
+        _setting("counting_channel", "minigames", "minigames",
+                 SettingValueType.CHANNEL, None, feature="minigame_counting",
+                 channel_types=TEXT_CHANNEL_TYPES,
+                 bot_permissions=("manage_messages", "read_message_history"),
+                 member_permissions=("view_channel", "send_messages")),
+        _setting("word_chain_channel", "minigames", "minigames",
+                 SettingValueType.CHANNEL, None, feature="minigame_word_chain",
+                 channel_types=TEXT_CHANNEL_TYPES,
+                 bot_permissions=("manage_messages", "read_message_history"),
+                 member_permissions=("view_channel", "send_messages")),
+        # Whether the same person may take two turns in a row. Off is the usual
+        # rule and the one that makes a channel a group activity rather than one
+        # person counting to a thousand.
+        _setting("minigame_allow_double_turn", "minigames", "minigames",
+                 SettingValueType.BOOLEAN, False, feature="minigames"),
+        _setting("casino_channels", "casino", "casino", SettingValueType.CHANNEL_LIST,
+                 [], feature="casino", channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
         _setting("levels_channels", "community", "levels", SettingValueType.CHANNEL_LIST,
                  [], feature="levels", legacy_path=("channels", "levels"),
@@ -654,15 +714,20 @@ SETTING_DEFINITIONS = {
 # Prices are registered from the shared item catalog, so adding a built-in item
 # there gives it a dashboard price field without a second list to keep in step.
 for _item_key, _default_price in item_catalog.shop_default_prices().items():
+    # A price belongs beside the item it is for, so the item page is where it is
+    # typed. The setting stays real — stored, validated, audited, and mirrored
+    # into `shop_prices` for the bot to read.
     definition = _setting(
         f"shop_price_{_item_key}", "economy", "shop", SettingValueType.INTEGER,
         _default_price, feature="shop", minimum=0, maximum=1000000000,
+        edited_elsewhere=True,
     )
     SETTING_DEFINITIONS[definition.key] = definition
 
 for _activity_key, (_coin, _xp) in {
     "loldle_easy": (2500, 100), "loldle_medium": (5000, 100),
     "loldle_hard": (7500, 150), "valdle": (5000, 100), "dbdle": (5000, 100),
+    "genshindle": (5000, 100),
     "daily_normal": (5000, 50), "daily_premium": (10000, 50),
     "chat_message": (5, 2), "voice_minute_normal": (5, 5),
     "voice_minute_premium": (10, 10),
@@ -670,7 +735,8 @@ for _activity_key, (_coin, _xp) in {
     # Everydle's rewards belong with Everydle, not with a "Games" page that also
     # holds the general other-games channel — the two had nothing to do with each
     # other beyond both being games.
-    _category = ("everydle" if _activity_key.startswith(("loldle", "valdle", "dbdle"))
+    _category = ("everydle" if _activity_key.startswith(
+        ("loldle", "valdle", "dbdle", "genshindle"))
                  else "economy")
     for _reward_type, _default in (("coin", _coin), ("xp", _xp)):
         definition = _setting(

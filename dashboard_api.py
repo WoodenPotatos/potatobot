@@ -1450,7 +1450,6 @@ def guild_item_list(guild_id):
             # route reuses the creation validator, so a partial body is refused
             # and every field has to be sent back unchanged.
             "config": item["config"],
-            "texts": item["texts"],
         })
     return jsonify({"status": "success", "data": items,
                     "limit": SHOP_ITEM_LIMIT,
@@ -1910,18 +1909,13 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
     Editing reuses this so an approved template can never be widened by going
     through the update path instead of the create path.
     """
-    fields = {"template_type", "enabled", "price", "config", "hu"}
+    # `text` rather than a language code: a custom item lives in one guild's
+    # database and is read only by that guild, so it is written once in whatever
+    # language they speak.
+    fields = {"template_type", "enabled", "price", "config", "text"}
     if require_key:
         fields.add("item_key")
-    # `en` is the one optional field. Hungarian is the primary language and what
-    # everything falls back to, exactly as in the shipped catalogs, so an
-    # installation is never forced to translate its own shop — but a custom item
-    # used to be stored under 'hu' whatever the language setting said, which made
-    # an English installation show Hungarian text for its own items while every
-    # built-in had both.
-    allowed = fields | {"en"}
-    if (not fields <= set(payload) <= allowed
-            or payload["template_type"] not in SAFE_SHOP_TEMPLATES):
+    if set(payload) != fields or payload["template_type"] not in SAFE_SHOP_TEMPLATES:
         raise RequestValidationError("dashboard.errors.shop_template_invalid")
 
     key = None
@@ -1969,17 +1963,11 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
         or not 1 <= item_config["duration_days"] <= 3650
     ):
         raise RequestValidationError("dashboard.errors.shop_config_voucher")
-    texts = {}
-    for language in database.CUSTOM_ITEM_LANGUAGES:
-        if language not in payload:
-            continue
-        entry = payload[language]
-        if not isinstance(entry, dict) or set(entry) != {"name", "description"} or not all(
-            isinstance(entry[field], str) and entry[field].strip() for field in entry
-        ):
-            raise RequestValidationError("dashboard.errors.shop_localization_required")
-        texts[language] = {"name": entry["name"].strip(),
-                           "description": entry["description"].strip()}
+    text = payload["text"]
+    if not isinstance(text, dict) or set(text) != {"name", "description"} or not all(
+        isinstance(text[field], str) and text[field].strip() for field in text
+    ):
+        raise RequestValidationError("dashboard.errors.shop_localization_required")
     if template == "coin_bundle":
         if set(item_config) != {"amount", "repeatable"} or not isinstance(item_config.get("repeatable"), bool):
             raise RequestValidationError("dashboard.errors.shop_config_coin_bundle")
@@ -1993,7 +1981,8 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
         "enabled": payload["enabled"],
         "price": price,
         "config": item_config,
-        **texts,
+        "text": {"name": text["name"].strip(),
+                 "description": text["description"].strip()},
     }
 
 
@@ -2023,16 +2012,13 @@ def create_guild_shop_item(guild_id):
                 (guild_id, key, payload["template_type"], int(payload["enabled"]), price,
                  json.dumps(payload["config"], sort_keys=True), actor_id(), timestamp),
             )
-            for language in database.CUSTOM_ITEM_LANGUAGES:
-                if language not in payload:
-                    continue
-                conn.execute(
-                    "INSERT INTO shop_item_localizations "
-                    "(guild_id, item_key, language, name, description) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (guild_id, key, language, payload[language]["name"],
-                     payload[language]["description"]),
-                )
+            conn.execute(
+                "INSERT INTO shop_item_localizations "
+                "(guild_id, item_key, language, name, description) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (guild_id, key, database.CUSTOM_ITEM_LANGUAGE,
+                 payload["text"]["name"], payload["text"]["description"]),
+            )
             # Written on the same connection so the item and its audit row
             # commit together; a separate write could leave the item unaudited.
             database.write_settings_audit(

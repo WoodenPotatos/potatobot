@@ -154,6 +154,28 @@ class DashboardItemTestCase(unittest.TestCase):
         self.assertEqual(201, response.status_code, response.get_data(as_text=True))
 
 
+class TemplateFieldsFollowTheChoiceTests(unittest.TestCase):
+    """Section three must follow the template chosen above it.
+
+    It did not: the redraw listened inside `.field` while the wrapper's class is
+    `input-group`, so every template kept asking for a role — pick "vault" and it
+    still said select a role. The declaration was right and only the wiring was
+    wrong, which is why nothing else could see it.
+    """
+
+    def test_every_template_asks_for_its_own_fields(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        if not (ROOT / "node_modules" / "jsdom").is_dir():
+            self.skipTest("jsdom is not installed; run `npm install`")
+        script = ROOT / "tests" / "js" / "item_editor_templates.js"
+        result = subprocess.run([node, str(script), str(ROOT)],
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, result.returncode,
+                         f"{result.stdout}\n{result.stderr}")
+
+
 class ItemListEndpointTests(DashboardItemTestCase):
     """The merged list. Nothing could assemble it before: the catalog route
     serves no names, and `/api/locale` serves only the dashboard namespace."""
@@ -197,7 +219,7 @@ class ItemListEndpointTests(DashboardItemTestCase):
         self.create_item({
             "item_key": "vip", "template_type": "coin_bundle", "enabled": True,
             "price": 500, "config": {"amount": 100, "repeatable": False},
-            "hu": {"name": "VIP", "description": "leírás"},
+            "text": {"name": "VIP", "description": "leírás"},
         })
         custom = [item for item in self.get()["data"] if item["source"] == "custom"]
         self.assertEqual(1, len(custom))
@@ -205,7 +227,8 @@ class ItemListEndpointTests(DashboardItemTestCase):
         self.assertTrue(item["editable"])
         # The PATCH route reuses the creation validator, so a partial body is
         # refused: the row has to carry everything a save must send back.
-        for field in ("config", "texts", "revision", "price", "enabled"):
+        for field in ("config", "name", "description", "revision", "price",
+                      "enabled"):
             self.assertIn(field, item)
 
     def test_the_custom_cap_is_reported_so_the_button_can_disable(self):
@@ -214,55 +237,55 @@ class ItemListEndpointTests(DashboardItemTestCase):
         self.assertEqual(0, payload["custom_count"])
 
 
-class CustomItemLanguageTests(DashboardItemTestCase):
-    """A custom item was stored under 'hu' whatever the language, so an English
-    installation showed Hungarian text for its own items while every built-in
-    had both."""
+class CustomItemTextTests(DashboardItemTestCase):
+    """A custom item is written once, in whatever language the guild speaks.
 
-    def create(self, payload):
-        self.create_item(payload)
+    This briefly took two languages, on the reasoning that every built-in has
+    both. Wrong analogy: a built-in ships to every installation and must read in
+    each, while a custom item lives in one guild's database and is read only by
+    that guild's members. A server with two main languages would use English for
+    both rather than keep two columns, so the second field was work with no
+    reader.
+    """
 
-    def test_english_is_served_when_it_is_stored(self):
-        self.create({
-            "item_key": "vip", "template_type": "coin_bundle", "enabled": True,
-            "price": 500, "config": {"amount": 100, "repeatable": False},
-            "hu": {"name": "Aranytálca", "description": "magyar"},
-            "en": {"name": "Golden platter", "description": "english"},
-        })
-        english = database.get_shop_item_definitions(123, "en")[0]
-        self.assertEqual("Golden platter", english["name"])
-        hungarian = database.get_shop_item_definitions(123, "hu")[0]
-        self.assertEqual("Aranytálca", hungarian["name"])
+    ITEM = {"item_key": "vip", "template_type": "coin_bundle", "enabled": True,
+            "price": 500, "config": {"amount": 100, "repeatable": False}}
 
-    def test_english_falls_back_to_hungarian_per_field(self):
-        """Never forced to translate, and a half-translated item still reads."""
-        self.create({
-            "item_key": "vip", "template_type": "coin_bundle", "enabled": True,
-            "price": 500, "config": {"amount": 100, "repeatable": False},
-            "hu": {"name": "Aranytálca", "description": "magyar"},
-        })
-        english = database.get_shop_item_definitions(123, "en")[0]
-        self.assertEqual("Aranytálca", english["name"])
-        self.assertEqual("magyar", english["description"])
-
-    def test_an_unknown_language_falls_back_rather_than_going_blank(self):
-        self.create({
-            "item_key": "vip", "template_type": "coin_bundle", "enabled": True,
-            "price": 500, "config": {"amount": 100, "repeatable": False},
-            "hu": {"name": "Aranytálca", "description": "magyar"},
-        })
-        item = database.get_shop_item_definitions(123, "de")[0]
+    def test_the_text_is_returned_as_written(self):
+        self.create_item({**self.ITEM,
+                          "text": {"name": "Aranytálca", "description": "magyar"}})
+        item = database.get_shop_item_definitions(123)[0]
         self.assertEqual("Aranytálca", item["name"])
+        self.assertEqual("magyar", item["description"])
 
-    def test_every_stored_language_is_returned_for_the_editor(self):
-        self.create({
-            "item_key": "vip", "template_type": "coin_bundle", "enabled": True,
-            "price": 500, "config": {"amount": 100, "repeatable": False},
-            "hu": {"name": "Aranytálca", "description": "magyar"},
-            "en": {"name": "Golden platter", "description": "english"},
-        })
-        texts = database.get_shop_item_definitions(123)[0]["texts"]
-        self.assertEqual({"hu", "en"}, set(texts))
+    def test_a_language_argument_changes_nothing(self):
+        """Accepted and ignored, so callers need not change if a guild language
+        is ever added."""
+        self.create_item({**self.ITEM,
+                          "text": {"name": "Aranytálca", "description": "magyar"}})
+        for language in ("hu", "en", "de", None):
+            item = database.get_shop_item_definitions(123, language)[0]
+            self.assertEqual("Aranytálca", item["name"])
+
+    def test_a_second_language_is_refused_rather_than_stored(self):
+        """`require_exact_keys` refuses an extra key, so a payload written
+        against the old two-field shape fails loudly instead of half-saving."""
+        response = self.client.post(
+            "/api/guilds/123/shop-items",
+            json={**self.ITEM, "text": {"name": "A", "description": "B"},
+                  "en": {"name": "Golden platter", "description": "english"}},
+            headers={"X-CSRF-Token": "csrf-token"})
+        self.assertEqual(400, response.status_code)
+
+    def test_the_text_is_required(self):
+        for text in ({"name": "", "description": "x"},
+                     {"name": "x", "description": ""},
+                     {"name": "x"}):
+            response = self.client.post(
+                "/api/guilds/123/shop-items",
+                json={**self.ITEM, "text": text},
+                headers={"X-CSRF-Token": "csrf-token"})
+            self.assertEqual(400, response.status_code, text)
 
 
 if __name__ == "__main__":

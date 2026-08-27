@@ -35,7 +35,8 @@ PIVOT_LANGUAGE = "en"
 # Datasets an adapter may touch, as (game, dataset). Only these two are live in
 # `cogs/everydle.py`; `dbdle`'s survivors, perks and roster datasets are
 # unfinished scaffolding that no command loads.
-MANAGED_DATASETS = (("valdle", "agents"), ("dbdle", "killers"))
+MANAGED_DATASETS = (("valdle", "agents"), ("dbdle", "killers"),
+                    ("genshindle", "characters"))
 # Refused by name, not by omission. Generalising this tool and pointing it at
 # LoLdle is the single most likely way it could cause harm.
 LOCKED_GAMES = frozenset({"loldle"})
@@ -47,7 +48,41 @@ LOCKED_GAMES = frozenset({"loldle"})
 SOURCE_AUTHORITATIVE = {
     ("valdle", "agents"): ("role",),
     ("dbdle", "killers"): ("movement_speed", "terror_radius", "height"),
+    # Everything Genshindle runs on is published by the game and changes only
+    # when the game changes it — there is no lore attribute in the set, which is
+    # why this dataset needs no person at all beyond the aliases.
+    ("genshindle", "characters"): (
+        "element", "weapon", "region", "rarity", "gender", "body_type",
+        "weekly_boss", "version",
+    ),
 }
+
+# Entities upstream carries that this puzzle deliberately does not, with a
+# reason each. Without somewhere to record the decision they are reported as
+# "new upstream" every single run, which is how a weekly report teaches its
+# reader to skim — the same reason ACCEPTED_DIVERGENCES exists. Removing an
+# entry makes the entity a finding again.
+#
+# Note what is *not* here: a character who has not been released yet. Whether a
+# character is out is the one fact this source does not carry — `version` is when
+# they entered the data, so an upcoming character already has one — which makes
+# it a genuine finding for a person to answer rather than something to record
+# once. Alyosha was briefly listed here and should not have been: 7.0 shipped
+# both her and Odette.
+EXCLUDED_ENTITIES = {
+    # Neither has a talent record upstream — the roster lists them, the talents
+    # endpoint does not — which is what says they are not playable characters.
+    ("genshindle", "characters", "manekin"):
+        "No talent record upstream, so not a playable character.",
+    ("genshindle", "characters", "manekina"):
+        "No talent record upstream, so not a playable character.",
+}
+
+
+def is_excluded(game: str, dataset: str, entity_id: str) -> str | None:
+    """The reason this entity is deliberately absent, or None."""
+    return EXCLUDED_ENTITIES.get((game, dataset, entity_id))
+
 
 # Divergences the maintainer has looked at and decided to keep. Reporting these
 # every run would teach an operator to skim past the report, which is the one way
@@ -195,7 +230,8 @@ class LocalDataset:
         return resolved
 
 
-MECHANICS_FILE = {("valdle", "agents"): "valdle.json",
+MECHANICS_FILE = {("genshindle", "characters"): "genshindle.json",
+                  ("valdle", "agents"): "valdle.json",
                   ("dbdle", "killers"): "killers.json"}
 
 
@@ -360,8 +396,189 @@ def fetch_dbdle(opener=None) -> dict[str, UpstreamEntity]:
     return entities
 
 
+# ------------------------------------------------------------------ genshindle
+
+GENSHIN_CHARACTERS_URL = (
+    "https://genshin-db-api.vercel.app/api/v5/characters"
+    "?query=names&matchCategories=true&verboseCategories=true"
+)
+GENSHIN_TALENTS_URL = (
+    "https://genshin-db-api.vercel.app/api/v5/talents"
+    "?query=names&matchCategories=true&verboseCategories=true"
+)
+
+# Upstream vocabulary -> the English display text the local catalog uses.
+GENSHIN_WEAPON = {
+    "WEAPON_SWORD_ONE_HAND": "Sword", "WEAPON_CLAYMORE": "Claymore",
+    "WEAPON_POLE": "Polearm", "WEAPON_BOW": "Bow", "WEAPON_CATALYST": "Catalyst",
+}
+GENSHIN_BODY = {
+    "BODY_BOY": "Teen male", "BODY_MALE": "Adult male",
+    "BODY_GIRL": "Teen female", "BODY_LADY": "Adult female",
+    "BODY_LOLI": "Short female",
+}
+
+# A weekly boss drops three talent materials, and **the API does not say which
+# boss a material comes from**: the material record's description only alludes to
+# it in prose, and the domain list does not carry weekly-boss drops at all. So
+# the value is the *material*, which upstream does publish and which a player
+# recognises just as well — rather than a boss name invented here, which is the
+# one thing this tool must never do.
+#
+# Adding a row collapses that material into a boss, and because all three of a
+# boss's materials map to the same name they stay one value. It is an attribute
+# change, so `everydle_propose.py` will hold it to a day boundary.
+GENSHIN_WEEKLY_BOSS: dict[str, str] = {}
+
+# Upstream leaves `region` blank for eleven characters but still states an
+# `associationType` for every one of them, so the region is published — just
+# under another name. These are the associations no character with a filled-in
+# region uses, checked against the live roster:
+#
+#   ASSOC_SNEZHNAYA / _STAR   Alyosha, Odette, Sandrone   -> Snezhnaya
+#   ASSOC_NODKRAI_ZIBAI       Zibai                       -> Nod-Krai
+#   ASSOC_MAINACTOR           the Traveller and its forms -> no nation
+#   ASSOC_RANGER              Aloy, a Horizon guest       -> no nation
+#   ASSOC_HVISION             Nicole, of the Hexenzirkel  -> no nation
+#   ASSOC_OMNI_SCOURGE        Skirk, of the Abyss         -> no nation
+#
+# The four that name no nation share one value rather than four of their own:
+# "not from any of Teyvat's nations" is the fact, and it is a real clue.
+#
+# An association that is *not* here and whose row has no region leaves the field
+# absent, which the drift report then names — so a nation added to the game
+# becomes a finding rather than a silently wrong label.
+GENSHIN_ASSOCIATION_REGION = {
+    "ASSOC_SNEZHNAYA": "Snezhnaya",
+    "ASSOC_SNEZHNAYA_STAR": "Snezhnaya",
+    "ASSOC_NODKRAI_ZIBAI": "Nod-Krai",
+    "ASSOC_MAINACTOR": "Outsider",
+    "ASSOC_RANGER": "Outsider",
+    "ASSOC_HVISION": "Outsider",
+    "ASSOC_OMNI_SCOURGE": "Outsider",
+}
+
+# Upstream writes "None" for a character with no element of their own, which is
+# the Traveller and any future form of them. They wield every element — the
+# talents endpoint carries a separate record per element, seven of them — so no
+# single element or weekly boss is true. "All" is the honest value for both, and
+# it plays as a clue rather than as a hole.
+GENSHIN_ALL = "All"
+
+
+def _genshin_region(row) -> str | None:
+    """This character's nation, from `region` or from the association."""
+    region = (row.get("region") or "").strip()
+    if region:
+        return region
+    return GENSHIN_ASSOCIATION_REGION.get(row.get("associationType") or "")
+
+# The talent-material id range a weekly boss drop falls in. Verified against the
+# live roster: 125 of 125 characters have exactly one cost in this range at
+# talent level 10, so this identifies the drop without matching on its name.
+GENSHIN_BOSS_MATERIAL_IDS = range(113000, 114000)
+
+
+def _genshin_weekly_boss(costs: dict) -> str | None:
+    """The weekly-boss talent material for one character, or None."""
+    hits = [
+        entry for entry in (costs or {}).get("lvl10") or []
+        if isinstance(entry, dict)
+        and entry.get("id") in GENSHIN_BOSS_MATERIAL_IDS
+        and (entry.get("name") or "").strip()
+    ]
+    if len(hits) != 1:
+        return None
+    material = hits[0]["name"].strip()
+    return GENSHIN_WEEKLY_BOSS.get(material, material)
+
+
+def fetch_genshindle(opener=None) -> dict[str, UpstreamEntity]:
+    """Playable Genshin Impact characters.
+
+    Every attribute this puzzle uses is published: element, weapon, region,
+    rarity, gender, body type, the release version, and the weekly-boss talent
+    material derived from the character's level-10 talent cost. There is no lore
+    attribute, so unlike Valdle and DbDle this adapter reports nothing as
+    needing a person — the only local knowledge is the aliases, which
+    `everydle_drift.py` already surfaces separately.
+
+    Two payloads rather than one per character: both endpoints answer in bulk, so
+    a run is two requests rather than a hundred and twenty-five.
+    """
+    characters = _require_rows(
+        fetch_json(GENSHIN_CHARACTERS_URL, opener) or [],
+        GENSHIN_CHARACTERS_URL, 60)
+    talents = _require_rows(
+        fetch_json(GENSHIN_TALENTS_URL, opener) or [],
+        GENSHIN_TALENTS_URL, 60)
+    boss_by_name = {}
+    for row in talents:
+        name = (row.get("name") or "").strip()
+        if name:
+            boss_by_name[name] = _genshin_weekly_boss(row.get("costs") or {})
+
+    entities = {}
+    for row in characters:
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        supplied = {}
+        element = (row.get("elementText") or "").strip()
+        # "None" is the Traveller, who has every element rather than none.
+        traveller = element == "None"
+        if traveller:
+            supplied["element"] = GENSHIN_ALL
+        elif element:
+            supplied["element"] = element
+        weapon = GENSHIN_WEAPON.get(row.get("weaponType"))
+        if weapon:
+            supplied["weapon"] = weapon
+        region = _genshin_region(row)
+        if region:
+            supplied["region"] = region
+        rarity = row.get("rarity")
+        if isinstance(rarity, int) and rarity in (4, 5):
+            supplied["rarity"] = f"{rarity}-star"
+        gender = (row.get("gender") or "").strip()
+        if gender:
+            supplied["gender"] = gender
+        body = GENSHIN_BODY.get(row.get("bodyType"))
+        if body:
+            supplied["body_type"] = body
+        # The Traveller's talents are recorded per element, so there are seven
+        # boss materials rather than one — "All" for the same reason the element
+        # is. Everyone else takes theirs from the talent cost.
+        boss = GENSHIN_ALL if traveller else boss_by_name.get(name)
+        if boss:
+            supplied["weekly_boss"] = boss
+        version = (str(row.get("version") or "")).strip()
+        if version:
+            # Numeric, so it compares as higher/lower the way Valdle's year does.
+            # "1.0" and "5.3" sort wrong as text and 1.10 would collide with 1.1
+            # as a float, so it is stored as major*100 + minor.
+            parts = version.split(".")
+            if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+                supplied["version"] = int(parts[0]) * 100 + int(parts[1])
+
+        entities[slugify(name)] = UpstreamEntity(
+            entity_id=slugify(name),
+            display_name=name,
+            aliases=(name,),
+            fields=supplied,
+            unknown_fields=tuple(
+                field_name for field_name in
+                ("element", "weapon", "region", "rarity", "gender", "body_type",
+                 "weekly_boss", "version")
+                if field_name not in supplied
+            ),
+        )
+    return entities
+
+
 ADAPTERS = {("valdle", "agents"): fetch_valdle,
-            ("dbdle", "killers"): fetch_dbdle}
+            ("dbdle", "killers"): fetch_dbdle,
+            ("genshindle", "characters"): fetch_genshindle}
 
 
 def fetch(game: str, dataset: str, opener=None) -> dict[str, UpstreamEntity]:
@@ -391,6 +608,8 @@ def record_fixtures(destination: Path) -> list[Path]:
         (VALORANT_AGENTS_URL, "valorant_agents.json"),
         (DBD_CHARACTERS_URL, "dbd_characters.json"),
         (DBD_DLC_URL, "dbd_dlc.json"),
+        (GENSHIN_CHARACTERS_URL, "genshin_characters.json"),
+        (GENSHIN_TALENTS_URL, "genshin_talents.json"),
     ):
         path = destination / name
         path.write_text(

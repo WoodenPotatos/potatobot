@@ -586,19 +586,35 @@ class RegistryPresentationTests(unittest.TestCase):
         self.assertEqual([], sorted(groups - set(labels)))
         self.assertEqual([], [key for key in groups if not labels[key]])
 
-    def test_casino_and_everydle_are_not_one_group(self):
-        """Both depend on `economy`, so grouping by dependency merged them."""
-        casino = {key for key, definition in FEATURE_DEFINITIONS.items()
-                  if definition.group == "casino"}
-        everydle = {key for key, definition in FEATURE_DEFINITIONS.items()
-                    if definition.group == "everydle"}
-        self.assertTrue(casino and everydle)
-        self.assertEqual(set(), casino & everydle)
-        # The group holds a master plus its games: `casino` and `casino_*`.
-        self.assertTrue(all(key == "casino" or key.startswith("casino_")
-                            for key in casino))
-        self.assertTrue(all(key == "everydle" or key.startswith("everydle_")
-                            for key in everydle))
+    def test_the_games_group_stays_separable_into_families(self):
+        """The `games` group holds three families and nothing else.
+
+        The original defect was grouping *by dependency*: every casino game and
+        every Everydle game depends on `economy`, so they collapsed into one
+        undifferentiated block. The operator has since asked for casino,
+        minigames and Everydle to sit in one `games` group deliberately — which
+        is safe only because each family is now a master toggle with its games
+        as children, so the block is read as three things rather than fifteen.
+        What must stay true is that separability: every member of the group is
+        one of the three masters or a child of one of them.
+        """
+        masters = ("casino", "minigames", "everydle")
+        group = {key for key, definition in FEATURE_DEFINITIONS.items()
+                 if definition.group == "games"}
+        self.assertEqual(set(masters), group & set(masters))
+        for key in group - set(masters):
+            parent = FEATURE_DEFINITIONS[key].parent
+            self.assertIn(parent, masters,
+                          f"{key} is in the games group under no master")
+        # A family is still identifiable by name, which is what keeps the
+        # dashboard's rendering and the registry from disagreeing.
+        for master in masters:
+            children = {key for key in group
+                        if FEATURE_DEFINITIONS[key].parent == master}
+            self.assertTrue(children, f"{master} has no games under it")
+            prefix = "everydle_" if master == "everydle" else (
+                "minigame_" if master == "minigames" else "casino_")
+            self.assertTrue(all(key.startswith(prefix) for key in children))
 
     def test_each_game_family_has_one_master_and_the_rest_are_children(self):
         """Eight near-identical games in the flat Features list pushed everything

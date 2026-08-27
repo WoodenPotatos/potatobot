@@ -26,6 +26,7 @@ CREATE TABLE users (
     last_loldle_medium TEXT,
     last_loldle_hard TEXT,
     last_valdle TEXT,
+    last_genshindle TEXT,
     last_dbdle_killer TEXT,
     last_dbdle_survivor TEXT,
     last_dbdle_perk TEXT,

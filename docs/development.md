@@ -133,7 +133,7 @@ The localization tests reject structure mismatches and inappropriate hard-coded 
 
 ## 8. Feature areas and background work
 
-The command surface covers help/version, LFG, profiles and leaderboards, economy and transfers, shop, casino games, Everydle games, music, moderation, faction management, tickets, onboarding, role-menu setup, temporary voice rooms, and administrative setup tools.
+The command surface covers help/version, LFG, profiles and leaderboards, economy and transfers, shop, casino games, channel minigames, Everydle games, music, moderation, faction management, tickets, onboarding, role-menu setup, temporary voice rooms, and administrative setup tools.
 
 Background behavior includes:
 
@@ -142,6 +142,7 @@ Background behavior includes:
 - daily inactivity scanning;
 - rental cleanup;
 - member join/leave, ban, boost, chat activity, and voice-state listeners;
+- an `on_message` minigame check, which is a cached settings read per configured game and nothing more when the channel is not one;
 - feature revision polling every two seconds;
 - event-loop lag monitoring every second;
 - top-ranker Discord role reconciliation coalesced to at most once per guild per 30 seconds.
@@ -220,6 +221,30 @@ these.
 - The creator is `MANAGED_FIELDS` + `MANAGED_KINDS` in `dashboard/script.js`, one
   page per kind. `pack` must emit all eight keys the POST route names — the route
   uses `require_exact_keys`.
+
+### Channel minigames
+
+`cogs/minigames.py` implements counting and word chain. The bot does not run
+either game — members play in the channel and the bot removes a message that
+breaks the rule, telling only its author why. Everything sits in `on_message`,
+so the module is written around that path: the channel check is a
+`guild_setting_sync` read before any other work, the listener catches broadly
+and logs (an exception out of a listener stops it for every guild), and a
+message that matches neither pattern is chatter and is left alone.
+
+Word comparison uses `fold()` — casefold, NFD, drop combining marks — applied to
+both sides, so an accented entry joins the same chain as its bare form.
+`database.advance_minigame` is a conditional UPDATE against the value the caller
+believed was current, so two simultaneous turns cannot both be accepted.
+
+A wrong message is deleted rather than resetting the chain, so the streak never
+breaks by itself; the 🏆 therefore marks every `MILESTONE_EVERY`-th turn rather
+than a new record, and `/minigame_reset` (Manage Server) is the way back to zero.
+
+Settings: `counting_channel`, `word_chain_channel` and
+`minigame_allow_double_turn`, on the Minigames page. Features: `minigames` with
+`minigame_counting` and `minigame_word_chain` under it, in the `games` group
+beside `casino` and `everydle`.
 
 ### Gacha and shop inventory
 

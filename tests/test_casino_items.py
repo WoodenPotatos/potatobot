@@ -292,3 +292,180 @@ class _CountingRng:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WheelTests(CasinoItemTestCase):
+    def test_the_house_edge_is_the_declared_two_percent(self):
+        """The segment weights are chosen so the expected return is exactly 98%,
+        the same edge `/mines` derives. A change to any row has to keep it."""
+        total = sum(weight for _, weight in database.WHEEL_SEGMENTS)
+        paid = sum(multiplier * weight
+                   for multiplier, weight in database.WHEEL_SEGMENTS)
+        self.assertEqual(98 * total, paid,
+                         "the wheel's expected return is no longer exactly 98%")
+
+    def test_a_spin_lands_on_a_declared_segment(self):
+        rng = random.Random(5)
+        seen = set()
+        for _ in range(2_000):
+            seen.add(database._wheel_spin(rng))
+        self.assertEqual({m for m, _ in database.WHEEL_SEGMENTS}, seen)
+
+    def test_the_measured_return_matches_the_table(self):
+        rng = random.Random(9)
+        rounds, staked, returned = 4_000, 0, 0
+        for _ in range(rounds):
+            result = database.resolve_wheel_wager(GUILD, MEMBER, 100, rng=rng)
+            staked += 100
+            returned += result["payout"]
+        self.assertAlmostEqual(0.98, returned / staked, delta=0.06)
+
+    def test_the_charm_keeps_the_better_of_two_spins(self):
+        self.give("lucky_charm", 500)
+        rng = random.Random(11)
+        for _ in range(500):
+            result = database.resolve_wheel_wager(GUILD, MEMBER, 100, rng=rng)
+            self.assertTrue(result["lucky_charm"])
+            self.assertGreaterEqual(result["multiplier"],
+                                    result["second_multiplier"])
+
+    def test_a_refused_wager_spends_nothing(self):
+        self.give("lucky_charm", 1)
+        self.set_balance(5)
+        self.assertIsNone(database.resolve_wheel_wager(GUILD, MEMBER, 100))
+        self.assertEqual(1, self.held("lucky_charm"))
+
+
+class HigherOrLowerTests(unittest.TestCase):
+    """The multiplier is derived from the real odds, not tabled."""
+
+    def test_a_tie_is_excluded_from_the_odds(self):
+        """A tie is a push — the card is redrawn and nothing changes — so
+        counting it as a loss would make the multiplier too generous."""
+        from cogs.casino import HILO_RANKS, hilo_odds
+
+        for value, _ in HILO_RANKS:
+            higher = hilo_odds(value, True)
+            lower = hilo_odds(value, False)
+            self.assertAlmostEqual(1.0, higher + lower, places=9,
+                                   msg=f"{value}: ties leaked into the odds")
+
+    def test_the_extremes_are_certain(self):
+        from cogs.casino import hilo_odds
+
+        self.assertEqual(1.0, hilo_odds(2, True))    # nothing is below a 2
+        self.assertEqual(1.0, hilo_odds(14, False))  # nothing is above an ace
+        self.assertEqual(0.0, hilo_odds(2, False))
+        self.assertEqual(0.0, hilo_odds(14, True))
+
+    def test_the_payout_carries_the_house_edge_once(self):
+        """A certain call pays almost nothing and a long shot pays a lot, and
+        the edge is applied to the ladder rather than to each rung."""
+        from cogs.casino import CASINO_EDGE, hilo_odds, hilo_payout
+
+        self.assertAlmostEqual(CASINO_EDGE, hilo_payout(1 / hilo_odds(2, True)),
+                               places=9)
+        self.assertGreater(hilo_payout(1 / hilo_odds(3, False)), 8.0)
+
+    def test_a_run_of_any_length_returns_the_same(self):
+        """What makes banking a choice about variance rather than a trap: a
+        five-call run is worth the same 98% a one-call run is."""
+        from cogs.casino import CASINO_EDGE, hilo_odds, hilo_payout
+
+        rng = random.Random(17)
+        for _ in range(200):
+            raw, survival = 1.0, 1.0
+            for _ in range(rng.randint(1, 6)):
+                value = rng.choice([rank for rank, _ in
+                                    __import__("cogs.casino", fromlist=["x"]).HILO_RANKS])
+                higher = rng.choice((True, False))
+                odds = hilo_odds(value, higher)
+                if not odds:
+                    continue
+                raw /= odds
+                survival *= odds
+            self.assertAlmostEqual(CASINO_EDGE, survival * hilo_payout(raw),
+                                   delta=0.02)
+
+
+class CrashTests(unittest.TestCase):
+    def test_the_edge_is_taken_once_however_deep_the_run(self):
+        """`/mines` multiplies its ladder by 0.98 a single time, so going
+        further is a choice about variance rather than a second tax. Charging
+        per step instead would make a ten-step run return 0.98**10 — 82% — a
+        different game to the one every other table here plays."""
+        from cogs.casino import CASINO_EDGE, CRASH_STEP, CRASH_SURVIVAL, crash_multiplier
+
+        self.assertAlmostEqual(1.0, CRASH_SURVIVAL * CRASH_STEP, places=9,
+                               msg="a step must be individually fair")
+        for depth in (1, 2, 3, 5, 10, 20):
+            self.assertAlmostEqual(
+                CASINO_EDGE, CRASH_SURVIVAL ** depth * crash_multiplier(depth),
+                delta=0.01, msg=f"{depth} steps returns something else")
+
+    def test_the_measured_return_matches_that(self):
+        """Cashing out after exactly three steps, forty thousand times."""
+        from cogs.casino import CRASH_SURVIVAL, crash_multiplier, crash_point
+
+        rng = random.Random(3)
+        rounds = 40_000
+        survived = sum(crash_point(rng) >= 3 for _ in range(rounds))
+        self.assertAlmostEqual(CRASH_SURVIVAL ** 3 * crash_multiplier(3),
+                               survived / rounds * crash_multiplier(3),
+                               delta=0.03)
+
+    def test_a_parachute_guarantees_its_floor(self):
+        from cogs.casino import crash_multiplier, crash_point
+
+        floor = int(item_catalog.ITEM_DEFINITIONS["parachute"].value)
+        rng = random.Random(4)
+        for _ in range(500):
+            survived = crash_point(rng, floor)
+            self.assertGreaterEqual(crash_multiplier(survived) * 100, floor)
+
+    def test_without_one_it_can_burst_immediately(self):
+        from cogs.casino import crash_point
+
+        rng = random.Random(6)
+        self.assertIn(0, [crash_point(rng) for _ in range(200)],
+                      "a round must be able to burst on the first step")
+
+    def test_a_round_is_bounded(self):
+        from cogs.casino import CRASH_MAX_STEPS, crash_point
+
+        rng = random.Random(8)
+        for _ in range(200):
+            self.assertLessEqual(crash_point(rng), CRASH_MAX_STEPS)
+
+
+class NewGameRegistrationTests(unittest.TestCase):
+    """A game missing one of these is broken in a way tests elsewhere miss."""
+
+    GAMES = {"hilo": "casino_hilo", "crash": "casino_crash",
+             "wheel": "casino_wheel"}
+
+    def test_each_game_has_a_policy_a_flag_and_a_launcher(self):
+        import pathlib
+        import re
+
+        from cogs.casino import CASINO_LAUNCHER_FEATURES
+        from feature_access import COMMAND_POLICIES
+        from settings_registry import FEATURE_DEFINITIONS
+
+        # Read rather than imported: importing `main` starts the bot and exits.
+        source = (pathlib.Path(__file__).resolve().parents[1] / "main.py"
+                  ).read_text(encoding="utf-8")
+        exempt = set(re.findall(
+            r'"([a-z]+)"',
+            re.search(r"ANTI_SPAM_EXEMPT_COMMANDS = \{(.*?)\}", source,
+                      re.S).group(1)))
+        self.assertIn("mines", exempt, "the premise: the set was found")
+
+        for command, feature in self.GAMES.items():
+            self.assertEqual(feature, COMMAND_POLICIES[command].feature_key)
+            self.assertIn(feature, FEATURE_DEFINITIONS)
+            self.assertEqual("casino", FEATURE_DEFINITIONS[feature].parent)
+            self.assertIn(feature, CASINO_LAUNCHER_FEATURES.values())
+            # Without this the game inherits the three-second global cooldown
+            # that every other casino game is exempt from.
+            self.assertIn(command, exempt)

@@ -40,6 +40,6 @@ useDefault = true
 description = "Gacha reward identifiers are item names, not credentials"
 regexTarget = "match"
 regexes = [
-    '''key":\s*"(loaded_die|lockpick|coins_\d+|emoji_\d+d|sticker_\d+d|sound_\d+d|vault_\w+|(small|med|big)_vault|premium_\d+d|streak_freeze|stacked_deck|lucky_charm|metal_detector)"''',
-    '''key:\s*'(loaded_die|lockpick|coins_\d+|emoji_\d+d|sticker_\d+d|sound_\d+d|vault_\w+|(small|med|big)_vault|premium_\d+d|streak_freeze|stacked_deck|lucky_charm|metal_detector)'''',
+    '''key":\s*"(loaded_die|lockpick|coins_\d+|emoji_\d+d|sticker_\d+d|sound_\d+d|vault_\w+|(small|med|big)_vault|premium_\d+d|streak_freeze|stacked_deck|lucky_charm|metal_detector|marked_card|parachute)"''',
+    '''key:\s*'(loaded_die|lockpick|coins_\d+|emoji_\d+d|sticker_\d+d|sound_\d+d|vault_\w+|(small|med|big)_vault|premium_\d+d|streak_freeze|stacked_deck|lucky_charm|metal_detector|marked_card|parachute)'''',
 ]
