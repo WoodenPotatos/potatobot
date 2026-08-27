@@ -190,6 +190,28 @@
     "youtube_new_video_desc": "**{title}**"
   },
   "shop": {
+    "categories": {
+      "perks": {
+        "name": "🌟 Perks",
+        "desc": "Standing benefits: membership and streak cover."
+      },
+      "casino": {
+        "name": "🎲 Casino",
+        "desc": "Help for a single paid round."
+      },
+      "heist": {
+        "name": "🔓 Heist",
+        "desc": "Tools for robbing somebody else."
+      },
+      "protection": {
+        "name": "🏦 Protection",
+        "desc": "Vaults and a bodyguard, so nobody robs you."
+      },
+      "rentals": {
+        "name": "✨ Rentals",
+        "desc": "Your own emoji, sticker or sound, set up by staff."
+      }
+    },
     "items": {
       "premium": {
         "name": "🌟 Premium membership",
@@ -284,6 +306,14 @@
     "purchase_already_processed": "✅ I have already processed this purchase.",
     "shop_title": "🏪 Potato Market",
     "shop_desc": "Pick an upgrade from the list below. Items take effect immediately!",
+    "category_placeholder": "Choose a section...",
+    "item_placeholder": "{category} — choose an item...",
+    "back_btn": "Back",
+    "category_unavailable": "That section is no longer available. Open the shop again.",
+    "item_unavailable": "❌ That item is no longer for sale.",
+    "item_unknown": "❌ There is no such item in the shop. Type its name and pick from the list offered.",
+    "items_hidden": "Some items do not fit in the menu. /buy can still reach them.",
+    "empty": "🏪 There is nothing for sale on this server right now.",
     "placeholder": "Choose an item…",
     "select_option_label": "{name} | Price: {price}",
     "rent_expired_reason": "The rental period (30 days) has expired.",
@@ -618,6 +648,9 @@
     "usage_rob": "/rob [user]",
     "usage_pay": "/pay [user] [amount]",
     "usage_shop": "/shop",
+    "usage_buy": "/buy <item>",
+    "cmd_buy": "Buy an item by name, without the menu.",
+    "buy_item_description": "The item's name — start typing and pick from the list.",
     "usage_gacha": "/gacha [1 or 10]",
     "usage_inventory": "/inventory",
     "usage_pity": "/pity [banner]",
@@ -1259,6 +1292,7 @@
       "youtube_role": "YouTube notification role",
       "twitch_streamers": "Watched Twitch channels",
       "youtube_channels": "YouTube channel ids",
+      "shop_hidden_items": "Built-in items you do not sell",
       "shop_price_premium": "Premium role price",
       "shop_price_lockpick": "Lockpick price",
       "shop_price_bodyguard": "Bodyguard price",
@@ -1376,7 +1410,7 @@
     "create": "Create",
     "edit_price": "Edit price",
     "shop_items_hint": "Everything this server can sell, built in and your own. A built-in item's only editable field is its price.",
-    "subtitle_shop_items": "{count} items · {custom}/{limit} of your own",
+    "subtitle_shop_items": "{visible} of {total} items on sale · {custom} of your own",
     "fulfillment_hint": "A member redeemed a voucher and is waiting for you to make the asset.",
     "active_heading": "Live grants",
     "active_hint": "What this server is currently paying out, soonest to expire first.",
@@ -1397,6 +1431,13 @@
     "remaining_hours": "{hours}h {minutes}m",
     "remaining_minutes": "{minutes}m",
     "item_new": "New item",
+    "item_category": "Section",
+    "item_category_default": "Automatic (from the kind)",
+    "item_section_count": "{used}/{limit}",
+    "item_section_full": "The {section} section is full. Pick another, or remove one from it.",
+    "item_every_section_full": "Every section is full. Remove an item, or hide a built-in one.",
+    "item_hide": "Hide",
+    "item_show": "Show",
     "item_limit_reached": "You have reached the limit of {limit} custom items.",
     "item_field_required": "Fill in \u201c{field}\u201d before saving.",
     "item_section_identity": "The item",
@@ -1544,7 +1585,9 @@
       "shop_config_vault": "A vault's configuration needs an amount greater than zero.",
       "shop_config_voucher": "A voucher needs an emoji, sticker or sound type and a duration between 1 and 3650 days.",
       "shop_item_invalid": "The shop item's data is invalid.",
-      "shop_item_limit": "The Discord shop menu can show {limit} custom items at most.",
+      "shop_item_exists": "An item with this key already exists.",
+      "shop_unhide_no_room": "The {category} section has no room to show that item again: it already holds {limit} of your own. Remove one from it, or leave the item hidden.",
+      "shop_item_limit": "The {category} section holds at most {limit} of your own items. Pick another section, or remove one.",
       "shop_item_not_found": "The shop item cannot be found.",
       "shop_key_invalid": "An item key can only contain letters, digits and underscores, up to 64 characters.",
       "shop_key_reserved": "This item key belongs to a built-in shop item, so it cannot be reused.",

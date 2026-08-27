@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.7.0-beta.2** &nbsp;·&nbsp; channel `beta`
+**Version 2.8.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -172,6 +172,17 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.8.0-beta.1
+
+- **The shop has sections, and room to grow.** `/shop` asks which section first — Perks, Casino, Heist, Protection, Rentals — and then shows that section's items. Discord only allows 25 options in one menu, so the whole shop used to be 25 items: 17 built-in ones left you **eight** of your own, and that number dropped every time we added an item. Per section it is 25 each, so you have **108 slots** instead of 8, and a new built-in only ever costs a slot on its own shelf.
+- **`/buy <name>` buys straight from the name**, with the list filtering as you type. It has no 25-item ceiling at all, so it can reach anything — including an item a very full section could not fit into the menu.
+- **You can hide a built-in item you do not sell.** No soundboard? Hide the sound rental and get its slot back. Hiding only removes it from the shop menu: it can still come out of the gacha, anyone who already owns one can still use it, and rentals still expire on time.
+- Showing a hidden item again is refused if its section has filled up while it was away, and says which section and how full — so you can delete one of your own or leave it hidden, rather than the menu quietly dropping something.
+- **The item page groups by section and shows the room left**, so you can see that Casino is at 7/25 before you try to add a twentieth thing to it. A full section is marked, and cannot be picked in the editor rather than failing on save.
+- Every item you already made keeps working and lands on a sensible shelf without you touching anything; you can move one whenever you like, or leave it on "Automatic".
+- **A long item name can no longer take `/shop` down.** A name at the editor's own 100-character limit made the menu exceed Discord's limit for an option label, which Discord rejects outright — it is capped and trimmed in three places now.
+- A disabled item bought by name now says it is unavailable instead of saying you cannot afford it.
+
 ### 2.7.0-beta.2
 
 - **The shop item editor follows the kind you pick.** Choosing "Vault" and still being asked which role to grant is fixed properly this time: the redraw was wired through the surrounding form and matched on an attribute, which had already broken twice in the same way, so it is wired straight to the Kind dropdown instead. There is nothing left in between to go wrong.
@@ -188,18 +199,6 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - **Two channel games the bot keeps honest.** A **counting** channel and a **word chain** channel: people play, and the bot removes a message that breaks the rule and tells only its author why, so the channel still reads as the chain. Accents and capitals are ignored when words are compared, and a message that is not an attempt at all is left alone.
 - The same person cannot take two turns in a row unless you allow it, two people posting at once cannot both count, and every hundredth turn gets a 🏆.
 - …and 11 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.6.0-beta.1
-
-- **Four casino items, and the loaded die now works in roulette.** A stacked deck deals your blackjack hand twice and keeps the better one, a lucky charm spins the slots twice and keeps the better payout, and a metal detector marks a minesweeper tile safe before you start. All four are buyable and drawable, and each is spent only by a paid round that actually resolves — win or lose. Getting there meant moving roulette's and slots' outcomes into their settlement transactions, which makes those two games atomic whether or not you own anything.
-- **`/pity`** shows your pity on a banner and the last five 5-stars you pulled, with the pity each one landed at. `/profile` gains a pity line too. The data has been recorded since the gacha shipped and nothing had ever read it.
-- **The item creator is rebuilt.** Four of its six kinds used to hand you an empty JSON box and expect you to type a role id and a shape nothing told you about; now every kind has real fields, a role picker, and no JSON anywhere. Items can be edited rather than only enabled, disabled or deleted.
-- **One list of every item.** Built-in items were visible only as a price field called "Loaded die price" — there was no way to see what an item does, or which ones the gacha can give, without reading the bot's own code. The page now reads the way `/shop` does, in your dashboard language, with your own items alongside.
-- **A custom item can have English text.** It was stored under Hungarian whatever your language setting said, so an English server showed Hungarian for its own items while every built-in had both. English is optional per field and falls back, so you are never made to translate.
-- **Redeems is its own page**, with the queue waiting on staff and a list of everything the server is currently granting and how long is left on each. It is not tied to the shop feature: a redemption may have come from the gacha, and a member has paid for it either way.
-- **Redeeming a voucher for an emoji, sticker or sound opens a ticket**, so you and the member can agree what to make instead of a request id appearing in a queue with no conversation attached. With tickets off it behaves as before.
-- Ticket creation lived in two hand-written copies that had already drifted apart; there is one now, and rental tickets are finally typed as rentals.
-- …and 24 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

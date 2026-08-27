@@ -49,6 +49,7 @@ def get_help_data():
                 t("general.usage_rob"): t("general.cmd_rob"),
                 t("general.usage_pay"): t("general.cmd_pay"),
                 t("general.usage_shop"): t("general.cmd_shop"),
+                t("general.usage_buy"): t("general.cmd_buy"),
                 t("general.usage_gacha"): t("general.cmd_gacha"),
                 t("general.usage_inventory"): t("general.cmd_inventory"),
                 t("general.usage_pity"): t("general.cmd_pity"),

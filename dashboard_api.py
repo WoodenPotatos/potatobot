@@ -1244,7 +1244,15 @@ def invalid_request_response(error: Exception):
     if isinstance(error, RequestValidationError):
         message = t(error.locale_key, **error.params)
     elif isinstance(error, database.ValidationError):
-        message = t(f"dashboard.errors.{error.reason}", **error.params)
+        params = dict(error.params)
+        # A `category` param is a stable English identifier, so render the shelf
+        # the operator actually reads. Interpolating `heist` into a Hungarian
+        # sentence would be the same defect as a raw locale key.
+        if isinstance(params.get("category"), str):
+            label = t(f"shop.categories.{params['category']}.name")
+            if not label.startswith("["):
+                params["category"] = label
+        message = t(f"dashboard.errors.{error.reason}", **params)
         if message.startswith("["):
             # A reason without a translation must not surface as a raw key.
             dashboard_logger.error(
@@ -1411,6 +1419,7 @@ def guild_item_list(guild_id):
     prices = database.run_read_sync(database.get_shop_prices, guild_id)
     custom = database.run_read_sync(
         database.get_shop_item_definitions, guild_id, language)
+    hidden = set(settings_cache.setting(guild_id, "shop_hidden_items") or ())
 
     items = []
     for key, definition in item_catalog.ITEM_DEFINITIONS.items():
@@ -1430,6 +1439,11 @@ def guild_item_list(guild_id):
             "enabled": True,
             "editable": False,
             "price_setting": f"shop_price_{key}" if definition.sold_in_shop else None,
+            "category": definition.category.value,
+            # A hidden built-in still appears, greyed, or an operator could
+            # never find it to un-hide it. It counts zero toward its section,
+            # which is what "gives the slot back" means.
+            "hidden": key in hidden,
         })
     for item in custom:
         items.append({
@@ -1446,13 +1460,42 @@ def guild_item_list(guild_id):
             "editable": True,
             "price_setting": None,
             "revision": item["revision"],
+            # Two fields, named so they cannot be confused: the table groups by
+            # `category`, and the editor round-trips `category_stored` so
+            # "Automatic" survives a save unchanged.
+            "category": item["category"],
+            "category_stored": item["category_stored"],
+            "hidden": False,
             # The editor and the enable/disable path both need these: the PATCH
             # route reuses the creation validator, so a partial body is refused
             # and every field has to be sent back unchanged.
             "config": item["config"],
         })
+    # Every section, always, and in the catalog's declared order — an operator
+    # must be able to file an item onto an empty shelf. The label is resolved
+    # here because `/api/locale` serves only the `dashboard` namespace, which is
+    # the same reason this endpoint already resolves `shop.items.<key>.*`.
+    section_labels = catalog.get("categories", {})
+    used = {}
+    for item in custom:
+        used[item["category"]] = used.get(item["category"], 0) + 1
+    sections = []
+    for category in item_catalog.SHOP_CATEGORY_ORDER:
+        builtin = len(item_catalog.shop_items_in(category.value, hidden))
+        capacity = item_catalog.custom_item_capacity(category.value, hidden)
+        mine = used.get(category.value, 0)
+        sections.append({
+            "id": category.value,
+            "label": (section_labels.get(category.value, {}).get("name")
+                      or category.value),
+            "limit": item_catalog.SELECT_OPTION_LIMIT,
+            "builtin": builtin,
+            "custom": mine,
+            "used": builtin + mine,
+            "remaining": max(0, capacity - mine),
+        })
     return jsonify({"status": "success", "data": items,
-                    "limit": SHOP_ITEM_LIMIT,
+                    "categories": sections,
                     "custom_count": len(custom)})
 
 
@@ -1881,16 +1924,17 @@ def delete_guild_gacha_banner(guild_id, banner_key):
         return internal_error_response("gacha banner deletion")
 
 
-SAFE_SHOP_TEMPLATES = {
-    "fixed_role", "timed_role", "vault", "consumable", "coin_bundle",
-    "fulfillment_voucher",
-}
+# Derived from the catalog's own table of template defaults, so a new template
+# cannot exist without a section to land in and there is no second list here.
+SAFE_SHOP_TEMPLATES = frozenset(item_catalog.SHOP_TEMPLATE_CATEGORIES)
 
-# A Discord select menu holds 25 options and the shop renders every built-in
-# item plus every enabled custom one into one menu, so the cap is derived rather
-# than chosen: adding a built-in item must lower it automatically, or a guild at
-# the old cap would push the menu past the limit and take `/shop` down entirely.
-SHOP_ITEM_LIMIT = 25 - len(database.BUILTIN_SHOP_KEYS)
+# There is deliberately no flat `SHOP_ITEM_LIMIT` any more. The menu is split by
+# section, so the cap is 25 minus that section's built-ins *minus the ones this
+# guild has hidden* — per guild, and therefore a function rather than a
+# constant. `item_catalog.custom_item_capacity` is the one implementation, and
+# `database.create_shop_item_definition` enforces it inside the same transaction
+# as the insert. A stale constant left importable here is how a second writer
+# comes to disagree.
 # Long enough for any snowflake, short enough that the column cannot be abused.
 DISCORD_ID_MAX_LENGTH = 24
 
@@ -1912,7 +1956,11 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
     # `text` rather than a language code: a custom item lives in one guild's
     # database and is read only by that guild, so it is written once in whatever
     # language they speak.
-    fields = {"template_type", "enabled", "price", "config", "text"}
+    # `category` is required on every create *and* every PATCH, because the key
+    # set is matched exactly. Deliberately not optional: a PATCH that omitted it
+    # would silently reset a section the operator had chosen, and a loud 400
+    # during development beats a silent data loss afterwards.
+    fields = {"template_type", "enabled", "price", "config", "text", "category"}
     if require_key:
         fields.add("item_key")
     if set(payload) != fields or payload["template_type"] not in SAFE_SHOP_TEMPLATES:
@@ -1927,6 +1975,18 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
             # A custom row with a built-in key would replace that item's purchase
             # handler and price in the live shop menu.
             raise RequestValidationError("dashboard.errors.shop_key_reserved")
+
+    # None means "follow the template", which must stay expressible after the
+    # migration: without it, opening a pre-migration item and pressing Save would
+    # pin its section, and it would then never follow a change to the defaults.
+    # An empty string is refused rather than folded into None — "not chosen" and
+    # "chosen as nothing" are different answers.
+    category = payload["category"]
+    if category is not None and (
+            not isinstance(category, str)
+            or category not in {member.value
+                                for member in item_catalog.ItemCategory}):
+        raise RequestValidationError("dashboard.errors.shop_category_invalid")
 
     price = require_nonnegative_integer(payload["price"])
     if not isinstance(payload["enabled"], bool) or not isinstance(payload["config"], dict):
@@ -1981,6 +2041,7 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
         "enabled": payload["enabled"],
         "price": price,
         "config": item_config,
+        "category": category,
         "text": {"name": text["name"].strip(),
                  "description": text["description"].strip()},
     }
@@ -1988,44 +2049,25 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
 
 @app.route("/api/guilds/<int:guild_id>/shop-items", methods=["POST"])
 def create_guild_shop_item(guild_id):
+    """Create one custom item. The model owns the cap and the audit row.
+
+    This used to count the guild's rows and insert here, which put a
+    read-check-write across a boundary the model could not see: two concurrent
+    creates could both pass a cap with one slot left. The per-section cap also
+    has to read the guild's hidden-item list, so the count, the read and the
+    insert belong on one connection.
+    """
     if not is_guild_authorized(guild_id):
         return unauthorized_response()
     try:
         item = _validate_shop_item(require_json_object(), require_key=True)
-        key, price = item["item_key"], item["price"]
-        payload = item
-        timestamp = datetime.now(timezone.utc).isoformat()
-        with database.get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            # Every stored row counts, not just the enabled ones. Counting only
-            # enabled rows let a guild accumulate disabled definitions and then
-            # re-enable past what a Discord select menu can display.
-            if conn.execute(
-                "SELECT COUNT(*) FROM shop_item_definitions WHERE guild_id = ?",
-                (guild_id,),
-            ).fetchone()[0] >= SHOP_ITEM_LIMIT:
-                raise RequestValidationError("dashboard.errors.shop_item_limit", limit=SHOP_ITEM_LIMIT)
-            conn.execute(
-                "INSERT INTO shop_item_definitions "
-                "(guild_id, item_key, template_type, enabled, price, config_json, updated_by, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (guild_id, key, payload["template_type"], int(payload["enabled"]), price,
-                 json.dumps(payload["config"], sort_keys=True), actor_id(), timestamp),
-            )
-            conn.execute(
-                "INSERT INTO shop_item_localizations "
-                "(guild_id, item_key, language, name, description) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (guild_id, key, database.CUSTOM_ITEM_LANGUAGE,
-                 payload["text"]["name"], payload["text"]["description"]),
-            )
-            # Written on the same connection so the item and its audit row
-            # commit together; a separate write could leave the item unaudited.
-            database.write_settings_audit(
-                conn, guild_id, actor_id(),
-                "shop_item.create", key, None, payload,
-            )
-        return jsonify({"status": "success", "message": t("dashboard.shop_item_created")}), 201
+        # Called directly, like every other dashboard mutation: a Waitress
+        # request thread has no event loop, and `database.run_write` is a
+        # coroutine — awaiting nothing here would have returned 201 having
+        # written nothing at all.
+        database.create_shop_item_definition(guild_id, actor_id(), item)
+        return jsonify({"status": "success",
+                        "message": t("dashboard.shop_item_created")}), 201
     except (ValueError, sqlite3.IntegrityError) as error:
         return invalid_request_response(error)
 

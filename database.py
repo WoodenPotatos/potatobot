@@ -162,7 +162,7 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_survivor", "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 15
+LATEST_SCHEMA_VERSION = 16
 
 # A claimed control action is re-queued only once its lease expires. The worker
 # renews the lease as it runs, so slowness never causes a duplicate Discord post.
@@ -724,6 +724,7 @@ def _create_control_plane_v5_schema(conn):
             guild_id INTEGER NOT NULL,
             item_key TEXT NOT NULL,
             template_type TEXT NOT NULL,
+            category TEXT,
             enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
             price INTEGER NOT NULL CHECK (price >= 0),
             config_json TEXT NOT NULL DEFAULT '{}',
@@ -978,6 +979,25 @@ def _create_control_plane_v5_schema(conn):
             "ALTER TABLE gacha_pulls ADD COLUMN featured_guaranteed "
             "INTEGER NOT NULL DEFAULT 0 CHECK (featured_guaranteed IN (0, 1))"
         )
+    shop_item_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(shop_item_definitions)")
+    }
+    if "category" not in shop_item_columns:
+        # Schema 16, purely additive and rewriting no row. The shop menu splits
+        # into sections, so a custom item can name the shelf it belongs on.
+        #
+        # Nullable with **no default and no CHECK**, deliberately, and both
+        # halves matter. NULL means "not chosen — resolve from the template",
+        # the same sentence `gacha_banners.display_name` and `warnings.tag`
+        # already carry; `NOT NULL DEFAULT 'perks'` would make every existing
+        # row assert a choice its operator never made, and nothing afterwards
+        # could tell a backfill from a decision. And SQLite cannot alter a CHECK
+        # without rebuilding the table, so a CHECK would freeze today's five
+        # sections into every deployed database and adding a sixth would become
+        # a drop-and-rename; `enabled` and `price` carry CHECKs because their
+        # domains are permanent, and this one is ours to grow. It is validated
+        # in Python against `item_catalog.ItemCategory`, which is the one source.
+        conn.execute("ALTER TABLE shop_item_definitions ADD COLUMN category TEXT")
     banner_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(gacha_banners)")
     }
@@ -3969,6 +3989,8 @@ def set_guild_settings(guild_id: int, actor_id: int, changes: list[dict]):
                     if change["revision"] != existing[1]:
                         raise RevisionConflictError("settings revision conflict")
                     revision, old_value = existing[1] + 1, json.loads(existing[0])
+                    if key == "shop_hidden_items":
+                        _assert_unhide_has_room(conn, guild_id, old_value, value)
                     conn.execute(
                         f"UPDATE {table} SET value_json = ?, revision = ?, "
                         f"updated_by = ?, updated_at = ? WHERE {where}",
@@ -5518,8 +5540,8 @@ def get_shop_item_definitions(guild_id: int, language: str = None) -> list[dict]
     """
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT item_key, template_type, enabled, price, config_json, revision "
-            "FROM shop_item_definitions WHERE guild_id = ? ORDER BY item_key",
+            "SELECT item_key, template_type, enabled, price, config_json, revision, "
+            "category FROM shop_item_definitions WHERE guild_id = ? ORDER BY item_key",
             (int(guild_id),),
         ).fetchall()
         localized = conn.execute(
@@ -5536,13 +5558,165 @@ def get_shop_item_definitions(guild_id: int, language: str = None) -> list[dict]
         # The stored language if it is there, otherwise whatever single row this
         # item has — an item written before the column meant anything still reads.
         written = stored.get(CUSTOM_ITEM_LANGUAGE) or next(iter(stored.values()), {})
+        config_value = json.loads(row[4])
         items.append({
             "item_key": row[0], "template_type": row[1], "enabled": bool(row[2]),
-            "price": row[3], "config": json.loads(row[4]), "revision": row[5],
+            "price": row[3], "config": config_value, "revision": row[5],
             "name": written.get("name"),
             "description": written.get("description"),
+            # Both, named so they cannot be confused: `category_stored` is the
+            # raw column, which the editor round-trips so "Automatic" survives a
+            # save, and `category` is the shelf the menu actually uses.
+            "category_stored": row[6],
+            "category": item_catalog.resolve_custom_category(
+                row[1], config_value, row[6]),
         })
     return items
+
+
+def _shop_section_usage(conn, guild_id: int) -> dict[str, int]:
+    """How many custom items each shelf already holds, on the caller's
+    connection.
+
+    The category is resolved in Python rather than in SQL because `COALESCE`
+    cannot express the default: it depends on `template_type` and, for a
+    consumable, on the item it wraps. A guild's rows are few, so reading them and
+    resolving keeps one implementation of the rule.
+    """
+    usage: dict[str, int] = {}
+    rows = conn.execute(
+        "SELECT template_type, config_json, category FROM shop_item_definitions "
+        "WHERE guild_id = ?", (int(guild_id),)
+    ).fetchall()
+    for template_type, config_json, category in rows:
+        try:
+            config_value = json.loads(config_json)
+        except (TypeError, ValueError):
+            config_value = {}
+        shelf = item_catalog.resolve_custom_category(
+            template_type, config_value, category)
+        usage[shelf] = usage.get(shelf, 0) + 1
+    return usage
+
+
+def _hidden_shop_items(conn, guild_id: int) -> list[str]:
+    """This guild's hidden built-in keys, read on the caller's connection.
+
+    Not through `settings_cache`: a cap is a write-side correctness boundary and
+    must see the same snapshot as the count and the insert.
+    """
+    row = conn.execute(
+        "SELECT value_json FROM guild_settings "
+        "WHERE guild_id = ? AND setting_key = 'shop_hidden_items'",
+        (int(guild_id),)
+    ).fetchone()
+    if row is None:
+        return []
+    try:
+        value = json.loads(row[0])
+    except (TypeError, ValueError):
+        return []
+    return [key for key in value if isinstance(key, str)] if isinstance(value, list) else []
+
+
+def _assert_section_has_room(conn, guild_id: int, shelf: str,
+                             usage: dict[str, int]) -> None:
+    hidden = _hidden_shop_items(conn, guild_id)
+    capacity = item_catalog.custom_item_capacity(shelf, hidden)
+    if usage.get(shelf, 0) >= capacity:
+        conn.rollback()
+        raise ValidationError("shop_item_limit", "shop section is full",
+                              limit=capacity, category=shelf)
+
+
+def _assert_unhide_has_room(conn, guild_id: int, previous, value) -> None:
+    """Refuse to un-hide a built-in whose shelf has no room for it.
+
+    Un-hiding is the one way to overfill a section without creating anything:
+    hide the sound rental, fill Rentals with custom items, un-hide it, and the
+    shelf holds 26. The render trim would then drop one silently, and a silent
+    trim is worse than a refusal an operator can read and act on — they can
+    delete a custom item, or leave the built-in hidden, and either way they chose
+    it.
+
+    Only a *removal* is checked. Hiding always frees a slot, and saving the same
+    list unchanged must never refuse.
+    """
+    was_hidden = set(previous or ())
+    now_hidden = set(value or ())
+    restored = was_hidden - now_hidden
+    if not restored:
+        return
+    usage = _shop_section_usage(conn, guild_id)
+    for key in sorted(restored):
+        definition = item_catalog.SHOP_ITEMS.get(key)
+        if definition is None:
+            continue
+        shelf = definition.category.value
+        capacity = item_catalog.custom_item_capacity(shelf, now_hidden)
+        if usage.get(shelf, 0) > capacity:
+            raise ValidationError(
+                "shop_unhide_no_room", "shop section has no room to restore",
+                item=key, category=shelf, limit=capacity)
+
+
+def create_shop_item_definition(guild_id: int, actor_id: int, item: dict) -> dict:
+    """Create one custom shop item, refusing a full section.
+
+    Shop items were the one managed thing this module could not create: the
+    insert *and* the cap check lived in the Flask route, so the count and the
+    write were not one transaction and two concurrent creates could both pass a
+    cap with one slot left. `create_gacha_banner` has always done it this way for
+    `GACHA_BANNER_LIMIT`, and the per-section cap makes it necessary rather than
+    merely tidier — it has to read the hidden list, count the rows and insert
+    against one snapshot.
+    """
+    item_key = item["item_key"]
+    timestamp = datetime.now(timezone.utc).isoformat()
+    try:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT 1 FROM shop_item_definitions "
+                "WHERE guild_id = ? AND item_key = ?", (int(guild_id), item_key)
+            ).fetchone()
+            if existing:
+                conn.rollback()
+                raise ValidationError("shop_item_exists", "item key already exists",
+                                      item=item_key)
+            shelf = item_catalog.resolve_custom_category(
+                item["template_type"], item["config"], item.get("category"))
+            _assert_section_has_room(
+                conn, guild_id, shelf, _shop_section_usage(conn, guild_id))
+            conn.execute(
+                "INSERT INTO shop_item_definitions (guild_id, item_key, "
+                "template_type, category, enabled, price, config_json, revision, "
+                "updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (int(guild_id), item_key, item["template_type"],
+                 item.get("category"), int(item["enabled"]), int(item["price"]),
+                 json.dumps(item["config"], sort_keys=True), int(actor_id),
+                 timestamp),
+            )
+            conn.execute(
+                "INSERT INTO shop_item_localizations (guild_id, item_key, language, "
+                "name, description) VALUES (?, ?, ?, ?, ?)",
+                (int(guild_id), item_key, CUSTOM_ITEM_LANGUAGE,
+                 item["text"]["name"], item["text"]["description"]),
+            )
+            # The bare key, matching `shop_item.update` and `shop_item.delete`:
+            # a prefixed target here would split one item's audit trail in two.
+            write_settings_audit(
+                conn, int(guild_id), actor_id, "shop_item.create", item_key,
+                None,
+                {"template_type": item["template_type"], "price": item["price"],
+                 "category": shelf},
+            )
+            conn.commit()
+    except sqlite3.Error as exc:
+        db_logger.exception("Shop item creation failed (guild=%s, item=%s)",
+                            guild_id, item_key)
+        raise DatabaseOperationError("shop item creation failed") from exc
+    return {"item_key": item_key, "revision": 1, "category": shelf}
 
 
 def update_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
@@ -5557,8 +5731,9 @@ def update_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
         with get_connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT template_type, enabled, price, config_json, revision "
-                "FROM shop_item_definitions WHERE guild_id = ? AND item_key = ?",
+                "SELECT template_type, enabled, price, config_json, revision, "
+                "category FROM shop_item_definitions "
+                "WHERE guild_id = ? AND item_key = ?",
                 (int(guild_id), item_key),
             ).fetchone()
             if row is None:
@@ -5567,13 +5742,30 @@ def update_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
             if int(expected_revision) != row[4]:
                 raise RevisionConflictError("shop item revision conflict")
             revision = row[4] + 1
+            previous_config = json.loads(row[3])
             previous = {"template_type": row[0], "enabled": bool(row[1]),
-                        "price": row[2], "config": json.loads(row[3])}
+                        "price": row[2], "config": previous_config,
+                        "category": row[5]}
+            # An edit cannot change the item *count*, so creation's cap used to
+            # be enough — but it can now move an item onto a different shelf,
+            # which makes the cap bypassable in two steps: create in an empty
+            # section, then edit across into a full one. Only a move is checked,
+            # so saving an item that is already there never refuses.
+            was = item_catalog.resolve_custom_category(
+                row[0], previous_config, row[5])
+            shelf = item_catalog.resolve_custom_category(
+                item["template_type"], item["config"], item.get("category"))
+            if shelf != was:
+                usage = _shop_section_usage(conn, guild_id)
+                usage[was] = max(0, usage.get(was, 0) - 1)
+                _assert_section_has_room(conn, guild_id, shelf, usage)
             conn.execute(
-                "UPDATE shop_item_definitions SET template_type = ?, enabled = ?, "
-                "price = ?, config_json = ?, revision = ?, updated_by = ?, updated_at = ? "
+                "UPDATE shop_item_definitions SET template_type = ?, category = ?, "
+                "enabled = ?, price = ?, config_json = ?, revision = ?, "
+                "updated_by = ?, updated_at = ? "
                 "WHERE guild_id = ? AND item_key = ?",
-                (item["template_type"], int(item["enabled"]), int(item["price"]),
+                (item["template_type"], item.get("category"),
+                 int(item["enabled"]), int(item["price"]),
                  json.dumps(item["config"], sort_keys=True), revision,
                  int(actor_id), timestamp, int(guild_id), item_key),
             )

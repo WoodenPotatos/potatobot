@@ -18,6 +18,7 @@ import unittest
 from pathlib import Path
 
 import dashboard_api
+import settings_cache
 import database
 import item_catalog
 
@@ -131,6 +132,10 @@ class DashboardItemTestCase(unittest.TestCase):
         dashboard_api._rate_limit_events.clear()
         dashboard_api._oauth_tokens.clear()
         dashboard_api._permission_cache._entries.clear()
+        # And so is the settings cache. A test here writes `shop_hidden_items`,
+        # and left behind it answers for the next test — the same discipline
+        # `database.DB_PATH` needs, and the failure only shows in a full run.
+        settings_cache.invalidate()
         with self.client.session_transaction() as session:
             session["logged_in"] = True
             session["user_id"] = "42"
@@ -145,6 +150,7 @@ class DashboardItemTestCase(unittest.TestCase):
     def tearDown(self):
         dashboard_api.ADMIN_ID = self.original_admin_id
         database.DB_PATH = self.original_path
+        settings_cache.invalidate()
         self.temp_dir.cleanup()
 
     def create_item(self, payload):
@@ -170,6 +176,21 @@ class TemplateFieldsFollowTheChoiceTests(unittest.TestCase):
         if not (ROOT / "node_modules" / "jsdom").is_dir():
             self.skipTest("jsdom is not installed; run `npm install`")
         script = ROOT / "tests" / "js" / "item_editor_templates.js"
+        result = subprocess.run([node, str(script), str(ROOT)],
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, result.returncode,
+                         f"{result.stdout}\n{result.stderr}")
+
+    def test_the_item_page_groups_by_section_and_shows_the_room_left(self):
+        """The other half of the per-section cap: the interface has to be able
+        to say which shelf is full before a save is refused, or the API's rule
+        arrives as an unexplained rejection."""
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        if not (ROOT / "node_modules" / "jsdom").is_dir():
+            self.skipTest("jsdom is not installed; run `npm install`")
+        script = ROOT / "tests" / "js" / "shop_sections.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)
         self.assertEqual(0, result.returncode,
@@ -217,7 +238,7 @@ class ItemListEndpointTests(DashboardItemTestCase):
 
     def test_a_custom_item_carries_what_an_edit_needs(self):
         self.create_item({
-            "item_key": "vip", "template_type": "coin_bundle", "enabled": True,
+            "item_key": "vip", "template_type": "coin_bundle", "category": None, "enabled": True,
             "price": 500, "config": {"amount": 100, "repeatable": False},
             "text": {"name": "VIP", "description": "leírás"},
         })
@@ -231,10 +252,65 @@ class ItemListEndpointTests(DashboardItemTestCase):
                       "enabled"):
             self.assertIn(field, item)
 
-    def test_the_custom_cap_is_reported_so_the_button_can_disable(self):
+    def test_the_room_left_per_section_is_reported(self):
+        """The interface has to be able to say "Casino 6/25" before a save is
+        refused. A rule the API enforces but the form cannot express turns into
+        an unexplained rejection, so the room travels with the items."""
+        import item_catalog
+
         payload = self.get()
-        self.assertEqual(dashboard_api.SHOP_ITEM_LIMIT, payload["limit"])
         self.assertEqual(0, payload["custom_count"])
+        sections = {entry["id"]: entry for entry in payload["categories"]}
+        # Every section, always, and in the declared order: an operator must be
+        # able to file an item onto an empty shelf.
+        self.assertEqual([c.value for c in item_catalog.SHOP_CATEGORY_ORDER],
+                         [entry["id"] for entry in payload["categories"]])
+        for category in item_catalog.SHOP_CATEGORY_ORDER:
+            entry = sections[category.value]
+            builtin = len(item_catalog.shop_items_in(category.value))
+            self.assertEqual(builtin, entry["builtin"])
+            self.assertEqual(0, entry["custom"])
+            self.assertEqual(builtin, entry["used"])
+            self.assertEqual(item_catalog.SELECT_OPTION_LIMIT, entry["limit"])
+            self.assertEqual(item_catalog.custom_item_capacity(category.value),
+                             entry["remaining"])
+            # Labelled, because the browser cannot read the `shop` namespace.
+            self.assertTrue(entry["label"])
+            self.assertFalse(entry["label"].startswith("["))
+
+    def test_a_builtin_reports_its_section_and_whether_it_is_hidden(self):
+        payload = self.get()
+        rows = {entry["item_key"]: entry for entry in payload["data"]}
+        self.assertEqual("protection", rows["small_vault"]["category"])
+        self.assertEqual("casino", rows["loaded_die"]["category"])
+        self.assertEqual("perks", rows["streak_freeze"]["category"])
+        self.assertEqual("heist", rows["lockpick"]["category"])
+        self.assertFalse(rows["rent_sound"]["hidden"])
+
+    def test_hiding_a_builtin_frees_a_slot_and_keeps_the_row_visible(self):
+        """A hidden item must still be listed, or an operator could never find
+        it to un-hide it."""
+        import item_catalog
+
+        before = {entry["id"]: entry for entry in self.get()["categories"]}
+        response = self.client.patch(
+            "/api/guilds/123/settings",
+            json={"changes": [{"key": "shop_hidden_items",
+                               "value": ["rent_sound"], "revision": 0}]},
+            headers={"X-CSRF-Token": "csrf-token"})
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+
+        payload = self.get()
+        after = {entry["id"]: entry for entry in payload["categories"]}
+        self.assertEqual(before["rentals"]["remaining"] + 1,
+                         after["rentals"]["remaining"])
+        self.assertEqual(before["rentals"]["builtin"] - 1,
+                         after["rentals"]["builtin"])
+        rows = {entry["item_key"]: entry for entry in payload["data"]}
+        self.assertTrue(rows["rent_sound"]["hidden"])
+        # And it stays a reserved key, so nothing can shadow it.
+        import database as db
+        self.assertIn("rent_sound", db.BUILTIN_SHOP_KEYS)
 
 
 class CustomItemTextTests(DashboardItemTestCase):
@@ -248,7 +324,7 @@ class CustomItemTextTests(DashboardItemTestCase):
     reader.
     """
 
-    ITEM = {"item_key": "vip", "template_type": "coin_bundle", "enabled": True,
+    ITEM = {"item_key": "vip", "template_type": "coin_bundle", "category": None, "enabled": True,
             "price": 500, "config": {"amount": 100, "repeatable": False}}
 
     def test_the_text_is_returned_as_written(self):

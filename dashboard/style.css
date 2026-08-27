@@ -577,6 +577,19 @@ svg[hidden] { display: none; }
 .card-head h2 { font-size: 1rem; }
 .card-head .card-hint { font-size: .82rem; color: var(--text-muted); margin-top: 3px; }
 
+/* One shelf of the shop's item list. The count beside the name is how the page
+   says where the room is, so it sits on the baseline with it rather than
+   floating right: an operator reads "Casino 7/25" as one phrase. */
+.section-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    margin: var(--space-5) 0 var(--space-3);
+}
+
+.section-head:first-child { margin-top: 0; }
+.section-head h3 { font-size: .95rem; }
+
 /* Dark quick-action banners, mirroring the reference dashboard header row. */
 .quick-actions {
     display: grid;

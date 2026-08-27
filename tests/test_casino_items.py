@@ -263,10 +263,14 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(1, item_catalog.ITEM_DEFINITIONS["metal_detector"].value)
 
     def test_the_shop_menu_still_fits_discord(self):
-        """Adding a built-in must lower the custom cap, not overflow the menu."""
-        import dashboard_api
-        self.assertLessEqual(
-            len(database.BUILTIN_SHOP_KEYS) + dashboard_api.SHOP_ITEM_LIMIT, 25)
+        """Adding a casino item must not push its section past 25 options."""
+        import item_catalog
+
+        for category in item_catalog.SHOP_CATEGORY_ORDER:
+            self.assertLessEqual(
+                len(item_catalog.shop_items_in(category.value))
+                + item_catalog.custom_item_capacity(category.value),
+                item_catalog.SELECT_OPTION_LIMIT)
 
 
 class _Fixed:

@@ -57,17 +57,35 @@ const AUDIT = [
      old_value: null, new_value: 7},
 ];
 
+/* The shop's shelves, so the grouped table is what the harness draws. Without
+ * them the page takes its ungrouped fallback and the grouping never runs. */
+const SECTIONS = [
+    {id: 'perks', label: 'Perks', limit: 25, builtin: 2, custom: 0, used: 2,
+     remaining: 23},
+    {id: 'protection', label: 'Protection', limit: 25, builtin: 4, custom: 0,
+     used: 4, remaining: 21},
+    // Deliberately full, so the "no room" pill and the disabled option render.
+    {id: 'casino', label: 'Casino', limit: 25, builtin: 6, custom: 19,
+     used: 25, remaining: 0},
+    {id: 'heist', label: 'Heist', limit: 25, builtin: 2, custom: 0, used: 2,
+     remaining: 23},
+    {id: 'rentals', label: 'Rentals', limit: 25, builtin: 3, custom: 0,
+     used: 3, remaining: 22},
+];
+
 /* One built-in and one custom, so the item table renders both branches: the
  * built-in's inline price input and the custom's edit/enable/delete actions. */
 const ITEMS = [
     {item_key: 'small_vault', source: 'builtin', name: 'Small vault',
      description: 'Protects a reserve.', effect: 'VAULT', value: 25000,
      price: 500000, in_shop: true, in_gacha: true, enabled: true,
-     editable: false, price_setting: 'shop_price_small_vault'},
+     editable: false, price_setting: 'shop_price_small_vault',
+     category: 'protection', hidden: false},
     {item_key: 'vip', source: 'custom', name: 'VIP', description: 'A role.',
      effect: 'timed_role', value: null, price: 5000, in_shop: true,
      in_gacha: false, enabled: true, editable: true, price_setting: null,
-     revision: 2, config: {role_id: ROLE, duration_days: 30}},
+     revision: 2, config: {role_id: ROLE, duration_days: 30},
+     category: 'perks', category_stored: null, hidden: false},
 ];
 
 /* Shaped the way each route really answers. A stub that returns the wrong shape
@@ -101,7 +119,8 @@ window.fetch = async (url) => {
         return ok({status: 'success', data: [], shipped_rewards: {}});
     }
     if (u.includes('/items')) {
-        return ok({status: 'success', data: ITEMS, limit: 10, custom_count: 1});
+        return ok({status: 'success', data: ITEMS, categories: SECTIONS,
+                   custom_count: 1});
     }
     if (u.includes('/audit')) {
         return ok({status: 'success', data: AUDIT});

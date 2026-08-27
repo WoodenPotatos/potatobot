@@ -56,6 +56,7 @@ COMMAND_POLICIES = {
     "rob": _command("economy"),
     "pay": _command("economy"),
     "shop": _command("shop", ResponsePolicy.PRIVATE),
+    "buy": _command("shop", ResponsePolicy.PRIVATE),
     # PUBLIC because the result embed *is* the command. Declared PRIVATE, the
     # tree deferred ephemerally and the public success branch made
     # PotatoContext.send delete the original response — stranding Discord's

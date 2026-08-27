@@ -190,6 +190,28 @@
     "youtube_new_video_desc": "**{title}**"
   },
   "shop": {
+    "categories": {
+      "perks": {
+        "name": "🌟 Kiváltságok",
+        "desc": "Tartós előnyök: tagság és sorozatvédelem."
+      },
+      "casino": {
+        "name": "🎲 Kaszinó",
+        "desc": "Egy-egy fizetett körre szóló segítségek."
+      },
+      "heist": {
+        "name": "🔓 Betörés",
+        "desc": "Eszközök ahhoz, hogy másokat kirabolj."
+      },
+      "protection": {
+        "name": "🏦 Védelem",
+        "desc": "Széfek és testőr, hogy téged ne rabolhassanak ki."
+      },
+      "rentals": {
+        "name": "✨ Bérlés",
+        "desc": "Saját emoji, matrica vagy hang, a személyzet közreműködésével."
+      }
+    },
     "items": {
       "premium": {
         "name": "🌟 Prémium Tagság",
@@ -284,6 +306,14 @@
     "purchase_already_processed": "✅ Ezt a vásárlást már feldolgoztam.",
     "shop_title": "🏪 Potato Market",
     "shop_desc": "Válassz egy fejlesztést a lenti listából. A tárgyak azonnal élesednek!",
+    "category_placeholder": "Válassz egy polcot...",
+    "item_placeholder": "{category} — válassz egy tárgyat...",
+    "back_btn": "Vissza",
+    "category_unavailable": "Ez a polc már nem elérhető. Nyisd meg újra a boltot!",
+    "item_unavailable": "❌ Ez a tárgy már nem kapható.",
+    "item_unknown": "❌ Nincs ilyen tárgy a boltban. Írd be a nevét, és válassz a felajánlott listából!",
+    "items_hidden": "Néhány tárgy nem fér ki a menübe. A /buy paranccsal azok is megvásárolhatók.",
+    "empty": "🏪 Ebben a szerverben most nincs megvásárolható tárgy.",
     "placeholder": "Válassz egy tárgyat...",
     "select_option_label": "{name} | Ár: {price}",
     "rent_expired_reason": "Bérleti idő (30 nap) lejárt.",
@@ -618,6 +648,9 @@
     "usage_rob": "/rob [felhasználó]",
     "usage_pay": "/pay [felhasználó] [összeg]",
     "usage_shop": "/shop",
+    "usage_buy": "/buy <tárgy>",
+    "cmd_buy": "Tárgy vásárlása név szerint, menü nélkül.",
+    "buy_item_description": "A tárgy neve — kezdd el írni, és válassz a listából.",
     "usage_gacha": "/gacha [1 vagy 10]",
     "usage_inventory": "/inventory",
     "usage_pity": "/pity [banner]",
@@ -1259,6 +1292,7 @@
       "youtube_role": "YouTube értesítési rang",
       "twitch_streamers": "Figyelt Twitch csatornák",
       "youtube_channels": "YouTube-csatorna azonosítók",
+      "shop_hidden_items": "Nem árult beépített tárgyak",
       "shop_price_premium": "Prémium rang ára",
       "shop_price_lockpick": "Álkulcs ára",
       "shop_price_bodyguard": "Testőr ára",
@@ -1376,7 +1410,7 @@
     "create": "Létrehozás",
     "edit_price": "Ár szerkesztése",
     "shop_items_hint": "Minden, amit ez a szerver árulhat: a beépítettek és a sajátjaid. Egy beépített tárgynál csak az ár szerkeszthető.",
-    "subtitle_shop_items": "{count} tárgy · {custom}/{limit} saját",
+    "subtitle_shop_items": "{visible} tárgy látható {total}-ból · {custom} saját",
     "fulfillment_hint": "Egy tag beváltott egy utalványt, és arra vár, hogy elkészítsd az eszközt.",
     "active_heading": "Élő jogosultságok",
     "active_hint": "Amit a szerver jelenleg ad, a leghamarabb lejáróval az élen.",
@@ -1397,6 +1431,13 @@
     "remaining_hours": "{hours} óra {minutes} perc",
     "remaining_minutes": "{minutes} perc",
     "item_new": "Új tárgy",
+    "item_category": "Polc",
+    "item_category_default": "Automatikus (a fajta szerint)",
+    "item_section_count": "{used}/{limit}",
+    "item_section_full": "A(z) {section} polc megtelt. Válassz másikat, vagy törölj onnan egyet.",
+    "item_every_section_full": "Minden polc megtelt. Törölj egy tárgyat, vagy rejts el egy beépítettet.",
+    "item_hide": "Elrejtés",
+    "item_show": "Megjelenítés",
     "item_limit_reached": "Elérted a(z) {limit} saját tárgyból álló korlátot.",
     "item_field_required": "Töltsd ki a(z) „{field}” mezőt a mentés előtt.",
     "item_section_identity": "A tárgy",
@@ -1544,7 +1585,9 @@
       "shop_config_vault": "A széf beállításához nullánál nagyobb összeg szükséges.",
       "shop_config_voucher": "Az utalványhoz emoji, matrica vagy hang típus és 1–3650 nap közötti időtartam kell.",
       "shop_item_invalid": "A bolti tárgy adatai érvénytelenek.",
-      "shop_item_limit": "A Discord bolti menü legfeljebb {limit} egyedi tárgyat tud megjeleníteni.",
+      "shop_item_exists": "Már van tárgy ezzel a kulccsal.",
+      "shop_unhide_no_room": "A(z) {category} polcon nincs hely a visszakapcsolt tárgynak: már {limit} saját tárgy van rajta. Törölj onnan egyet, vagy hagyd elrejtve.",
+      "shop_item_limit": "A(z) {category} polcra legfeljebb {limit} saját tárgy kerülhet. Válassz másik polcot, vagy törölj egyet.",
       "shop_item_not_found": "A bolti tárgy nem található.",
       "shop_key_invalid": "A tárgykulcs csak betűt, számot és aláhúzást tartalmazhat, legfeljebb 64 karakteren.",
       "shop_key_reserved": "Ez a tárgykulcs egy beépített bolti tárgyé, ezért nem használható fel.",

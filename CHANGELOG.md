@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.8.0-beta.1
+
+- **The shop has sections, and room to grow.** `/shop` asks which section first
+  — Perks, Casino, Heist, Protection, Rentals — and then shows that section's
+  items. Discord only allows 25 options in one menu, so the whole shop used to
+  be 25 items: 17 built-in ones left you **eight** of your own, and that number
+  dropped every time we added an item. Per section it is 25 each, so you have
+  **108 slots** instead of 8, and a new built-in only ever costs a slot on its
+  own shelf.
+- **`/buy <name>` buys straight from the name**, with the list filtering as you
+  type. It has no 25-item ceiling at all, so it can reach anything — including
+  an item a very full section could not fit into the menu.
+- **You can hide a built-in item you do not sell.** No soundboard? Hide the
+  sound rental and get its slot back. Hiding only removes it from the shop menu:
+  it can still come out of the gacha, anyone who already owns one can still use
+  it, and rentals still expire on time.
+- Showing a hidden item again is refused if its section has filled up while it
+  was away, and says which section and how full — so you can delete one of your
+  own or leave it hidden, rather than the menu quietly dropping something.
+- **The item page groups by section and shows the room left**, so you can see
+  that Casino is at 7/25 before you try to add a twentieth thing to it. A full
+  section is marked, and cannot be picked in the editor rather than failing on
+  save.
+- Every item you already made keeps working and lands on a sensible shelf
+  without you touching anything; you can move one whenever you like, or leave it
+  on "Automatic".
+- **A long item name can no longer take `/shop` down.** A name at the editor's
+  own 100-character limit made the menu exceed Discord's limit for an option
+  label, which Discord rejects outright — it is capped and trimmed in three
+  places now.
+- A disabled item bought by name now says it is unavailable instead of saying
+  you cannot afford it.
+
 ## 2.7.0-beta.2
 
 - **The shop item editor follows the kind you pick.** Choosing "Vault" and

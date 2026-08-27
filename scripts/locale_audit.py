@@ -261,6 +261,14 @@ def composed_key_families() -> dict:
         for key in item_catalog.SHOP_ITEMS
         for field in ("name", "desc")
     )
+    # The shop's shelves. Derived from the enum, so a new category is gated the
+    # moment it is declared — an unlabelled one would draw as a bracketed key in
+    # a live Discord menu.
+    families["shop categories"] = sorted(
+        f"shop.categories.{category.value}.{field}"
+        for category in item_catalog.SHOP_CATEGORY_ORDER
+        for field in ("name", "desc")
+    )
     # Pull and redemption outcomes, composed from the model's reason codes.
     families["gacha outcomes"] = [
         f"gacha.{reason}" for reason in

@@ -3022,6 +3022,12 @@ async function createWorkResponse(event) {
  *  one, an item for an edit. Mirrors how the managed-message pages track it. */
 let itemEditorTarget;
 
+/** The shop's sections, as `/items` reports them: id, label, and how much room
+ *  is left in each. Held here because both the grouped table and the editor's
+ *  section picker read it, and the labels can only come from the endpoint —
+ *  `/api/locale` serves the `dashboard` namespace alone. */
+let itemCategories = [];
+
 async function loadShopItems() {
     const itemsHost = document.getElementById('shop-items');
     const listCard = document.getElementById('shop-item-list-card');
@@ -3041,10 +3047,14 @@ async function loadShopItems() {
         return;
     }
     itemList = payload.data;
+    itemCategories = payload.categories || [];
 
+    // `count` used to be every row, which diverges from the menu the moment
+    // anything is hidden, and the old flat `limit` no longer exists.
     const custom = payload.custom_count;
+    const visible = itemList.filter((item) => !item.hidden && item.in_shop).length;
     setSubtitle('dashboard.subtitle_shop_items',
-                {count: itemList.length, custom, limit: payload.limit});
+                {visible, total: itemList.length, custom});
     renderItemTable(itemsHost, itemList);
 
     // One owner of the page-action slot: every render clears it and adds exactly
@@ -3053,9 +3063,12 @@ async function loadShopItems() {
     host.replaceChildren();
     const create = element('button', 'btn btn-primary', tr('dashboard.item_new'));
     create.type = 'button';
-    create.disabled = custom >= payload.limit;
-    if (create.disabled) create.title = format('dashboard.item_limit_reached',
-                                               {limit: payload.limit});
+    // Only when *every* section is full: with one shelf at its cap there is
+    // still somewhere to put a new item, and disabling the button then would
+    // hide a capability that works.
+    const anyRoom = itemCategories.some((entry) => entry.remaining > 0);
+    create.disabled = itemCategories.length > 0 && !anyRoom;
+    if (create.disabled) create.title = tr('dashboard.item_every_section_full');
     create.addEventListener('click', () => renderItemEditor(null));
     host.appendChild(create);
 }
@@ -3080,6 +3093,31 @@ async function handleWriteConflict(error, reload) {
  * three is reachable from the browser on its own.
  */
 function renderItemTable(host, items) {
+    // One table per section, in the order the endpoint reports. The grouping is
+    // the column, so there is no "Section" column; and an empty section still
+    // renders, because it is a legal destination for a new item.
+    if (itemCategories.length) {
+        const wrap = element('div', 'stack');
+        itemCategories.forEach((section) => {
+            const head = element('div', 'section-head');
+            head.appendChild(element('h3', null, section.label));
+            // `pill` translates its argument, so the already-formatted count
+            // is built as an element rather than passed through it.
+            head.appendChild(element(
+                'span', `pill ${section.remaining <= 0 ? 'off' : 'neutral'}`,
+                format('dashboard.item_section_count',
+                       {used: section.used, limit: section.limit})));
+            wrap.appendChild(head);
+            wrap.appendChild(renderItemSection(
+                items.filter((item) => item.category === section.id)));
+        });
+        host.replaceChildren(wrap);
+        return;
+    }
+    host.replaceChildren(renderItemSection(items));
+}
+
+function renderItemSection(items) {
     const node = table([
         'dashboard.column_item', 'dashboard.column_item_effect',
         'dashboard.column_price', 'dashboard.column_available',
@@ -3090,7 +3128,7 @@ function renderItemTable(host, items) {
 
     items.forEach((item) => {
         const row = element('tr');
-        row.classList.toggle('reward-disabled', !item.enabled);
+        row.classList.toggle('reward-disabled', !item.enabled || item.hidden);
 
         const identity = element('td');
         identity.appendChild(element('div', 'item-name', item.name));
@@ -3169,18 +3207,53 @@ function renderItemTable(host, items) {
             remove.addEventListener('click', () => deleteItem(item, remove));
             actions.appendChild(remove);
         } else if (item.price_setting) {
-            // A built-in's one editable field, typed here rather than on a
-            // settings page: it still writes the registered setting, so the
-            // storage, validation and audit trail are unchanged.
-            // Nothing else to do to a built-in: its price is editable in place
-            // above, and its behaviour is the bot's rather than a guild's.
-            actions.appendChild(element('span', 'cell-muted',
-                                        tr('dashboard.item_builtin_note')));
+            // A built-in's price is editable in place above and its behaviour is
+            // the bot's, but whether this guild *sells* it is theirs. Hiding it
+            // gives its section's slot back. A price of 0 makes an item free
+            // rather than absent, so this had to be its own state.
+            const hide = element('button', 'btn btn-outline',
+                tr(item.hidden ? 'dashboard.item_show' : 'dashboard.item_hide'));
+            hide.type = 'button';
+            hide.title = tr('dashboard.item_builtin_note');
+            hide.addEventListener('click', () => toggleBuiltinHidden(item, hide));
+            actions.appendChild(hide);
         }
         row.appendChild(actions);
         body.appendChild(row);
     });
-    host.replaceChildren(node);
+    const wrap = element('div', 'table-wrap');
+    wrap.appendChild(node);
+    return wrap;
+}
+
+/** Add or remove a built-in from this guild's hidden list.
+ *
+ *  Written through the same settings PATCH `saveBuiltinPrice` uses, with the
+ *  same optimistic revision, so two people toggling at once still conflict
+ *  rather than one silently winning. Both reloads are needed: without
+ *  `loadGuild` the next toggle sends a stale revision and 409s.
+ */
+async function toggleBuiltinHidden(item, button) {
+    button.disabled = true;
+    const current = settings.shop_hidden_items?.value || [];
+    const next = item.hidden
+        ? current.filter((key) => key !== item.item_key)
+        : [...current, item.item_key];
+    try {
+        const saved = await api(`/guilds/${guildId}/settings`, {
+            method: 'PATCH', headers: headers(),
+            body: JSON.stringify({changes: [{
+                key: 'shop_hidden_items', value: next,
+                revision: settings.shop_hidden_items?.revision || 0,
+            }]}),
+        });
+        toast(saved.message);
+        await loadGuild();
+        await loadShopItems();
+    } catch (error) {
+        await handleWriteConflict(error, loadShopItems);
+        button.disabled = false;
+    }
 }
 
 /** Write a built-in item's price through the setting that already holds it.
@@ -3231,6 +3304,10 @@ function itemPatchBody(item, changes) {
         enabled: item.enabled,
         price: item.price,
         config: item.config,
+        // Required, because the route matches the payload's key set exactly —
+        // and this body backs the enable/disable toggle, so omitting it would
+        // fail every toggle click with `shop_template_invalid`.
+        category: item.category_stored ?? null,
         text: {name: item.name || item.item_key,
                description: item.description || ''},
         revision: item.revision,
@@ -3525,6 +3602,13 @@ function renderItemEditor(existing) {
         kind: 'number', label: 'dashboard.item_price', min: 0, default: 1000,
         required: true, hint: 'item_price',
     }, existing ? existing.price : undefined, isNew);
+    // The shelf. Blank means "follow the kind", and it has to stay choosable
+    // after the migration: without it, opening an item saved before sections
+    // existed and pressing Save would pin its section, and it would then never
+    // follow a change to the defaults.
+    addEditorField(grid, readers, 'category', {
+        kind: 'category', label: 'dashboard.item_category', hint: 'item_category',
+    }, existing ? existing.category_stored : null, isNew);
     identity.appendChild(grid);
     form.appendChild(identity);
 
@@ -3620,6 +3704,24 @@ function addEditorField(host, readers, name, spec, value, isNew) {
     return control.node;
 }
 
+/** Which shelf an unassigned item lands on, mirroring the catalog's template
+ *  table. Only used to pre-empt a refusal the operator could not otherwise
+ *  predict; the server remains the authority, and an unknown template falls
+ *  through to no guess rather than a wrong one. */
+const TEMPLATE_SECTIONS = {
+    fixed_role: 'perks', timed_role: 'perks', coin_bundle: 'perks',
+    vault: 'protection', fulfillment_voucher: 'rentals',
+};
+
+function resolvedSectionFor(template, config) {
+    if (template === 'consumable') {
+        const wrapped = (itemList || []).find(
+            (item) => item.item_key === config.item_key);
+        return wrapped ? wrapped.category : null;
+    }
+    return TEMPLATE_SECTIONS[template] || null;
+}
+
 async function saveItem(existing, readers, configReaders, submit) {
     const values = {};
     Object.entries(readers).forEach(([name, read]) => { values[name] = read(); });
@@ -3645,8 +3747,19 @@ async function saveItem(existing, readers, configReaders, submit) {
         enabled: existing ? existing.enabled : true,
         price: values.price,
         config: packed,
+        category: values.category ?? null,
         text: {name: values.name, description: values.description},
     };
+
+    // Say which shelf is full before the server does. The API cannot accept it,
+    // but a refusal the form could have predicted reads as a bug.
+    const target = itemCategories.find((entry) => entry.id === (
+        values.category || resolvedSectionFor(template, packed)));
+    if (target && target.remaining <= 0
+            && !(existing && existing.category === target.id)) {
+        toast(format('dashboard.item_section_full', {section: target.label}), true);
+        return;
+    }
 
     submit.disabled = true;
     try {
@@ -4057,6 +4170,31 @@ function managedFieldControl(name, spec, value, isNew) {
         if (value !== undefined && value !== null) select.value = value;
         else if (spec.default !== undefined) select.value = spec.default;
         return {node: select, read: () => select.value};
+    }
+    if (spec.kind === 'category') {
+        const select = document.createElement('select');
+        const auto = document.createElement('option');
+        auto.value = '';
+        auto.textContent = tr('dashboard.item_category_default');
+        select.appendChild(auto);
+        itemCategories.forEach((section) => {
+            const node = document.createElement('option');
+            node.value = section.id;
+            node.textContent = section.remaining > 0
+                ? section.label
+                : `${section.label} (${section.used}/${section.limit})`;
+            // A rule the API enforces that the form cannot express turns into an
+            // unexplained rejection, so a full shelf says so and cannot be
+            // picked. The one it is already on stays available, or an edit could
+            // not save.
+            node.disabled = section.remaining <= 0
+                && !(value && value === section.id);
+            select.appendChild(node);
+        });
+        if (value) select.value = value;
+        // '' reads back as null, keeping "not chosen" distinct from a choice —
+        // the same discipline the number kind's empty-is-null has.
+        return {node: select, read: () => select.value || null};
     }
     if (spec.kind === 'catalog') {
         // The consumable picker. It listed raw keys like `loaded_die`, because

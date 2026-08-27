@@ -101,6 +101,8 @@ class SettingDefinition:
     maximum: int | None = None
     legacy_path: tuple[str, ...] | None = None
     # Allowed values for a STRING setting. Empty means free text. A setting with
+    # For a STRING this renders as a dropdown; for a STRING_LIST every member
+    # must be one of these and the stored order is this order.
     # choices renders as a dropdown and is rejected on save if it is anything
     # else, so an operator cannot select a value the installation cannot honour.
     choices: tuple[str, ...] = ()
@@ -711,6 +713,21 @@ SETTING_DEFINITIONS = {
     )
 }
 
+# Which built-in items this guild does not sell. One setting holding a set,
+# rather than seventeen booleans: `shop_price_*` is seventeen settings because
+# each carries a distinct *value*, while hiding carries only membership, so
+# seventeen rows would be seventeen audit trails and seventeen labels expressing
+# one list. `choices` is the catalog, so a built-in that is ever retired stops
+# being a legal hide target with no second list, and `edited_elsewhere` keeps it
+# off the settings form because the toggle belongs beside the item — exactly the
+# argument the prices already make.
+_hidden_items = _setting(
+    "shop_hidden_items", "economy", "shop", SettingValueType.STRING_LIST, [],
+    feature="shop", choices=tuple(item_catalog.SHOP_ITEMS),
+    edited_elsewhere=True,
+)
+SETTING_DEFINITIONS[_hidden_items.key] = _hidden_items
+
 # Prices are registered from the shared item catalog, so adding a built-in item
 # there gives it a dashboard price field without a second list to keep in step.
 for _item_key, _default_price in item_catalog.shop_default_prices().items():
@@ -831,10 +848,23 @@ def validate_setting_value(definition: SettingDefinition, value):
         if not isinstance(value, list):
             raise ValueError("setting must be a list of Discord snowflakes")
         value = [_snowflake(item) for item in value]
-    if kind is SettingValueType.STRING_LIST and (
-        not isinstance(value, list) or any(not isinstance(item, str) for item in value)
-    ):
-        raise ValueError("setting must be a string list")
+    if kind is SettingValueType.STRING_LIST:
+        if (not isinstance(value, list)
+                or any(not isinstance(item, str) for item in value)):
+            raise ValueError("setting must be a string list")
+        # `choices` used to constrain a STRING only, so a constrained *list*
+        # accepted arbitrary junk — `shop_hidden_items` could have held a
+        # misspelled item key that hid nothing and that nothing would report.
+        # Extending the existing field beats a bespoke validator: the allowed set
+        # stays declared next to the setting.
+        if definition.choices:
+            allowed = set(definition.choices)
+            unknown = [item for item in value if item not in allowed]
+            if unknown:
+                raise ValueError("setting must contain only the allowed values")
+            # Stored as a set, in the declaration's own order, so the same
+            # selection cannot read back as a change nobody made.
+            value = [item for item in definition.choices if item in set(value)]
     if kind is SettingValueType.JSON and not isinstance(value, (dict, list)):
         raise ValueError("setting must be JSON object or list")
     validator = _JSON_SHAPE_VALIDATORS.get(definition.json_shape)

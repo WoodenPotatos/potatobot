@@ -249,7 +249,7 @@ class DashboardSecurityTests(unittest.TestCase):
         generic = dashboard_api.t("dashboard.invalid_request")
         response = self.client.post(
             "/api/guilds/123/shop-items",
-            json={"item_key": "premium", "template_type": "fixed_role", "enabled": True,
+            json={"item_key": "premium", "template_type": "fixed_role", "category": None, "enabled": True,
                   "price": 100, "config": {"role_id": 5}, "text": {"name": "a", "description": "b"}},
             headers=headers,
         )
@@ -264,7 +264,7 @@ class DashboardSecurityTests(unittest.TestCase):
             with self.subTest(item_key=key):
                 response = self.client.post(
                     "/api/guilds/123/shop-items",
-                    json={"item_key": key, "template_type": "vault", "enabled": True,
+                    json={"item_key": key, "template_type": "vault", "category": None, "enabled": True,
                           "price": 100, "config": {"amount": 1000},
                           "text": {"name": "a", "description": "b"}},
                     headers=headers,
@@ -424,7 +424,7 @@ class DashboardSecurityTests(unittest.TestCase):
         headers = self._headers()
         created = self.client.post(
             "/api/guilds/123/shop-items",
-            json={"item_key": "vip_role", "template_type": "vault", "enabled": True,
+            json={"item_key": "vip_role", "template_type": "vault", "category": None, "enabled": True,
                   "price": 100, "config": {"amount": 1000},
                   "text": {"name": "Vip", "description": "leiras"}},
             headers=headers,
@@ -450,7 +450,7 @@ class DashboardSecurityTests(unittest.TestCase):
     def _create_item(self, headers, key="vip_role", price=100):
         return self.client.post(
             "/api/guilds/123/shop-items",
-            json={"item_key": key, "template_type": "vault", "enabled": True,
+            json={"item_key": key, "template_type": "vault", "category": None, "enabled": True,
                   "price": price, "config": {"amount": 1000},
                   "text": {"name": "Vip", "description": "leiras"}},
             headers=headers,
@@ -465,7 +465,7 @@ class DashboardSecurityTests(unittest.TestCase):
 
         disabled = self.client.patch(
             "/api/guilds/123/shop-items/vip_role",
-            json={"template_type": "vault", "enabled": False, "price": 250,
+            json={"template_type": "vault", "category": None, "enabled": False, "price": 250,
                   "config": {"amount": 2000},
                   "text": {"name": "Vip 2", "description": "uj"}, "revision": 1},
             headers=headers,
@@ -480,7 +480,7 @@ class DashboardSecurityTests(unittest.TestCase):
 
         stale = self.client.patch(
             "/api/guilds/123/shop-items/vip_role",
-            json={"template_type": "vault", "enabled": True, "price": 300,
+            json={"template_type": "vault", "category": None, "enabled": True, "price": 300,
                   "config": {"amount": 2000},
                   "text": {"name": "x", "description": "y"}, "revision": 1},
             headers=headers,
@@ -498,7 +498,7 @@ class DashboardSecurityTests(unittest.TestCase):
         self._create_item(headers)
         response = self.client.patch(
             "/api/guilds/123/shop-items/vip_role",
-            json={"template_type": "arbitrary_code", "enabled": True, "price": 1,
+            json={"template_type": "arbitrary_code", "category": None, "enabled": True, "price": 1,
                   "config": {}, "text": {"name": "a", "description": "b"}, "revision": 1},
             headers=headers,
         )
@@ -509,7 +509,7 @@ class DashboardSecurityTests(unittest.TestCase):
         self._create_item(headers)
         renamed = self.client.patch(
             "/api/guilds/123/shop-items/vip_role",
-            json={"item_key": "other", "template_type": "vault", "enabled": True,
+            json={"item_key": "other", "template_type": "vault", "category": None, "enabled": True,
                   "price": 1, "config": {"amount": 1},
                   "text": {"name": "a", "description": "b"}, "revision": 1},
             headers=headers,
@@ -607,14 +607,23 @@ class DashboardSecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_disabled_shop_rows_count_against_the_cap(self):
+        """The cap is per section now, so this fills the one the payload lands
+        in. Every stored row counts, not just the enabled ones: counting only
+        enabled rows let a guild accumulate disabled definitions and then
+        re-enable past what a Discord select menu can display."""
+        import item_catalog
+
         headers = self._headers()
-        for index in range(dashboard_api.SHOP_ITEM_LIMIT):
+        # `_create_item` posts a vault, which resolves to the protection shelf.
+        section = item_catalog.resolve_custom_category("vault", {"amount": 1000})
+        capacity = item_catalog.custom_item_capacity(section)
+        for index in range(capacity):
             created = self._create_item(headers, key=f"item_{index}")
             self.assertEqual(created.status_code, 201, created.get_data(as_text=True))
             # Disable it, so only the total row count can enforce the cap.
             disabled = self.client.patch(
                 f"/api/guilds/123/shop-items/item_{index}",
-                json={"template_type": "vault", "enabled": False, "price": 100,
+                json={"template_type": "vault", "category": None, "enabled": False, "price": 100,
                       "config": {"amount": 1000},
                       "text": {"name": "a", "description": "b"}, "revision": 1},
                 headers=headers,
@@ -623,11 +632,24 @@ class DashboardSecurityTests(unittest.TestCase):
 
         overflow = self._create_item(headers, key="one_too_many")
         self.assertEqual(overflow.status_code, 400)
+        # The message names the shelf the operator reads, not the raw id.
         self.assertEqual(
             overflow.get_json()["message"],
-            dashboard_api.t("dashboard.errors.shop_item_limit",
-                            limit=dashboard_api.SHOP_ITEM_LIMIT),
+            dashboard_api.t(
+                "dashboard.errors.shop_item_limit", limit=capacity,
+                category=dashboard_api.t(f"shop.categories.{section}.name")),
         )
+        # And another shelf is untouched, which is the whole point of sections.
+        elsewhere = self.client.post(
+            "/api/guilds/123/shop-items",
+            json={"item_key": "on_another_shelf", "template_type": "coin_bundle",
+                  "category": "perks", "enabled": True, "price": 100,
+                  "config": {"amount": 10, "repeatable": False},
+                  "text": {"name": "a", "description": "b"}},
+            headers=headers,
+        )
+        self.assertEqual(elsewhere.status_code, 201,
+                         elsewhere.get_data(as_text=True))
 
     def test_model_layer_rejections_name_their_reason(self):
         """database.py validators carry a reason code that maps to a locale key,
@@ -692,10 +714,14 @@ class DashboardSecurityTests(unittest.TestCase):
         self.assertEqual(
             {entry["key"] for entry in payload}, set(item_catalog.ITEM_DEFINITIONS)
         )
-        # Identity and defaults only; nothing guild-specific or secret.
+        # Identity and defaults only; nothing guild-specific or secret. The
+        # category belongs here: it is part of what an item *is*, and a payload
+        # that omits a field of the definition is how the dashboard ends up
+        # unable to express something.
         self.assertEqual(
             set(payload[0]),
-            {"key", "effect", "value", "default_price", "sold_in_shop", "gacha_kind"},
+            {"key", "effect", "value", "default_price", "sold_in_shop",
+             "gacha_kind", "category"},
         )
 
     def test_a_reward_can_be_added_to_an_already_saved_banner(self):
@@ -783,7 +809,7 @@ class DashboardSecurityTests(unittest.TestCase):
                 response = self.client.post(
                     "/api/guilds/123/shop-items",
                     json={
-                        "item_key": f"custom_{item_key}", "template_type": "consumable",
+                        "item_key": f"custom_{item_key}", "template_type": "consumable", "category": None,
                         "enabled": True, "price": 100,
                         "config": {"item_key": item_key},
                         "text": {"name": "Teszt", "description": "Teszt"},
@@ -803,7 +829,7 @@ class DashboardSecurityTests(unittest.TestCase):
         rejected = self.client.post(
             "/api/guilds/123/shop-items",
             json={
-                "item_key": "custom_unknown", "template_type": "consumable",
+                "item_key": "custom_unknown", "template_type": "consumable", "category": None,
                 "enabled": True, "price": 100,
                 "config": {"item_key": "big_vault"},
                 "text": {"name": "Teszt", "description": "Teszt"},

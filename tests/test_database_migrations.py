@@ -3,10 +3,12 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
 import unittest
 from contextlib import closing
 
 import database
+import item_catalog
 
 
 class MigrationTests(unittest.TestCase):
@@ -863,3 +865,235 @@ class Schema12ManagedMessageTests(unittest.TestCase):
         self.assertEqual("222", after["message_id"])
         self.assertEqual("111", after["channel_id"])
         self.assertEqual(2, len(after["entries"]))
+
+
+class Schema16ShopCategoryTests(unittest.TestCase):
+    """Schema 16 adds `shop_item_definitions.category` and rewrites no row.
+
+    Nullable with no default and no CHECK, for two separate reasons. NULL means
+    "not chosen — resolve from the template", the same third state
+    `gacha_banners.display_name` and `warnings.tag` already carry: a
+    `NOT NULL DEFAULT 'perks'` would make every existing row assert a choice its
+    operator never made, and nothing afterwards could tell a backfill from a
+    decision. And SQLite cannot alter a CHECK without rebuilding the table, so a
+    CHECK would freeze today's five sections into every deployed database.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _downgrade(self):
+        """Reshape a current database into the pre-schema-16 shape."""
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("ALTER TABLE shop_item_definitions DROP COLUMN category")
+            conn.execute("PRAGMA user_version = 15")
+            conn.commit()
+
+    def _add_row(self, template, config):
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute(
+                "INSERT INTO shop_item_definitions (guild_id, item_key, "
+                "template_type, enabled, price, config_json, revision, "
+                "updated_at) VALUES (1, ?, ?, 1, 500, ?, 1, '2026-01-01')",
+                (f"legacy_{template}", template, json.dumps(config)))
+            conn.commit()
+
+    def test_clean_database_has_the_column(self):
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
+            columns = {row[1] for row in conn.execute(
+                "PRAGMA table_info(shop_item_definitions)")}
+            self.assertIn("category", columns)
+
+    def test_the_column_is_nullable_and_unconstrained(self):
+        """A CHECK here could never be widened without rebuilding the table."""
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'shop_item_definitions'"
+            ).fetchone()[0]
+        self.assertIn("category TEXT", sql)
+        self.assertNotIn("category TEXT NOT NULL", sql)
+        self.assertNotIn("CHECK (category", sql)
+
+    def test_an_existing_row_survives_with_no_category_and_still_resolves(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        self._downgrade()
+        self._add_row("vault", {"amount": 25000})
+        self._add_row("consumable", {"item_key": "lockpick"})
+        database.initialize_database()
+
+        rows = {row["item_key"]: row
+                for row in database.get_shop_item_definitions(1)}
+        self.assertEqual(2, len(rows))
+        for row in rows.values():
+            self.assertIsNone(row["category_stored"],
+                              "an upgraded row must not assert a choice")
+        # And the template decides, so nothing has to be edited to work.
+        self.assertEqual("protection", rows["legacy_vault"]["category"])
+        # A consumable follows the item it grants rather than a flat guess.
+        self.assertEqual("heist", rows["legacy_consumable"]["category"])
+
+    def test_re_running_the_migration_changes_nothing(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        self._downgrade()
+        self._add_row("coin_bundle", {"amount": 10, "repeatable": False})
+        database.initialize_database()
+        first = database.get_shop_item_definitions(1)
+        database.initialize_database()
+        self.assertEqual(first, database.get_shop_item_definitions(1))
+
+
+class ShopSectionCapTests(unittest.TestCase):
+    """The per-section cap lives in the model, not in the Flask route.
+
+    It used to be a count in the route followed by an insert, so the check and
+    the write were not one transaction: two concurrent creates could both pass a
+    cap with one slot left. The cap also has to read the guild's hidden-item
+    list, because hiding a built-in genuinely gives its slot back.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _item(self, key, category=None, template="coin_bundle", config=None):
+        return {"item_key": key, "template_type": template, "enabled": True,
+                "price": 500,
+                "config": config or {"amount": 10, "repeatable": False},
+                "text": {"name": key, "description": "d"},
+                "category": category}
+
+    def _fill(self, category, count):
+        for index in range(count):
+            database.create_shop_item_definition(
+                1, 7, self._item(f"{category}_{index}", category))
+
+    def test_a_full_section_is_refused_and_another_still_has_room(self):
+        capacity = item_catalog.custom_item_capacity("heist")
+        self._fill("heist", capacity)
+        with self.assertRaises(database.ValidationError) as caught:
+            database.create_shop_item_definition(1, 7, self._item("extra", "heist"))
+        self.assertEqual("shop_item_limit", caught.exception.reason)
+        # The point of sections: another shelf is unaffected.
+        database.create_shop_item_definition(1, 7, self._item("fine", "perks"))
+
+    def test_an_edit_cannot_move_an_item_into_a_full_section(self):
+        """Otherwise the cap is bypassable in two steps."""
+        capacity = item_catalog.custom_item_capacity("heist")
+        self._fill("heist", capacity)
+        database.create_shop_item_definition(1, 7, self._item("mover", "perks"))
+        stored = {row["item_key"]: row
+                  for row in database.get_shop_item_definitions(1)}["mover"]
+        body = {"template_type": "coin_bundle", "enabled": True, "price": 500,
+                "config": {"amount": 10, "repeatable": False},
+                "text": {"name": "mover", "description": "d"},
+                "category": "heist"}
+        with self.assertRaises(database.ValidationError):
+            database.update_shop_item_definition(
+                1, 7, "mover", body, stored["revision"])
+        # Saving it where it already is must still work: only a move is checked.
+        body["category"] = "perks"
+        database.update_shop_item_definition(
+            1, 7, "mover", body, stored["revision"])
+
+    def test_hiding_a_builtin_gives_its_slot_back(self):
+        capacity = item_catalog.custom_item_capacity("rentals")
+        self._fill("rentals", capacity)
+        with self.assertRaises(database.ValidationError):
+            database.create_shop_item_definition(
+                1, 7, self._item("one_more", "rentals"))
+        database.set_guild_settings(1, 7, [
+            {"key": "shop_hidden_items", "value": ["rent_sound"], "revision": 0}])
+        database.create_shop_item_definition(
+            1, 7, self._item("one_more", "rentals"))
+
+    def test_un_hiding_a_builtin_with_no_room_is_refused(self):
+        """Un-hiding is the one way to overfill a shelf without creating
+        anything, and a silent render trim is worse than a refusal the operator
+        can read and act on."""
+        database.set_guild_settings(1, 7, [
+            {"key": "shop_hidden_items", "value": ["rent_sound"], "revision": 0}])
+        capacity = item_catalog.custom_item_capacity("rentals", ["rent_sound"])
+        self._fill("rentals", capacity)
+
+        with self.assertRaises(database.ValidationError) as caught:
+            database.set_guild_settings(1, 7, [
+                {"key": "shop_hidden_items", "value": [], "revision": 1}])
+        self.assertEqual("shop_unhide_no_room", caught.exception.reason)
+        self.assertEqual("rentals", caught.exception.params["category"])
+        self.assertEqual("rent_sound", caught.exception.params["item"])
+
+    def test_hiding_more_and_saving_unchanged_are_never_refused(self):
+        """Only a removal is checked: hiding always frees a slot, and opening
+        the page and saving must not start failing."""
+        database.set_guild_settings(1, 7, [
+            {"key": "shop_hidden_items", "value": ["rent_sound"], "revision": 0}])
+        self._fill("rentals", item_catalog.custom_item_capacity(
+            "rentals", ["rent_sound"]))
+        database.set_guild_settings(1, 7, [
+            {"key": "shop_hidden_items",
+             "value": ["rent_sound", "rent_emoji"], "revision": 1}])
+        database.set_guild_settings(1, 7, [
+            {"key": "shop_hidden_items",
+             "value": ["rent_sound", "rent_emoji"], "revision": 2}])
+
+    def test_freeing_a_slot_lets_the_un_hide_through(self):
+        database.set_guild_settings(1, 7, [
+            {"key": "shop_hidden_items", "value": ["rent_sound"], "revision": 0}])
+        capacity = item_catalog.custom_item_capacity("rentals", ["rent_sound"])
+        self._fill("rentals", capacity)
+        database.delete_shop_item_definition(1, 7, "rentals_0", 1)
+        database.set_guild_settings(1, 7, [
+            {"key": "shop_hidden_items", "value": [], "revision": 1}])
+
+    def test_the_cap_holds_against_a_concurrent_writer(self):
+        """The test the Flask route could never have passed."""
+        capacity = item_catalog.custom_item_capacity("heist")
+        self._fill("heist", capacity - 1)
+
+        outcomes = []
+        barrier = threading.Barrier(2)
+
+        def attempt(key):
+            barrier.wait()
+            try:
+                database.create_shop_item_definition(1, 7, self._item(key, "heist"))
+                outcomes.append("accepted")
+            except Exception:
+                outcomes.append("refused")
+
+        threads = [threading.Thread(target=attempt, args=(f"race_{i}",))
+                   for i in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(1, outcomes.count("accepted"), outcomes)
+        held = [row for row in database.get_shop_item_definitions(1)
+                if row["category"] == "heist"]
+        self.assertEqual(capacity, len(held))
+
+    def test_a_duplicate_key_is_refused(self):
+        database.create_shop_item_definition(1, 7, self._item("only"))
+        with self.assertRaises(database.ValidationError) as caught:
+            database.create_shop_item_definition(1, 7, self._item("only"))
+        self.assertEqual("shop_item_exists", caught.exception.reason)
