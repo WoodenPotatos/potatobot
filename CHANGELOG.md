@@ -1,5 +1,66 @@
 # Changelog
 
+## 2.9.0-beta.1
+
+- **Switching a feature off hides its page again.** It briefly only dimmed it,
+  which was a workaround for an older problem — hiding the shop page once took
+  away staff's only route to redemptions members had already paid for. Redeems has
+  its own page now and is never hidden by anything, so the toggle can do what a
+  toggle is for.
+- **The stray lines around the item creator's sections are gone.** They were the
+  browser's own default box, because those sections had no styling at all. Same
+  for the button row underneath them.
+- **Your own items can go in a gacha banner.** They always could, mechanically —
+  what was missing is that the reward picker only offered the built-in items, so
+  there was no way to choose one. They are offered by name now, with the amount
+  filled in from the item.
+- A custom reward shows **its own name** to the member instead of a bracketed
+  placeholder.
+- The item list now says whether the gacha can actually award each item, and
+  "disabled" is only about the shop: a disabled item can still be a gacha reward,
+  which is how you run something in the gacha without selling it.
+- **The "consumable" kind is no longer offered when creating an item.** It could
+  only ever hand out an existing built-in item under a new name and price — it
+  cannot change any of its numbers — so it invited an expectation it could not
+  meet. Existing ones still open and edit normally.
+
+- **An LFG post keeps working after a restart.** Its buttons used to stop
+  answering the moment the bot restarted — and the post expired on its own after
+  two hours even if it didn't. Both are gone: the party is stored, so Join, Leave
+  and Delete keep working for as long as the message is there.
+- Two people pressing Join at the same instant can no longer both take the last
+  slot; one of them is told somebody got there first.
+- A host who has left the server no longer breaks the post's display.
+
+- **Your own numbers for the built-in items.** The drill, lockpick, parachute,
+  metal detector and streak freeze each have a number, and you can change it on
+  the item page — right beside the item, like its price. So the parachute's floor
+  can be 1.80 instead of 1.95 if that suits your server better.
+  Each one has a range with a reason: these are knobs on games that are meant to
+  pay back 98%, so a value outside the range is refused rather than quietly
+  trimmed, and setting it back to the shipped number clears it completely.
+- Two of those numbers were previously written into the code in two places, so
+  changing them would have appeared to work and done nothing. They now come from
+  one place.
+- The loaded die, stacked deck, lucky charm and marked card are **not** adjustable
+  yet. Each of them "takes two and keeps the better", and where that two lives
+  makes it a bigger change than it looks; it is written down rather than
+  half-done.
+- **A custom vault can protect any amount.** It used to make you pick one of the
+  three built-in vaults and quietly copied that one's amount, which is why a new
+  vault looked like it just gave out the small one. Type the reserve you want —
+  300,000 works — and the built-in values are offered as suggestions.
+- **Every item kind now explains itself** in the creator: one sentence saying what
+  a purchase actually does, including the parts that were invisible, like a
+  bigger vault replacing a smaller one instead of adding to it.
+- The Casino, Minigames and Everydle sidebar tabs now go dim when you switch the
+  family off, instead of looking switched on. They stay clickable on purpose, so
+  you can set a family up before turning it on.
+- Opening a channel dropdown no longer shuffles the page around.
+- The 10-pull guarantee's description said "4⭐ or better", which read as though
+  it affected the 5⭐ chance. It never did — it only lifts a 3⭐ — and the text
+  now says so.
+
 ## 2.8.0-beta.1
 
 - **The shop has sections, and room to grow.** `/shop` asks which section first

@@ -314,7 +314,8 @@ class RoleMenuShapeTests(unittest.TestCase):
     def test_every_shape_has_a_validator_and_a_snowflake_declaration(self):
         """A shape the editor can render but the API cannot check is a hole."""
         import settings_registry
-        for shape in (settings_registry.JSON_SHAPE_ROLE_MENU,
+        for shape in (settings_registry.JSON_SHAPE_ITEM_VALUES,
+                      settings_registry.JSON_SHAPE_ROLE_MENU,
                       settings_registry.JSON_SHAPE_LEVEL_ROLES,
                       settings_registry.JSON_SHAPE_LFG_CHANNELS,
                       settings_registry.JSON_SHAPE_FACTIONS):
@@ -323,15 +324,51 @@ class RoleMenuShapeTests(unittest.TestCase):
                 self.assertIn(shape,
                               settings_registry.JSON_SHAPE_SNOWFLAKE_FIELDS)
 
+    #: A shape whose every setting is `edited_elsewhere` never reaches the
+    #: settings form, so it cannot fall back to a JSON text box there — its
+    #: editing surface is a page of its own. Listed rather than inferred, so
+    #: adding a shape still forces a decision about where it is edited, and the
+    #: test below checks the claim rather than trusting it.
+    EDITED_ON_THEIR_OWN_PAGE = {"item_values"}
+
     def test_the_client_renders_every_shape_the_registry_declares(self):
-        """Otherwise a setting silently falls back to the JSON text box."""
+        """Otherwise a setting silently falls back to the JSON text box.
+
+        A shape edited on its own page is exempt from the row editor but not
+        from being editable: `item_values` is typed beside each item on the item
+        page, the way `shop_price_*` is, which is why it is `edited_elsewhere`.
+        The exemption is verified below rather than taken on trust.
+        """
         import re
         import settings_registry
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         rendered = set(re.findall(r"^    (\w+): \{$", source, re.MULTILINE))
         for shape in settings_registry.JSON_SHAPE_SNOWFLAKE_FIELDS:
+            if shape in self.EDITED_ON_THEIR_OWN_PAGE:
+                continue
             with self.subTest(shape=shape):
                 self.assertIn(shape, rendered)
+
+    def test_a_shape_exempt_from_the_row_editor_is_edited_somewhere(self):
+        """The exemption above is a claim about the interface, so check it.
+
+        Every setting declaring such a shape must be `edited_elsewhere` — that
+        is what keeps it off the form — and the client must actually name the
+        setting, or it is configurable in code and nowhere else.
+        """
+        source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        for shape in self.EDITED_ON_THEIR_OWN_PAGE:
+            owners = [key for key, definition in SETTING_DEFINITIONS.items()
+                      if definition.json_shape == shape]
+            self.assertTrue(owners, f"{shape} is declared by no setting")
+            for key in owners:
+                with self.subTest(setting=key):
+                    self.assertTrue(
+                        SETTING_DEFINITIONS[key].edited_elsewhere,
+                        "a shape exempt from the row editor would render as a "
+                        "raw JSON box on the settings form")
+                    self.assertIn(f"'{key}'", source,
+                                  "nothing in the client writes this setting")
 
 
     def test_the_client_columns_match_what_the_validator_accepts(self):
@@ -759,6 +796,30 @@ class NavigationReachabilityTests(unittest.TestCase):
             "owning no settings; drop their data-category",
         )
 
+    def test_each_game_family_page_declares_the_feature_it_belongs_to(self):
+        """A family's own page must react to its master switch.
+
+        Casino, Minigames and Everydle each carry `data-category` and used to
+        carry no `data-feature`, so turning the family off did nothing to its
+        nav item: `updateNavigation` mutes only items that declare a feature,
+        and it hides a `data-category` item only when the category owns no
+        content — while `categoryHasVisibleSettings` counts the family's
+        sub-toggles as content, which are still declared when the master is off.
+        The item therefore looked switched on. It is muted now, not hidden: the
+        settings behind it stay reachable so a family can be configured before
+        it is enabled.
+        """
+        import re
+
+        for family in ("casino", "minigames", "everydle"):
+            pattern = (r'data-feature="([a-z_]+)"\s+data-page="'
+                       + family + r'"')
+            found = re.search(pattern, self.html)
+            self.assertIsNotNone(
+                found, f"the {family} nav item declares no data-feature")
+            self.assertEqual(family, found.group(1))
+            self.assertIn(family, settings_registry.FEATURE_DEFINITIONS)
+
     def test_every_settings_category_has_a_nav_entry(self):
         """The mirror image: a category nothing links to is unreachable too."""
         import re
@@ -767,31 +828,56 @@ class NavigationReachabilityTests(unittest.TestCase):
         self.assertEqual(set(), self.categories - linked,
                          "a settings category with no sidebar entry")
 
-    def test_an_editor_page_is_not_hidden_by_the_feature_it_edits(self):
-        """The same class of bug, one attribute over.
+    #: Pages that clear an obligation a member has already paid for. These are
+    #: the ones the original incident was really about, and the only ones that
+    #: must be reachable whatever is switched off.
+    OBLIGATION_PAGES = {"redeems", "audit"}
 
-        `data-feature` used to hide its nav item outright. Every page carrying
-        one is an *editor* for that feature, so turning the feature off removed
-        the only way to configure it — and for the shop, the only way to see and
-        complete fulfillment requests members had already paid for, including
-        gacha-sourced ones. The routes behind these pages enforce no feature
-        check at all, so the interface was hiding working functionality. A
-        switched-off feature is shown, not hidden.
+    def test_a_page_that_clears_an_obligation_is_never_feature_gated(self):
+        """The rule that survived, restated once the behaviour changed.
+
+        This began as "an editor page is not hidden by the feature it edits",
+        because hiding them once removed staff's only route to **fulfillment
+        requests members had already paid for**, gacha-sourced ones included. A
+        switched-off feature was therefore muted rather than hidden.
+
+        The operator has since asked for hiding back, on the grounds that making
+        a page disappear is what a toggle is *for* — and that is now safe for the
+        reason the muting was a workaround: Redeems is its own page and
+        deliberately carries no `data-feature`, so the queue that discharges an
+        obligation is reachable no matter what is off. What remains true, and is
+        what this now asserts, is narrower and more important than the original:
+        **a page holding money a member has already spent may not be gated at
+        all.** Everything else coming back with its feature is a deliberate
+        trade.
         """
+        import re
+
+        for page in self.OBLIGATION_PAGES:
+            with self.subTest(page=page):
+                pattern = re.compile(
+                    r'<button[^>]*data-page="' + page + r'"', re.DOTALL)
+                buttons = [self.html[m.start():self.html.index(">", m.start())]
+                           for m in pattern.finditer(self.html)]
+                self.assertTrue(buttons, f"no nav item for {page}")
+                for button in buttons:
+                    self.assertNotIn(
+                        "data-feature", button,
+                        f"{page} clears a paid-for obligation and must not be "
+                        "hidden by any feature flag")
+
+    def test_a_switched_off_feature_hides_its_page(self):
+        """The behaviour the operator asked for, pinned so it does not drift
+        back to muting by accident."""
         script = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         start = script.index("function updateNavigation()")
-        end = script.index("\n}", start)
-        body = script[start:end]
-        self.assertIn("data-feature", body, "the premise: it still reads them")
-        feature_line = next(
-            line for line in body.splitlines()
-            if "dataset.feature" in line or "nav-item-off" in line
-        )
-        self.assertIn("nav-item-off", feature_line)
-        self.assertNotIn(
-            "'hidden', featureState", body,
-            "an editor page must not be hidden by the feature it edits",
-        )
+        body = script[start:script.index("\n}", start)]
+        code = "\n".join(line for line in body.split("\n")
+                         if not line.strip().startswith("//"))
+        self.assertIn("dataset.feature", code, "the premise: it still reads them")
+        self.assertIn("featureOff", code)
+        self.assertNotIn("nav-item-off", code,
+                         "muting is gone; a toggle hides its page")
 
     def test_the_off_notice_names_a_real_locale_family(self):
         """The notice is the only thing telling an operator the feature is off."""

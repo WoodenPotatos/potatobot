@@ -583,6 +583,12 @@ def auth_status():
                 "idle_timeout_seconds": int(SESSION_IDLE_TIMEOUT.total_seconds()),
                 # Release metadata only; the sidebar shows it next to the brand.
                 "version": version_display(),
+                # The token the *current* client bundle is served under. The
+                # version above comes from the server, so a tab left open across
+                # a deploy shows the new number while still running the old
+                # script — which is indistinguishable from a fix that did not
+                # work, and cost three rounds of "it is still broken" once.
+                "asset_version": _asset_version(),
                 "guilds": _decorate_guilds(
                     database.run_read_sync(
                         database.get_active_guilds,
@@ -1393,6 +1399,69 @@ def settings_registry():
     })
 
 
+#: Which custom item templates can be a gacha reward, and the reward `kind` each
+#: becomes. Only the two whose grant path is purely amount-driven and needs no
+#: key parsing: `_grant_gacha_reward_locked` adds coins or sets a reserve from
+#: the `amount` on the reward row itself. Deliberately excluded for now —
+#: `fulfillment_voucher`, because redemption reads the asset type out of the
+#: reward *key* and a custom key would not parse; `fixed_role`/`timed_role`,
+#: because the gacha has no role kind at all; and `consumable`, because the grant
+#: would create a `user_inventory` row under a key nothing consumes.
+GACHA_ELIGIBLE_TEMPLATES = {"vault": "vault", "coin_bundle": "coins"}
+
+
+def _gacha_eligible_custom_items(guild_id: int) -> list[dict]:
+    """This guild's custom items that a banner may award.
+
+    A banner has always accepted any reward key and the pull has always granted
+    it correctly, so this closes an interface gap rather than adding a mechanic:
+    without it the picker offered only the built-in catalog and there was no way
+    to choose one of your own. The amount comes from the item's own config,
+    because a custom vault awarding a different reserve than it sells would make
+    one key mean two things.
+    """
+    items = database.run_read_sync(database.get_shop_item_definitions, guild_id)
+    eligible = []
+    for item in items:
+        kind = GACHA_ELIGIBLE_TEMPLATES.get(item["template_type"])
+        if kind is None:
+            continue
+        amount = (item.get("config") or {}).get("amount")
+        if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
+            continue
+        eligible.append({
+            "key": item["item_key"],
+            "kind": kind,
+            "amount": amount,
+            "name": item["name"] or item["item_key"],
+            # Whether the shop also sells it. A member can win an item the shop
+            # does not offer, which is the point: `enabled` is a shop switch.
+            "sold_in_shop": item["enabled"],
+        })
+    return eligible
+
+
+def _mechanic_payload(item_key: str, overrides: dict):
+    """What the item page needs to render a mechanic's number, or None.
+
+    The bounds travel with the value because the alternative is the client
+    carrying its own copy of `MECHANIC_PARAMETERS` — which is exactly how an
+    interface starts rejecting what the API accepts, or offering what it does
+    not.
+    """
+    parameter = item_catalog.MECHANIC_PARAMETERS.get(item_key)
+    if parameter is None:
+        return None
+    definition = item_catalog.ITEM_DEFINITIONS[item_key]
+    return {
+        "value": item_catalog.mechanic_value(item_key, overrides),
+        "shipped": definition.value,
+        "minimum": parameter.minimum,
+        "maximum": parameter.maximum,
+        "unit": parameter.unit,
+    }
+
+
 @app.route("/api/guilds/<int:guild_id>/items")
 def guild_item_list(guild_id):
     """Every item this guild can sell, built-in and custom, in one list.
@@ -1420,6 +1489,18 @@ def guild_item_list(guild_id):
     custom = database.run_read_sync(
         database.get_shop_item_definitions, guild_id, language)
     hidden = set(settings_cache.setting(guild_id, "shop_hidden_items") or ())
+    overrides = settings_cache.setting(guild_id, "shop_item_values") or {}
+    if not isinstance(overrides, dict):
+        overrides = {}
+    # Every key any of this guild's banners can award, so a row can say whether
+    # the item is actually obtainable from the gacha rather than guessing from
+    # its template.
+    gacha_reward_keys = set()
+    for banner in database.run_read_sync(database.list_gacha_banners, guild_id):
+        for entries in ((banner.get("config") or {}).get("rewards") or {}).values():
+            for entry in entries or ():
+                if isinstance(entry, dict) and entry.get("enabled", True):
+                    gacha_reward_keys.add(entry.get("key"))
 
     items = []
     for key, definition in item_catalog.ITEM_DEFINITIONS.items():
@@ -1444,6 +1525,10 @@ def guild_item_list(guild_id):
             # never find it to un-hide it. It counts zero toward its section,
             # which is what "gives the slot back" means.
             "hidden": key in hidden,
+            # The mechanic's number, its bounds and its unit, so the item page
+            # can offer a field that cannot produce a value the validator would
+            # refuse. Absent for an item whose behaviour carries no number.
+            "mechanic": _mechanic_payload(key, overrides),
         })
     for item in custom:
         items.append({
@@ -1454,8 +1539,12 @@ def guild_item_list(guild_id):
             "effect": item["template_type"],
             "value": None,
             "price": item["price"],
-            "in_shop": True,
-            "in_gacha": False,
+            # `in_shop` is what `enabled` means and nothing more: a disabled
+            # item is simply not in the `/shop` menu, and can still be a banner
+            # reward. `in_gacha` is answered by looking, because "is my item in
+            # the gacha?" was a question the page could not answer at all.
+            "in_shop": item["enabled"],
+            "in_gacha": item["item_key"] in gacha_reward_keys,
             "enabled": item["enabled"],
             "editable": True,
             "price_setting": None,
@@ -1834,6 +1923,9 @@ def guild_gacha(guild_id):
         return jsonify({"status": "success", "data": {
             "banners": banners,
             "shipped_rewards": database.shipped_reward_table(),
+            # The guild's own items that can be a banner reward, so the reward
+            # picker offers them instead of an operator having to know the key.
+            "custom_rewards": _gacha_eligible_custom_items(guild_id),
         }})
     try:
         payload = require_json_object()

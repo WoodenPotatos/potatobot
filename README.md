@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.8.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.9.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -172,6 +172,18 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.9.0-beta.1
+
+- **Switching a feature off hides its page again.** It briefly only dimmed it, which was a workaround for an older problem — hiding the shop page once took away staff's only route to redemptions members had already paid for. Redeems has its own page now and is never hidden by anything, so the toggle can do what a toggle is for.
+- **The stray lines around the item creator's sections are gone.** They were the browser's own default box, because those sections had no styling at all. Same for the button row underneath them.
+- **Your own items can go in a gacha banner.** They always could, mechanically — what was missing is that the reward picker only offered the built-in items, so there was no way to choose one. They are offered by name now, with the amount filled in from the item.
+- A custom reward shows **its own name** to the member instead of a bracketed placeholder.
+- The item list now says whether the gacha can actually award each item, and "disabled" is only about the shop: a disabled item can still be a gacha reward, which is how you run something in the gacha without selling it.
+- **The "consumable" kind is no longer offered when creating an item.** It could only ever hand out an existing built-in item under a new name and price — it cannot change any of its numbers — so it invited an expectation it could not meet. Existing ones still open and edit normally.
+- **An LFG post keeps working after a restart.** Its buttons used to stop answering the moment the bot restarted — and the post expired on its own after two hours even if it didn't. Both are gone: the party is stored, so Join, Leave and Delete keep working for as long as the message is there.
+- Two people pressing Join at the same instant can no longer both take the last slot; one of them is told somebody got there first.
+- …and 9 more, in [CHANGELOG.md](CHANGELOG.md).
+
 ### 2.8.0-beta.1
 
 - **The shop has sections, and room to grow.** `/shop` asks which section first — Perks, Casino, Heist, Protection, Rentals — and then shows that section's items. Discord only allows 25 options in one menu, so the whole shop used to be 25 items: 17 built-in ones left you **eight** of your own, and that number dropped every time we added an item. Per section it is 25 each, so you have **108 slots** instead of 8, and a new built-in only ever costs a slot on its own shelf.
@@ -187,18 +199,6 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 
 - **The shop item editor follows the kind you pick.** Choosing "Vault" and still being asked which role to grant is fixed properly this time: the redraw was wired through the surrounding form and matched on an attribute, which had already broken twice in the same way, so it is wired straight to the Kind dropdown instead. There is nothing left in between to go wrong.
 - **Editing an item now shows what the item is set to.** The fields were the right ones but arrived empty — a vault opened reading "Nothing selected", and saving it wrote that back. All six kinds keep their stored values now.
-
-### 2.7.0-beta.1
-
-- **The five new casino items can be pulled at all now.** The lucky charm, stacked deck, marked card, metal detector and parachute were marked drawable but were never added to the shipped gacha table, so no banner could award them — and because "add missing rewards" compares your banner against that shipped table, it correctly reported nothing missing. The only route to them was "reset rewards", which throws away your own table. They are in the shipped 3-star tier now, so the button offers them.
-- **The gacha page's buttons follow the banner you are looking at.** They were built once when you opened the page, so switching banners in the picker left them describing the previous one — a banner that was missing rewards showed no "add missing" button at all.
-- **The audit log shows its entries again.** It drew the count in the header and then stopped, leaving the list loading forever, because the code that turns a timestamp into "3 hours ago" used a table that was never defined.
-- **Editing a shop item opens the right kind.** Every existing item opened as "Permanent role" asking which role to grant, whatever it actually was — so editing a vault and saving would have turned it into a role grant.
-- **Russian roulette.** `/russian` opens a lobby other members join; when the host starts it, one player takes the round and everybody else splits the pot. Up to ten players, and the house takes its 2% off the pot once rather than per player, so a bigger table is better odds and not worse.
-- Every ante is its own reserved wager, so a lobby nobody starts costs nothing: the antes come back when it expires, and again at the next start if the bot went down while it was open.
-- **Two channel games the bot keeps honest.** A **counting** channel and a **word chain** channel: people play, and the bot removes a message that breaks the rule and tells only its author why, so the channel still reads as the chain. Accents and capitals are ignored when words are compared, and a message that is not an attempt at all is left alone.
-- The same person cannot take two turns in a row unless you allow it, two people posting at once cannot both count, and every hundredth turn gets a 🏆.
-- …and 11 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

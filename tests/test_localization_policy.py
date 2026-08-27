@@ -192,12 +192,65 @@ class NavigationReachabilityTests(unittest.TestCase):
             with self.subTest(page=item["page"]):
                 self.assertIn(item["page"], self.sections)
 
-    def test_no_item_carries_both_hiding_rules(self):
-        """`updateNavigation` runs the two loops in sequence and each `toggle`
-        overwrites the other's decision, so the second one silently wins."""
-        for item in self.items:
-            with self.subTest(page=item["page"]):
-                self.assertFalse(item["category"] and item["feature"])
+    def test_every_class_the_client_builds_has_a_css_rule(self):
+        """A class defined nowhere renders as nothing, silently.
+
+        `.managed-section` had no rule at all, so every numbered section in the
+        item creator fell back to the user-agent `<fieldset>` border — a thin
+        inset rectangle with the legend notching its top edge, which reads as
+        stray lines nobody can explain. `.form-actions` and `.stack` were the
+        same, so the buttons sat flush against it. `.icon-button` was an earlier
+        instance of exactly this.
+
+        Only classes passed to `element()` as literals are checked: those are the
+        ones the client asserts exist, and a computed class name cannot be
+        matched from here without guessing.
+        """
+        import re
+
+        js = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        css = (ROOT / "dashboard" / "style.css").read_text(encoding="utf-8")
+        used = set()
+        for match in re.finditer(r"element\('[a-z]+', '([a-z0-9 -]+)'", js):
+            used.update(match.group(1).split())
+        styled = set(re.findall(r"\.([a-zA-Z][\w-]*)", css))
+        # `btn*` variants are composed from a shared base, so the modifier alone
+        # need not have a rule of its own.
+        missing = sorted(name for name in used - styled
+                         if not name.startswith("btn"))
+        self.assertEqual([], missing)
+
+    def test_navigation_decides_hidden_exactly_once(self):
+        """An item may carry both `data-feature` and `data-category`.
+
+        This rule has been restated twice, so the history is worth keeping. It
+        began as "an item may not carry both", because `updateNavigation` ran two
+        loops that each called `toggle('hidden', …)` and the second silently
+        overwrote the first. It then allowed both, because the loops had come to
+        toggle different classes — one hiding, one dimming. It is now the
+        stronger version: there is **one** pass and the two conditions are
+        combined, so a decision cannot be overwritten by construction rather
+        than by the two rules happening not to collide.
+
+        Asserted against the code with comments stripped, so a comment naming
+        `toggle` does not read as a second call to it.
+        """
+        source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        body = source[source.index("function updateNavigation("):]
+        body = body[:body.index("\n}")]
+        code = "\n".join(line for line in body.split("\n")
+                         if not line.strip().startswith("//"))
+        # Exactly one decision *per nav item*. The group header's own toggle is
+        # a separate question — whether a group with nothing visible in it should
+        # show its heading — and operates on the header, not the item.
+        self.assertEqual(
+            1, code.count("button.classList.toggle('hidden'"),
+            "more than one place decides a nav item's `hidden`, so one "
+            "decision is lost")
+        self.assertEqual(1, code.count("header.classList.toggle('hidden'"))
+        # And both conditions still reach that one decision.
+        self.assertIn("dataset.feature", code)
+        self.assertIn("dataset.category", code)
 
     def test_every_declared_feature_gate_exists(self):
         for item in self.items:
@@ -322,6 +375,7 @@ class JavaScriptIsActuallyRunTests(unittest.TestCase):
             "tests.test_item_creator.TemplateRoundTripTests",
             "tests.test_dashboard_boot.DashboardBootTests",
             "tests.test_item_creator.TemplateFieldsFollowTheChoiceTests",
+            "tests.test_dashboard_boot.StaleClientNoticeTests",
         ])
         result = unittest.TestResult()
         suite.run(result)

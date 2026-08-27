@@ -147,7 +147,19 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-html { color-scheme: light dark; }
+/* `scrollbar-gutter` is what stops a page reflowing when a menu opens.
+   An in-page popover is `position: absolute` in document coordinates on purpose
+   — a fixed element repositioned from JS can never keep up with a
+   compositor-thread scroll — but an absolutely positioned element still extends
+   the document's scrollable area. On a short page (the casino settings are five
+   switches and one field) opening a tall menu therefore made the document
+   scrollable for the first time, a scrollbar appeared, the viewport narrowed by
+   its width, and every `auto-fill` grid on the page re-laid out. Reserving the
+   gutter always means the viewport width never changes. */
+html {
+    color-scheme: light dark;
+    scrollbar-gutter: stable;
+}
 
 body {
     font-family: var(--font-body);
@@ -812,6 +824,30 @@ table.data tbody tr.reward-new td { background: var(--surface-raised); }
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
+    padding: 0 var(--space-2);
+    margin-left: calc(-1 * var(--space-2));
+    font-size: .71rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .11em;
+    color: var(--accent-strong);
+}
+
+/* The item creator's and the content builders' numbered sections. This class had
+   **no rule at all**, so every one of them fell back to the user-agent
+   `<fieldset>` border — a thin inset rectangle with the legend notching its top
+   edge, which is the stray lines an operator sees and cannot explain. Styled the
+   same way `.form-section` is, because they are the same thing on a different
+   page and looking different is the whole complaint. */
+.managed-section {
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    padding: var(--space-4) var(--space-5) var(--space-5);
+    margin-bottom: var(--space-4);
+    background: var(--surface-raised);
+}
+
+.managed-section > legend {
     padding: 0 var(--space-2);
     margin-left: calc(-1 * var(--space-2));
     font-size: .71rem;
@@ -1810,13 +1846,86 @@ input[type="color"] { width: 100%; height: 38px; padding: 2px; cursor: pointer; 
     color: var(--text);
     font-size: .84rem;
 }
-.nav-item-off > span { opacity: .55; }
-.nav-item-off::after {
-    content: "";
-    width: 6px;
-    height: 6px;
-    margin-left: auto;
-    border-radius: 50%;
-    background: var(--warning);
-    flex: 0 0 auto;
+/* `.nav-item-off` is gone: a switched-off feature hides its page rather than
+   dimming it, which is what the toggle is for. The muted variant briefly existed
+   because hiding once took away staff's route to paid-for fulfillment requests,
+   and that is solved by Redeems being its own ungated page instead. */
+
+
+/* Shown when the loaded bundle is older than the one the server serves. Fixed
+   to the bottom so it cannot be scrolled past, and above the toasts because it
+   needs acting on rather than reading. */
+.stale-notice {
+    position: fixed;
+    left: 50%;
+    bottom: var(--space-5);
+    transform: translateX(-50%);
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-md);
+    font-size: .88rem;
+    max-width: min(92vw, 34rem);
+}
+
+
+/* One sentence saying what a purchase of the chosen kind does. Sits above the
+   fields rather than under them, because it is what tells you whether the
+   fields below are the ones you wanted. */
+.section-note {
+    margin: 0 0 var(--space-4);
+    font-size: .86rem;
+    color: var(--text-muted);
+    max-width: 62ch;
+}
+
+.section-note:empty { display: none; }
+
+
+/* A number field that suggests values. The datalist is not rendered, so the
+   holder only has to not disturb the field's own sizing. */
+.input-with-presets { display: contents; }
+
+
+/* A built-in item's mechanic number, beside its effect name. The unit sits
+   before the field so the number is never ambiguous — 0.30 and 30 mean very
+   different things for a lockpick. */
+.mechanic-field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: 4px;
+}
+
+.mechanic-unit { font-size: .78rem; color: var(--text-muted); }
+.mechanic-field .price-input { width: 6.5rem; }
+
+
+/* Three classes the client uses that had no rule at all, which is why the item
+   creator looked unfinished: its sections had the user-agent fieldset border and
+   its buttons sat flush against them. A class defined nowhere is a trap this page
+   has hit before — `.icon-button` was one. */
+
+/* The submit row at the foot of an editor form. */
+.form-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+}
+
+/* A plain vertical run of blocks, used where a container only has to space its
+   children — the grouped item sections, for one. */
+.stack { display: flex; flex-direction: column; }
+
+/* An embed's body in the message preview: it is operator-authored text, so it
+   keeps its newlines and wraps rather than overflowing. */
+.preview-embed-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }

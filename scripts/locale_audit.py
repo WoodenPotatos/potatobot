@@ -261,6 +261,13 @@ def composed_key_families() -> dict:
         for key in item_catalog.SHOP_ITEMS
         for field in ("name", "desc")
     )
+    # What each item template does, shown in the creator. Derived from the
+    # template table so a new template cannot ship without an explanation —
+    # which is the whole reason the family exists.
+    families["item template notes"] = sorted(
+        f"dashboard.item_template_notes.{template}"
+        for template in item_catalog.SHOP_TEMPLATE_CATEGORIES
+    )
     # The shop's shelves. Derived from the enum, so a new category is gated the
     # moment it is declared — an unlabelled one would draw as a bracketed key in
     # a live Discord menu.

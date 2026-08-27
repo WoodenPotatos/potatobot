@@ -48,10 +48,12 @@ window.fetch = async (url) => {
         return ok({language: 'en', available: ['en'], data: {dashboard: locale.dashboard}});
     }
     if (u.includes('/auth/status')) {
-        return ok({status: 'success', data: {
-            user: {id: '42', username: 't', avatar: null}, is_host: true,
-            idle_timeout_seconds: 600,
-            guilds: [{guild_id: '1', name: 'G', icon: null}]}});
+        return ok({logged_in: true,
+                   user: {id: '42', username: 'tester', avatar: null},
+                   csrf_token: 'csrf-token', is_host: true,
+                   idle_timeout_seconds: 600, version: '0.0.0-test',
+                   asset_version: 'test-token',
+                   guilds: [{id: '1', name: 'Test Guild'}]});
     }
     if (u.includes('/settings/registry')) {
         return ok({status: 'success', data: {settings: {}, features: [], groups: []}});
@@ -72,7 +74,7 @@ window.eval(script);
 const EXPECTED = {
     fixed_role: ['Role'],
     timed_role: ['Role', 'Duration (days)'],
-    vault: ['Vault'],
+    vault: ['Protected reserve'],
     consumable: ['Consumable'],
     coin_bundle: ['Coins', 'Can be bought more than once'],
     fulfillment_voucher: ['Asset kind', 'Duration (days)'],
@@ -89,21 +91,52 @@ const EXPECTED = {
 
     const select = window.document.querySelector('#shop-item-editor select');
     assert.ok(select, 'the creator did not render');
+    /* A *new* item cannot be a `consumable`: it grants +1 of an existing built-in
+     * and cannot change any of its numbers, so offering it invites the
+     * reasonable expectation that it is how a variant is built, which it is not.
+     * It stays available when *editing* one, because a guild that already has
+     * such a row must be able to open and delete it. */
     const offered = [...select.options].map((o) => o.value);
-    assert.deepStrictEqual(offered.sort(), Object.keys(EXPECTED).sort(),
-        'the template list is not the declared one');
+    assert.ok(!offered.includes('consumable'),
+        'a new item must not be offered the consumable kind');
+    assert.deepStrictEqual(
+        offered.slice().sort(),
+        Object.keys(EXPECTED).filter((k) => k !== 'consumable').sort(),
+        'the template list is not the declared one minus what is withheld');
 
     const labels = () => [...window.document.querySelectorAll(
         '#shop-item-editor fieldset:nth-of-type(3) .field-label')]
         .map((node) => node.textContent);
 
+    const note = () => window.document.querySelector(
+        '#shop-item-editor fieldset:nth-of-type(3) .section-note').textContent;
+
     for (const [template, expected] of Object.entries(EXPECTED)) {
+        if (template === 'consumable') continue;   // not offered for a new item
         select.value = template;
         select.dispatchEvent(new window.Event('change', {bubbles: true}));
         await new Promise((r) => setTimeout(r, 20));
         assert.deepStrictEqual(labels(), expected,
             `${template} asked for ${JSON.stringify(labels())}`);
+        // Every kind explains itself, redrawn with the section so the sentence
+        // always describes the kind on screen. A vault's field is a reserve and
+        // a consumable's is which existing item to hand over; neither is
+        // apparent from a number and a dropdown, which is what made the creator
+        // read as broken.
+        assert.ok(note().length > 0, `${template} explains nothing`);
+        assert.ok(!note().startsWith('['), `${template}'s note is a raw key`);
     }
+    // And the notes are distinct — a copied sentence explains nothing either.
+    const notes = new Set();
+    for (const template of Object.keys(EXPECTED)) {
+        if (template === 'consumable') continue;
+        select.value = template;
+        select.dispatchEvent(new window.Event('change', {bubbles: true}));
+        await new Promise((r) => setTimeout(r, 10));
+        notes.add(note());
+    }
+    assert.strictEqual(notes.size, Object.keys(EXPECTED).length - 1,
+        'two templates share an explanation');
 
     // One text, in whatever language the guild speaks.
     const text = [...window.document.querySelectorAll(
@@ -125,7 +158,7 @@ const EXPECTED = {
     const STORED = {
         fixed_role: {role_id: ROLE},
         timed_role: {role_id: ROLE, duration_days: 30},
-        vault: {amount: 25000},
+        vault: {amount: 300000},
         consumable: {item_key: 'stacked_deck'},
         coin_bundle: {amount: 100, repeatable: false},
         fulfillment_voucher: {asset_type: 'emoji', duration_days: 180},
@@ -143,6 +176,10 @@ const EXPECTED = {
         const chosen = window.document.querySelector('#shop-item-editor select');
         assert.strictEqual(chosen.value, template,
             `editing a ${template} opened as ${chosen.value}`);
+        // A withheld kind is still selectable while editing an item that is one,
+        // or the row could never be opened.
+        assert.ok([...chosen.options].some((o) => o.value === template),
+            `${template} is not offered even when editing one`);
         assert.deepStrictEqual(labels(), EXPECTED[template],
             `editing a ${template} asked for ${JSON.stringify(labels())}`);
 
@@ -187,4 +224,8 @@ const EXPECTED = {
         'the redraw still relies on the event bubbling to an ancestor');
 
     console.log('ok');
+    // Explicit, because an authenticated boot starts the session
+    // countdown and the feature poller, and those pending timers keep
+    // Node alive indefinitely once the harness has finished.
+    process.exit(0);
 })();

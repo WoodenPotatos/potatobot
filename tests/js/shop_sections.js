@@ -51,10 +51,12 @@ window.fetch = async (url) => {
         return ok({language: 'en', available: ['en'], data: {dashboard: locale.dashboard}});
     }
     if (u.includes('/auth/status')) {
-        return ok({status: 'success', data: {
-            user: {id: '42', username: 't', avatar: null}, is_host: true,
-            idle_timeout_seconds: 600,
-            guilds: [{guild_id: '1', name: 'G', icon: null}]}});
+        return ok({logged_in: true,
+                   user: {id: '42', username: 'tester', avatar: null},
+                   csrf_token: 'csrf-token', is_host: true,
+                   idle_timeout_seconds: 600, version: '0.0.0-test',
+                   asset_version: 'test-token',
+                   guilds: [{id: '1', name: 'Test Guild'}]});
     }
     if (u.includes('/settings/registry')) {
         return ok({status: 'success', data: {settings: {}, features: [], groups: []}});
@@ -129,4 +131,8 @@ window.fetch = async (url) => {
         'a full section must say why it cannot be picked');
 
     console.log('ok');
+    // Explicit, because an authenticated boot starts the session
+    // countdown and the feature poller, and those pending timers keep
+    // Node alive indefinitely once the harness has finished.
+    process.exit(0);
 })();

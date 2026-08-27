@@ -366,3 +366,256 @@ class CustomItemTextTests(DashboardItemTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FreeFormVaultTests(DashboardItemTestCase):
+    """A custom vault protects the amount that was typed.
+
+    The field used to be a picker over the three built-in vaults and stored
+    whichever one's amount was chosen, so "create a new vault" could only ever
+    hand out an existing one — which is exactly how it read to the operator. The
+    server has always accepted any positive reserve; only the client forbade it.
+    """
+
+    def make(self, key, amount, price=1000):
+        return {"item_key": key, "template_type": "vault", "category": None,
+                "enabled": True, "price": price, "config": {"amount": amount},
+                "text": {"name": key, "description": "d"}}
+
+    def test_a_reserve_the_catalog_does_not_have_is_accepted(self):
+        self.create_item(self.make("vault_extra", 300000))
+        stored = database.get_shop_item_definitions(123)[0]
+        self.assertEqual({"amount": 300000}, stored["config"])
+        # Not one of the three built-in reserves, which is the whole point.
+        import item_catalog
+        self.assertNotIn(300000, [definition.value for definition
+                                  in item_catalog.VAULT_ITEMS.values()])
+
+    def test_buying_it_protects_exactly_that_amount(self):
+        self.create_item(self.make("vault_extra", 300000, price=500))
+        with database.get_connection() as conn:
+            conn.execute("INSERT INTO users (user_id, balance) VALUES (7, 900000)")
+            conn.commit()
+        result = database.purchase_custom_shop_item(123, 7, "vault_extra")
+        self.assertTrue(result["purchased"])
+        with database.get_connection() as conn:
+            reserve = conn.execute(
+                "SELECT protected_reserve FROM users WHERE user_id = 7"
+            ).fetchone()[0]
+        self.assertEqual(300000, reserve)
+
+    def test_a_smaller_reserve_does_not_downgrade_a_larger_one(self):
+        """A vault replaces a lower one; it must not work in reverse."""
+        self.create_item(self.make("vault_extra", 300000, price=500))
+        self.create_item(self.make("vault_tiny", 25000, price=100))
+        with database.get_connection() as conn:
+            conn.execute("INSERT INTO users (user_id, balance) VALUES (7, 900000)")
+            conn.commit()
+        database.purchase_custom_shop_item(123, 7, "vault_extra")
+        database.purchase_custom_shop_item(123, 7, "vault_tiny")
+        with database.get_connection() as conn:
+            reserve = conn.execute(
+                "SELECT protected_reserve FROM users WHERE user_id = 7"
+            ).fetchone()[0]
+        self.assertEqual(300000, reserve)
+
+    def test_zero_and_negative_reserves_are_still_refused(self):
+        for amount in (0, -1):
+            response = self.client.post(
+                "/api/guilds/123/shop-items",
+                json=self.make(f"vault_{abs(amount)}x", amount),
+                headers={"X-CSRF-Token": "csrf-token"})
+            self.assertEqual(400, response.status_code, amount)
+
+    def test_a_gacha_vault_reward_still_awards_the_catalog_reserve(self):
+        """Free-form reserves are a *shop* affordance. A banner rewarding a
+        catalog vault key must still award that vault's own amount, or the same
+        key would mean two different things depending on how it arrived."""
+        config = json.loads(json.dumps(database.DEFAULT_GACHA_CONFIG))
+        for entry in config["rewards"]["4"]:
+            if entry["key"] == "small_vault":
+                entry["amount"] = 999
+        with self.assertRaises(database.ValidationError):
+            database.set_gacha_banner(123, 42, True, config, 0)
+
+
+class MechanicPayloadTests(DashboardItemTestCase):
+    """The item page has to be able to offer a legal number and only a legal one.
+
+    The bounds travel with the value, because the alternative is the client
+    carrying its own copy of `MECHANIC_PARAMETERS` — which is how an interface
+    starts rejecting what the API accepts, or offering what it does not.
+    """
+
+    def rows(self):
+        payload = self.client.get("/api/guilds/123/items?lang=en").get_json()
+        return {entry["item_key"]: entry for entry in payload["data"]}
+
+    def test_a_configurable_item_carries_its_bounds_and_its_unit(self):
+        import item_catalog
+
+        rows = self.rows()
+        for key, parameter in item_catalog.MECHANIC_PARAMETERS.items():
+            with self.subTest(item=key):
+                mechanic = rows[key]["mechanic"]
+                self.assertEqual(parameter.minimum, mechanic["minimum"])
+                self.assertEqual(parameter.maximum, mechanic["maximum"])
+                self.assertEqual(parameter.unit, mechanic["unit"])
+                self.assertEqual(item_catalog.ITEM_DEFINITIONS[key].value,
+                                 mechanic["shipped"])
+                self.assertEqual(mechanic["shipped"], mechanic["value"])
+
+    def test_an_item_with_no_number_carries_no_mechanic(self):
+        rows = self.rows()
+        for key in ("loaded_die", "premium", "small_vault", "rent_sound"):
+            with self.subTest(item=key):
+                self.assertIsNone(rows[key]["mechanic"])
+
+    def test_an_override_is_reflected_in_the_value_but_not_the_shipped(self):
+        response = self.client.patch(
+            "/api/guilds/123/settings",
+            json={"changes": [{"key": "shop_item_values",
+                               "value": {"parachute": 180}, "revision": 0}]},
+            headers={"X-CSRF-Token": "csrf-token"})
+        self.assertEqual(200, response.status_code,
+                         response.get_data(as_text=True))
+        mechanic = self.rows()["parachute"]["mechanic"]
+        self.assertEqual(180, mechanic["value"])
+        # `shipped` is what "reset to normal" means, so it must not move.
+        self.assertEqual(195, mechanic["shipped"])
+
+
+class CustomItemAsGachaRewardTests(DashboardItemTestCase):
+    """A custom item can be a banner reward, and the page says whether it is.
+
+    The mechanics were never the problem: a banner has always accepted any reward
+    key and `_grant_gacha_reward_locked` has always granted it correctly — a
+    custom vault really does set the reserve it configures. Three interface gaps
+    made it look impossible. The reward picker offered the built-in catalog only,
+    so a custom item never appeared and, because a kind with built-in options
+    renders a select rather than a text field, its key could not be typed either.
+    The member saw `[gacha.rewards.<key>]`, because the locale family covers only
+    the shipped rewards. And the item page reported `in_gacha` as a flat False for
+    every custom item, so "is my item in the gacha?" was unanswerable.
+    """
+
+    def make_vault(self, key="vault_extra", amount=300000, enabled=False):
+        return {"item_key": key, "template_type": "vault", "category": None,
+                "enabled": enabled, "price": 1, "config": {"amount": amount},
+                "text": {"name": "Extra vault", "description": "d"}}
+
+    def make_bundle(self, key="big_bundle", amount=5000, enabled=True):
+        # Not repeatable: a repeatable bundle may not pay more than it costs,
+        # which is a real anti-inflation guard rather than a fixture detail.
+        return {"item_key": key, "template_type": "coin_bundle",
+                "category": None, "enabled": enabled, "price": 100,
+                "config": {"amount": amount, "repeatable": False},
+                "text": {"name": "Big bundle", "description": "d"}}
+
+    def offered(self):
+        payload = self.client.get("/api/guilds/123/gacha").get_json()["data"]
+        return {entry["key"]: entry for entry in payload["custom_rewards"]}
+
+    def test_an_eligible_custom_item_is_offered_with_its_own_amount(self):
+        self.create_item(self.make_vault())
+        self.create_item(self.make_bundle())
+        offered = self.offered()
+        self.assertEqual("vault", offered["vault_extra"]["kind"])
+        self.assertEqual(300000, offered["vault_extra"]["amount"])
+        self.assertEqual("coins", offered["big_bundle"]["kind"])
+        self.assertEqual(5000, offered["big_bundle"]["amount"])
+        # Named, because an operator chose the name and does not know the key.
+        self.assertEqual("Extra vault", offered["vault_extra"]["name"])
+
+    def test_a_shop_disabled_item_is_still_offered(self):
+        """The whole point: in the gacha for a while, never in the shop.
+        `enabled` is a shop switch and has no gacha meaning."""
+        self.create_item(self.make_vault(enabled=False))
+        offered = self.offered()
+        self.assertIn("vault_extra", offered)
+        self.assertFalse(offered["vault_extra"]["sold_in_shop"])
+
+    def test_a_template_with_no_safe_grant_path_is_not_offered(self):
+        """A voucher's asset type is parsed out of the reward *key* at
+        redemption, and the gacha has no role kind at all, so offering either
+        would produce a reward that cannot be delivered."""
+        self.create_item({
+            "item_key": "vip_role", "template_type": "fixed_role",
+            "category": None, "enabled": True, "price": 100,
+            "config": {"role_id": 1420070400000000002},
+            "text": {"name": "VIP", "description": "d"}})
+        self.create_item({
+            "item_key": "an_emoji", "template_type": "fulfillment_voucher",
+            "category": None, "enabled": True, "price": 100,
+            "config": {"asset_type": "emoji", "duration_days": 30},
+            "text": {"name": "Emoji", "description": "d"}})
+        self.assertEqual({}, self.offered())
+
+    def test_the_item_page_says_whether_the_gacha_can_award_it(self):
+        self.create_item(self.make_vault())
+        self.create_item(self.make_bundle())
+        config = json.loads(json.dumps(database.DEFAULT_GACHA_CONFIG))
+        config["rewards"]["5"].append(
+            {"key": "vault_extra", "kind": "vault", "amount": 300000,
+             "weight": 1})
+        database.set_gacha_banner(123, 42, True, config, 0)
+
+        rows = {entry["item_key"]: entry for entry
+                in self.client.get("/api/guilds/123/items?lang=en").get_json()["data"]}
+        self.assertTrue(rows["vault_extra"]["in_gacha"])
+        self.assertFalse(rows["vault_extra"]["in_shop"])
+        # And one that is only sold reads the other way round.
+        self.assertFalse(rows["big_bundle"]["in_gacha"])
+        self.assertTrue(rows["big_bundle"]["in_shop"])
+
+    def test_a_disabled_reward_row_does_not_count_as_obtainable(self):
+        self.create_item(self.make_vault())
+        config = json.loads(json.dumps(database.DEFAULT_GACHA_CONFIG))
+        config["rewards"]["5"].append(
+            {"key": "vault_extra", "kind": "vault", "amount": 300000,
+             "weight": 1, "enabled": False})
+        database.set_gacha_banner(123, 42, True, config, 0)
+        rows = {entry["item_key"]: entry for entry
+                in self.client.get("/api/guilds/123/items?lang=en").get_json()["data"]}
+        self.assertFalse(rows["vault_extra"]["in_gacha"])
+
+
+class CustomRewardLabelTests(unittest.TestCase):
+    """A custom reward is named, not shown as a bracketed locale key."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "labels.db")
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.create_shop_item_definition(1, 42, {
+            "item_key": "vault_extra", "template_type": "vault",
+            "category": None, "enabled": False, "price": 1,
+            "config": {"amount": 300000},
+            "text": {"name": "Extra vault", "description": "d"}})
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def test_a_custom_key_reads_as_the_operators_own_name(self):
+        from cogs.gacha import gacha_reward_label
+
+        self.assertEqual("Extra vault",
+                         gacha_reward_label("vault_extra", guild_id=1))
+
+    def test_a_shipped_key_is_never_renamed_by_a_guild(self):
+        from cogs.gacha import gacha_reward_label
+
+        label = gacha_reward_label("big_vault", guild_id=1)
+        self.assertFalse(label.startswith("["))
+        self.assertNotEqual("big_vault", label)
+
+    def test_a_key_with_no_item_and_no_locale_reads_as_itself(self):
+        """A banner saved before the item was deleted. The key beats a bracketed
+        key, which is what a member used to see."""
+        from cogs.gacha import gacha_reward_label
+
+        self.assertEqual("deleted_thing",
+                         gacha_reward_label("deleted_thing", guild_id=1))

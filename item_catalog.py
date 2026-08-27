@@ -206,6 +206,84 @@ GACHA_ELIGIBLE_ITEMS: dict[str, ItemDefinition] = {
 }
 
 
+@dataclass(frozen=True)
+class MechanicParameter:
+    """What a built-in item's number means, and how far it may be moved.
+
+    `ItemDefinition.value` is the shipped default. A guild may override it
+    through the `shop_item_values` setting, so this declares the bounds and, more
+    importantly, *why* each bound is where it is — every one of these numbers is
+    a knob on a game whose house edge is 2% by design, and a generous value is
+    not a cosmetic choice but a way to print coins.
+
+    `unit` names what the number counts, so the editor can label it without a
+    second list. `hardest` is the direction that favours the player, recorded
+    because the reviewer of a future bound needs to know which way is dangerous.
+    """
+
+    minimum: int | float
+    maximum: int | float
+    unit: str
+    player_favours: str          # "higher" or "lower"
+
+
+#: Only the mechanics whose number the code reads as a scalar. The four
+#: "keeps the better of two" items — the loaded die, stacked deck, lucky charm
+#: and marked card — are deliberately absent: their count lives in the *caller*,
+#: which pre-rolls two outcomes and passes both, so making it configurable is a
+#: signature change across three resolvers rather than a value lookup. Recorded
+#: in `todo.md` rather than half-done here.
+MECHANIC_PARAMETERS: dict[str, MechanicParameter] = {
+    # Added to a robbery's success chance, as a fraction — 0.15 is fifteen
+    # percentage points. Kept in the unit the code already uses rather than
+    # presented as a percentage, because a converted unit is two places for the
+    # conversion to be wrong. Capped at 0.50 because
+    # the base chance plus a defender's multipliers already lands well under 1,
+    # and a bonus above this makes a lockpick a guaranteed theft rather than an
+    # improved attempt.
+    "lockpick": MechanicParameter(0.01, 0.50, "fraction", "higher"),
+    # Share of a victim's protected reserve a drill exposes, as a fraction. 1.0
+    # would make a vault worthless, which is the one thing a vault must not be.
+    "vault_glove": MechanicParameter(0.01, 0.90, "fraction", "higher"),
+    # Safe tiles revealed before a minesweeper round. The board's multipliers are
+    # derived from the real odds, so every revealed tile is a step the player no
+    # longer risks: at 5 the game pays above its own ladder. Held to 3.
+    "metal_detector": MechanicParameter(1, 3, "tiles", "higher"),
+    # The multiplier a crash cannot burst before, in hundredths. Above 244 — the
+    # fourth rung — the item guarantees more than it can be priced for; 100 is
+    # the floor because below the first rung it protects nothing.
+    "parachute": MechanicParameter(100, 244, "hundredths", "higher"),
+    # Extra days of Everydle streak forgiven beyond the built-in grace. No
+    # economy effect at all, so the only bound is one that keeps a streak
+    # meaningful.
+    "streak_freeze": MechanicParameter(1, 14, "days", "higher"),
+}
+
+
+def mechanic_value(item_key: str, overrides=None):
+    """This guild's number for a built-in item's mechanic.
+
+    The one place the question is answered, so the shop, the games and the
+    dashboard cannot disagree. An override outside the declared bounds is
+    ignored rather than clamped: it can only arrive from a row written before a
+    bound tightened, and silently applying half of an operator's intention is
+    worse than applying none of it.
+    """
+    definition = ITEM_DEFINITIONS.get(item_key)
+    shipped = definition.value if definition else None
+    parameter = MECHANIC_PARAMETERS.get(item_key)
+    if parameter is None or not overrides:
+        return shipped
+    chosen = overrides.get(item_key)
+    if chosen is None:
+        return shipped
+    if not isinstance(chosen, (int, float)) or isinstance(chosen, bool):
+        return shipped
+    if not parameter.minimum <= chosen <= parameter.maximum:
+        return shipped
+    return chosen
+
+
 #: A custom item's shelf when its operator has not chosen one. `consumable`
 #: resolves through the item it wraps rather than guessing, so a custom
 #: "Burglar's Kit" that grants lockpicks lands in `heist` and a "Casino Pass"

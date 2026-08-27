@@ -56,6 +56,7 @@ READ_ONLY_OPERATIONS = {
     "get_gacha_banner", "list_gacha_banners", "get_work_responses",
     "get_five_star_history", "get_gacha_pity", "get_active_entitlements",
     "get_minigame_state",
+    "get_lfg_post",
     "get_user_inventory",
     "get_user_vouchers",
     "get_guild_settings", "get_instance_settings", "get_schema_version",
@@ -162,7 +163,7 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_survivor", "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 16
+LATEST_SCHEMA_VERSION = 17
 
 # A claimed control action is re-queued only once its lease expires. The worker
 # renews the lease as it runs, so slowness never causes a duplicate Discord post.
@@ -608,6 +609,23 @@ def _create_scoped_schema(conn):
         -- Schema 15. One row per channel game per guild: where the chain is up
         -- to, and who moved last. Small and hot — read on every message in a
         -- game channel — so it is one row rather than a log.
+        CREATE TABLE IF NOT EXISTS lfg_posts (
+            guild_id INTEGER NOT NULL,
+            message_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            host_id INTEGER NOT NULL,
+            -- Exactly one of these is set: a game is either one of the guild's
+            -- game roles or a line of text the host typed.
+            game_role_id INTEGER,
+            game_text TEXT,
+            needed INTEGER NOT NULL DEFAULT 0,
+            -- The party, as an ordered JSON list. A second table would be more
+            -- normalised and every read wants the whole list anyway, in order,
+            -- which is what the embed prints.
+            joined_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, message_id)
+        );
         CREATE TABLE IF NOT EXISTS minigame_state (
             guild_id INTEGER NOT NULL,
             game_key TEXT NOT NULL,
@@ -2207,12 +2225,19 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
                 elif day_gap in (1, 2):
                     # A single missed day is already forgiven, and always was.
                     new_streak = streak_count + 1
-                elif (day_gap == 3 and guild_id is not None
+                elif (guild_id is not None
+                      and day_gap <= 2 + int(
+                          item_catalog.mechanic_value(
+                              "streak_freeze",
+                              guild_item_values(guild_id)) or 0)
                       and _consume_streak_freeze(conn, guild_id, user_id,
                                                  timestamp)):
-                    # One freeze covers exactly one day beyond the built-in
-                    # grace. A longer absence resets, or the item would be a
-                    # permanent streak rather than one forgiven day.
+                    # A freeze covers its configured number of days beyond the
+                    # built-in grace of two, one by default. A longer absence
+                    # resets, or the item would be a permanent streak rather
+                    # than a bounded forgiveness. The bound is checked *before*
+                    # the item is spent, so a gap nothing can cover never
+                    # consumes one.
                     new_streak = streak_count + 1
                     froze_streak = True
                 else:
@@ -3691,7 +3716,14 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
             # CLAUDE.md forbids guessing which guild a legacy row belonged to.
             inventory_lockpick = attacker[7] > 0
             inventory_glove = attacker[8] > 0
-            final_chance = (base_chance + attacker[5] + (0.15 if inventory_lockpick else 0.0)) * (
+            # Read rather than written: this was the literal `0.15`, which
+            # merely duplicated `ItemDefinition.value` and meant a guild could
+            # never change it — and would have made a configurable lockpick
+            # silently do nothing.
+            lockpick_bonus = item_catalog.mechanic_value(
+                "lockpick", guild_item_values(guild_id)) or 0.0
+            final_chance = (base_chance + attacker[5]
+                            + (lockpick_bonus if inventory_lockpick else 0.0)) * (
                 victim_passive_defense * victim_defense
             )
             won = chance_roll < final_chance
@@ -3699,7 +3731,10 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
                 protected = min(victim[0], max(0, victim[2]))
                 stealable = max(0, victim[0] - protected)
                 if inventory_glove:
-                    stealable += int(protected * 0.25)
+                    # Was the literal `0.25`, for the same reason.
+                    exposure = item_catalog.mechanic_value(
+                        "vault_glove", guild_item_values(guild_id)) or 0.0
+                    stealable += int(protected * exposure)
                 amount = max(1, int(stealable * steal_percent)) if stealable else 0
                 attacker_result = _apply_stats_locked(
                     conn, attacker_id, amount, 30, win_inc=1, clamp_balance=False
@@ -4635,6 +4670,184 @@ def get_gacha_banner(guild_id: int, banner_key: str = DEFAULT_GACHA_BANNER_KEY) 
                 "is_default": True,
                 "config": json.loads(json.dumps(DEFAULT_GACHA_CONFIG))}
     return _banner_row_dict(row)
+
+
+def create_lfg_post(guild_id: int, message_id: int, channel_id: int,
+                    host_id: int, needed: int, game_role_id=None,
+                    game_text=None) -> None:
+    """Record a posted LFG message so its buttons survive a restart.
+
+    Written *after* the message is sent, because the id does not exist before
+    then — the same order `record_managed_post` uses. A caller whose insert fails
+    is holding a post with dead buttons and must remove it.
+    """
+    timestamp = datetime.now(timezone.utc).isoformat()
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                "INSERT INTO lfg_posts (guild_id, message_id, channel_id, "
+                "host_id, game_role_id, game_text, needed, joined_json, "
+                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?)",
+                (int(guild_id), int(message_id), int(channel_id), int(host_id),
+                 int(game_role_id) if game_role_id else None, game_text,
+                 max(0, int(needed)), timestamp),
+            )
+            conn.commit()
+    except sqlite3.Error as exc:
+        db_logger.exception("Could not record an LFG post (guild=%s, message=%s)",
+                            guild_id, message_id)
+        raise DatabaseOperationError("lfg post insert failed") from exc
+
+
+def get_lfg_post(guild_id: int, message_id: int):
+    """One LFG post, or None when the row is gone.
+
+    None is the ordinary case for a post made before this table existed, and the
+    caller answers the click with "this post has expired" rather than failing.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT channel_id, host_id, game_role_id, game_text, needed, "
+            "joined_json, created_at FROM lfg_posts "
+            "WHERE guild_id = ? AND message_id = ?",
+            (int(guild_id), int(message_id)),
+        ).fetchone()
+    if row is None:
+        return None
+    try:
+        joined = json.loads(row[5])
+    except (TypeError, ValueError):
+        joined = []
+    return {"channel_id": row[0], "host_id": row[1], "game_role_id": row[2],
+            "game_text": row[3], "needed": row[4],
+            "joined": [int(uid) for uid in joined if isinstance(uid, int)],
+            "created_at": row[6]}
+
+
+def _set_lfg_party(conn, guild_id: int, message_id: int, expected, party):
+    """Commit a party list only if the stored one is still what we read.
+
+    A conditional UPDATE rather than a read followed by a write: two people
+    pressing Join in the same instant would otherwise both read the same list
+    and one of them would vanish. The rowcount is the answer, exactly as
+    `advance_minigame` does it.
+    """
+    return conn.execute(
+        "UPDATE lfg_posts SET joined_json = ? "
+        "WHERE guild_id = ? AND message_id = ? AND joined_json = ?",
+        (json.dumps(party), int(guild_id), int(message_id),
+         json.dumps(expected)),
+    ).rowcount == 1
+
+
+def join_lfg_post(guild_id: int, message_id: int, user_id: int):
+    """Add somebody to a party, or say why not.
+
+    Returns the post with its new party, or a `{"error": …}` naming the reason.
+    Every refusal is checked inside the transaction, so a full party cannot gain
+    an extra member between the check and the write.
+    """
+    try:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT host_id, needed, joined_json FROM lfg_posts "
+                "WHERE guild_id = ? AND message_id = ?",
+                (int(guild_id), int(message_id)),
+            ).fetchone()
+            if row is None:
+                conn.rollback()
+                return {"error": "gone"}
+            host_id, needed, stored = row
+            party = [int(uid) for uid in json.loads(stored)]
+            if int(user_id) == int(host_id):
+                conn.rollback()
+                return {"error": "host"}
+            if int(user_id) in party:
+                conn.rollback()
+                return {"error": "already"}
+            if needed > 0 and len(party) >= needed:
+                conn.rollback()
+                return {"error": "full"}
+            updated = party + [int(user_id)]
+            if not _set_lfg_party(conn, guild_id, message_id, party, updated):
+                conn.rollback()
+                return {"error": "raced"}
+            conn.commit()
+            return {"joined": updated, "needed": needed, "host_id": host_id,
+                    "full": needed > 0 and len(updated) >= needed}
+    except sqlite3.Error as exc:
+        db_logger.exception("LFG join failed (guild=%s, message=%s)",
+                            guild_id, message_id)
+        raise DatabaseOperationError("lfg join failed") from exc
+
+
+def leave_lfg_post(guild_id: int, message_id: int, user_id: int):
+    """Remove somebody from a party, or say why not."""
+    try:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT needed, joined_json FROM lfg_posts "
+                "WHERE guild_id = ? AND message_id = ?",
+                (int(guild_id), int(message_id)),
+            ).fetchone()
+            if row is None:
+                conn.rollback()
+                return {"error": "gone"}
+            needed, stored = row
+            party = [int(uid) for uid in json.loads(stored)]
+            if int(user_id) not in party:
+                conn.rollback()
+                return {"error": "absent"}
+            updated = [uid for uid in party if uid != int(user_id)]
+            if not _set_lfg_party(conn, guild_id, message_id, party, updated):
+                conn.rollback()
+                return {"error": "raced"}
+            conn.commit()
+            return {"joined": updated, "needed": needed,
+                    "full": needed > 0 and len(updated) >= needed}
+    except sqlite3.Error as exc:
+        db_logger.exception("LFG leave failed (guild=%s, message=%s)",
+                            guild_id, message_id)
+        raise DatabaseOperationError("lfg leave failed") from exc
+
+
+def delete_lfg_post(guild_id: int, message_id: int) -> bool:
+    """Forget a post. True when a row was actually removed."""
+    try:
+        with get_connection() as conn:
+            removed = conn.execute(
+                "DELETE FROM lfg_posts WHERE guild_id = ? AND message_id = ?",
+                (int(guild_id), int(message_id)),
+            ).rowcount
+            conn.commit()
+            return removed == 1
+    except sqlite3.Error as exc:
+        db_logger.exception("LFG delete failed (guild=%s, message=%s)",
+                            guild_id, message_id)
+        raise DatabaseOperationError("lfg delete failed") from exc
+
+
+def prune_lfg_posts(older_than_days: int = 7) -> int:
+    """Drop posts nobody will use again.
+
+    A post is a moment rather than a record, so the row has no reason to outlive
+    the message by much. This is housekeeping, not correctness: a stale row only
+    ever answers a click on a message that is almost certainly gone.
+    """
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(days=max(1, int(older_than_days)))).isoformat()
+    try:
+        with get_connection() as conn:
+            removed = conn.execute(
+                "DELETE FROM lfg_posts WHERE created_at < ?", (cutoff,)
+            ).rowcount
+            conn.commit()
+            return removed
+    except sqlite3.Error as exc:
+        db_logger.exception("LFG prune failed")
+        raise DatabaseOperationError("lfg prune failed") from exc
 
 
 def get_minigame_state(guild_id: int, game_key: str) -> dict:
@@ -5627,6 +5840,26 @@ def _assert_section_has_room(conn, guild_id: int, shelf: str,
         conn.rollback()
         raise ValidationError("shop_item_limit", "shop section is full",
                               limit=capacity, category=shelf)
+
+
+def guild_item_values(guild_id: int) -> dict:
+    """This guild's overrides for the built-in item mechanics.
+
+    Read through the settings cache like every other setting, so a dashboard
+    change is visible immediately and a game does not open a connection per
+    round. Falls back to no overrides on any failure: a mechanic reverting to its
+    shipped number is a game that still works, where an exception inside a
+    settlement transaction is not.
+    """
+    try:
+        import settings_cache
+
+        value = settings_cache.setting(int(guild_id), "shop_item_values")
+    except Exception:
+        db_logger.exception("Could not read item value overrides (guild=%s)",
+                            guild_id)
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _assert_unhide_has_room(conn, guild_id: int, previous, value) -> None:

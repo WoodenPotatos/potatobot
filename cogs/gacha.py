@@ -24,7 +24,20 @@ from support_tickets import open_ticket
 gacha_logger = logging.getLogger("PotatoBot.Gacha")
 
 
-def gacha_reward_label(key, duration_days=None):
+def gacha_reward_label(key, duration_days=None, guild_id=None):
+    """What a member is shown for one reward key.
+
+    `guild_id` lets a **custom shop item** used as a banner reward be named. A
+    banner has always accepted any key and the pull has always granted it
+    correctly — a custom vault really does set the reserve it configures — but
+    without this the member saw `[gacha.rewards.vault_extra]`, because the locale
+    family only covers the shipped rewards. The guild's own item carries the name
+    its operator typed, so that is what it is called.
+
+    The locale catalog still wins where it has an entry, so a shipped reward is
+    never renamed by a guild that happens to have created a key like it — which
+    it cannot anyway, since built-in keys are reserved.
+    """
     if duration_days is not None and key.split("_", 1)[0] in {"emoji", "sticker", "sound"}:
         known = {
             "emoji_30d", "sticker_30d", "sound_30d",
@@ -36,7 +49,21 @@ def gacha_reward_label(key, duration_days=None):
                 asset=t(f"gacha.asset_types.{key.split('_', 1)[0]}"),
                 days=duration_days,
             )
-    return t(f"gacha.rewards.{key}")
+    label = t(f"gacha.rewards.{key}")
+    if not label.startswith("[") or guild_id is None:
+        return label
+    # No shipped entry: this is one of the guild's own items, or a key from a
+    # banner saved before the item was deleted. A stored name beats a bracketed
+    # key, and the key itself beats a bracketed one.
+    try:
+        for item in database.get_shop_item_definitions(int(guild_id)):
+            if item["item_key"] == key:
+                return item["name"] or key
+    except database.DatabaseOperationError:
+        gacha_logger.exception(
+            "Could not read a custom item's name for a reward label "
+            "(guild_id=%s, key=%s)", guild_id, key)
+    return key
 
 
 async def revoke_entitlement(guild, entitlement) -> bool:
@@ -195,7 +222,8 @@ class Gacha(commands.Cog):
                 t(
                     "gacha.result_line",
                     stars="⭐" * reward["rarity"],
-                    reward=gacha_reward_label(reward["key"]),
+                    reward=gacha_reward_label(reward["key"],
+                                              guild_id=ctx.guild.id),
                     suffix=suffix,
                 )
             )
@@ -230,13 +258,17 @@ class Gacha(commands.Cog):
             database.run_read(database.get_user_vouchers, ctx.guild.id, ctx.author.id),
         )
         item_lines = [
-            t("gacha.inventory_item", item=gacha_reward_label(key), amount=amount)
+            t("gacha.inventory_item",
+              item=gacha_reward_label(key, guild_id=ctx.guild.id),
+              amount=amount)
             for key, amount in items.items()
         ] or [t("gacha.inventory_empty")]
         voucher_lines = [
             t(
                 "gacha.inventory_voucher",
-                reward=gacha_reward_label(voucher["reward_key"], voucher["duration_days"]),
+                reward=gacha_reward_label(voucher["reward_key"],
+                                          voucher["duration_days"],
+                                          guild_id=ctx.guild.id),
                 voucher_id=voucher["voucher_id"],
                 status=t(f"gacha.voucher_status.{voucher['status']}"),
             )
@@ -297,7 +329,8 @@ class Gacha(commands.Cog):
 
         lines = [
             t("gacha.pity_history_line",
-              reward=gacha_reward_label(entry["reward_key"]),
+              reward=gacha_reward_label(entry["reward_key"],
+                                        guild_id=ctx.guild.id),
               pity=entry["pity"],
               marker=(t("gacha.pity_marker_hard") if entry["hard_pity"]
                       else t("gacha.pity_marker_featured") if entry["featured"]

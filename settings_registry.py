@@ -201,6 +201,11 @@ JSON_SHAPE_FACTIONS = "factions"          # {key: {leader_role_id, manageable_id
 # this is derived from the platform rather than chosen.
 ROLE_MENU_ENTRY_LIMIT = 25
 
+#: `{item_key: number}` — a guild's override for a built-in mechanic's number.
+#: The key set and the bounds come from `item_catalog.MECHANIC_PARAMETERS`, so
+#: this shape has no list of its own to drift.
+JSON_SHAPE_ITEM_VALUES = "item_values"
+
 # Where a snowflake sits inside each shape, so the browser gets it as a string.
 # One declaration, read by the wire transform and by the tests: an id nested one
 # level down rounds exactly as readily as one at the top, and the bug does not
@@ -210,6 +215,10 @@ JSON_SHAPE_SNOWFLAKE_FIELDS = {
     JSON_SHAPE_LEVEL_ROLES: None,          # the value is the id itself
     JSON_SHAPE_LFG_CHANNELS: None,
     JSON_SHAPE_FACTIONS: ("leader_role_id", "manageable_ids"),
+    # Declared as holding no snowflake rather than omitted: `wire_json_shape`
+    # treats an absent shape as "nothing to transform", which is the same
+    # behaviour by accident, and this is the one place the question is answered.
+    JSON_SHAPE_ITEM_VALUES: (),
 }
 
 # Every field a shape's entry has, with what an absent one stands for. The row
@@ -713,6 +722,17 @@ SETTING_DEFINITIONS = {
     )
 }
 
+# A guild's own numbers for the built-in item mechanics. One JSON setting rather
+# than one per item, because the set is declared by `MECHANIC_PARAMETERS` and a
+# generated family would put five more rows on the Economy page that belong
+# beside the items instead. `edited_elsewhere` keeps it off the settings form for
+# that reason; the item page is where it is typed.
+_item_values = _setting(
+    "shop_item_values", "economy", "shop", SettingValueType.JSON, {},
+    feature="shop", json_shape=JSON_SHAPE_ITEM_VALUES, edited_elsewhere=True,
+)
+SETTING_DEFINITIONS[_item_values.key] = _item_values
+
 # Which built-in items this guild does not sell. One setting holding a set,
 # rather than seventeen booleans: `shop_price_*` is seventeen settings because
 # each carries a distinct *value*, while hiding carries only membership, so
@@ -972,11 +992,49 @@ def _validated_role_menu(value):
     return normalised
 
 
+def _validated_item_values(value):
+    """A guild's overrides for the built-in item mechanics.
+
+    The allowed keys and their bounds come from
+    `item_catalog.MECHANIC_PARAMETERS`, so there is no second list here to drift
+    from the declaration. An out-of-bounds number is **refused**, not clamped:
+    every one of these is a knob on a game whose house edge is 2% by design, and
+    silently applying half of what an operator asked for is how a game quietly
+    starts paying more than it takes.
+
+    An entry equal to the shipped default is dropped rather than stored, so
+    "reset it to normal" leaves no row behind that a later change to the default
+    would then be unable to reach.
+    """
+    value = _shaped_map(value, "item values")
+    cleaned = {}
+    for key, number in value.items():
+        parameter = item_catalog.MECHANIC_PARAMETERS.get(key)
+        if parameter is None:
+            raise ValueError(f"{key} has no configurable mechanic")
+        if isinstance(number, bool) or not isinstance(number, (int, float)):
+            raise ValueError(f"{key} must be a number")
+        if not parameter.minimum <= number <= parameter.maximum:
+            raise ValueError(
+                f"{key} must be between {parameter.minimum} and "
+                f"{parameter.maximum}")
+        shipped = item_catalog.ITEM_DEFINITIONS[key].value
+        if number == shipped:
+            continue
+        # Stored as an int where the declaration is integral, so a browser
+        # sending 3.0 for a tile count does not read back as a change.
+        cleaned[key] = (int(number)
+                        if float(number).is_integer()
+                        and isinstance(parameter.minimum, int) else number)
+    return cleaned
+
+
 _JSON_SHAPE_VALIDATORS = {
     JSON_SHAPE_ROLE_MENU: _validated_role_menu,
     JSON_SHAPE_LEVEL_ROLES: _validated_level_roles,
     JSON_SHAPE_LFG_CHANNELS: _validated_lfg_channels,
     JSON_SHAPE_FACTIONS: _validated_factions,
+    JSON_SHAPE_ITEM_VALUES: _validated_item_values,
 }
 
 

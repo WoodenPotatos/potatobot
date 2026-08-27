@@ -19,7 +19,7 @@ from discord.ext import commands
 from datetime import datetime, timedelta
 from cogs.utils import (
     BoundedCooldownMap, apply_database_result, currency_emoji, is_channel,
-    is_premium, t,
+    is_premium, item_mechanic_value, t,
 )
 from feature_access import require_interaction_feature
 
@@ -1040,7 +1040,7 @@ async def start_crash_game(ctx_or_int, bet):
                       if isinstance(ctx_or_int, discord.Interaction)
                       else ctx_or_int.send(msg, ephemeral=True))
 
-    floor = (int(item_catalog.ITEM_DEFINITIONS["parachute"].value)
+    floor = (int(item_mechanic_value(ctx_or_int.guild.id, "parachute") or 0)
              if reservation["consumed"] else 0)
     # Drawn once, before the first click, so no click can influence it. The item
     # was already consumed by the reservation above, atomically with the stake.
@@ -1521,8 +1521,9 @@ async def start_mines_game(ctx_or_int, bet):
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True) if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.send(msg, ephemeral=True))
 
+    # This guild's number, not the shipped one: the mechanic is configurable.
     detector_tiles = (
-        int(item_catalog.ITEM_DEFINITIONS["metal_detector"].value)
+        int(item_mechanic_value(ctx_or_int.guild.id, "metal_detector") or 0)
         if reservation["consumed"] else 0
     )
     view = MinesweeperView(user, bet, start_mines_game, wager_id,

@@ -10,8 +10,10 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-from discord.ext import commands
-from cogs.utils import BoundedCooldownMap, t, guild_setting_sync
+from discord.ext import commands, tasks
+import database
+from cogs.utils import (BoundedCooldownMap, display_member_name,
+                        guild_setting_sync, handle_loop_error, t)
 from version import REPOSITORY_URL, release_channel, version_display
 from feature_access import require_interaction_feature
 
@@ -210,25 +212,85 @@ class HelpView(discord.ui.View):
         super().__init__()
         self.add_item(HelpSelect(user_roles, is_admin, guild_id))
 
+def lfg_embed(guild, post):
+    """Render one stored LFG post.
+
+    Everything comes from the row plus live Discord state, so the same post
+    renders identically after a restart. A host who has left the guild is shown
+    through `display_member_name`, which never prints a raw id.
+    """
+    role = (guild.get_role(int(post["game_role_id"]))
+            if post["game_role_id"] else None)
+    if role is not None:
+        game_name, colour = role.mention, role.color
+    else:
+        game_name = f"**{post['game_text'] or ''}**"
+        colour = discord.Color.teal()
+
+    host = guild.get_member(int(post["host_id"]))
+    host_name = (host.mention if host
+                 else display_member_name(guild, int(post["host_id"])))
+
+    embed = discord.Embed(title=t("general.lfg_title"), color=colour)
+    desc = t("general.lfg_host_game", host=host_name, game=game_name)
+    joined = post["joined"]
+    if post["needed"] > 0:
+        desc += t("general.lfg_needed", joined=len(joined), needed=post["needed"])
+    else:
+        desc += t("general.lfg_any")
+    if joined:
+        embed.add_field(
+            name=t("general.lfg_joined_title"),
+            value="\n".join(t("general.lfg_joined_format", uid=uid)
+                            for uid in joined),
+            inline=False)
+    else:
+        embed.add_field(name=t("general.lfg_joined_title"),
+                        value=t("general.lfg_nobody_yet"), inline=False)
+    embed.description = desc
+    return embed
+
+
 class LFGView(discord.ui.View):
-    def __init__(self, host: discord.Member, game_info, needed: int):
-        super().__init__(timeout=2 * 60 * 60)
-        self.host = host
-        self.game_info = game_info 
-        self.needed = needed
-        self.joined = []
+    """A party post whose buttons keep working across a restart.
 
-        btn_join = discord.ui.Button(label=t("general.lfg_btn_join"), style=discord.ButtonStyle.success, emoji="✅")
-        btn_join.callback = self.join_btn
-        self.add_item(btn_join)
+    This used to be non-persistent with a two-hour timeout and its whole state —
+    host, game, party — in memory, so a restart left three buttons that answered
+    "This interaction failed" and the post died two hours in regardless. The
+    state lives in `lfg_posts` now and is read per interaction.
 
-        btn_leave = discord.ui.Button(label=t("general.lfg_btn_leave"), style=discord.ButtonStyle.danger, emoji="❌")
-        btn_leave.callback = self.leave_btn
-        self.add_item(btn_leave)
+    `LFGView()` with no argument is the **routing** instance handed to
+    `bot.add_view()`. It holds nothing about any particular post and every button
+    is enabled, because a persistent view is shared by every message it serves —
+    disabling Join on the instance would disable it everywhere. A full party is
+    rendered by `lfg_view_for`, which builds a fresh view for that one edit.
+    """
 
-        btn_delete = discord.ui.Button(label=t("general.lfg_btn_delete"), style=discord.ButtonStyle.secondary, emoji="🗑️")
-        btn_delete.callback = self.delete_btn
-        self.add_item(btn_delete)
+    JOIN_ID = "lfg:join"
+    LEAVE_ID = "lfg:leave"
+    DELETE_ID = "lfg:delete"
+
+    def __init__(self, join_disabled: bool = False):
+        super().__init__(timeout=None)
+
+        join = discord.ui.Button(
+            label=t("general.lfg_btn_join"), style=discord.ButtonStyle.success,
+            emoji="✅", custom_id=self.JOIN_ID, disabled=join_disabled)
+        join.callback = self.join_btn
+        self.add_item(join)
+
+        leave = discord.ui.Button(
+            label=t("general.lfg_btn_leave"), style=discord.ButtonStyle.danger,
+            emoji="❌", custom_id=self.LEAVE_ID)
+        leave.callback = self.leave_btn
+        self.add_item(leave)
+
+        remove = discord.ui.Button(
+            label=t("general.lfg_btn_delete"),
+            style=discord.ButtonStyle.secondary, emoji="🗑️",
+            custom_id=self.DELETE_ID)
+        remove.callback = self.delete_btn
+        self.add_item(remove)
 
     async def interaction_check(self, interaction: discord.Interaction):
         if not await require_interaction_feature(interaction, "lfg"):
@@ -244,60 +306,49 @@ class LFGView(discord.ui.View):
         lfg_interaction_times[interaction.user.id] = now
         return True
 
-    def build_embed(self):
-        if isinstance(self.game_info, discord.Role):
-            game_name = self.game_info.mention
-            embed_color = self.game_info.color
-        else:
-            game_name = f"**{self.game_info}**"
-            embed_color = discord.Color.teal() 
-
-        embed = discord.Embed(
-            title=t("general.lfg_title"),
-            color=embed_color
-        )
-        
-        desc = t("general.lfg_host_game", host=self.host.mention, game=game_name)
-        
-        if self.needed > 0:
-            desc += t("general.lfg_needed", joined=len(self.joined), needed=self.needed)
-        else:
-            desc += t("general.lfg_any")
-
-        if self.joined:
-            players_str = "\n".join([t("general.lfg_joined_format", uid=uid) for uid in self.joined])
-            embed.add_field(name=t("general.lfg_joined_title"), value=players_str, inline=False)
-        else:
-            embed.add_field(name=t("general.lfg_joined_title"), value=t("general.lfg_nobody_yet"), inline=False)
-            
-        embed.description = desc
-        return embed
+    async def _refuse(self, interaction, reason):
+        """One place mapping a model refusal to something a member can read."""
+        keys = {
+            "gone": "general.lfg_err_expired",
+            "host": "general.lfg_err_host_auto_in",
+            "already": "general.lfg_err_already_joined",
+            "full": "general.lfg_err_full",
+            "absent": "general.lfg_err_not_in",
+            "raced": "general.lfg_err_raced",
+        }
+        await interaction.response.send_message(
+            t(keys.get(reason, "general.lfg_err_expired")), ephemeral=True)
 
     async def join_btn(self, interaction: discord.Interaction):
-        if interaction.user.id in self.joined:
-            return await interaction.response.send_message(t("general.lfg_err_already_joined"), ephemeral=True)
-        if interaction.user.id == self.host.id:
-            return await interaction.response.send_message(t("general.lfg_err_host_auto_in"), ephemeral=True)
-        if self.needed > 0 and len(self.joined) >= self.needed:
-            return await interaction.response.send_message(t("general.lfg_err_full"), ephemeral=True)
+        result = await database.run_write(
+            database.join_lfg_post, interaction.guild.id,
+            interaction.message.id, interaction.user.id)
+        if "error" in result:
+            return await self._refuse(interaction, result["error"])
 
-        self.joined.append(interaction.user.id)
+        post = await database.run_read(
+            database.get_lfg_post, interaction.guild.id, interaction.message.id)
+        if post is None:
+            return await self._refuse(interaction, "gone")
+        # Acknowledge first. The announcement used to be sent before this, so a
+        # refused channel send left the member joined, the interaction
+        # unacknowledged, and "This interaction failed" on screen.
+        await interaction.response.edit_message(
+            embed=lfg_embed(interaction.guild, post),
+            view=lfg_view_for(post))
 
-        full = self.needed > 0 and len(self.joined) == self.needed
-        if full:
-            self.children[0].disabled = True
-
-        # Acknowledge first. The "party is full" announcement used to be sent
-        # before this, so a refused channel send left the member joined, the
-        # interaction unacknowledged, and "This interaction failed" on screen.
-        await interaction.response.edit_message(embed=self.build_embed(), view=self)
-
-        if full:
-            game_name = self.game_info.name if isinstance(self.game_info, discord.Role) else self.game_info
+        if result["full"]:
+            role = (interaction.guild.get_role(int(post["game_role_id"]))
+                    if post["game_role_id"] else None)
+            game_name = role.name if role else (post["game_text"] or "")
+            host = interaction.guild.get_member(int(post["host_id"]))
+            host_name = (host.mention if host else
+                         display_member_name(interaction.guild,
+                                             int(post["host_id"])))
             try:
                 await interaction.channel.send(
-                    t("general.lfg_success_full", host=self.host.mention,
-                      game=game_name),
+                    t("general.lfg_success_full", host=host_name,
+                      game=discord.utils.escape_mentions(game_name)),
                     delete_after=60,
                 )
             except discord.HTTPException:
@@ -307,22 +358,94 @@ class LFGView(discord.ui.View):
                 )
 
     async def leave_btn(self, interaction: discord.Interaction):
-        if interaction.user.id not in self.joined:
-            return await interaction.response.send_message(t("general.lfg_err_not_in"), ephemeral=True)
-
-        self.joined.remove(interaction.user.id)
-        self.children[0].disabled = False 
-        
-        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        result = await database.run_write(
+            database.leave_lfg_post, interaction.guild.id,
+            interaction.message.id, interaction.user.id)
+        if "error" in result:
+            return await self._refuse(interaction, result["error"])
+        post = await database.run_read(
+            database.get_lfg_post, interaction.guild.id, interaction.message.id)
+        if post is None:
+            return await self._refuse(interaction, "gone")
+        await interaction.response.edit_message(
+            embed=lfg_embed(interaction.guild, post),
+            view=lfg_view_for(post))
 
     async def delete_btn(self, interaction: discord.Interaction):
-        if interaction.user.id != self.host.id and not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message(t("general.lfg_err_not_host"), ephemeral=True)
-        await interaction.message.delete()
+        post = await database.run_read(
+            database.get_lfg_post, interaction.guild.id, interaction.message.id)
+        # A post whose row is gone can still be removed by its channel's
+        # moderators, so an unknown row falls back to the administrator check
+        # rather than refusing outright.
+        host_id = post["host_id"] if post else None
+        if (host_id is not None and interaction.user.id != int(host_id)
+                and not interaction.user.guild_permissions.administrator):
+            return await interaction.response.send_message(
+                t("general.lfg_err_not_host"), ephemeral=True)
+        if post is None and not interaction.user.guild_permissions.administrator:
+            return await self._refuse(interaction, "gone")
+        # The row goes first: if the delete succeeds and the message removal does
+        # not, a dead post is better than a live post nothing can clear.
+        await database.run_write(database.delete_lfg_post,
+                                 interaction.guild.id, interaction.message.id)
+        try:
+            await interaction.message.delete()
+        except discord.HTTPException:
+            await interaction.response.send_message(
+                t("general.lfg_err_expired"), ephemeral=True)
+
+
+def lfg_view_for(post):
+    """A view for one post, with Join disabled when the party is full.
+
+    Built fresh rather than mutating the registered instance: a persistent view
+    is shared by every message it serves, so disabling a button on it would
+    disable that button on every party in the guild.
+    """
+    full = post["needed"] > 0 and len(post["joined"]) >= post["needed"]
+    return LFGView(join_disabled=full)
+
 
 class General(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # One routing instance for every party post in every guild: a click is
+        # routed by `custom_id` and the post is read per interaction, so there is
+        # nothing per-post for a registered view to hold. Every button is
+        # enabled here on purpose — a full party's disabled Join is rendered by
+        # `lfg_view_for` for that one message, because disabling it on the shared
+        # instance would disable it on every party at once.
+        self.bot.add_view(LFGView())
+        self.lfg_prune.start()
+
+    def cog_unload(self):
+        self.lfg_prune.cancel()
+
+    @tasks.loop(hours=24)
+    async def lfg_prune(self):
+        """Drop rows for posts nobody will click again.
+
+        Housekeeping rather than correctness: a stale row only ever answers a
+        click on a message that is almost certainly gone. Started from
+        `__init__`, so it has no revival path on a gateway reconnect — which is
+        exactly why it carries an error handler.
+        """
+        try:
+            removed = await database.run_write(database.prune_lfg_posts, 7)
+            if removed:
+                general_logger.info("Pruned %s stale LFG post(s).", removed)
+        except database.DatabaseOperationError:
+            general_logger.exception("Could not prune stale LFG posts.")
+
+    @lfg_prune.before_loop
+    async def before_lfg_prune(self):
+        await self.bot.wait_until_ready()
+
+    @lfg_prune.error
+    async def lfg_prune_error(self, error):
+        await handle_loop_error(
+            self.bot, self.lfg_prune, "lfg_prune", error, general_logger,
+        )
 
     @commands.hybrid_command(name="version", description=t("general.cmd_version"))
     async def version(self, ctx):
@@ -361,8 +484,6 @@ class General(commands.Cog):
             if not role:
                 return await ctx.send(t("general.search_err_role_not_found"), ephemeral=True)
 
-            view = LFGView(ctx.author, role, needed)
-            embed = view.build_embed()
             # A nickname is attacker-controlled, so it must never survive as a
             # mention in the one message where role pings are permitted.
             ping_msg = t(
@@ -370,10 +491,8 @@ class General(commands.Cog):
                 role=role.mention,
                 user=discord.utils.escape_mentions(ctx.author.display_name),
             )
-            await ctx.send(
-                content=ping_msg,
-                embed=embed,
-                view=view,
+            await self._post_lfg(
+                ctx, content=ping_msg, needed=needed, game_role_id=role.id,
                 allowed_mentions=discord.AllowedMentions(
                     everyone=False, roles=[role], users=True, replied_user=False
                 ),
@@ -383,17 +502,46 @@ class General(commands.Cog):
             if not game:
                 return await ctx.send(t("general.search_err_no_game"), ephemeral=True)
 
-            view = LFGView(ctx.author, game, needed)
-            embed = view.build_embed()
             custom_msg = t(
                 "general.search_custom_game_msg",
                 user=discord.utils.escape_mentions(ctx.author.display_name),
                 game=discord.utils.escape_mentions(game),
             )
-            await ctx.send(content=custom_msg, embed=embed, view=view)
+            await self._post_lfg(ctx, content=custom_msg, needed=needed,
+                                 game_text=game)
 
         else:
             await ctx.send(t("general.search_err_wrong_channel"), ephemeral=True)
+
+    async def _post_lfg(self, ctx, *, content, needed, game_role_id=None,
+                        game_text=None, allowed_mentions=None):
+        """Send a party post and record it, or leave nothing behind.
+
+        The message has to exist before its id does, so the row is written after
+        the send — and if that write fails the post is removed rather than left
+        with buttons nothing can answer. That is the whole reason this is one
+        function instead of two call sites.
+        """
+        post = {"channel_id": ctx.channel.id, "host_id": ctx.author.id,
+                "game_role_id": game_role_id, "game_text": game_text,
+                "needed": needed, "joined": []}
+        message = await ctx.send(
+            content=content, embed=lfg_embed(ctx.guild, post),
+            view=lfg_view_for(post),
+            **({"allowed_mentions": allowed_mentions} if allowed_mentions else {}))
+        try:
+            await database.run_write(
+                database.create_lfg_post, ctx.guild.id, message.id,
+                ctx.channel.id, ctx.author.id, needed,
+                game_role_id=game_role_id, game_text=game_text)
+        except database.DatabaseOperationError:
+            general_logger.exception(
+                "Could not record an LFG post; removing it (guild_id=%s)",
+                ctx.guild.id)
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                pass
 
     @commands.hybrid_command(name="help", description=t("general.cmd_help"))
     async def help(self, ctx):

@@ -15,21 +15,15 @@ const start = source.indexOf('const SHOP_TEMPLATES = {');
 const end = source.indexOf('\n};', start) + 3;
 assert.ok(start > 0, 'SHOP_TEMPLATES not found');
 
-// `vault` resolves its amount through the item list, so the stubs stand in for
-// what the endpoint serves.
+// `consumable` still resolves through the item list, so the stubs stand in for
+// what the endpoint serves. `vault` no longer does: its amount is typed, and a
+// reserve the catalog has never heard of is the point.
 const itemList = [
     {item_key: 'small_vault', effect: 'vault', value: 25000},
     {item_key: 'med_vault', effect: 'vault', value: 100000},
     {item_key: 'big_vault', effect: 'vault', value: 500000},
+    {item_key: 'loaded_die', effect: 'inventory', value: null},
 ];
-function vaultKeyForAmount(amount) {
-    const match = itemList.find((i) => i.effect === 'vault' && i.value === amount);
-    return match ? match.item_key : null;
-}
-function vaultAmountForKey(key) {
-    const match = itemList.find((i) => i.item_key === key);
-    return match ? match.value : null;
-}
 
 const SHOP_TEMPLATES = eval(`(${source.slice(start + 'const SHOP_TEMPLATES = '.length, end - 1)})`);
 
@@ -38,7 +32,7 @@ const SHOP_TEMPLATES = eval(`(${source.slice(start + 'const SHOP_TEMPLATES = '.l
 const stored = {
     fixed_role: {role_id: 1420070400000000002},
     timed_role: {role_id: 1420070400000000002, duration_days: 30},
-    vault: {amount: 100000},
+    vault: {amount: 300000},
     consumable: {item_key: 'loaded_die'},
     coin_bundle: {amount: 5000, repeatable: true},
     fulfillment_voucher: {asset_type: 'emoji', duration_days: 180},

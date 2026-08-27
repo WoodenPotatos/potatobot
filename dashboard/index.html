@@ -127,15 +127,15 @@
                         <svg class="ic" aria-hidden="true"><use href="#ic-economy"></use></svg>
                         <span data-i18n="dashboard.nav_economy"></span>
                     </button>
-                    <button type="button" class="nav-item feature-page" data-feature="shop_gacha" data-page="gacha">
+                    <button type="button" class="nav-item" data-feature="shop_gacha" data-page="gacha">
                         <svg class="ic" aria-hidden="true"><use href="#ic-gacha"></use></svg>
                         <span data-i18n="dashboard.nav_gacha"></span>
                     </button>
-                    <button type="button" class="nav-item feature-page" data-feature="economy" data-page="work-responses">
+                    <button type="button" class="nav-item" data-feature="economy" data-page="work-responses">
                         <svg class="ic" aria-hidden="true"><use href="#ic-work"></use></svg>
                         <span data-i18n="dashboard.nav_work_responses"></span>
                     </button>
-                    <button type="button" class="nav-item feature-page" data-feature="shop" data-page="shop-builder">
+                    <button type="button" class="nav-item" data-feature="shop" data-page="shop-builder">
                         <svg class="ic" aria-hidden="true"><use href="#ic-shop"></use></svg>
                         <span data-i18n="dashboard.nav_shop_builder"></span>
                     </button>
@@ -155,15 +155,18 @@
                         <span data-i18n="dashboard.nav_group_games"></span>
                         <svg class="ic ic-sm chevron" aria-hidden="true"><use href="#ic-chevron-down"></use></svg>
                     </button>
-                    <button type="button" class="nav-item" data-page="everydle" data-category="everydle">
+                    <button type="button" class="nav-item" data-feature="everydle"
+                            data-page="everydle" data-category="everydle">
                         <svg class="ic" aria-hidden="true"><use href="#ic-games"></use></svg>
                         <span data-i18n="dashboard.nav_everydle"></span>
                     </button>
-                    <button type="button" class="nav-item" data-page="casino" data-category="casino">
+                    <button type="button" class="nav-item" data-feature="casino"
+                            data-page="casino" data-category="casino">
                         <svg class="ic" aria-hidden="true"><use href="#ic-casino"></use></svg>
                         <span data-i18n="dashboard.nav_casino"></span>
                     </button>
-                    <button type="button" class="nav-item" data-page="minigames" data-category="minigames">
+                    <button type="button" class="nav-item" data-feature="minigames"
+                            data-page="minigames" data-category="minigames">
                         <svg class="ic" aria-hidden="true"><use href="#ic-games"></use></svg>
                         <span data-i18n="dashboard.nav_minigames"></span>
                     </button>
@@ -193,19 +196,19 @@
                         <svg class="ic" aria-hidden="true"><use href="#ic-builders"></use></svg>
                         <span data-i18n="dashboard.nav_embeds"></span>
                     </button>
-                    <button type="button" class="nav-item feature-page" data-feature="onboarding" data-page="rules-panel">
+                    <button type="button" class="nav-item" data-feature="onboarding" data-page="rules-panel">
                         <svg class="ic" aria-hidden="true"><use href="#ic-shield-check"></use></svg>
                         <span data-i18n="dashboard.nav_rules_panel"></span>
                     </button>
-                    <button type="button" class="nav-item feature-page" data-feature="role_menus" data-page="role-menus">
+                    <button type="button" class="nav-item" data-feature="role_menus" data-page="role-menus">
                         <svg class="ic" aria-hidden="true"><use href="#ic-community"></use></svg>
                         <span data-i18n="dashboard.nav_role_menus"></span>
                     </button>
-                    <button type="button" class="nav-item feature-page" data-feature="tickets" data-page="ticket-launcher">
+                    <button type="button" class="nav-item" data-feature="tickets" data-page="ticket-launcher">
                         <svg class="ic" aria-hidden="true"><use href="#ic-inbox"></use></svg>
                         <span data-i18n="dashboard.nav_ticket_launcher"></span>
                     </button>
-                    <button type="button" class="nav-item feature-page" data-feature="onboarding" data-page="entry-gate">
+                    <button type="button" class="nav-item" data-feature="onboarding" data-page="entry-gate">
                         <svg class="ic" aria-hidden="true"><use href="#ic-shield-check"></use></svg>
                         <span data-i18n="dashboard.nav_entry_gate"></span>
                     </button>
@@ -577,6 +580,15 @@
     <!-- Menus render here so they escape the sticky topbar's stacking context. -->
     <div id="popover-root"></div>
     <div id="modal-root"></div>
+    <!-- Shown when the loaded bundle is older than the one the server now
+         serves. A tab left open across a deploy keeps running its old script
+         while the sidebar still shows the new version number, which reads as a
+         fix that did not work. -->
+    <div id="stale-notice" class="stale-notice hidden" role="status">
+        <span data-i18n="dashboard.stale_client"></span>
+        <button type="button" class="btn btn-chrome btn-sm" id="stale-reload"
+                data-i18n="dashboard.stale_reload"></button>
+    </div>
     <div id="toast-container" class="toast-container" role="status" aria-live="polite"></div>
     <script src="script.js"></script>
 </body>

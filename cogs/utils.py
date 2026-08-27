@@ -285,6 +285,25 @@ def display_member_name(guild, user_id: int) -> str:
     )
 
 
+def item_mechanic_value(guild_id, item_key):
+    """This guild's number for a built-in item's mechanic.
+
+    A synchronous settings read, like `guild_setting_sync` beside it, so a
+    command body may call it directly — it touches the settings cache and never
+    the database, which is why it lives here rather than in `database.py` where
+    an async caller would be a policy violation.
+
+    The rule itself is `item_catalog.mechanic_value`, shared with the paths that
+    run inside the writer, so a guild's override means the same thing wherever
+    it is applied.
+    """
+    import item_catalog
+
+    overrides = guild_setting_sync(guild_id, "shop_item_values")
+    return item_catalog.mechanic_value(
+        item_key, overrides if isinstance(overrides, dict) else {})
+
+
 def guild_setting_sync(guild_id: int, key: str):
     """One typed setting, from memory, with no await and no database read.
 

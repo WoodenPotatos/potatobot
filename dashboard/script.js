@@ -21,6 +21,11 @@ let settings = {};
 // the card head decides which.
 let gacha = null;
 let gachaBanners = [];
+/** The guild's own items a banner may award. The reward picker used to offer the
+ *  built-in catalog only, so a custom item never appeared and — because a kind
+ *  with built-in options shows a select rather than a text field — there was no
+ *  way to type its key either. */
+let customRewards = [];
 let shippedRewards = null;
 let activeBannerKey = null;
 // The shared built-in item catalog. Identical for every guild, so it is fetched
@@ -434,8 +439,16 @@ function openPopover(trigger, buildMenu, options = {}) {
         surface.style.setProperty(
             '--popover-top', `${Math.round(box.bottom + offsetY + 8)}px`);
         if (options.align === 'left') {
+            // Clamped to the document's right edge. An absolutely positioned
+            // surface extends the scrollable area, so a menu anchored to a field
+            // near the right would make the *page* scroll sideways — which the
+            // body must never do. `matchWidth` means the surface is as wide as
+            // its trigger, so the trigger's own width is the right allowance.
+            const width = options.matchWidth ? box.width : 0;
+            const maxLeft = Math.max(0, document.documentElement.clientWidth - width);
             surface.style.setProperty(
-                '--popover-left', `${Math.round(box.left + offsetX)}px`);
+                '--popover-left',
+                `${Math.round(Math.min(box.left, maxLeft) + offsetX)}px`);
             surface.style.setProperty('--popover-right', 'auto');
         } else {
             // The page never scrolls horizontally, so the document's right edge
@@ -588,6 +601,7 @@ function showLogin() {
 
 function bindShell() {
     document.getElementById('fatal-retry').addEventListener('click', () => location.reload());
+    document.getElementById('stale-reload').addEventListener('click', () => location.reload());
 
     document.querySelectorAll('.nav-item').forEach((button) => {
         button.addEventListener('click', () => { showPage(button.dataset.page); });
@@ -746,6 +760,7 @@ async function authenticate() {
 
     document.getElementById('main-dashboard').classList.remove('hidden');
     document.getElementById('brand-version').textContent = result.version || '';
+    checkClientFreshness(result.asset_version);
     renderHeaderControls();
 
     if (!guildId) {
@@ -805,6 +820,8 @@ async function loadGuild() {
             ? gachaData.data : gachaData.data.banners;
         shippedRewards = Array.isArray(gachaData.data)
             ? null : gachaData.data.shipped_rewards;
+        customRewards = Array.isArray(gachaData.data)
+            ? [] : (gachaData.data.custom_rewards || []);
         resources = resourceData.data;
         // A banner deleted in another tab must not leave the page editing a
         // banner the server no longer has.
@@ -835,21 +852,25 @@ function categoryHasVisibleSettings(category) {
 }
 
 function updateNavigation() {
-    // An editor page is NOT hidden by the feature it edits. It used to be, and
-    // the consequence was that turning off `shop` — which exists to gate the
-    // `/shop` command — removed staff's only way to edit items and, worse, to
-    // see and complete fulfillment requests members had already paid for,
-    // including gacha-sourced ones that have nothing to do with the shop flag.
-    // The routes behind these pages enforce no feature check at all, so the
-    // interface was hiding working functionality. The flag is shown as a muted
-    // nav item plus a notice on the page instead.
-    document.querySelectorAll('.nav-item[data-feature]').forEach((button) => {
-        button.classList.toggle(
-            'nav-item-off', featureState[button.dataset.feature]?.enabled === false);
-    });
-
-    document.querySelectorAll('.nav-item[data-category]').forEach((button) => {
-        button.classList.toggle('hidden', !categoryHasVisibleSettings(button.dataset.category));
+    // A switched-off feature hides its page. That is what a toggle is for, and
+    // it is decided in **one pass** over both conditions rather than two loops
+    // each calling `toggle('hidden', …)` — two loops would have the second
+    // silently overwrite the first, which is a bug this file has already had.
+    //
+    // This briefly muted instead of hiding, because hiding once took away
+    // staff's only route to fulfillment requests members had already paid for.
+    // That hazard is gone: Redeems is its own page and deliberately carries no
+    // `data-feature`, so the queue that clears an obligation is reachable
+    // whatever is switched off. The consequence that remains is deliberate — a
+    // feature's editor page comes back when the feature does.
+    document.querySelectorAll('.nav-item').forEach((button) => {
+        const feature = button.dataset.feature;
+        const category = button.dataset.category;
+        const featureOff = Boolean(feature)
+            && featureState[feature]?.enabled === false;
+        const emptyCategory = Boolean(category)
+            && !categoryHasVisibleSettings(category);
+        button.classList.toggle('hidden', featureOff || emptyCategory);
     });
 
     document.querySelectorAll('.nav-group').forEach((group) => {
@@ -2494,12 +2515,31 @@ function rewardKeyCell(row) {
 
     const refresh = () => {
         const kind = row.dataset.kind;
-        const options = (itemCatalog || []).filter((item) => item.gacha_kind === kind);
+        const options = [
+            ...(itemCatalog || [])
+                .filter((item) => item.gacha_kind === kind)
+                .map((item) => ({key: item.key, label: item.key})),
+            // The guild's own items, named rather than keyed, because an
+            // operator chose that name and does not know the key by heart. A
+            // custom vault awards the reserve it configures, so the amount is
+            // filled in from the item and not typed twice.
+            ...customRewards
+                .filter((item) => item.kind === kind)
+                .map((item) => ({
+                    key: item.key,
+                    label: format(item.sold_in_shop
+                                  ? 'dashboard.reward_custom_option'
+                                  : 'dashboard.reward_custom_option_hidden',
+                                  {name: item.name}),
+                    amount: item.amount,
+                })),
+        ];
         select.replaceChildren();
         options.forEach((item) => {
             const option = document.createElement('option');
             option.value = item.key;
-            option.textContent = item.key;
+            option.textContent = item.label;
+            if (item.amount !== undefined) option.dataset.amount = String(item.amount);
             select.appendChild(option);
         });
         const picked = options.length > 0;
@@ -2541,8 +2581,15 @@ function syncRewardAmount(row) {
     const amount = row.querySelector('[data-field="amount"]');
     const key = readRewardKey(row);
     const item = (itemCatalog || []).find((entry) => entry.key === key);
+    const custom = customRewards.find((entry) => entry.key === key);
     if (item && item.effect === 'vault') {
         amount.value = String(item.value);
+        amount.readOnly = true;
+    } else if (custom) {
+        // A custom item awards what it is configured to award. Editable here and
+        // differing there would make one key mean two things depending on how a
+        // member obtained it, which is the rule catalog vaults already follow.
+        amount.value = String(custom.amount);
         amount.readOnly = true;
     } else {
         amount.readOnly = false;
@@ -3028,6 +3075,27 @@ let itemEditorTarget;
  *  `/api/locale` serves the `dashboard` namespace alone. */
 let itemCategories = [];
 
+/** Warn when this page is running a bundle the server has replaced.
+ *
+ *  The version in the sidebar comes from the server, so a tab left open across
+ *  a deploy shows the *new* number while still executing the *old* script —
+ *  indistinguishable from a fix that did not work. The bundle's own token is in
+ *  the `src` it was loaded from, so comparing the two is exact rather than a
+ *  guess, and the notice is a persistent bar because a toast disappears before
+ *  anybody can act on it.
+ */
+function checkClientFreshness(serverToken) {
+    if (!serverToken) return;
+    const tag = document.querySelector('script[src*="script.js"]');
+    const loaded = tag && new URL(tag.src, location.href).searchParams.get('v');
+    // No token at all means the page was opened without the stamped shell —
+    // local development, say — and there is nothing to compare.
+    if (!loaded || loaded === serverToken) return;
+    const notice = document.getElementById('stale-notice');
+    if (!notice) return;
+    notice.classList.remove('hidden');
+}
+
 async function loadShopItems() {
     const itemsHost = document.getElementById('shop-items');
     const listCard = document.getElementById('shop-item-list-card');
@@ -3138,9 +3206,15 @@ function renderItemSection(items) {
         identity.appendChild(element('div', 'cell-key', item.item_key));
         row.appendChild(identity);
 
-        row.appendChild(element('td', null, item.source === 'builtin'
+        const effectCell = element('td');
+        effectCell.appendChild(element('div', null, item.source === 'builtin'
             ? tr(`dashboard.item_effects.${item.effect}`)
             : tr(`dashboard.item_templates.${item.effect}`)));
+        // A built-in whose mechanic carries a number is typed here, beside the
+        // item, for the same reason its price is: a number that belongs to an
+        // item does not belong on a settings form three pages away.
+        if (item.mechanic) effectCell.appendChild(mechanicInput(item));
+        row.appendChild(effectCell);
         // A built-in's price is typed here rather than on a settings page, so
         // every item's price is in one list. It still writes the registered
         // setting, so storage, validation and the audit row are unchanged.
@@ -3253,6 +3327,72 @@ async function toggleBuiltinHidden(item, button) {
     } catch (error) {
         await handleWriteConflict(error, loadShopItems);
         button.disabled = false;
+    }
+}
+
+/** The inline number for a built-in item's mechanic.
+ *
+ *  `item.mechanic` carries the bounds and the unit from
+ *  `item_catalog.MECHANIC_PARAMETERS`, so the field cannot offer a value the
+ *  validator would refuse — a rule the API enforces that the form cannot express
+ *  is an unexplained rejection. Out-of-bounds is refused rather than clamped,
+ *  because every one of these is a knob on a game whose house edge is
+ *  deliberate.
+ */
+function mechanicInput(item) {
+    const wrap = element('label', 'mechanic-field');
+    wrap.appendChild(element('span', 'mechanic-unit',
+        format('dashboard.item_mechanic_unit',
+               {unit: tr(`dashboard.item_mechanic_units.${item.mechanic.unit}`)})));
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'price-input';
+    input.min = String(item.mechanic.minimum);
+    input.max = String(item.mechanic.maximum);
+    // A fractional bound means a fractional step, or the browser's spinner
+    // cannot reach a legal value at all.
+    input.step = Number.isInteger(item.mechanic.minimum) ? '1' : '0.01';
+    input.value = String(item.mechanic.value);
+    input.addEventListener('change', () => {
+        const next = Number(input.value);
+        if (!Number.isFinite(next)
+                || next < item.mechanic.minimum || next > item.mechanic.maximum) {
+            toast(format('dashboard.item_mechanic_range',
+                         {min: item.mechanic.minimum,
+                          max: item.mechanic.maximum}), true);
+            input.value = String(item.mechanic.value);
+            return;
+        }
+        if (next !== item.mechanic.value) saveMechanicValue(item, next, input);
+    });
+    wrap.appendChild(input);
+    return wrap;
+}
+
+/** Write one item's mechanic number into `shop_item_values`.
+ *
+ *  The same optimistic revision the price input uses, and both reloads for the
+ *  same reason: without `loadGuild` the next edit sends a stale revision.
+ */
+async function saveMechanicValue(item, next, input) {
+    input.disabled = true;
+    const current = {...(settings.shop_item_values?.value || {})};
+    if (next === item.mechanic.shipped) delete current[item.item_key];
+    else current[item.item_key] = next;
+    try {
+        const saved = await api(`/guilds/${guildId}/settings`, {
+            method: 'PATCH', headers: headers(),
+            body: JSON.stringify({changes: [{
+                key: 'shop_item_values', value: current,
+                revision: settings.shop_item_values?.revision || 0,
+            }]}),
+        });
+        toast(saved.message);
+        await loadGuild();
+        await loadShopItems();
+    } catch (error) {
+        await handleWriteConflict(error, loadShopItems);
+        input.disabled = false;
     }
 }
 
@@ -3498,8 +3638,15 @@ const SHOP_TEMPLATE_FIELDS = {
     duration_days: {kind: 'number', label: 'dashboard.item_duration', min: 1,
                     max: 3650, default: 30, required: true,
                     hint: 'item_duration'},
-    vault_item: {kind: 'catalog', label: 'dashboard.item_vault', effect: 'vault',
-                 required: true, hint: 'item_vault'},
+    // A reserve, typed. This was a picker over the three built-in vaults, which
+    // stored whichever one's amount you chose — so "create a new vault" could
+    // only ever hand out an existing one, which is exactly how it read. The
+    // server has always accepted any positive amount; only this field forbade
+    // it. The built-in reserves are offered as presets because they are the
+    // useful reference points, not because they are the only legal values.
+    vault_amount: {kind: 'number', label: 'dashboard.item_vault', min: 1,
+                   max: 1000000000, default: 25000, required: true,
+                   presets: 'vault', hint: 'item_vault'},
     consumable_item: {kind: 'catalog', label: 'dashboard.item_consumable',
                       effect: 'inventory', required: true,
                       hint: 'item_consumable'},
@@ -3527,11 +3674,13 @@ const SHOP_TEMPLATES = {
                             duration_days: values.duration_days}),
     },
     vault: {
-        fields: ['vault_item'],
-        // Stored as an amount, chosen as an item: the reserve a vault protects
-        // is the catalog's to decide, and the server refuses a mismatch.
-        unpack: (config) => ({vault_item: vaultKeyForAmount(config.amount)}),
-        pack: (values) => ({amount: vaultAmountForKey(values.vault_item)}),
+        fields: ['vault_amount'],
+        // The reserve is typed. It used to be chosen from the three built-in
+        // vaults and stored as whichever one's amount, so a new vault could only
+        // ever be an existing one — the server has always taken any positive
+        // number.
+        unpack: (config) => ({vault_amount: config.amount}),
+        pack: (values) => ({amount: values.vault_amount}),
     },
     consumable: {
         fields: ['consumable_item'],
@@ -3554,15 +3703,22 @@ const SHOP_TEMPLATES = {
     },
 };
 
-function vaultKeyForAmount(amount) {
-    const match = (itemList || []).find(
-        (item) => item.effect === 'vault' && item.value === amount);
-    return match ? match.item_key : null;
-}
+/** Kinds a *new* item may be, plus whatever the item being edited already is.
+ *
+ *  `consumable` is withheld: it grants +1 of an existing built-in item and
+ *  cannot change any of its numbers, so a custom one can only ever be that same
+ *  item under a different name and price. Offering it invites the reasonable
+ *  expectation that it is how you build a variant — "a die that rerolls five
+ *  times" — which it is not, and cannot be until each mechanic's count stops
+ *  living in its caller. Withheld rather than deleted, because the server still
+ *  validates the template and a guild that already has such a row must be able
+ *  to open, edit and delete it.
+ */
+const WITHHELD_TEMPLATES = ['consumable'];
 
-function vaultAmountForKey(key) {
-    const match = (itemList || []).find((item) => item.item_key === key);
-    return match ? match.value : null;
+function offerableTemplates(current) {
+    return Object.keys(SHOP_TEMPLATES).filter(
+        (name) => !WITHHELD_TEMPLATES.includes(name) || name === current);
 }
 
 /** The item creator, in place of the list. Same shape as the content builders:
@@ -3595,7 +3751,7 @@ function renderItemEditor(existing) {
     }, existing ? existing.item_key : '', isNew);
     const templateControl = addEditorField(grid, readers, 'template_type', {
         kind: 'choice', label: 'dashboard.item_template',
-        options: Object.keys(SHOP_TEMPLATES), default: template,
+        options: offerableTemplates(template), default: template,
         optionLabels: 'dashboard.item_templates', hint: 'item_template',
     }, template, isNew);
     addEditorField(grid, readers, 'price', {
@@ -3630,6 +3786,13 @@ function renderItemEditor(existing) {
     // Section three is the only part that changes with the template, so it is
     // rebuilt in place when the choice changes rather than the whole form.
     const configSection = itemEditorSection(3, 'dashboard.item_section_config');
+    // What a purchase of this kind actually does, in one sentence, redrawn with
+    // the section so it always describes the kind on screen. The fields alone
+    // did not say: a vault's field is a reserve and a consumable's is which
+    // existing item to hand over, and neither is obvious from a number and a
+    // dropdown.
+    const configNote = element('p', 'section-note');
+    configSection.appendChild(configNote);
     const configGrid = element('div', 'form-grid');
     configSection.appendChild(configGrid);
     form.appendChild(configSection);
@@ -3639,6 +3802,8 @@ function renderItemEditor(existing) {
         Object.keys(configReaders).forEach((key) => delete configReaders[key]);
         configGrid.replaceChildren();
         const chosen = readers.template_type();
+        const note = tr(`dashboard.item_template_notes.${chosen}`);
+        configNote.textContent = note.startsWith('[') ? '' : note;
         const spec = SHOP_TEMPLATES[chosen];
         // `effect`, not `template_type`: that is the field `/items` serves a
         // custom item's kind under. Comparing the wrong name was always false,
@@ -3688,6 +3853,18 @@ function itemEditorSection(index, labelKey) {
     const node = element('fieldset', 'managed-section');
     node.appendChild(element('legend', null, `${index}. ${tr(labelKey)}`));
     return node;
+}
+
+/** A number input plus the datalist that suggests values for it.
+ *
+ *  Returned as one node because `managedFieldWrapper` appends a single control,
+ *  and a `<datalist>` has to be in the document for `list=` to resolve.
+ */
+function wrapWithPresets(input, list) {
+    const holder = element('span', 'input-with-presets');
+    holder.appendChild(input);
+    holder.appendChild(list);
+    return holder;
 }
 
 /** One labelled field, registering its reader under `name`. */
@@ -4150,6 +4327,31 @@ function managedFieldControl(name, spec, value, isNew) {
         if (spec.min !== undefined) input.min = spec.min;
         if (spec.max !== undefined) input.max = spec.max;
         if (spec.required) input.required = true;
+        if (spec.presets) {
+            // Presets are a convenience, never a constraint: the built-in
+            // reserves are the useful reference points but any positive amount
+            // is legal, which a `<select>` here could not express. A datalist
+            // suggests without restricting, and a browser that ignores it
+            // leaves a plain number field — which is the correct fallback.
+            const list = document.createElement('datalist');
+            list.id = `presets-${name}`;
+            (itemList || [])
+                .filter((item) => item.source === 'builtin'
+                                  && item.effect === spec.presets
+                                  && item.value !== null)
+                .forEach((item) => {
+                    const option = document.createElement('option');
+                    option.value = String(item.value);
+                    option.label = item.name;
+                    list.appendChild(option);
+                });
+            if (list.children.length) {
+                input.setAttribute('list', list.id);
+                return {node: wrapWithPresets(input, list),
+                        read: () => (input.value === ''
+                                     ? null : Number(input.value))};
+            }
+        }
         // An empty numeric field reads as null, not 0. Zero is a legitimate
         // price and "not filled in" must stay distinguishable from it, or a
         // half-finished row saves as free.

@@ -96,11 +96,18 @@ window.fetch = async (url) => {
         return ok({language: 'en', available: ['hu', 'en'],
                    data: {dashboard: locale.dashboard}});
     }
+    // `/auth/status` answers at the *top level*, not under `data` — `api()`
+    // returns the whole payload. Stubbed under `data`, `result.logged_in` was
+    // undefined, the client showed the login screen, and `authenticate()` and
+    // `loadGuild()` never ran at all: this harness was reporting "ok" for pages
+    // rendered on a dashboard that had never booted.
     if (u.includes('/auth/status')) {
-        return ok({status: 'success', data: {
-            user: {id: '42', username: 'tester', avatar: null},
-            is_host: true, idle_timeout_seconds: 600,
-            guilds: [{guild_id: GUILD, name: 'Test Guild', icon: null}]}});
+        return ok({logged_in: true,
+                   user: {id: '42', username: 'tester', avatar: null},
+                   csrf_token: 'csrf-token', is_host: true,
+                   idle_timeout_seconds: 600, version: '0.0.0-test',
+                   asset_version: 'test-token',
+                   guilds: [{id: GUILD, name: 'Test Guild'}]});
     }
     if (u.includes('/settings/registry')) {
         return ok({status: 'success', data: {settings: {}, features: [], groups: []}});
@@ -166,7 +173,7 @@ window.eval(script);
         }
         const problem = thrown || uncaught.slice(before)[0];
         if (problem) {
-            console.log(`FAIL  ${page}: ${problem.message || problem}`);
+            console.log(`FAIL  ${page}: ${problem.stack || problem.message || problem}`);
             failed = true;
         } else {
             console.log(`ok    ${page}`);
