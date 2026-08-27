@@ -725,13 +725,6 @@
         }
       },
       "attributes": {
-        "body_type": {
-          "body_type_dfe01b29e8": "Short female",
-          "body_type_53e245b4d1": "Teen male",
-          "body_type_258f9b8350": "Adult male",
-          "body_type_d91604f1ca": "Teen female",
-          "body_type_76e7c65f80": "Adult female"
-        },
         "element": {
           "element_7ff7149bc8": "Hydro",
           "element_9bd84a1fbb": "Geo",

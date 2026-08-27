@@ -163,7 +163,7 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_survivor", "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 17
+LATEST_SCHEMA_VERSION = 18
 
 # A claimed control action is re-queued only once its lease expires. The worker
 # renews the lease as it runs, so slowness never causes a duplicate Discord post.
@@ -835,6 +835,10 @@ def _create_control_plane_v5_schema(conn):
             source_type TEXT NOT NULL DEFAULT 'gacha'
                 CHECK (source_type IN ('gacha', 'shop')),
             duration_days INTEGER NOT NULL CHECK (duration_days > 0),
+            -- What the voucher is *for*, written when it is granted. NULL means
+            -- "derive it from `reward_key`", which is how every voucher granted
+            -- before this column still redeems.
+            subject TEXT,
             status TEXT NOT NULL DEFAULT 'available'
                 CHECK (status IN ('available', 'pending', 'active', 'fulfilled', 'expired', 'cancelled')),
             acquired_at TEXT NOT NULL,
@@ -997,6 +1001,21 @@ def _create_control_plane_v5_schema(conn):
             "ALTER TABLE gacha_pulls ADD COLUMN featured_guaranteed "
             "INTEGER NOT NULL DEFAULT 0 CHECK (featured_guaranteed IN (0, 1))"
         )
+    voucher_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(reward_vouchers)")
+    }
+    if "subject" not in voucher_columns:
+        # Schema 18, purely additive and rewriting no row. A voucher's meaning
+        # used to be inferred from its key — `redeem_voucher` did
+        # `reward_key.split("_", 1)[0]` and refused anything not beginning
+        # `emoji`, `sticker` or `sound` — which is why a guild's own voucher item
+        # could never be a banner reward, and why a key like `emoji_thing` would
+        # have worked by accident. The subject states it instead.
+        #
+        # NULL means "derive from the key", the same third state
+        # `gacha_banners.display_name` and `warnings.tag` carry, so every voucher
+        # already granted keeps redeeming down the path it always did.
+        conn.execute("ALTER TABLE reward_vouchers ADD COLUMN subject TEXT")
     shop_item_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(shop_item_definitions)")
     }
@@ -5215,6 +5234,42 @@ def _weighted_choice(entries: list[dict], rng) -> dict:
     raise RuntimeError("weighted choice failed")
 
 
+def _voucher_subject_for(conn, guild_id: int, reward_key: str):
+    """What a voucher for this reward key is *for*, or None to derive it later.
+
+    None for a built-in key, so a shipped voucher behaves exactly as it always
+    has and every existing row keeps its meaning. For one of the guild's own
+    items the subject comes from the item's config — an asset type, or a role.
+
+    Read on the caller's connection rather than through `get_shop_item_definitions`,
+    which opens its own: this runs inside the pull's transaction and a second
+    connection would see a different snapshot.
+    """
+    if reward_key in item_catalog.ITEM_DEFINITIONS or reward_key == "premium_30d":
+        return None
+    row = conn.execute(
+        "SELECT template_type, config_json FROM shop_item_definitions "
+        "WHERE guild_id = ? AND item_key = ?", (int(guild_id), reward_key)
+    ).fetchone()
+    if row is None:
+        return None
+    template, raw = row
+    try:
+        config_value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if template == "fulfillment_voucher":
+        asset = config_value.get("asset_type")
+        return asset if asset in {"emoji", "sticker", "sound"} else None
+    if template == "timed_role":
+        role_id = config_value.get("role_id")
+        # `role:<id>` is the entitlement key the shop already writes for a custom
+        # timed role, so a redeemed one expires through the pass that already
+        # revokes anything starting with `role:`.
+        return f"role:{int(role_id)}" if role_id else None
+    return None
+
+
 def _grant_gacha_reward_locked(conn, guild_id: int, user_id: int,
                                reward: dict, config_value: dict, timestamp: str) -> dict:
     kind, amount = reward["kind"], reward["amount"]
@@ -5239,11 +5294,16 @@ def _grant_gacha_reward_locked(conn, guild_id: int, user_id: int,
             granted["protected_reserve"] = amount
     else:
         voucher_id = secrets.token_urlsafe(12)
+        # The subject is written **now**, not resolved at redemption: a voucher
+        # can outlive the item that produced it, and resolving late would strand
+        # every one of them the moment an operator deleted the item.
         conn.execute(
             "INSERT INTO reward_vouchers "
-            "(voucher_id, guild_id, user_id, reward_key, source_type, duration_days, acquired_at) "
-            "VALUES (?, ?, ?, ?, 'gacha', ?, ?)",
-            (voucher_id, guild_id, user_id, reward["key"], amount, timestamp),
+            "(voucher_id, guild_id, user_id, reward_key, source_type, "
+            "duration_days, subject, acquired_at) "
+            "VALUES (?, ?, ?, ?, 'gacha', ?, ?, ?)",
+            (voucher_id, guild_id, user_id, reward["key"], amount,
+             _voucher_subject_for(conn, guild_id, reward["key"]), timestamp),
         )
         granted["voucher_id"] = voucher_id
     return granted
@@ -5507,6 +5567,45 @@ def get_user_vouchers(guild_id: int, user_id: int) -> list[dict]:
     return [dict(zip(keys, row)) for row in rows]
 
 
+def _extend_timed_entitlement(conn, guild_id: int, user_id: int,
+                              entitlement_key: str, duration_days: int,
+                              now, voucher_id: str, timestamp: str) -> str:
+    """Start or extend one timed grant, returning when it now expires.
+
+    Extending rather than stacking: a member redeeming a second voucher while the
+    first is live gets the time added, which is what the premium path has always
+    done. Factored out because premium and a role voucher differ only in the
+    entitlement key, and two copies of "work out the new expiry" is two places
+    for an off-by-one that costs somebody a month.
+    """
+    active = conn.execute(
+        "SELECT entitlement_id, expires_at FROM timed_entitlements "
+        "WHERE guild_id = ? AND user_id = ? AND entitlement_key = ? "
+        "AND status = 'active' ORDER BY expires_at DESC LIMIT 1",
+        (int(guild_id), int(user_id), entitlement_key),
+    ).fetchone()
+    start = now
+    if active:
+        current_expiry = datetime.fromisoformat(active[1])
+        if current_expiry > start:
+            start = current_expiry
+    expires = (start + timedelta(days=duration_days)).isoformat()
+    if active:
+        conn.execute(
+            "UPDATE timed_entitlements SET expires_at = ? WHERE entitlement_id = ?",
+            (expires, active[0]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO timed_entitlements "
+            "(guild_id, user_id, entitlement_key, starts_at, expires_at, "
+            "source_voucher_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (int(guild_id), int(user_id), entitlement_key, timestamp, expires,
+             voucher_id),
+        )
+    return expires
+
+
 def redeem_voucher(guild_id: int, user_id: int, voucher_id: str) -> dict:
     """Activate premium now or open asset fulfillment without starting its timer."""
     now = datetime.now(timezone.utc)
@@ -5514,17 +5613,38 @@ def redeem_voucher(guild_id: int, user_id: int, voucher_id: str) -> dict:
     with get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            "SELECT reward_key, duration_days, status FROM reward_vouchers "
+            "SELECT reward_key, duration_days, status, subject FROM reward_vouchers "
             "WHERE voucher_id = ? AND guild_id = ? AND user_id = ?",
             (voucher_id, int(guild_id), int(user_id)),
         ).fetchone()
         if row is None:
             conn.rollback()
             return {"redeemed": False, "reason": "not_found"}
-        reward_key, duration_days, status = row
+        reward_key, duration_days, status, subject = row
         if status != "available":
             conn.rollback()
             return {"redeemed": False, "reason": "already_redeemed"}
+        # A guild's own role voucher. Recorded here and applied by the caller,
+        # because a Discord call may not happen inside this transaction — which
+        # is the same reason premium is a voucher at all rather than a reward the
+        # pull grants directly.
+        if isinstance(subject, str) and subject.startswith("role:"):
+            try:
+                role_id = int(subject.split(":", 1)[1])
+            except (ValueError, IndexError):
+                conn.rollback()
+                return {"redeemed": False, "reason": "not_redeemable"}
+            expires = _extend_timed_entitlement(
+                conn, guild_id, user_id, subject, duration_days, now,
+                voucher_id, timestamp)
+            conn.execute(
+                "UPDATE reward_vouchers SET status = 'active', redeemed_at = ?, "
+                "expires_at = ? WHERE voucher_id = ?",
+                (timestamp, expires, voucher_id),
+            )
+            conn.commit()
+            return {"redeemed": True, "kind": "role", "role_id": role_id,
+                    "entitlement_key": subject, "expires_at": expires}
         if reward_key == "premium_30d":
             active = conn.execute(
                 "SELECT entitlement_id, expires_at FROM timed_entitlements "
@@ -5556,7 +5676,10 @@ def redeem_voucher(guild_id: int, user_id: int, voucher_id: str) -> dict:
             )
             result = {"redeemed": True, "kind": "premium", "expires_at": expires.isoformat()}
         else:
-            asset_type = reward_key.split("_", 1)[0]
+            # The stored subject when there is one, and the old key parse when
+            # there is not — which is every voucher granted before the column
+            # existed, and every built-in one.
+            asset_type = subject or reward_key.split("_", 1)[0]
             if asset_type not in {"emoji", "sticker", "sound"}:
                 raise ValidationError("voucher_not_redeemable", "voucher cannot be redeemed")
             conn.execute(
@@ -5577,18 +5700,31 @@ def redeem_voucher(guild_id: int, user_id: int, voucher_id: str) -> dict:
 
 def rollback_premium_redemption(guild_id: int, user_id: int, voucher_id: str):
     """Restore a premium voucher when Discord role assignment fails."""
+    return rollback_voucher_redemption(guild_id, user_id, voucher_id, "premium")
+
+
+def rollback_voucher_redemption(guild_id: int, user_id: int, voucher_id: str,
+                                entitlement_key: str):
+    """Put a redeemed voucher back when Discord refused the grant.
+
+    A pull cannot be refunded — it has already spent pity and coins by the time
+    anything reaches Discord — so a redemption that fails must leave the voucher
+    **unredeemed** rather than consumed. That was the premium path's whole reason
+    for existing and a role voucher needs it identically, so the entitlement key
+    is a parameter rather than a second copy of the function.
+    """
     with get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         voucher = conn.execute(
             "SELECT duration_days, status FROM reward_vouchers WHERE voucher_id = ? "
-            "AND guild_id = ? AND user_id = ? AND reward_key = 'premium_30d'",
+            "AND guild_id = ? AND user_id = ?",
             (voucher_id, int(guild_id), int(user_id)),
         ).fetchone()
         active = conn.execute(
             "SELECT entitlement_id, expires_at FROM timed_entitlements WHERE guild_id = ? "
-            "AND user_id = ? AND entitlement_key = 'premium' AND status = 'active' "
+            "AND user_id = ? AND entitlement_key = ? AND status = 'active' "
             "ORDER BY expires_at DESC LIMIT 1",
-            (int(guild_id), int(user_id)),
+            (int(guild_id), int(user_id), entitlement_key),
         ).fetchone()
         if not voucher or voucher[1] != "active" or not active:
             conn.rollback()

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.10.0-beta.1
+
+- **Your own vouchers and timed roles can be gacha rewards.** Make an item that
+  grants an emoji, sticker or sound, or a role for N days, and put it in a banner.
+  A member wins a voucher and redeems it with `/redeem` as usual — the role lands
+  with its expiry, and an asset opens the staff ticket with the right kind.
+- Previously a custom voucher was refused on redemption, because what it was for
+  was worked out from its *name* rather than from the item. It is recorded when
+  you win it now, so it also keeps working if you delete or rename the item
+  afterwards.
+- If Discord refuses the role — it was deleted, or sits above the bot — the
+  voucher stays unspent rather than vanishing.
+- **Permanent roles are deliberately not offered.** A reward needs a duration, and
+  a permanent role won by chance could not be taken back by anything. A 3650-day
+  timed role does the same job and can still be removed.
+- **Genshindle no longer asks about body type.** It sounded like a good clue and
+  was not: five values across 120 characters, most of them the same two, so a
+  guess almost never learned anything from it while it took up a column. Gone
+  from the game and from the weekly update check.
+
 ## 2.9.0-beta.1
 
 - **Switching a feature off hides its page again.** It briefly only dimmed it,

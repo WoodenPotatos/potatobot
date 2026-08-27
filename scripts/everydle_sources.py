@@ -51,8 +51,14 @@ SOURCE_AUTHORITATIVE = {
     # Everything Genshindle runs on is published by the game and changes only
     # when the game changes it — there is no lore attribute in the set, which is
     # why this dataset needs no person at all beyond the aliases.
+    # `body_type` was here and was **removed deliberately** (2026-08-27): the
+    # game publishes it and it sounded like a good clue, but in play it narrows
+    # almost nothing — five values across 120 characters, most of them in two of
+    # them — so it filled a column without earning it. Upstream still carries it;
+    # this dataset chooses not to, which is why it is absent here rather than an
+    # `ACCEPTED_DIVERGENCES` entry.
     ("genshindle", "characters"): (
-        "element", "weapon", "region", "rarity", "gender", "body_type",
+        "element", "weapon", "region", "rarity", "gender",
         "weekly_boss", "version",
     ),
 }
@@ -412,12 +418,6 @@ GENSHIN_WEAPON = {
     "WEAPON_SWORD_ONE_HAND": "Sword", "WEAPON_CLAYMORE": "Claymore",
     "WEAPON_POLE": "Polearm", "WEAPON_BOW": "Bow", "WEAPON_CATALYST": "Catalyst",
 }
-GENSHIN_BODY = {
-    "BODY_BOY": "Teen male", "BODY_MALE": "Adult male",
-    "BODY_GIRL": "Teen female", "BODY_LADY": "Adult female",
-    "BODY_LOLI": "Short female",
-}
-
 # A weekly boss drops three talent materials, and **the API does not say which
 # boss a material comes from**: the material record's description only alludes to
 # it in prose, and the domain list does not carry weekly-boss drops at all. So
@@ -543,9 +543,6 @@ def fetch_genshindle(opener=None) -> dict[str, UpstreamEntity]:
         gender = (row.get("gender") or "").strip()
         if gender:
             supplied["gender"] = gender
-        body = GENSHIN_BODY.get(row.get("bodyType"))
-        if body:
-            supplied["body_type"] = body
         # The Traveller's talents are recorded per element, so there are seven
         # boss materials rather than one — "All" for the same reason the element
         # is. Everyone else takes theirs from the talent cost.
@@ -568,7 +565,7 @@ def fetch_genshindle(opener=None) -> dict[str, UpstreamEntity]:
             fields=supplied,
             unknown_fields=tuple(
                 field_name for field_name in
-                ("element", "weapon", "region", "rarity", "gender", "body_type",
+                ("element", "weapon", "region", "rarity", "gender",
                  "weekly_boss", "version")
                 if field_name not in supplied
             ),

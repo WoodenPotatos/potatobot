@@ -1400,14 +1400,28 @@ def settings_registry():
 
 
 #: Which custom item templates can be a gacha reward, and the reward `kind` each
-#: becomes. Only the two whose grant path is purely amount-driven and needs no
-#: key parsing: `_grant_gacha_reward_locked` adds coins or sets a reserve from
-#: the `amount` on the reward row itself. Deliberately excluded for now —
-#: `fulfillment_voucher`, because redemption reads the asset type out of the
-#: reward *key* and a custom key would not parse; `fixed_role`/`timed_role`,
-#: because the gacha has no role kind at all; and `consumable`, because the grant
-#: would create a `user_inventory` row under a key nothing consumes.
-GACHA_ELIGIBLE_TEMPLATES = {"vault": "vault", "coin_bundle": "coins"}
+#: becomes.
+#:
+#: `vault` and `coin_bundle` are amount-driven: the grant reads the `amount` on
+#: the reward row. `fulfillment_voucher` and `timed_role` both become vouchers,
+#: which is how the gacha has always deferred anything needing a Discord call —
+#: premium is one for exactly that reason. What each voucher is *for* is written
+#: into `reward_vouchers.subject` when it is granted, rather than parsed back out
+#: of its key, which is what used to make a custom one unredeemable.
+#:
+#: Two exclusions, each for its own reason. **`fixed_role`** because a reward row
+#: requires `amount > 0` and a permanent grant has no duration to put there — it
+#: would need a magic value — and because a permanent role won by chance cannot
+#: be taken back by any existing pass, so a mis-configured banner would be
+#: unrecoverable without hand-editing the database; a 3650-day `timed_role` is
+#: the practical equivalent and *is* revocable. **`consumable`** because the
+#: grant would create a `user_inventory` row under a key nothing consumes.
+GACHA_ELIGIBLE_TEMPLATES = {
+    "vault": "vault",
+    "coin_bundle": "coins",
+    "fulfillment_voucher": "voucher",
+    "timed_role": "voucher",
+}
 
 
 def _gacha_eligible_custom_items(guild_id: int) -> list[dict]:
@@ -1426,7 +1440,11 @@ def _gacha_eligible_custom_items(guild_id: int) -> list[dict]:
         kind = GACHA_ELIGIBLE_TEMPLATES.get(item["template_type"])
         if kind is None:
             continue
-        amount = (item.get("config") or {}).get("amount")
+        config_value = item.get("config") or {}
+        # A voucher's "amount" is how many days it is worth, which is where a
+        # duration lives in every template that has one.
+        amount = (config_value.get("duration_days") if kind == "voucher"
+                  else config_value.get("amount"))
         if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
             continue
         eligible.append({

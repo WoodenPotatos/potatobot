@@ -376,6 +376,31 @@ class Gacha(commands.Cog):
             message = t(
                 "gacha.redeem_premium_success", expires_at=result["expires_at"]
             )
+        elif result["kind"] == "role":
+            # One of the guild's own role vouchers. The database recorded the
+            # entitlement and stopped there, because a Discord call may not
+            # happen inside that transaction — the same reason premium is a
+            # voucher rather than something a pull grants directly.
+            role = ctx.guild.get_role(result["role_id"])
+            if not role or not can_self_assign_role(ctx.guild, role):
+                await database.run_write(
+                    database.rollback_voucher_redemption,
+                    ctx.guild.id, ctx.author.id, voucher_id,
+                    result["entitlement_key"])
+                return await ctx.send(t("shop.role_not_found"), ephemeral=True)
+            try:
+                await ctx.author.add_roles(
+                    role, reason=t("gacha.role_voucher_reason"))
+            except discord.HTTPException:
+                gacha_logger.exception("Failed to assign a redeemed role.")
+                await database.run_write(
+                    database.rollback_voucher_redemption,
+                    ctx.guild.id, ctx.author.id, voucher_id,
+                    result["entitlement_key"])
+                return await ctx.send(t("shop.bot_role_hierarchy_error"),
+                                      ephemeral=True)
+            message = t("gacha.redeem_role_success", role=role.name,
+                        expires_at=result["expires_at"])
         else:
             # An asset voucher needs a conversation: staff have to know which
             # emoji, sticker or sound to make. Before this, redeeming recorded a

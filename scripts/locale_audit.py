@@ -282,7 +282,8 @@ def composed_key_families() -> dict:
         ("banner_disabled", "banner_unknown", "not_enough_money")
     ] + [
         f"gacha.redeem_{reason}" for reason in
-        ("not_found", "already_redeemed", "premium_success", "fulfillment_success")
+        ("not_found", "already_redeemed", "not_redeemable", "premium_success",
+         "fulfillment_success", "role_success")
     ]
     # Outbox failure codes, rendered by the actions column on the builders page.
     # An executor *returns* its code rather than assigning it, so both forms are

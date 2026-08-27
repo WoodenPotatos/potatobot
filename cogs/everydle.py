@@ -418,8 +418,12 @@ class ValdleModal(discord.ui.Modal):
 # on its own. `version` is the release version stored as major*100 + minor, so
 # it compares higher/lower the way Valdle's year does — "1.0" and "5.3" sort
 # wrong as text, and 1.10 would collide with 1.1 as a float.
+# `body_type` was dropped (2026-08-27): five values across 120 characters, most
+# of them in two, so it took a column and narrowed almost nothing. Removed from
+# the dataset and from the updater's field list too, so it cannot come back as a
+# drift finding.
 GENSHIN_FIELDS = ("element", "weapon", "region", "rarity", "gender",
-                  "body_type", "weekly_boss")
+                  "weekly_boss")
 
 
 def genshin_version_text(packed: int) -> str:

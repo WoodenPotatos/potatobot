@@ -83,9 +83,17 @@ Probed 2026-08-27. Two bulk endpoints, 122 characters and 125 talent records,
 answering in one request each rather than one per character.
 
 Unlike the other two, **this source publishes every attribute the puzzle uses**:
-`elementText`, `weaponType`, `region`, `rarity`, `gender`, `bodyType` and the
-release `version`. There is no lore field, so the adapter reports nothing as
-needing a person and the only local knowledge is the aliases.
+`elementText`, `weaponType`, `region`, `rarity`, `gender` and the release
+`version`. There is no lore field, so the adapter reports nothing as needing a
+person and the only local knowledge is the aliases.
+
+It also publishes `bodyType`, which the puzzle **used to use and no longer
+does** (removed 2026-08-27). It sounded like a good clue and was not: five values
+across 120 characters, most of them concentrated in two, so a guess almost never
+learned anything from it and it cost a column in an already wide grid. It is
+absent from `SOURCE_AUTHORITATIVE` rather than recorded in
+`ACCEPTED_DIVERGENCES`, because the dataset does not carry the field at all —
+there is nothing for the drift check to disagree about.
 
 Two things it does *not* publish, both settled deliberately:
 

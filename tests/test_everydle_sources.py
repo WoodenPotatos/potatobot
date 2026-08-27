@@ -604,12 +604,18 @@ class GenshindleAdapterTests(unittest.TestCase):
     def test_a_complete_character_needs_nobody(self):
         amber = self.characters["amber"]
         self.assertEqual((), amber.unknown_fields)
+        # `body_type` is deliberately absent. Upstream still publishes it and the
+        # adapter deliberately drops it: five values across 120 characters, most
+        # of them in two, so it filled a column and narrowed almost nothing.
+        # Asserted as an exact dict rather than a subset, so putting it back
+        # would have to be a decision rather than an accident.
         self.assertEqual(
             {"element": "Pyro", "weapon": "Bow", "region": "Mondstadt",
-             "rarity": "4-star", "gender": "Female", "body_type": "Teen female",
+             "rarity": "4-star", "gender": "Female",
              "weekly_boss": "Dvalin's Sigh", "version": 100},
             amber.fields,
         )
+        self.assertNotIn("body_type", amber.fields)
 
     def test_the_weekly_boss_comes_from_the_talent_cost(self):
         """Identified by material id range, not by name: 125 of 125 characters

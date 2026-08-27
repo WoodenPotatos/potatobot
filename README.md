@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.9.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.10.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -172,6 +172,14 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.10.0-beta.1
+
+- **Your own vouchers and timed roles can be gacha rewards.** Make an item that grants an emoji, sticker or sound, or a role for N days, and put it in a banner. A member wins a voucher and redeems it with `/redeem` as usual — the role lands with its expiry, and an asset opens the staff ticket with the right kind.
+- Previously a custom voucher was refused on redemption, because what it was for was worked out from its *name* rather than from the item. It is recorded when you win it now, so it also keeps working if you delete or rename the item afterwards.
+- If Discord refuses the role — it was deleted, or sits above the bot — the voucher stays unspent rather than vanishing.
+- **Permanent roles are deliberately not offered.** A reward needs a duration, and a permanent role won by chance could not be taken back by anything. A 3650-day timed role does the same job and can still be removed.
+- **Genshindle no longer asks about body type.** It sounded like a good clue and was not: five values across 120 characters, most of them the same two, so a guess almost never learned anything from it while it took up a column. Gone from the game and from the weekly update check.
+
 ### 2.9.0-beta.1
 
 - **Switching a feature off hides its page again.** It briefly only dimmed it, which was a workaround for an older problem — hiding the shop page once took away staff's only route to redemptions members had already paid for. Redeems has its own page now and is never hidden by anything, so the toggle can do what a toggle is for.
@@ -194,11 +202,6 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - Every item you already made keeps working and lands on a sensible shelf without you touching anything; you can move one whenever you like, or leave it on "Automatic".
 - **A long item name can no longer take `/shop` down.** A name at the editor's own 100-character limit made the menu exceed Discord's limit for an option label, which Discord rejects outright — it is capped and trimmed in three places now.
 - A disabled item bought by name now says it is unavailable instead of saying you cannot afford it.
-
-### 2.7.0-beta.2
-
-- **The shop item editor follows the kind you pick.** Choosing "Vault" and still being asked which role to grant is fixed properly this time: the redraw was wired through the surrounding form and matched on an attribute, which had already broken twice in the same way, so it is wired straight to the Kind dropdown instead. There is nothing left in between to go wrong.
-- **Editing an item now shows what the item is set to.** The fields were the right ones but arrived empty — a vault opened reading "Nothing selected", and saving it wrote that back. All six kinds keep their stored values now.
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

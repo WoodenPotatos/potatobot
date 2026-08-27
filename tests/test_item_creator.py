@@ -535,20 +535,49 @@ class CustomItemAsGachaRewardTests(DashboardItemTestCase):
         self.assertIn("vault_extra", offered)
         self.assertFalse(offered["vault_extra"]["sold_in_shop"])
 
-    def test_a_template_with_no_safe_grant_path_is_not_offered(self):
-        """A voucher's asset type is parsed out of the reward *key* at
-        redemption, and the gacha has no role kind at all, so offering either
-        would produce a reward that cannot be delivered."""
-        self.create_item({
-            "item_key": "vip_role", "template_type": "fixed_role",
-            "category": None, "enabled": True, "price": 100,
-            "config": {"role_id": 1420070400000000002},
-            "text": {"name": "VIP", "description": "d"}})
+    def test_a_voucher_and_a_timed_role_are_offered_as_vouchers(self):
+        """Both defer their Discord call to redemption, which is how the gacha
+        has always handled anything it cannot do inside a pull's transaction —
+        premium is a voucher for exactly that reason."""
         self.create_item({
             "item_key": "an_emoji", "template_type": "fulfillment_voucher",
             "category": None, "enabled": True, "price": 100,
             "config": {"asset_type": "emoji", "duration_days": 30},
             "text": {"name": "Emoji", "description": "d"}})
+        self.create_item({
+            "item_key": "vip_month", "template_type": "timed_role",
+            "category": None, "enabled": True, "price": 100,
+            "config": {"role_id": 1420070400000000002, "duration_days": 30},
+            "text": {"name": "VIP month", "description": "d"}})
+        offered = self.offered()
+        self.assertEqual("voucher", offered["an_emoji"]["kind"])
+        self.assertEqual("voucher", offered["vip_month"]["kind"])
+        # A voucher's "amount" is its duration in days, not an `amount` field.
+        self.assertEqual(30, offered["an_emoji"]["amount"])
+        self.assertEqual(30, offered["vip_month"]["amount"])
+
+    def test_a_permanent_role_is_not_offered(self):
+        """Two independent reasons, either sufficient. A reward row requires
+        `amount > 0` and a permanent grant has no duration to put there, so it
+        would need a magic value. And a permanent role won by chance cannot be
+        taken back by any existing pass, so a mis-configured banner would be
+        unrecoverable without hand-editing the database — a 3650-day timed role
+        is the practical equivalent and *is* revocable."""
+        self.create_item({
+            "item_key": "vip_forever", "template_type": "fixed_role",
+            "category": None, "enabled": True, "price": 100,
+            "config": {"role_id": 1420070400000000002},
+            "text": {"name": "VIP", "description": "d"}})
+        self.assertEqual({}, self.offered())
+
+    def test_a_consumable_is_still_not_offered(self):
+        """The grant would create a `user_inventory` row under a key nothing
+        consumes."""
+        self.create_item({
+            "item_key": "a_die", "template_type": "consumable",
+            "category": None, "enabled": True, "price": 100,
+            "config": {"item_key": "loaded_die"},
+            "text": {"name": "Die", "description": "d"}})
         self.assertEqual({}, self.offered())
 
     def test_the_item_page_says_whether_the_gacha_can_award_it(self):

@@ -3,7 +3,6 @@
   "dataset": "characters",
   "entities": {
     "aino": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_7ff7149bc8",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -13,7 +12,6 @@
       "weekly_boss": "weekly_boss_b19f490723"
     },
     "albedo": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_9bd84a1fbb",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -23,7 +21,6 @@
       "weekly_boss": "weekly_boss_689653c4f0"
     },
     "alhaitham": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_a40fb67e27",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -33,7 +30,6 @@
       "weekly_boss": "weekly_boss_5ad01ff0fa"
     },
     "amber": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -43,7 +39,6 @@
       "weekly_boss": "weekly_boss_f237b38644"
     },
     "arataki_itto": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_9bd84a1fbb",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -53,7 +48,6 @@
       "weekly_boss": "weekly_boss_f95f67dd74"
     },
     "arlecchino": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -63,7 +57,6 @@
       "weekly_boss": "weekly_boss_41dda73144"
     },
     "baizhu": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_a40fb67e27",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -73,7 +66,6 @@
       "weekly_boss": "weekly_boss_1b4b2e8efd"
     },
     "barbara": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_7ff7149bc8",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -83,7 +75,6 @@
       "weekly_boss": "weekly_boss_bdbcdddd8a"
     },
     "beidou": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -93,7 +84,6 @@
       "weekly_boss": "weekly_boss_f237b38644"
     },
     "bennett": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_5e95ad9e00",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -103,7 +93,6 @@
       "weekly_boss": "weekly_boss_eea6c57223"
     },
     "candace": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_7ff7149bc8",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -113,7 +102,6 @@
       "weekly_boss": "weekly_boss_74ad5ff68c"
     },
     "charlotte": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -123,7 +111,6 @@
       "weekly_boss": "weekly_boss_66b1bccdbf"
     },
     "chasca": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_580ad862fd",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -133,7 +120,6 @@
       "weekly_boss": "weekly_boss_b19f490723"
     },
     "chevreuse": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -143,7 +129,6 @@
       "weekly_boss": "weekly_boss_4dc73f7659"
     },
     "chiori": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_9bd84a1fbb",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -153,7 +138,6 @@
       "weekly_boss": "weekly_boss_66b1bccdbf"
     },
     "chongyun": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_ecc509c9c3",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -163,7 +147,6 @@
       "weekly_boss": "weekly_boss_f237b38644"
     },
     "citlali": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -173,7 +156,6 @@
       "weekly_boss": "weekly_boss_9ba32453bb"
     },
     "clorinde": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -183,7 +165,6 @@
       "weekly_boss": "weekly_boss_9e3eae8093"
     },
     "collei": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_a40fb67e27",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -193,7 +174,6 @@
       "weekly_boss": "weekly_boss_74ad5ff68c"
     },
     "columbina": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_7ff7149bc8",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -203,7 +183,6 @@
       "weekly_boss": "weekly_boss_9cdd4c32fe"
     },
     "cyno": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_b157bb722e",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -213,7 +192,6 @@
       "weekly_boss": "weekly_boss_c79a9c5102"
     },
     "dahlia": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_7ff7149bc8",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -223,7 +201,6 @@
       "weekly_boss": "weekly_boss_92e4b514c8"
     },
     "dehya": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -233,7 +210,6 @@
       "weekly_boss": "weekly_boss_686cbc7a25"
     },
     "diluc": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_5e95ad9e00",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -243,7 +219,6 @@
       "weekly_boss": "weekly_boss_eea6c57223"
     },
     "diona": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -253,7 +228,6 @@
       "weekly_boss": "weekly_boss_098401b4ce"
     },
     "dori": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -263,7 +237,6 @@
       "weekly_boss": "weekly_boss_556a65c5ee"
     },
     "durin": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_5e95ad9e00",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -273,7 +246,6 @@
       "weekly_boss": "weekly_boss_e49482cf2c"
     },
     "emilie": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_a40fb67e27",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -283,7 +255,6 @@
       "weekly_boss": "weekly_boss_b19f490723"
     },
     "escoffier": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -293,7 +264,6 @@
       "weekly_boss": "weekly_boss_a68feb931f"
     },
     "eula": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -303,7 +273,6 @@
       "weekly_boss": "weekly_boss_3a160d8777"
     },
     "faruzan": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_580ad862fd",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -313,7 +282,6 @@
       "weekly_boss": "weekly_boss_686cbc7a25"
     },
     "fischl": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -323,7 +291,6 @@
       "weekly_boss": "weekly_boss_8442fcb6d4"
     },
     "flins": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_b157bb722e",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -333,7 +300,6 @@
       "weekly_boss": "weekly_boss_07565fd8d6"
     },
     "freminet": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_ecc509c9c3",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -343,7 +309,6 @@
       "weekly_boss": "weekly_boss_1b4b2e8efd"
     },
     "furina": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_7ff7149bc8",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -353,7 +318,6 @@
       "weekly_boss": "weekly_boss_f02bf59b29"
     },
     "gaming": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_5e95ad9e00",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -363,7 +327,6 @@
       "weekly_boss": "weekly_boss_f02bf59b29"
     },
     "ganyu": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -373,7 +336,6 @@
       "weekly_boss": "weekly_boss_ea4735488c"
     },
     "gorou": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_9bd84a1fbb",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -383,7 +345,6 @@
       "weekly_boss": "weekly_boss_ba7776d533"
     },
     "hu_tao": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -393,7 +354,6 @@
       "weekly_boss": "weekly_boss_098401b4ce"
     },
     "iansan": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -403,7 +363,6 @@
       "weekly_boss": "weekly_boss_9ba32453bb"
     },
     "ifa": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_580ad862fd",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -413,7 +372,6 @@
       "weekly_boss": "weekly_boss_e0a7ac4ecb"
     },
     "illuga": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_9bd84a1fbb",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -423,7 +381,6 @@
       "weekly_boss": "weekly_boss_a68feb931f"
     },
     "ineffa": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -433,7 +390,6 @@
       "weekly_boss": "weekly_boss_e49482cf2c"
     },
     "jahoda": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_580ad862fd",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -443,7 +399,6 @@
       "weekly_boss": "weekly_boss_698a4bc19e"
     },
     "jean": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_580ad862fd",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -453,7 +408,6 @@
       "weekly_boss": "weekly_boss_eea6c57223"
     },
     "kachina": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_9bd84a1fbb",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -463,7 +417,6 @@
       "weekly_boss": "weekly_boss_41dda73144"
     },
     "kaedehara_kazuha": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_580ad862fd",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -473,7 +426,6 @@
       "weekly_boss": "weekly_boss_f45cd8ee4b"
     },
     "kaeya": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_ecc509c9c3",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -483,7 +435,6 @@
       "weekly_boss": "weekly_boss_8442fcb6d4"
     },
     "kamisato_ayaka": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -493,7 +444,6 @@
       "weekly_boss": "weekly_boss_556a65c5ee"
     },
     "kamisato_ayato": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_7ff7149bc8",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -503,7 +453,6 @@
       "weekly_boss": "weekly_boss_c79a9c5102"
     },
     "kaveh": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_a40fb67e27",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -513,7 +462,6 @@
       "weekly_boss": "weekly_boss_ba8c0b5cab"
     },
     "keqing": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -523,7 +471,6 @@
       "weekly_boss": "weekly_boss_bdbcdddd8a"
     },
     "kinich": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_a40fb67e27",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -533,7 +480,6 @@
       "weekly_boss": "weekly_boss_9ba32453bb"
     },
     "kirara": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_a40fb67e27",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -543,7 +489,6 @@
       "weekly_boss": "weekly_boss_9e3eae8093"
     },
     "klee": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -553,7 +498,6 @@
       "weekly_boss": "weekly_boss_bdbcdddd8a"
     },
     "kujou_sara": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -563,7 +507,6 @@
       "weekly_boss": "weekly_boss_f95f67dd74"
     },
     "kuki_shinobu": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -573,7 +516,6 @@
       "weekly_boss": "weekly_boss_74ad5ff68c"
     },
     "lan_yan": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_580ad862fd",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -583,7 +525,6 @@
       "weekly_boss": "weekly_boss_e49482cf2c"
     },
     "lauma": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_a40fb67e27",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -593,7 +534,6 @@
       "weekly_boss": "weekly_boss_92e4b514c8"
     },
     "layla": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -603,7 +543,6 @@
       "weekly_boss": "weekly_boss_5ad01ff0fa"
     },
     "linnea": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_9bd84a1fbb",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -613,7 +552,6 @@
       "weekly_boss": "weekly_boss_d486a0ba89"
     },
     "lisa": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -623,7 +561,6 @@
       "weekly_boss": "weekly_boss_413dac9780"
     },
     "lohen": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_ecc509c9c3",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -633,7 +570,6 @@
       "weekly_boss": "weekly_boss_698a4bc19e"
     },
     "lynette": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_580ad862fd",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -643,7 +579,6 @@
       "weekly_boss": "weekly_boss_9e3eae8093"
     },
     "lyney": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_5e95ad9e00",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -653,7 +588,6 @@
       "weekly_boss": "weekly_boss_ba8c0b5cab"
     },
     "mavuika": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -663,7 +597,6 @@
       "weekly_boss": "weekly_boss_a68feb931f"
     },
     "mika": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_ecc509c9c3",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -673,7 +606,6 @@
       "weekly_boss": "weekly_boss_5ad01ff0fa"
     },
     "mona": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_7ff7149bc8",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -683,7 +615,6 @@
       "weekly_boss": "weekly_boss_bdbcdddd8a"
     },
     "mualani": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_7ff7149bc8",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -693,7 +624,6 @@
       "weekly_boss": "weekly_boss_f02bf59b29"
     },
     "nahida": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_a40fb67e27",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -703,7 +633,6 @@
       "weekly_boss": "weekly_boss_686cbc7a25"
     },
     "navia": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_9bd84a1fbb",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -713,7 +642,6 @@
       "weekly_boss": "weekly_boss_66b1bccdbf"
     },
     "nefer": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_a40fb67e27",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -723,7 +651,6 @@
       "weekly_boss": "weekly_boss_e0a7ac4ecb"
     },
     "neuvillette": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_7ff7149bc8",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -733,7 +660,6 @@
       "weekly_boss": "weekly_boss_9e3eae8093"
     },
     "nilou": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_7ff7149bc8",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -743,7 +669,6 @@
       "weekly_boss": "weekly_boss_74ad5ff68c"
     },
     "ningguang": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_9bd84a1fbb",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -753,7 +678,6 @@
       "weekly_boss": "weekly_boss_8442fcb6d4"
     },
     "noelle": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_9bd84a1fbb",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -763,7 +687,6 @@
       "weekly_boss": "weekly_boss_413dac9780"
     },
     "ororon": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_b157bb722e",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -773,7 +696,6 @@
       "weekly_boss": "weekly_boss_66b1bccdbf"
     },
     "prune": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_580ad862fd",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -783,7 +705,6 @@
       "weekly_boss": "weekly_boss_9cdd4c32fe"
     },
     "qiqi": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -793,7 +714,6 @@
       "weekly_boss": "weekly_boss_d64e4ec1c3"
     },
     "raiden_shogun": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -803,7 +723,6 @@
       "weekly_boss": "weekly_boss_ba7776d533"
     },
     "razor": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_b157bb722e",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -813,7 +732,6 @@
       "weekly_boss": "weekly_boss_413dac9780"
     },
     "rosaria": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -823,7 +741,6 @@
       "weekly_boss": "weekly_boss_ea4735488c"
     },
     "sangonomiya_kokomi": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_7ff7149bc8",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -833,7 +750,6 @@
       "weekly_boss": "weekly_boss_445e1057f4"
     },
     "sayu": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_580ad862fd",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -843,7 +759,6 @@
       "weekly_boss": "weekly_boss_f45cd8ee4b"
     },
     "sethos": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_b157bb722e",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -853,7 +768,6 @@
       "weekly_boss": "weekly_boss_25c9cf557e"
     },
     "shenhe": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -863,7 +777,6 @@
       "weekly_boss": "weekly_boss_445e1057f4"
     },
     "shikanoin_heizou": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_580ad862fd",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -873,7 +786,6 @@
       "weekly_boss": "weekly_boss_459bfe0e01"
     },
     "sigewinne": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_7ff7149bc8",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -883,7 +795,6 @@
       "weekly_boss": "weekly_boss_4dc73f7659"
     },
     "sucrose": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_580ad862fd",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -893,7 +804,6 @@
       "weekly_boss": "weekly_boss_8442fcb6d4"
     },
     "tartaglia": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_7ff7149bc8",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -903,7 +813,6 @@
       "weekly_boss": "weekly_boss_098401b4ce"
     },
     "thoma": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_5e95ad9e00",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -913,7 +822,6 @@
       "weekly_boss": "weekly_boss_445e1057f4"
     },
     "tighnari": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_a40fb67e27",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -923,7 +831,6 @@
       "weekly_boss": "weekly_boss_459bfe0e01"
     },
     "varesa": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -933,7 +840,6 @@
       "weekly_boss": "weekly_boss_92e4b514c8"
     },
     "varka": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_580ad862fd",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -943,7 +849,6 @@
       "weekly_boss": "weekly_boss_e0a7ac4ecb"
     },
     "venti": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_580ad862fd",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -953,7 +858,6 @@
       "weekly_boss": "weekly_boss_d64e4ec1c3"
     },
     "wanderer": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_580ad862fd",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -963,7 +867,6 @@
       "weekly_boss": "weekly_boss_25c9cf557e"
     },
     "wriothesley": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_ecc509c9c3",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -973,7 +876,6 @@
       "weekly_boss": "weekly_boss_ba8c0b5cab"
     },
     "xiangling": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -983,7 +885,6 @@
       "weekly_boss": "weekly_boss_413dac9780"
     },
     "xianyun": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_580ad862fd",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -993,7 +894,6 @@
       "weekly_boss": "weekly_boss_4dc73f7659"
     },
     "xiao": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_580ad862fd",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -1003,7 +903,6 @@
       "weekly_boss": "weekly_boss_ea4735488c"
     },
     "xilonen": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_9bd84a1fbb",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1013,7 +912,6 @@
       "weekly_boss": "weekly_boss_5ad01ff0fa"
     },
     "xingqiu": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_7ff7149bc8",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
@@ -1023,7 +921,6 @@
       "weekly_boss": "weekly_boss_d64e4ec1c3"
     },
     "xinyan": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -1033,7 +930,6 @@
       "weekly_boss": "weekly_boss_689653c4f0"
     },
     "yae_miko": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_b157bb722e",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1043,7 +939,6 @@
       "weekly_boss": "weekly_boss_459bfe0e01"
     },
     "yanfei": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -1053,7 +948,6 @@
       "weekly_boss": "weekly_boss_556a65c5ee"
     },
     "yaoyao": {
-      "body_type": "body_type_dfe01b29e8",
       "element": "element_a40fb67e27",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -1063,7 +957,6 @@
       "weekly_boss": "weekly_boss_25c9cf557e"
     },
     "yelan": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_7ff7149bc8",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1073,7 +966,6 @@
       "weekly_boss": "weekly_boss_f45cd8ee4b"
     },
     "yoimiya": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1083,7 +975,6 @@
       "weekly_boss": "weekly_boss_3a160d8777"
     },
     "yumemizuki_mizuki": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_580ad862fd",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1093,7 +984,6 @@
       "weekly_boss": "weekly_boss_41dda73144"
     },
     "yun_jin": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_9bd84a1fbb",
       "gender": "gender_476d159014",
       "rarity": "rarity_c90697d444",
@@ -1103,7 +993,6 @@
       "weekly_boss": "weekly_boss_f95f67dd74"
     },
     "zhongli": {
-      "body_type": "body_type_258f9b8350",
       "element": "element_9bd84a1fbb",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -1113,7 +1002,6 @@
       "weekly_boss": "weekly_boss_689653c4f0"
     },
     "aether": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_3c298a2577",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_dc34a696fd",
@@ -1123,7 +1011,6 @@
       "weekly_boss": "weekly_boss_8f910030aa"
     },
     "aloy": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1133,7 +1020,6 @@
       "weekly_boss": "weekly_boss_ba7776d533"
     },
     "lumine": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_3c298a2577",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1143,7 +1029,6 @@
       "weekly_boss": "weekly_boss_8f910030aa"
     },
     "nicole": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_5e95ad9e00",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1153,7 +1038,6 @@
       "weekly_boss": "weekly_boss_e05e6ca829"
     },
     "odette": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1163,7 +1047,6 @@
       "weekly_boss": "weekly_boss_01f7ebe672"
     },
     "sandrone": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1173,7 +1056,6 @@
       "weekly_boss": "weekly_boss_f28e443da3"
     },
     "skirk": {
-      "body_type": "body_type_d91604f1ca",
       "element": "element_ecc509c9c3",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1183,7 +1065,6 @@
       "weekly_boss": "weekly_boss_698a4bc19e"
     },
     "zibai": {
-      "body_type": "body_type_76e7c65f80",
       "element": "element_9bd84a1fbb",
       "gender": "gender_476d159014",
       "rarity": "rarity_dc34a696fd",
@@ -1193,7 +1074,6 @@
       "weekly_boss": "weekly_boss_07565fd8d6"
     },
     "alyosha": {
-      "body_type": "body_type_53e245b4d1",
       "element": "element_b157bb722e",
       "gender": "gender_2efad92a26",
       "rarity": "rarity_c90697d444",
