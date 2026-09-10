@@ -70,3 +70,26 @@ class StaleClientNoticeTests(unittest.TestCase):
                     capture_output=True, text=True, timeout=120)
                 self.assertEqual(0, result.returncode,
                                  f"{result.stdout}\n{result.stderr}")
+
+
+class ApiErrorRoutingTests(unittest.TestCase):
+    """A 401 ends a session; a 403 refuses an action. Different answers.
+
+    `handleApiError` treated them alike and announced both as "your session
+    expired", so a refusal told the operator to log in again — which cannot help
+    — and discarded the page they were on. It is what made a real lockout read as
+    an expiry for two days when the cause was Discord rate-limiting a permission
+    check.
+    """
+
+    def test_only_a_401_shows_the_login_card(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        if not (ROOT / "node_modules" / "jsdom").is_dir():
+            self.skipTest("jsdom is not installed; run `npm install`")
+        script = ROOT / "tests" / "js" / "api_error_routing.js"
+        result = subprocess.run([node, str(script), str(ROOT)],
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, result.returncode,
+                         f"{result.stdout}\n{result.stderr}")

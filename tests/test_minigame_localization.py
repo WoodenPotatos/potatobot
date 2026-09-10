@@ -169,3 +169,53 @@ class MinigameLocalizationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GenshindleHeaderTests(unittest.TestCase):
+    """The guess grid's header must have a column for every column it draws.
+
+    `body_type` was removed from the dataset, both catalogs' value entries,
+    `GENSHIN_FIELDS` and the updater's `SOURCE_AUTHORITATIVE` list — but not from
+    `genshindle_header`, a hand-written literal that was a fifth place the
+    attribute lived. The result was not a stray word: the header had nine columns
+    against a row's eight, so everything right of Gender was mislabelled — the
+    weekly boss sat under "Alkat", the version under "Heti boss", and "Verzió"
+    labelled nothing at all.
+
+    This counts columns. It cannot catch a wrong *name* in the right slot, which
+    would need a locale key per column; it does catch the drift that actually
+    happened, on the day it happens.
+    """
+
+    def header_columns(self, language):
+        import json
+
+        catalog = json.loads(
+            (ROOT / "locales" / f"{language}.json").read_text(encoding="utf-8"))
+        header = catalog["everydle"]["genshindle_header"].strip("`")
+        return [part.strip() for part in header.split("|")]
+
+    def test_the_header_matches_the_fields_it_labels(self):
+        from cogs.everydle import GENSHIN_FIELDS
+
+        # The name leads and the version trails; everything between is a field.
+        expected = len(GENSHIN_FIELDS) + 2
+        for language in ("hu", "en"):
+            with self.subTest(language=language):
+                columns = self.header_columns(language)
+                self.assertEqual(
+                    expected, len(columns),
+                    f"{language}: header has {len(columns)} columns for "
+                    f"{len(GENSHIN_FIELDS)} fields plus name and version — "
+                    f"{columns}")
+
+    def test_both_catalogs_agree_on_the_column_count(self):
+        """A header translated at a different width mislabels one language
+        only, which is the harder version to notice."""
+        self.assertEqual(len(self.header_columns("hu")),
+                         len(self.header_columns("en")))
+
+    def test_the_removed_attribute_is_gone_from_both_headers(self):
+        for language, word in (("hu", "Alkat"), ("en", "Build")):
+            with self.subTest(language=language):
+                self.assertNotIn(word, self.header_columns(language))

@@ -129,6 +129,27 @@ def currency_emoji() -> str:
     return value if isinstance(value, str) and value.strip() else DEFAULT_CURRENCY_EMOJI
 
 
+def currency_plain():
+    """The currency symbol for a surface that renders plain text, or "".
+
+    An embed **footer** is plain text, exactly as a select option's label is:
+    `<:potatocoins:…>` renders as those literal characters there, so a guild with
+    a custom symbol saw a raw emoji id in every casino footer. Unicode works
+    fine, so the symbol is dropped only when it cannot render.
+
+    Shares `currency_select_emoji`'s judgement rather than re-deriving it —
+    `PartialEmoji.from_str` fills `id` only for a well-formed custom reference,
+    and turns arbitrary prose into a "unicode emoji" named after the prose, so
+    neither caller can trust it alone.
+
+    `t()` supplies `coin` through `kwargs.setdefault`, so a footer has to pass
+    `coin=currency_plain()` explicitly to override it.
+    """
+    emoji = currency_select_emoji()
+    # A `PartialEmoji` here means a custom reference, which a footer cannot draw.
+    return emoji if isinstance(emoji, str) else ""
+
+
 def currency_select_emoji():
     """The currency as a Discord select-option emoji, or None if it cannot be one.
 
@@ -517,54 +538,172 @@ def level_milestones(configured) -> dict[int, object]:
     return milestones
 
 
+async def send_moderation_log(guild, embed, what: str = "a moderation record",
+                              skip_channel=None):
+    """Post one embed to the guild's moderation log channel, if it has one.
+
+    Three callers now — the word filter, the warn escalation alert and a staff
+    level change — each of which had (or would have had) its own copy of "read
+    the setting, resolve the channel, send, swallow the HTTP error". Returns
+    whether the record exists, so a caller that must tell somebody can.
+
+    An unset channel is not a failure: a guild that never configured one has
+    chosen not to have this, and the action itself already happened.
+
+    `skip_channel` is where the caller has *already* posted this embed as its
+    own reply. A command run inside the log channel otherwise posts the identical
+    embed twice — once with the "used /command" header and once as a plain
+    message — which reads as the command being broken. The record is there
+    either way, so this reports success without sending a second copy.
+    """
+    channel_id = await guild_setting(guild.id, "moderation_log_channel")
+    channel = guild.get_channel(int(channel_id)) if channel_id else None
+    if channel is None:
+        return False
+    if skip_channel is not None and getattr(skip_channel, "id", None) == channel.id:
+        return True
+    try:
+        await channel.send(embed=embed)
+    except discord.HTTPException:
+        utility_logger.warning(
+            "Could not post %s to the moderation log (guild_id=%s, channel_id=%s)",
+            what, guild.id, channel_id,
+        )
+        return False
+    return True
+
+
+def _milestone_role(guild, role_value):
+    """The role a milestone names, by id or by name.
+
+    A milestone's value may be either: the id is what an operator should
+    configure, and the name is retained because an installation that never
+    configured this has always relied on it.
+    """
+    if isinstance(role_value, int):
+        return guild.get_role(role_value)
+    return discord.utils.get(guild.roles, name=role_value)
+
+
+async def announce_level_up(member, level, level_milestones_map):
+    """Say so in the levels channel, when the level is one worth saying."""
+    milestones = list(level_milestones_map.keys())
+    if 2 not in milestones:
+        milestones.append(2)
+    if level not in milestones:
+        return
+    levels_channels = await guild_setting(member.guild.id, "levels_channels")
+    if not levels_channels:
+        return
+    channel = member.guild.get_channel(levels_channels[0])
+    if channel is None:
+        return
+    if level == 2:
+        msg = t("utils.level_up_2", user=member.mention)
+    else:
+        msg = t("utils.level_up_x", user=member.mention, level=level)
+    await channel.send(msg)
+
+
+async def reconcile_level_roles(member, level, level_milestones_map=None):
+    """Put the member on exactly the milestone role their level earns.
+
+    Split out of `check_level_roles`, which only ever ran on a *promotion* and
+    only ever added — so lowering somebody left their old level role on, and a
+    member dropped below every milestone kept a role they had not earned. There
+    was no path that could take one back, which made a demotion no demotion.
+
+    Idempotent, and silent: it makes no API call when the member already holds
+    exactly the right role, and says nothing anywhere. The announcement is
+    `announce_level_up`, because a level going *down* must not be announced as an
+    achievement.
+    """
+    if level_milestones_map is None:
+        level_milestones_map = level_milestones(
+            await guild_setting(member.guild.id, "level_roles")
+        )
+    if not level_milestones_map:
+        return
+
+    target_value = None
+    for m_level in sorted(level_milestones_map.keys(), reverse=True):
+        if level >= m_level:
+            target_value = level_milestones_map[m_level]
+            break
+    target = (_milestone_role(member.guild, target_value)
+              if target_value is not None else None)
+
+    # Every milestone role the member currently holds, whichever milestone named
+    # it. Comparing the whole set is what lets this remove a role as well as add
+    # one — and what makes "already correct" cost nothing.
+    all_values = list(level_milestones_map.values())
+    held = [role for role in member.roles
+            if role.id in all_values or role.name in all_values]
+    # Compared by id, never by object: `guild.get_role` and `member.roles` are
+    # the same objects in discord.py but need not be anywhere else, and an
+    # identity comparison that silently fails re-grants a role the member
+    # already has on every call.
+    held_ids = {role.id for role in held}
+    stale = [role for role in held if target is None or role.id != target.id]
+    if not stale and (target is None or target.id in held_ids):
+        return
+
+    if stale:
+        await member.remove_roles(*stale)
+    if target is not None and target.id not in held_ids:
+        await member.add_roles(target)
+
+
 async def check_level_roles(member, level):
     """Announce a milestone and move the member onto the role it grants.
 
-    A milestone's value may be a role id or a role name: the id is what an
-    operator should configure, and the name is retained because an installation
-    that never configured this has always relied on it.
+    The level-up path: the announcement, then the role. Both halves live in their
+    own function because an administrator correcting a level needs the second
+    without the first, and in both directions.
     """
     level_milestones_map = level_milestones(
         await guild_setting(member.guild.id, "level_roles")
     )
+    await announce_level_up(member, level, level_milestones_map)
+    await reconcile_level_roles(member, level, level_milestones_map)
 
-    milestones = list(level_milestones_map.keys())
-    if 2 not in milestones:
-        milestones.append(2)
 
-    if level in milestones:
-        levels_channels = await guild_setting(member.guild.id, "levels_channels")
-        if levels_channels:
-            channel = member.guild.get_channel(levels_channels[0])
-            if channel:
-                if level == 2:
-                    msg = t("utils.level_up_2", user=member.mention)
-                else:
-                    msg = t("utils.level_up_x", user=member.mention, level=level)
-                await channel.send(msg)
-    
-    role_value = None
-    for m_level in sorted(level_milestones_map.keys(), reverse=True):
-        if level >= m_level:
-            role_value = level_milestones_map[m_level]
-            break
-            
-    if role_value:
-        if isinstance(role_value, int):
-            role = member.guild.get_role(role_value)
-        else:
-            role = discord.utils.get(member.guild.roles, name=role_value)
-            
-        if role and role not in member.roles:
-            all_role_values = list(level_milestones_map.values())
-            to_remove = []
-            for r in member.roles:
-                if r.id in all_role_values or r.name in all_role_values:
-                    to_remove.append(r)
-            
-            if to_remove:
-                await member.remove_roles(*to_remove)
-            await member.add_roles(role)
+async def apply_admin_level_change(member, result):
+    """The Discord half of a staff level correction.
+
+    Unlike `apply_database_result`, which is the reward path and only ever sees a
+    level go up, this has to handle both directions: the role is reconciled
+    either way, and the levels channel hears about a promotion only. "@member
+    reached level 3" after a punishment would be worse than saying nothing.
+
+    Returns whether the roles were actually applied, so the command can tell the
+    operator that the level changed but Discord refused the role — usually
+    because the role sits above the bot.
+    """
+    stats = result["stats"]
+    new_level = stats[2]
+    if result.get("xp_changed"):
+        mark_top_ranker_dirty(member.guild)
+    if new_level > result["old_level"]:
+        try:
+            await announce_level_up(
+                member, new_level,
+                level_milestones(await guild_setting(member.guild.id, "level_roles")),
+            )
+        except discord.HTTPException:
+            utility_logger.warning(
+                "Could not announce an administrative level change "
+                "(guild=%s, level=%s)", member.guild.id, new_level)
+    if new_level == result["old_level"]:
+        return True
+    try:
+        await reconcile_level_roles(member, new_level)
+    except discord.HTTPException:
+        utility_logger.warning(
+            "Could not move the level role after an administrative change "
+            "(guild=%s, member=%s)", member.guild.id, member.id)
+        return False
+    return True
 
 
 def is_staff():
@@ -733,6 +872,34 @@ def is_premium(member):
     if member.premium_since is not None:
         return True
     return False
+
+
+#: Why a member in a voice channel is earning nothing there. `None` means they
+#: are earning. `not_in_voice` is not a problem, only the absence of one.
+VOICE_REWARD_BLOCKS = ("not_in_voice", "afk_channel", "deafened")
+
+
+def voice_reward_block(member):
+    """Whether this member's voice presence pays, and if not, why.
+
+    One definition, in one place, because two surfaces need it and they must not
+    disagree: `voice_xp_paycheck` uses it to decide who is paid, and `/profile`
+    uses it to *say* why somebody is not. Before this the rule existed only as a
+    filter inside the loop, so a member could sit deafened for four hours, earn
+    nothing, and find nothing anywhere that explained it — which is how it was
+    reported as a bug rather than as the anti-idle rule it is.
+
+    Deafening is the line, not muting: someone listening and not talking is still
+    present, and someone who has switched the channel off is not.
+    """
+    voice = getattr(member, "voice", None)
+    if voice is None or voice.channel is None:
+        return "not_in_voice"
+    if voice.channel == member.guild.afk_channel:
+        return "afk_channel"
+    if voice.self_deaf or voice.deaf:
+        return "deafened"
+    return None
 
 
 def can_self_assign_role(guild, role):

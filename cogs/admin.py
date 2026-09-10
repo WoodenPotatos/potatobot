@@ -17,12 +17,12 @@ from managed_messages import render_managed_message
 from discord.ext import commands
 from datetime import datetime, timedelta
 from cogs.utils import (
-    BoundedCooldownMap, can_self_assign_role, currency_emoji,
-    guild_setting_sync, guild_settings_sync, is_staff, set_guild_setting, t,
-    update_user_data,
+    BoundedCooldownMap, apply_admin_level_change, can_self_assign_role,
+    currency_emoji, guild_setting_sync, guild_settings_sync, is_staff,
+    send_moderation_log, set_guild_setting, t, update_user_data,
 )
 from settings_registry import SETTING_DEFINITIONS
-from feature_access import require_interaction_feature
+from feature_access import is_enabled, require_interaction_feature
 
 onboarding_interaction_times = BoundedCooldownMap()
 admin_logger = logging.getLogger("PotatoBot.Admin")
@@ -460,6 +460,98 @@ class Admin(commands.Cog):
         embed.add_field(name=t("admin.award_new_bal"), value=f"{new_bal}{currency_emoji()}")
     
         await ctx.send(embed=embed)
+
+    #: A level a typo cannot reach. There is no natural ceiling — the curve is
+    #: quadratic, so level 1000 is nearly ten million XP — and the point is that
+    #: `/setlevel 100000` should be refused rather than applied.
+    MAX_SETTABLE_LEVEL = 1000
+
+    async def _report_level_change(self, ctx, member, result, reason,
+                                   roles_applied):
+        """One reply and one log line for both commands.
+
+        They differ in what they ask for and agree on everything after: the level
+        before and after, the XP, who did it and why.
+        """
+        _, new_xp, new_level, _, _ = result["stats"]
+        old_level = result["old_level"]
+        dropped = new_level < old_level
+        embed = discord.Embed(
+            title=t("admin.level_lower_title") if dropped
+            else t("admin.level_raise_title"),
+            colour=discord.Colour.red() if dropped else discord.Colour.green(),
+            description=t("admin.level_desc", admin=ctx.author.display_name,
+                          user=member.mention),
+        )
+        embed.add_field(name=t("admin.level_change"),
+                        value=f"{old_level} → {new_level}")
+        embed.add_field(name=t("admin.level_xp"),
+                        value=f"{result['old_xp']} → {new_xp}")
+        if reason:
+            embed.add_field(name=t("admin.level_reason"), value=reason,
+                            inline=False)
+        if not roles_applied:
+            embed.add_field(name=t("admin.level_role_failed_label"),
+                            value=t("admin.level_role_failed"), inline=False)
+        await ctx.send(embed=embed)
+        # The reply *is* the record when the command was run in the log channel;
+        # sending it again there is the same embed twice in one channel.
+        await send_moderation_log(ctx.guild, embed, "a level change",
+                                  skip_channel=ctx.channel)
+
+    @commands.hybrid_command(name="setlevel", description=t("general.cmd_setlevel"))
+    @discord.app_commands.default_permissions(administrator=True)
+    @commands.has_permissions(administrator=True)
+    async def setlevel(self, ctx, member: discord.Member, level: int,
+                       *, reason: str = None):
+        """Put a member on a level exactly.
+
+        Writes the level's **floor** in XP, because the level column is derived
+        from XP on every write — setting it alone would last until the member's
+        next message. The reply says so, since setting somebody to the level they
+        are already on discards their progress within it and that should be
+        visible rather than surprising.
+        """
+        if not is_enabled(ctx.guild.id, "levels"):
+            # `update_user_data` silently zeroes an XP change while levels are
+            # off, so without this the command would report a success it did not
+            # have.
+            return await ctx.send(t("admin.level_feature_off"), ephemeral=True)
+        if not 1 <= level <= self.MAX_SETTABLE_LEVEL:
+            return await ctx.send(
+                t("admin.level_out_of_range", maximum=self.MAX_SETTABLE_LEVEL),
+                ephemeral=True)
+
+        reason = discord.utils.escape_mentions(reason)[:512] if reason else None
+        result = await database.run_write(
+            database.set_user_experience, member.id,
+            database.xp_for_level(level))
+        roles_applied = await apply_admin_level_change(member, result)
+        await self._report_level_change(ctx, member, result, reason,
+                                        roles_applied)
+
+    @commands.hybrid_command(name="givexp", description=t("general.cmd_givexp"))
+    @discord.app_commands.default_permissions(administrator=True)
+    @commands.has_permissions(administrator=True)
+    async def givexp(self, ctx, member: discord.Member, amount: int,
+                     *, reason: str = None):
+        """Add or take XP, letting the level fall where it falls.
+
+        The precise tool: a member owed three hours of voice rewards is owed a
+        number of XP, not a level. A negative amount takes it back, and the
+        database clamps the total at zero.
+        """
+        if not is_enabled(ctx.guild.id, "levels"):
+            return await ctx.send(t("admin.level_feature_off"), ephemeral=True)
+        if amount == 0:
+            return await ctx.send(t("admin.level_xp_zero"), ephemeral=True)
+
+        reason = discord.utils.escape_mentions(reason)[:512] if reason else None
+        result = await database.run_write(
+            database.apply_user_delta, member.id, 0, amount)
+        roles_applied = await apply_admin_level_change(member, result)
+        await self._report_level_change(ctx, member, result, reason,
+                                        roles_applied)
 
     @commands.hybrid_command(name="awardall", description=t("general.cmd_awardall"))
     @discord.app_commands.default_permissions(administrator=True)

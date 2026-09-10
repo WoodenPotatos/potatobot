@@ -11,6 +11,8 @@ configured right now, can the bot do what its enabled features need? It is pure
 data. Every finding carries stable English keys and identifiers, and each caller
 maps them to its own locale catalog, so the bot embed and the dashboard page
 cannot drift apart.
+
+Rules that bind changes here: docs/subsystems/dashboard.md
 """
 
 from dataclasses import dataclass, field

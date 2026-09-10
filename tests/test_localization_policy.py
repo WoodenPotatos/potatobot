@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -469,3 +470,71 @@ class DuplicateKeyTests(unittest.TestCase):
 
         parsed = json.loads('{"a": 1, "a": 2}')
         self.assertEqual({"a": 2}, parsed)
+
+
+class FooterCannotCarryACustomEmojiTests(unittest.TestCase):
+    """An embed footer is plain text, so a custom emoji renders as its id.
+
+    Six casino footers interpolated `{coin}` and printed
+    `<:potatocoins:1489…>` to every member of a guild whose currency symbol is
+    custom — the same defect the shop menu had on select option *labels*, which
+    is why `currency_select_emoji` already exists and why `currency_plain`
+    shares its judgement.
+
+    `t()` supplies `coin` through `kwargs.setdefault`, so a footer key holding
+    the token is safe only when the call site passes `coin=` explicitly. This
+    walks the call sites and requires exactly that; the failure it prevents is
+    silent, because nothing raises and the footer merely reads as gibberish.
+    """
+
+    def footer_calls(self):
+        """Every `set_footer(text=t("key", …))`, as (key, argument text)."""
+        found = []
+        for path in sorted((ROOT / "cogs").glob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            for match in re.finditer(
+                    r"set_footer\(\s*text=t\(\s*[\"']([a-z_]+\.[a-z_]+)[\"']"
+                    r"(.*?)\)\s*\)", source, re.S):
+                found.append((path.name, match.group(1), match.group(2)))
+        return found
+
+    def test_the_premise_holds(self):
+        calls = self.footer_calls()
+        self.assertGreaterEqual(
+            len(calls), 6, "no localized footers found; the matcher is wrong")
+
+    def test_a_footer_key_holding_the_coin_token_overrides_it(self):
+        catalog = json.loads(
+            (ROOT / "locales" / "hu.json").read_text(encoding="utf-8"))
+        offenders = []
+        for filename, key, args in self.footer_calls():
+            section, name = key.split(".", 1)
+            template = catalog.get(section, {}).get(name)
+            if isinstance(template, str) and "{coin}" in template:
+                if "coin=" not in args:
+                    offenders.append(f"{filename}: {key}")
+        self.assertEqual(
+            [], offenders,
+            "these footers would print a raw emoji id for a guild with a "
+            "custom currency symbol; pass coin=currency_plain(): "
+            f"{offenders}")
+
+    def test_currency_plain_never_returns_a_custom_reference(self):
+        import cogs.utils as utils
+
+        for symbol in ("<:potatocoins:1420070400000000003>", "<a:spin:1420070400000000003>",
+                       "Potato Coin", "", "   "):
+            with self.subTest(symbol=symbol):
+                with patch.object(
+                        utils, "currency_emoji", lambda s=symbol: s):
+                    self.assertEqual("", utils.currency_plain())
+
+    def test_currency_plain_keeps_a_unicode_symbol(self):
+        """It is dropped only where it cannot render, not always."""
+        import cogs.utils as utils
+
+        for symbol in ("🥔", "💰", "⭐"):
+            with self.subTest(symbol=symbol):
+                with patch.object(
+                        utils, "currency_emoji", lambda s=symbol: s):
+                    self.assertEqual(symbol, utils.currency_plain())

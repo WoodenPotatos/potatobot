@@ -259,10 +259,15 @@ DEFAULT_GACHA_CONFIG = {
             {"key": "marked_card", "kind": "item", "amount": 1, "weight": 100},
             {"key": "metal_detector", "kind": "item", "amount": 1, "weight": 100},
             {"key": "parachute", "kind": "item", "amount": 1, "weight": 100},
-            {"key": "coins_250", "kind": "coins", "amount": 250, "weight": 300},
-            {"key": "coins_500", "kind": "coins", "amount": 500, "weight": 100},
-            {"key": "coins_1000", "kind": "coins", "amount": 1000, "weight": 70},
-            {"key": "coins_5000", "kind": "coins", "amount": 5000, "weight": 8},
+            # No coin reward ships, in any tier. An amount is one guild's
+            # economy — 250 means one thing at this scaling and nothing at
+            # another — so shipping four fixed amounts is the same mistake as a
+            # role id in a registry default: a fact about one installation
+            # travelling to every one. A guild that wants coins builds a
+            # `coin_bundle` item at its own amount, or types a key; the `coins`
+            # kind and the `gacha.rewards.coins_*` labels both stay, because
+            # banners saved before this and every `gacha_pulls` row still name
+            # them. That is the `vault_25000` rule.
         ],
         "4": [
             {"key": "emoji_30d", "kind": "voucher", "amount": 30, "weight": 1},
@@ -1463,6 +1468,28 @@ def _ensure_user(conn, user_id: int, timestamp: str = None):
     )
 
 
+def level_for_xp(xp: int) -> int:
+    """The level a given amount of XP is worth.
+
+    The one definition of the curve. It was written inline in two places and was
+    about to be written in a third — with its inverse beside it — which is how a
+    formula comes to disagree with itself. Level is **derived** and never stored
+    independently: every write recomputes it, so anything that set `users.level`
+    on its own would be undone by the member's next message.
+    """
+    return int(math.sqrt(max(0, xp) / 10)) + 1
+
+
+def xp_for_level(level: int) -> int:
+    """The XP a level starts at — the inverse of `level_for_xp`.
+
+    Level 1 begins at zero, and each level is the next square: 10, 40, 90, 160.
+    `/setlevel` writes this, which is why it puts a member at the *floor* of the
+    level rather than anywhere inside it.
+    """
+    return 10 * (max(1, level) - 1) ** 2
+
+
 def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
                         xp_change: int = 0, win_inc: int = 0,
                         loss_inc: int = 0, clamp_balance: bool = True):
@@ -1479,7 +1506,7 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
         return None
 
     new_xp = max(0, old_xp + xp_change)
-    new_level = int(math.sqrt(new_xp / 10)) + 1
+    new_level = level_for_xp(new_xp)
     new_wins = old_wins + win_inc
     new_losses = old_losses + loss_inc
     conn.execute(
@@ -1493,6 +1520,10 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
     return {
         "stats": (new_balance, new_xp, new_level, new_wins, new_losses),
         "old_level": old_level,
+        # Reported rather than reconstructed by the caller: XP is clamped at
+        # zero, so subtracting the delta back off the new total is wrong exactly
+        # when a negative change hit the floor.
+        "old_xp": old_xp,
         "xp_changed": new_xp != old_xp,
     }
 
@@ -1511,6 +1542,49 @@ def apply_user_delta(user_id: int, balance_change: int = 0, xp_change: int = 0,
     except sqlite3.Error as exc:
         db_logger.exception("Atomic user update failed (user=%s)", user_id)
         raise DatabaseOperationError("atomic user update failed") from exc
+
+
+def set_user_experience(user_id: int, new_xp: int):
+    """Set a member's XP outright, and with it the level it works out to.
+
+    The correction tool `/setlevel` and `/givexp` need, and the reason it writes
+    XP rather than a level: the level column is recomputed from XP on every
+    write, so setting it alone would survive until the member's next message and
+    no longer.
+
+    An absolute write rather than a read-modify-write of a value the caller
+    computed, so it does not reintroduce the split-update pattern the hardening
+    baseline forbids — the caller says what the XP should *be*, and the row is
+    read and written under one `BEGIN IMMEDIATE`.
+
+    Returns the shape `_apply_stats_locked` returns, so the Discord-side helpers
+    that follow a level change need no second case for it.
+    """
+    try:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            _ensure_user(conn, user_id)
+            row = conn.execute(
+                "SELECT balance, xp, level, bj_wins, bj_losses FROM users "
+                "WHERE user_id = ?", (user_id,),
+            ).fetchone()
+            balance, old_xp, old_level, wins, losses = row
+            target_xp = max(0, int(new_xp))
+            target_level = level_for_xp(target_xp)
+            conn.execute(
+                "UPDATE users SET xp = ?, level = ? WHERE user_id = ?",
+                (target_xp, target_level, user_id),
+            )
+            conn.commit()
+            return {
+                "stats": (balance, target_xp, target_level, wins, losses),
+                "old_level": old_level,
+                "old_xp": old_xp,
+                "xp_changed": target_xp != old_xp,
+            }
+    except sqlite3.Error as exc:
+        db_logger.exception("Setting a member's experience failed (user=%s)", user_id)
+        raise DatabaseOperationError("setting experience failed") from exc
 
 
 def reserve_wager(user_id: int, amount: int):
@@ -2062,7 +2136,7 @@ def transfer_balance(sender_id: int, recipient_id: int, amount: int,
                 conn.rollback()
                 return None
             new_xp = max(0, sender[1] + sender_xp)
-            new_level = int(math.sqrt(new_xp / 10)) + 1
+            new_level = level_for_xp(new_xp)
             conn.execute(
                 "UPDATE users SET balance = balance - ?, xp = ?, level = ? WHERE user_id = ?",
                 (amount, new_xp, new_level, sender_id),
@@ -2261,7 +2335,14 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
                     froze_streak = True
                 else:
                     new_streak = 1
-            effective_streak = min(streak_count + 1, 100)
+            # `new_streak`, not `streak_count + 1`. The old form paid the
+            # streak the member was on *before* this claim, which broke in two
+            # directions: a streak reset after a gap still paid the lapsed
+            # bonus, and a second Everydle game on the same day — `day_gap == 0`,
+            # so `new_streak == streak_count` — paid one step above the streak it
+            # was on. The embed showed `new_streak` throughout, so the number a
+            # member read and the number they were paid for disagreed.
+            effective_streak = min(new_streak, 100)
             reward = int(base_coin * (1.0 + effective_streak / 100.0))
             result = _apply_stats_locked(conn, user_id, reward, xp_reward)
             conn.execute(
@@ -5050,19 +5131,30 @@ def missing_shipped_rewards(config_value: dict) -> dict:
 def new_banner_config() -> dict:
     """The config a freshly created banner starts with.
 
-    Everything except the reward table comes from the shipped defaults, because
-    the cost and the pity numbers are sensible starting points that an operator
-    would otherwise retype. The reward table does **not**: copying eighteen
-    shipped rewards means the first thing you do with a new banner is prune it.
+    The cost and the pity numbers come from the shipped defaults, because they
+    are sensible starting points an operator would otherwise retype.
 
-    It cannot be literally empty — `_validated_gacha_config` requires at least
-    one enabled reward per tier, because a tier can still be rolled and must have
-    something to award — so each tier gets one small coin reward to replace.
+    The **reward table is split by what a tier is for**, and that distinction is
+    the whole of it. Tier 3 is filler: it can never carry a featured reward — a
+    rate-up on the pool nobody is chasing has no meaning and no loss branch — so
+    every banner's 3-star tier wants the same shipped rows, and starting empty
+    meant adding seven of them by hand for each new banner. It is seeded from the
+    shipped table. Tiers 4 and 5 are what an event banner is *about*, so copying
+    the shipped rows there would mean the first thing you do is prune them.
+
+    A tier cannot be literally empty — `_validated_gacha_config` requires one
+    enabled reward per tier, because a tier can still be rolled and must have
+    something to award — so the two curated tiers get one placeholder each.
+    `coins_250` stays that placeholder deliberately: it is a valid reward with a
+    locale name, and now that **no shipped reward is a coin** it cannot be
+    mistaken for one, nor re-offered by `missing_shipped_rewards`.
     """
     config = json.loads(json.dumps(DEFAULT_GACHA_CONFIG))
     placeholder = {"key": "coins_250", "kind": "coins", "amount": 250,
                    "weight": 1, "enabled": True}
-    config["rewards"] = {tier: [dict(placeholder)] for tier in ("3", "4", "5")}
+    config["rewards"] = {"3": shipped_reward_table()["3"],
+                         "4": [dict(placeholder)],
+                         "5": [dict(placeholder)]}
     return config
 
 

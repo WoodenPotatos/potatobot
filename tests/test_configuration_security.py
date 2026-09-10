@@ -199,6 +199,47 @@ class ConfigurationSecurityTests(unittest.TestCase):
         leaked = re.findall(r"\d{15,20}", example_text)
         self.assertEqual([], leaked, "config.json.example leaks Discord identifiers")
 
+    #: What `CLAUDE.md` may cost. It is loaded into context on every turn of every
+    #: session, so its size is paid continuously rather than when somebody opens
+    #: it. Set a little above what the 2026-09-01 pass achieved (2,091 lines /
+    #: 198,295 characters), which leaves room to record a rule and not room to
+    #: retell an incident.
+    CLAUDE_MD_MAX_LINES = 2200
+    CLAUDE_MD_MAX_CHARS = 210_000
+
+    def test_the_instruction_file_stays_within_its_budget(self):
+        """Nothing noticed `CLAUDE.md` reaching six times its recommended size.
+
+        That is the same silent-absence failure the file itself keeps warning
+        about, applied to the file itself: no error, no log line, just a session
+        that got slower every month. The fix when this fails is to move the
+        *narrative* to `docs/lessons.md`, or one subsystem's detail to
+        `docs/subsystems/` — neither is loaded — and keep the
+        rule with one clause of why. Deleting a rule to get under the budget is
+        the one wrong answer.
+        """
+        text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        lines = len(text.splitlines())
+        self.assertLessEqual(
+            lines, self.CLAUDE_MD_MAX_LINES,
+            f"CLAUDE.md is {lines} lines. Move narrative to docs/lessons.md "
+            f"rather than dropping a rule.")
+        self.assertLessEqual(
+            len(text), self.CLAUDE_MD_MAX_CHARS,
+            f"CLAUDE.md is {len(text)} characters. Same remedy.")
+
+    def test_the_lessons_archive_is_never_published(self):
+        """It names this deployment, its channels and its dates, which is
+        exactly why the narrative was allowed to move there."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "publish_public", ROOT / "scripts" / "publish_public.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertIn("docs/lessons.md", module.EXCLUDED_PATHS)
+        self.assertIn("CLAUDE.md", module.EXCLUDED_PATHS)
+
     def test_secret_scanner_allowlist_stays_narrow(self):
         """The gitleaks allowlist exists only for the gacha reward identifiers.
 
@@ -233,12 +274,22 @@ class ConfigurationSecurityTests(unittest.TestCase):
         sources = re.findall(r"'''(.*?)'''", config, re.DOTALL)
         patterns = [re.compile(source) for source in sources if "key" in source]
         self.assertTrue(patterns, "no reward-key allowlist regex in .gitleaks.toml")
-        unmatched = [
+        # `new_banner_config()` as well as the shipped table. Since no shipped
+        # reward is a coin any more, its `coins_250` placeholder is the only
+        # `key": "coins_..."` literal left in `database.py` — so without this the
+        # allowlist alternative covering it would be checked by nothing, and
+        # removing that alternative would turn CI red for a reason nobody could
+        # trace back to here.
+        keys = {
             entry["key"]
-            for tier in database.DEFAULT_GACHA_CONFIG["rewards"].values()
+            for table in (database.DEFAULT_GACHA_CONFIG["rewards"],
+                          database.new_banner_config()["rewards"])
+            for tier in table.values()
             for entry in tier
-            if not any(pattern.search(f'key": "{entry["key"]}"')
-                       for pattern in patterns)
+        }
+        unmatched = [
+            key for key in sorted(keys)
+            if not any(pattern.search(f'key": "{key}"') for pattern in patterns)
         ]
         self.assertEqual(
             [], unmatched,

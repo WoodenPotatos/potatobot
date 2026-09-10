@@ -2,6 +2,8 @@ import ast
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 import tempfile
@@ -668,6 +670,28 @@ class RegistryPresentationTests(unittest.TestCase):
                     [], sorted(set(definition.required_discord_permissions) - valid)
                 )
 
+
+
+class FeatureCascadePromptTests(unittest.TestCase):
+    """The prompt must say which feature pulls each one.
+
+    It listed bare names, so disabling `economy` read "Shop, Rentals, Potato
+    Gacha" with no hint that the last two came *through* the shop. That is the
+    prompt an operator was reading when they asked whether the gacha really
+    needs the shop — and it could not tell them which declaration to look at.
+    """
+
+    def test_each_cascaded_feature_names_what_pulls_it(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        if not (ROOT / "node_modules" / "jsdom").is_dir():
+            self.skipTest("jsdom is not installed; run `npm install`")
+        script = ROOT / "tests" / "js" / "feature_cascade_prompt.js"
+        result = subprocess.run([node, str(script), str(ROOT)],
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, result.returncode,
+                         f"{result.stdout}\n{result.stderr}")
 
 if __name__ == "__main__":
     unittest.main()

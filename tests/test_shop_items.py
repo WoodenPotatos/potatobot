@@ -11,10 +11,13 @@ only one of them knew.
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from datetime import datetime
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -23,6 +26,92 @@ if ROOT not in sys.path:
 import database
 import item_catalog
 from settings_registry import SETTING_DEFINITIONS
+
+
+class ShippedRewardPoolTests(unittest.TestCase):
+    """What a fresh installation's banner awards, and what it deliberately does
+    not.
+
+    Coins used to ship as four fixed amounts in the 3-star tier. An amount is one
+    guild's economy — 250 coins means one thing at this scaling and nothing at
+    another — so shipping them is the same mistake as a role id in a registry
+    default: a fact about one installation travelling to every one. The `coins`
+    kind, its free-text key and a `coin_bundle` custom item all stay, so a guild
+    that wants a coin reward sets its own amount.
+    """
+
+    def test_no_shipped_reward_is_coins(self):
+        coins = [
+            entry["key"]
+            for tier, entries in database.DEFAULT_GACHA_CONFIG["rewards"].items()
+            for entry in entries
+            if entry["kind"] == "coins"
+        ]
+        self.assertEqual(
+            [], coins,
+            "a coin amount is one guild's economy and must not ship; build a "
+            "coin_bundle item instead",
+        )
+
+    def test_the_retired_coin_labels_stay(self):
+        """Removing a reward from the pool must not remove its name.
+
+        Stored banners still list these keys — the live standard banner has all
+        four — and every `gacha_pulls` row that ever awarded one names it
+        forever, so a missing label would turn recorded history into a bracketed
+        key. Exactly why `vault_25000` and `vault_500000` are still in the
+        catalogs.
+        """
+        catalog = json.loads(
+            (Path(ROOT) / "locales" / "hu.json").read_text(encoding="utf-8"))
+        rewards = catalog["gacha"]["rewards"]
+        for key in ("coins_250", "coins_500", "coins_1000", "coins_5000"):
+            self.assertTrue(rewards.get(key), f"{key} lost its label")
+
+    def test_a_new_banner_starts_with_the_filler_tier_filled(self):
+        """Tier 3 can never feature a reward, so every banner's 3-star tier is
+        the same filler and building one by hand was seven rows a time. Tiers 4
+        and 5 are what an event banner is about, so they stay placeholders."""
+        config = database.new_banner_config()
+        shipped = database.shipped_reward_table()
+        self.assertEqual([entry["key"] for entry in shipped["3"]],
+                         [entry["key"] for entry in config["rewards"]["3"]])
+        for tier in ("4", "5"):
+            self.assertEqual(1, len(config["rewards"][tier]),
+                             f"tier {tier} is curated and must start empty")
+        # And it has to be a config the writers accept, or creating a banner
+        # fails on its own default.
+        database._validated_gacha_config(config, "event_banner")
+
+    def test_a_new_banner_is_not_a_copy_of_the_shipped_table(self):
+        """The mutation guard for the seed above: `shipped_reward_table()`
+        returns a deep copy, so editing a new banner's tier 3 must not reach
+        `DEFAULT_GACHA_CONFIG`."""
+        config = database.new_banner_config()
+        config["rewards"]["3"][0]["weight"] = 999
+        self.assertNotEqual(
+            999, database.DEFAULT_GACHA_CONFIG["rewards"]["3"][0]["weight"])
+
+
+class TierImportTests(unittest.TestCase):
+    """Filling one tier from the shipped table, in the browser.
+
+    `missing_shipped_rewards` is already per tier and already reaches the client,
+    so the button is the tier-scoped half of "Add missing rewards" sharing one
+    implementation — there is deliberately no second diff in JavaScript.
+    """
+
+    def test_a_tier_can_be_imported_from_the_shipped_table(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        if not (Path(ROOT) / "node_modules" / "jsdom").is_dir():
+            self.skipTest("jsdom is not installed; run `npm install`")
+        script = Path(ROOT) / "tests" / "js" / "gacha_tier_import.js"
+        result = subprocess.run([node, str(script), ROOT],
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, result.returncode,
+                         f"{result.stdout}\n{result.stderr}")
 
 
 class SharedItemIdentityTests(unittest.TestCase):

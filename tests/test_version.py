@@ -288,13 +288,21 @@ class WorkResponseSubstitutionTests(unittest.TestCase):
 
 
 class CoinArgumentTests(unittest.TestCase):
-    """No caller may pass `coin` to `t()`.
+    """A caller may pass `coin` to `t()` only where the symbol cannot render.
 
     `t()` supplies it from the currency setting with `kwargs.setdefault`, so an
-    explicit argument silently wins. That is exactly how the shop menu came to
-    show the fallback emoji while every other surface showed the configured one:
-    a call site passed the symbol as a parameter instead of embedding it, so the
+    explicit argument silently wins. That is how the shop menu came to show the
+    fallback emoji while every other surface showed the configured one: a call
+    site passed the symbol as a parameter instead of embedding it, so the
     105-site sweep never saw it.
+
+    The rule was "no call site, ever", written when every surface could draw a
+    custom emoji. An embed **footer** cannot — `<:potatocoins:…>` renders as
+    those literal characters — so six casino footers printed a raw emoji id to
+    any guild with a custom symbol. The half that still holds is the half worth
+    guarding: an override is allowed *only* to strip a symbol a surface cannot
+    draw, and only through `currency_plain()`, which is the one place that
+    judgement lives. Passing a literal, or anything else, is still forbidden.
     """
 
     def test_no_call_site_passes_coin(self):
@@ -306,11 +314,19 @@ class CoinArgumentTests(unittest.TestCase):
         for path in sorted(ROOT.glob("cogs/*.py")) + sorted(ROOT.glob("*.py")):
             text = path.read_text(encoding="utf-8")
             for number, line in enumerate(text.splitlines(), 1):
-                if pattern.search(line):
-                    offenders.append(f"{path.relative_to(ROOT)}:{number}")
+                if not pattern.search(line):
+                    continue
+                # The sanctioned override: strip a symbol this surface cannot
+                # draw. Anything else — a literal, another helper — is the
+                # defect the rule was written for.
+                if "coin=currency_plain()" in line:
+                    continue
+                offenders.append(f"{path.relative_to(ROOT)}:{number}")
         self.assertEqual(
             [], offenders,
-            "let t() supply the currency symbol; an explicit coin= overrides it")
+            "let t() supply the currency symbol; an explicit coin= overrides "
+            "it. The one exception is a surface that cannot draw a custom "
+            "emoji, which must pass coin=currency_plain()")
 
     def test_the_shop_select_label_carries_no_currency(self):
         """A select option's label is plain text.

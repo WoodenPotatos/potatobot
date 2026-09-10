@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.10.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.13.1-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -172,6 +172,18 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.13.1-beta.1
+
+- **The Genshindle grid's headings line up again.** A column was removed from the game a while back but not from the heading row, so everything to the right of "Nem" was labelled with the wrong name — the weekly boss under "Alkat", the version under "Heti boss".
+- **The daily bonus now follows the streak you are actually shown.** Losing a streak and starting again still paid the old streak's bonus, so the same "1 nap" could be worth different amounts on different days. A second Everydle game on the same day was also paid one step too high.
+- **The coin symbol is no longer printed as a code in game footers.** Crash, higher-or-lower, the wheel and Russian roulette showed `<:potatocoins:…>` instead of the symbol, because a footer cannot draw a custom emoji. A custom symbol is now left out of those footers; a plain one still shows.
+- **The gacha can run with the shop switched off.** It never needed the shop — nothing in it reads that switch — so a server can now sell nothing and hand every item out through the gacha. The premium role and the item values stay editable when the shop is off, because the gacha grants those items too. Switching the shop off now stops the shop and rentals, and nothing else.
+- **The feature switch says which feature needs which.** Turning something off used to list what would go with it as bare names; each one now names the feature that requires it.
+- **The bot notices when it has stopped being connected and restarts itself.** On 31 August the connection to Discord went away at 21:59 and nothing rebuilt it. The process stayed alive and idle, so the server saw a perfectly healthy service and the dashboard kept working — the bot was simply absent from Discord until somebody noticed by hand the next day. A watchdog now checks that the connection is really there and that the bot is still doing work, and ends the process if either has been false for a few minutes, which makes the server start it again within ten seconds.
+- The wait before it acts is deliberately several minutes, so a Discord outage or an ordinary reconnection is waited out rather than restarted through.
+- **And it can now be asked what it is doing.** The cause of that outage could not be established, because there was no way to see where the bot was stuck. `kill -USR1` now writes every thread's position into the log. See `docs/performance_recovery_plan.md`.
+- …and 14 more, in [CHANGELOG.md](CHANGELOG.md).
+
 ### 2.10.0-beta.1
 
 - **Your own vouchers and timed roles can be gacha rewards.** Make an item that grants an emoji, sticker or sound, or a role for N days, and put it in a banner. A member wins a voucher and redeems it with `/redeem` as usual — the role lands with its expiry, and an asset opens the staff ticket with the right kind.
@@ -191,17 +203,6 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - **An LFG post keeps working after a restart.** Its buttons used to stop answering the moment the bot restarted — and the post expired on its own after two hours even if it didn't. Both are gone: the party is stored, so Join, Leave and Delete keep working for as long as the message is there.
 - Two people pressing Join at the same instant can no longer both take the last slot; one of them is told somebody got there first.
 - …and 9 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.8.0-beta.1
-
-- **The shop has sections, and room to grow.** `/shop` asks which section first — Perks, Casino, Heist, Protection, Rentals — and then shows that section's items. Discord only allows 25 options in one menu, so the whole shop used to be 25 items: 17 built-in ones left you **eight** of your own, and that number dropped every time we added an item. Per section it is 25 each, so you have **108 slots** instead of 8, and a new built-in only ever costs a slot on its own shelf.
-- **`/buy <name>` buys straight from the name**, with the list filtering as you type. It has no 25-item ceiling at all, so it can reach anything — including an item a very full section could not fit into the menu.
-- **You can hide a built-in item you do not sell.** No soundboard? Hide the sound rental and get its slot back. Hiding only removes it from the shop menu: it can still come out of the gacha, anyone who already owns one can still use it, and rentals still expire on time.
-- Showing a hidden item again is refused if its section has filled up while it was away, and says which section and how full — so you can delete one of your own or leave it hidden, rather than the menu quietly dropping something.
-- **The item page groups by section and shows the room left**, so you can see that Casino is at 7/25 before you try to add a twentieth thing to it. A full section is marked, and cannot be picked in the editor rather than failing on save.
-- Every item you already made keeps working and lands on a sensible shelf without you touching anything; you can move one whenever you like, or leave it on "Automatic".
-- **A long item name can no longer take `/shop` down.** A name at the editor's own 100-character limit made the menu exceed Discord's limit for an option label, which Discord rejects outright — it is capped and trimmed in three places now.
-- A disabled item bought by name now says it is unavailable instead of saying you cannot afford it.
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

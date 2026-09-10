@@ -301,7 +301,13 @@ FEATURE_DEFINITIONS = {
                               "external_emojis")),
         _feature("shop", "economy", dependencies=("economy",),
                  permissions=("manage_roles",)),
-        _feature("shop_gacha", "economy", dependencies=("economy", "shop"),
+        # `economy` only: a pull spends coins. It does **not** depend on `shop`
+        # — nothing in `cogs/gacha.py` reads that flag, it calls no shop
+        # function, reads shop *data* through `database`, and borrows a few
+        # `shop.*` locale strings. The dependency existed only as a declaration,
+        # and it made a gacha-only guild impossible: turning the shop off to
+        # sell nothing also turned off the gacha.
+        _feature("shop_gacha", "economy", dependencies=("economy",),
                  default=False,
                  permissions=("manage_roles", "manage_expressions")),
         _feature("rentals", "economy",
@@ -583,8 +589,15 @@ SETTING_DEFINITIONS = {
                  [], legacy_path=("roles", "admin")),
         _setting("premium_roles", "economy", "premium", SettingValueType.ROLE_LIST,
                  [], feature="economy", legacy_path=("roles", "premium")),
+        # `economy`, not `shop`: this is the role a **gacha** premium voucher
+        # grants, read by `cogs/gacha.py` and `item_catalog.py`. Owned by the
+        # shop it vanished from the dashboard whenever the shop was switched
+        # off, leaving a role being handed out that nobody could configure. It
+        # also reunites it with `premium_roles`, already economy-owned and on
+        # this same page.
         _setting("premium_role", "economy", "premium", SettingValueType.ROLE,
-                 None, feature="shop", legacy_path=("roles", "premium_role"), assignable_role=True),
+                 None, feature="economy", legacy_path=("roles", "premium_role"),
+                 assignable_role=True),
         _setting("member_role", "community", "onboarding", SettingValueType.ROLE,
                  None, feature="onboarding", legacy_path=("roles", "member"), assignable_role=True),
         _setting("onboarding_role", "community", "onboarding", SettingValueType.ROLE,
@@ -727,9 +740,13 @@ SETTING_DEFINITIONS = {
 # generated family would put five more rows on the Economy page that belong
 # beside the items instead. `edited_elsewhere` keeps it off the settings form for
 # that reason; the item page is where it is typed.
+# `economy`, not `shop`: these are the mechanic bounds for the lockpick, the
+# vault drill, the streak freeze and the rest, every one of them drawable from
+# the gacha. Owned by the shop they hid with it, so a guild that sells nothing
+# could win the items and not tune them.
 _item_values = _setting(
     "shop_item_values", "economy", "shop", SettingValueType.JSON, {},
-    feature="shop", json_shape=JSON_SHAPE_ITEM_VALUES, edited_elsewhere=True,
+    feature="economy", json_shape=JSON_SHAPE_ITEM_VALUES, edited_elsewhere=True,
 )
 SETTING_DEFINITIONS[_item_values.key] = _item_values
 

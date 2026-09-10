@@ -1,3 +1,8 @@
+"""The Flask control-plane API and the durable Discord action outbox.
+
+Rules that bind changes here: docs/subsystems/dashboard.md
+"""
+
 import logging
 import asyncio
 import copy
@@ -201,6 +206,29 @@ class TtlCache:
 
 _permission_cache = TtlCache(PERMISSION_CACHE_SECONDS, MAX_TRACKED_SESSIONS)
 
+# One refresh at a time per session. `loadGuild()` fires four `/api/guilds/…`
+# reads at once and a fresh session's cache is empty, so all four missed it and
+# each made its own Discord call — which is what earned the 429 that then read as
+# a revoked grant and logged a real administrator out. Per session rather than one
+# global lock: a global one would let a slow Discord call block every other
+# session's reads, and Waitress runs eight threads.
+_refresh_locks: dict[str, threading.Lock] = {}
+_refresh_locks_guard = threading.Lock()
+
+
+def _session_refresh_lock(session_id: str) -> threading.Lock:
+    with _refresh_locks_guard:
+        lock = _refresh_locks.get(session_id)
+        if lock is None:
+            # Bounded like every other transient map. Evicting a lock somebody
+            # holds is harmless: they finish under it and the next caller simply
+            # makes its own, so the worst case is the duplicate Discord call this
+            # exists to avoid, not a correctness failure.
+            while len(_refresh_locks) >= MAX_TRACKED_SESSIONS:
+                del _refresh_locks[next(iter(_refresh_locks))]
+            lock = _refresh_locks[session_id] = threading.Lock()
+        return lock
+
 # Channel and role selectors are re-read on every page load, so a short cache
 # keeps a standalone dashboard from making two Discord calls each time.
 RESOURCE_CACHE_SECONDS = 60
@@ -221,6 +249,8 @@ def _forget_session(session_id: str | None):
     with _oauth_token_lock:
         _oauth_tokens.pop(session_id, None)
     _permission_cache.forget(session_id)
+    with _refresh_locks_guard:
+        _refresh_locks.pop(session_id, None)
 
 
 def _prune_oauth_tokens(now: float):
@@ -734,6 +764,12 @@ def _permission_refresh_unavailable(mutating: bool, cause: str):
     return None
 
 
+#: The only answers from Discord that mean this session's grant is gone. Every
+#: other status — 429 above all — is a reason to try later, not to log somebody
+#: out. Kept as a set so the list of what ends a session is short and readable.
+_GRANT_REVOKED_STATUSES = frozenset({401, 403})
+
+
 @app.before_request
 def recheck_mutation_guild_permissions():
     """Do not authorize an action from a stale Discord permission snapshot.
@@ -776,34 +812,47 @@ def recheck_mutation_guild_permissions():
         session["authorized_guild_ids"] = cached
         return None
 
-    try:
-        authorized = _refresh_authorized_guilds(session_id)
-    except requests.HTTPError as exc:
-        # Discord answered, and the answer was no. A 401 means the grant is gone
-        # and a 403 means it is not allowed to ask — neither improves by waiting,
-        # so serving the cookie's snapshot would keep a revoked session working
-        # until the twelve-hour cap. This used to be swallowed by the same
-        # RequestException handler as a timeout, which is why an invalid token
-        # and an unreachable Discord were indistinguishable in the journal.
-        status = getattr(exc.response, "status_code", None)
-        if status is not None and 400 <= status < 500:
-            dashboard_logger.warning(
-                "Discord rejected a permission refresh (status=%s); ending the "
-                "session.", status,
-            )
+    # One Discord call per session, however many requests arrive together. The
+    # cache is re-read inside the lock, so the three that wait find what the
+    # first one stored instead of asking again.
+    with _session_refresh_lock(session_id):
+        cached = _permission_cache.get(session_id)
+        if cached is not None:
+            session["authorized_guild_ids"] = cached
+            return None
+        try:
+            authorized = _refresh_authorized_guilds(session_id)
+        except requests.HTTPError as exc:
+            # Discord answered, and only two answers mean the grant is gone: 401,
+            # the token is no longer valid, and 403, it may not ask. Neither
+            # improves by waiting, so serving the cookie's snapshot would keep a
+            # revoked session working until the twelve-hour cap.
+            #
+            # **429 is not one of them.** It is Discord asking us to wait, and
+            # treating it as a revocation logged a real administrator out twelve
+            # times in one evening — the burst above was making four calls per
+            # page load and being rate-limited for it. Anything that is not a
+            # definite no degrades instead: a read serves stale, a write refuses.
+            # 400 would be a bug of ours rather than an answer about the grant.
+            status = getattr(exc.response, "status_code", None)
+            if status in _GRANT_REVOKED_STATUSES:
+                dashboard_logger.warning(
+                    "Discord rejected a permission refresh (status=%s, path=%s); "
+                    "ending the session.", status, request.path,
+                )
+                _forget_session(session_id)
+                session.clear()
+                return unauthorized_response()
+            return _permission_refresh_unavailable(mutating, f"status={status}")
+        except (requests.RequestException, ValueError) as exc:
+            return _permission_refresh_unavailable(mutating, type(exc).__name__)
+
+        if authorized is None:
             _forget_session(session_id)
             session.clear()
             return unauthorized_response()
-        return _permission_refresh_unavailable(mutating, f"status={status}")
-    except (requests.RequestException, ValueError) as exc:
-        return _permission_refresh_unavailable(mutating, type(exc).__name__)
 
-    if authorized is None:
-        _forget_session(session_id)
-        session.clear()
-        return unauthorized_response()
-
-    _permission_cache.put(session_id, authorized)
+        _permission_cache.put(session_id, authorized)
     session["authorized_guild_ids"] = authorized
     return None
 
@@ -1459,6 +1508,39 @@ def _gacha_eligible_custom_items(guild_id: int) -> list[dict]:
     return eligible
 
 
+#: Which field of a template's config holds a Discord snowflake. One declaration,
+#: so the wire transform and the validator cannot disagree about where an id
+#: lives — the same reason `JSON_SHAPE_SNOWFLAKE_FIELDS` exists for settings.
+ITEM_CONFIG_SNOWFLAKE_FIELDS = {
+    "fixed_role": ("role_id",),
+    "timed_role": ("role_id",),
+}
+
+
+def _wire_item_config(template: str, config_value):
+    """A config with its snowflakes as decimal strings.
+
+    An id is 64-bit and a JavaScript number holds 53 bits exactly, so sending
+    `1420070400000000001` as a JSON number gives the browser
+    `1420070400000000000`. `guild_item_list` sent the config straight through, so
+    opening a role item and saving it wrote the id back **rounded** — the setting
+    matched no role afterwards. Exactly the defect `_wire_value` was written for
+    on the settings routes; the item config never got the same treatment because
+    creating a role item was refused outright, which masked it.
+
+    Storage is unchanged: ids stay integers in `config_json`, so nothing the bot
+    reads changes shape.
+    """
+    fields = ITEM_CONFIG_SNOWFLAKE_FIELDS.get(template)
+    if not fields or not isinstance(config_value, dict):
+        return config_value
+    wired = dict(config_value)
+    for field in fields:
+        if isinstance(wired.get(field), int) and not isinstance(wired[field], bool):
+            wired[field] = str(wired[field])
+    return wired
+
+
 def _mechanic_payload(item_key: str, overrides: dict):
     """What the item page needs to render a mechanic's number, or None.
 
@@ -1575,8 +1657,10 @@ def guild_item_list(guild_id):
             "hidden": False,
             # The editor and the enable/disable path both need these: the PATCH
             # route reuses the creation validator, so a partial body is refused
-            # and every field has to be sent back unchanged.
-            "config": item["config"],
+            # and every field has to be sent back unchanged. Snowflakes leave as
+            # strings, or `JSON.parse` rounds them and saving writes back an id
+            # that matches no role.
+            "config": _wire_item_config(item["template_type"], item["config"]),
         })
     # Every section, always, and in the catalog's declared order — an operator
     # must be able to file an item onto an empty shelf. The label is resolved
@@ -2103,17 +2187,34 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
         raise RequestValidationError("dashboard.errors.shop_item_invalid")
     item_config = payload["config"]
     template = payload["template_type"]
-    if template == "fixed_role" and (
-        set(item_config) != {"role_id"} or not isinstance(item_config["role_id"], int)
-    ):
-        raise RequestValidationError("dashboard.errors.shop_config_fixed_role")
-    if template == "timed_role" and (
-        set(item_config) != {"role_id", "duration_days"}
-        or not isinstance(item_config["role_id"], int)
-        or not isinstance(item_config["duration_days"], int)
-        or not 1 <= item_config["duration_days"] <= 3650
-    ):
-        raise RequestValidationError("dashboard.errors.shop_config_timed_role")
+    # A role id arrives as a **decimal string**, because a snowflake is 64-bit
+    # and a JSON number holds 53 bits exactly — the role picker has always sent
+    # one and `unpack` has always turned the stored integer back into one. This
+    # demanded an `int` and so refused *every* role item ever created from the
+    # dashboard. `_snowflake_arg` is the normaliser the settings routes already
+    # use; storage stays an integer, which is what the purchase path reads.
+    #
+    # Nothing caught it because every test fixture wrote `role_id` as an int
+    # literal, exercising the server with a type the browser never sends.
+    if template in {"fixed_role", "timed_role"}:
+        expected = ({"role_id"} if template == "fixed_role"
+                    else {"role_id", "duration_days"})
+        reason = ("dashboard.errors.shop_config_fixed_role"
+                  if template == "fixed_role"
+                  else "dashboard.errors.shop_config_timed_role")
+        if set(item_config) != expected:
+            raise RequestValidationError(reason)
+        try:
+            item_config = dict(item_config)
+            item_config["role_id"] = _snowflake_arg(item_config["role_id"])
+        except ValueError:
+            raise RequestValidationError(reason) from None
+        if template == "timed_role" and (
+            isinstance(item_config["duration_days"], bool)
+            or not isinstance(item_config["duration_days"], int)
+            or not 1 <= item_config["duration_days"] <= 3650
+        ):
+            raise RequestValidationError(reason)
     if template == "vault" and (
         set(item_config) != {"amount"} or not isinstance(item_config["amount"], int)
         or item_config["amount"] <= 0

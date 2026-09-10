@@ -9,9 +9,11 @@ file behind them. A cog cannot import `main`, and `dashboard_api` must not, so
 the setup belongs in a module both can reach.
 """
 
+import faulthandler
 import logging
 import logging.handlers
 import os
+import signal
 import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -69,6 +71,34 @@ def configure_logger(name: str) -> logging.Logger:
     return configured
 
 
+def enable_stack_dumps():
+    """Make the process able to say what it is doing, on demand.
+
+    A bot that stopped talking to Discord for fourteen hours could not be
+    diagnosed at all: the process was alive and idle, the event loop was in
+    `epoll`, and there was no way to see what the gateway task was waiting on
+    without installing a profiler on a production host. `faulthandler` is in the
+    standard library and costs nothing until it fires.
+
+    Two halves. `enable()` prints every thread's Python stack to stderr — and so
+    to the journal — if the interpreter dies on a fatal signal, which otherwise
+    leaves nothing behind at all. `register(SIGUSR1)` does the same on demand:
+
+        kill -USR1 $(systemctl show potatobot -p MainPID --value)
+
+    `chain=False` because nothing else handles these, and `all_threads=True`
+    because the interesting one is rarely the main thread.
+
+    Idempotent, so the in-process dashboard calling this after `main` is a no-op
+    rather than a second registration.
+    """
+    if not faulthandler.is_enabled():
+        faulthandler.enable()
+    # Windows has no SIGUSR1, and neither has a stripped-down container.
+    if hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
+
+
 def configure_dashboard_logging():
     """Everything a standalone `python dashboard_api.py` needs.
 
@@ -78,3 +108,4 @@ def configure_dashboard_logging():
     """
     configure_logger("PotatoBot")
     configure_logger("waitress")
+    enable_stack_dumps()

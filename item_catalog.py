@@ -14,6 +14,8 @@ under keys the shop had never heard of.
 
 Stdlib only and no project imports, so ``database``, ``settings_registry``,
 ``dashboard_api`` and the cogs can all depend on it without a cycle.
+
+Rules that bind changes here: docs/subsystems/gacha.md
 """
 
 from dataclasses import dataclass

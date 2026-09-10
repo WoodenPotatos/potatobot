@@ -136,6 +136,8 @@ def get_help_data():
             "commands": {
                 t("general.usage_award"): t("general.cmd_award"),
                 t("general.usage_awardall"): t("general.cmd_awardall"),
+                t("general.usage_setlevel"): t("general.cmd_setlevel"),
+                t("general.usage_givexp"): t("general.cmd_givexp"),
                 t("general.usage_rent_start"): t("general.cmd_rent_start"),
                 t("general.usage_maintenance"): t("general.cmd_maintenance"),
                 t("general.usage_testreset"): t("general.cmd_testreset"),

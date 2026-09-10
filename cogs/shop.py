@@ -1,3 +1,8 @@
+"""The shop menu, `/buy`, rentals and custom items.
+
+Rules that bind changes here: docs/subsystems/gacha.md
+"""
+
 import discord
 import asyncio
 import logging

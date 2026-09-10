@@ -4,6 +4,8 @@
  * contain no Hungarian prose, which tests/test_localization_policy.py enforces.
  * DOM construction stays on createElement/textContent - never innerHTML - so
  * Discord-supplied names cannot become markup.
+ *
+ * Rules that bind changes here: docs/subsystems/dashboard.md
  */
 
 const API = '/api';
@@ -266,11 +268,21 @@ function renderSessionTimer() {
     node.classList.toggle('expired', left === 0);
 }
 
-/** Route an expired session back to the login card instead of looping toasts. */
+/** Route an expired session back to the login card instead of looping toasts.
+ *
+ *  **Only a 401.** This took a 403 to the login card as well and announced it as
+ *  an expired session, so a refused action — a CSRF mismatch, a guild you may not
+ *  touch — told the operator to log in again, which could not help and threw away
+ *  the page they were on. The server sends a specific localized reason for each;
+ *  showing it is the whole difference between a defect somebody can act on and
+ *  one they report as "the dashboard logs me out".
+ */
 function handleApiError(error) {
-    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+    if (error instanceof ApiError && error.status === 401) {
         showLogin();
-        toast(tr('dashboard.session_expired'), true);
+        // The server's own reason where it gave one: an ended session and an
+        // absolute-cap expiry are both 401 and do not mean the same thing.
+        toast(error.message || tr('dashboard.session_expired'), true);
         return;
     }
     toast(error.message, true);
@@ -1128,24 +1140,38 @@ function renderFeatures() {
     });
 }
 
-/** Features that would cascade off with this one, for the confirmation prompt.
+/** Features that would cascade off with this one, each naming what pulls it.
+ *
  *  The database disables dependants transitively, so listing only the direct
- *  ones understated what the operator was about to turn off: disabling
- *  `economy` also takes `shop_gacha` with it through `shop`. */
+ *  ones understated what the operator was about to turn off. Listing them as
+ *  bare names understated it differently: disabling `economy` printed "Shop,
+ *  Rentals, Potato Gacha" with no hint that the last two come *through* the
+ *  shop, so the prompt read as one flat consequence rather than a chain — and
+ *  an operator questioning whether a dependency is real could not tell from it
+ *  which declaration to look at.
+ *
+ *  Each entry therefore carries the parent that reached it. Joined inline
+ *  rather than as lines, because `confirmAction` renders its message into a
+ *  `<p>` and a paragraph collapses newlines.
+ */
 function dependentFeatures(key) {
-    const affected = new Set();
+    const affected = new Map();
     const pending = [key];
     while (pending.length) {
         const parent = pending.pop();
         Object.entries(featureState).forEach(([other, state]) => {
             if (other === key || affected.has(other) || !state.enabled) return;
             if ((state.dependencies || []).includes(parent)) {
-                affected.add(other);
+                affected.set(other, parent);
                 pending.push(other);
             }
         });
     }
-    return [...affected].map((other) => tr(featureState[other].locale_key));
+    return [...affected].map(([other, parent]) => format(
+        'dashboard.feature_cascade_item',
+        {feature: tr(featureState[other].locale_key),
+         parent: tr(featureState[parent]?.locale_key || parent)},
+    ));
 }
 
 async function saveFeature(key, input, revision) {
@@ -2361,19 +2387,36 @@ async function resetBannerRewards() {
  */
 function addMissingRewards() {
     if (!gacha) return;
-    const missing = gacha.missing_rewards || {};
-    let added = 0;
-    Object.entries(missing).forEach(([tier, entries]) => {
-        const table = gacha.config.rewards[tier] || (gacha.config.rewards[tier] = []);
-        entries.forEach((entry) => { table.push({...entry}); added += 1; });
-    });
+    const added = Object.keys(gacha.missing_rewards || {})
+        .reduce((sum, tier) => sum + importTier(tier), 0);
     if (!added) {
         toast(tr('dashboard.gacha_nothing_missing'));
         return;
     }
-    gacha.missing_rewards = {};
     renderGacha();
     toast(format('dashboard.gacha_rewards_added', {count: added}));
+}
+
+/** Append one tier's missing shipped rewards. Returns how many were added.
+ *
+ *  Shared by the page action above and each tier's own Import button, so both
+ *  append and prune identically. **Pruning is not tidiness**: a stale
+ *  `missing_rewards` entry lets the other path append the same key again, and
+ *  `_validated_gacha_config` rejects a tier that lists one reward twice — two
+ *  rows for one reward would double its odds and make the displayed chance a lie.
+ *
+ *  What is missing is read from `gacha.missing_rewards`, which the server
+ *  computed per tier with `missing_shipped_rewards`. Deliberately not diffed
+ *  again here: the rule for what counts as missing — key alone, so a deliberate
+ *  omission is re-offered rather than silently restored — belongs in one place.
+ */
+function importTier(tier) {
+    const entries = gacha?.missing_rewards?.[tier];
+    if (!entries || !entries.length) return 0;
+    const table = gacha.config.rewards[tier] || (gacha.config.rewards[tier] = []);
+    entries.forEach((entry) => table.push({...entry}));
+    delete gacha.missing_rewards[tier];
+    return entries.length;
 }
 
 function renderRewardTable(rewards) {
@@ -2400,6 +2443,27 @@ function renderRewardTable(rewards) {
             element('span', null, format('dashboard.gacha_tier_heading', {tier})),
             add,
         );
+
+        // Filling a tier from the shipped table, one click instead of one row at
+        // a time. Tier 3 is the reason it exists — it can never feature a reward,
+        // so every banner's 3-star tier is the same filler — but a tier is a tier
+        // and a per-tier button needs no special case for one of them.
+        //
+        // Shown only while that tier is actually missing something, so it leaves
+        // once the tier is complete rather than sitting there doing nothing.
+        const missing = gacha?.missing_rewards?.[tier]?.length || 0;
+        if (missing) {
+            const bring = element('button', 'btn btn-ghost btn-sm',
+                                  format('dashboard.gacha_import_tier', {count: missing}));
+            bring.type = 'button';
+            bring.addEventListener('click', () => {
+                const added = importTier(tier);
+                renderGacha();
+                toast(format('dashboard.gacha_tier_imported',
+                             {count: added, tier}));
+            });
+            cell.appendChild(bring);
+        }
         heading.appendChild(cell);
         body.appendChild(heading);
 
@@ -3096,6 +3160,36 @@ function checkClientFreshness(serverToken) {
     notice.classList.remove('hidden');
 }
 
+/** Re-read the reward pool a banner may draw from.
+ *
+ * `customRewards` is derived from this guild's own items, and it was loaded by
+ * `loadGuild()` alone — at boot and on a guild switch. So creating an item and
+ * walking to the Gacha page left the picker holding the pool from before the
+ * item existed, and nothing about that looked like staleness: it showed for a
+ * voucher and not for a vault, because **no built-in item carries a `voucher`
+ * gacha kind**, so that list is the custom pool and nothing else while the vault
+ * kinds still offered the three shipped vaults.
+ *
+ * A second request rather than deriving the pool from `itemList`, because which
+ * templates a banner may award and where each one's amount comes from is the
+ * server's rule (`GACHA_ELIGIBLE_TEMPLATES`), and a copy of it here is exactly
+ * the duplication that keeps the interface and the validator able to disagree.
+ *
+ * It fails silent: the item was saved either way, and the pool comes back on the
+ * next load — the same posture `applyPermissionNotes` takes.
+ */
+async function refreshCustomRewards() {
+    if (!guildId) return;
+    try {
+        const payload = await api(`/guilds/${guildId}/gacha`);
+        if (!Array.isArray(payload.data)) {
+            customRewards = payload.data.custom_rewards || [];
+        }
+    } catch (error) {
+        /* left as it was */
+    }
+}
+
 async function loadShopItems() {
     const itemsHost = document.getElementById('shop-items');
     const listCard = document.getElementById('shop-item-list-card');
@@ -3116,6 +3210,10 @@ async function loadShopItems() {
     }
     itemList = payload.data;
     itemCategories = payload.categories || [];
+    // Every item mutation ends here — save, delete and the enable toggle all
+    // converge on this function — so the reward pool is refreshed here rather
+    // than in each handler, where the next one added would forget it.
+    await refreshCustomRewards();
 
     // `count` used to be every row, which diverges from the menu the moment
     // anything is hidden, and the old flat `limit` no longer exists.

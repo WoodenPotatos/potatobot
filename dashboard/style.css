@@ -7,6 +7,8 @@
  * The Content-Security-Policy served with this page is `style-src 'self'` with
  * no `font-src`, so there are no external fonts, no icon webfonts and no inline
  * style attributes anywhere. Icons come from the inline SVG sprite in the HTML.
+ *
+ * Rules that bind changes here: docs/subsystems/dashboard.md
  */
 
 :root,

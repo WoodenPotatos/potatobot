@@ -5,6 +5,8 @@ cannot sign in to the dashboard â€” only the host and guild administrators can â
 the member-facing half lives here as Discord commands and the operator sees the
 outcome through the audit feed. Erasure is installation-wide by necessity: wallets
 are keyed only by Discord user id, so there is no per-guild copy to erase.
+
+Rules that bind changes here: docs/subsystems/deployment.md
 """
 
 import io

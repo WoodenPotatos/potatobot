@@ -1,5 +1,106 @@
 # Changelog
 
+## 2.13.1-beta.1
+
+- **The Genshindle grid's headings line up again.** A column was removed from
+  the game a while back but not from the heading row, so everything to the right
+  of "Nem" was labelled with the wrong name — the weekly boss under "Alkat", the
+  version under "Heti boss".
+- **The daily bonus now follows the streak you are actually shown.** Losing a
+  streak and starting again still paid the old streak's bonus, so the same
+  "1 nap" could be worth different amounts on different days. A second Everydle
+  game on the same day was also paid one step too high.
+- **The coin symbol is no longer printed as a code in game footers.** Crash,
+  higher-or-lower, the wheel and Russian roulette showed `<:potatocoins:…>`
+  instead of the symbol, because a footer cannot draw a custom emoji. A custom
+  symbol is now left out of those footers; a plain one still shows.
+- **The gacha can run with the shop switched off.** It never needed the shop —
+  nothing in it reads that switch — so a server can now sell nothing and hand
+  every item out through the gacha. The premium role and the item values stay
+  editable when the shop is off, because the gacha grants those items too.
+  Switching the shop off now stops the shop and rentals, and nothing else.
+- **The feature switch says which feature needs which.** Turning something off
+  used to list what would go with it as bare names; each one now names the
+  feature that requires it.
+
+- **The bot notices when it has stopped being connected and restarts itself.**
+  On 31 August the connection to Discord went away at 21:59 and nothing rebuilt
+  it. The process stayed alive and idle, so the server saw a perfectly healthy
+  service and the dashboard kept working — the bot was simply absent from Discord
+  until somebody noticed by hand the next day. A watchdog now checks that the
+  connection is really there and that the bot is still doing work, and ends the
+  process if either has been false for a few minutes, which makes the server
+  start it again within ten seconds.
+- The wait before it acts is deliberately several minutes, so a Discord outage or
+  an ordinary reconnection is waited out rather than restarted through.
+- **And it can now be asked what it is doing.** The cause of that outage could
+  not be established, because there was no way to see where the bot was stuck.
+  `kill -USR1` now writes every thread's position into the log. See
+  `docs/performance_recovery_plan.md`.
+- **Administrators can correct a member's level.** `/setlevel @member 12` puts
+  them on a level exactly, and `/givexp @member 1050` gives or takes XP — useful
+  when somebody is owed what they missed, since three and a half hours of voice
+  is a number of XP rather than a number of levels. Both take an optional reason.
+- **The level role now follows in both directions.** Until now the role only ever
+  moved when somebody levelled *up*, so lowering a member left the old role on
+  them — and a member dropped below every milestone kept a role they had not
+  earned. Going down now takes it back.
+- A level change is posted to the moderation log with who did it, the levels
+  before and after, and the reason — unless you ran the command in that channel,
+  in which case the reply already is the record and it is not repeated. A promotion is announced in the levels
+  channel as usual; a demotion is not, since announcing a punishment as an
+  achievement would be odd.
+- **Administrators are no longer logged out when Discord is busy.** Opening a
+  server asked Discord four times at once what that admin was allowed to manage;
+  Discord answered "slow down" to some of them, and the bot read that as the
+  admin's access having been withdrawn. The dashboard appeared for a second and
+  then said the session had expired, and logging in again could not help. It now
+  asks once per page instead of four times, and treats being told to slow down as
+  a reason to wait rather than as a reason to end the session.
+- **A refused action no longer claims your session expired.** Anything the server
+  turned down said the same thing and threw you back to the login screen. It now
+  tells you the actual reason and leaves you on the page.
+- **The higher voice rate follows the premium role, not only boosting.** A member
+  given the premium role was paid the premium rate everywhere in the bot except
+  in voice, where only server boosters got it.
+- **`/profile` now says when voice is paying nothing, and why.** Being deafened
+  earns no coins and no XP — the rule that stops someone idling for hours — but
+  nothing anywhere said so, so it looked like broken rewards. Being in the AFK
+  channel is named separately, since the answer there is to move rather than to
+  undeafen. Muting still earns, as it always did.
+- **Coins are no longer a reward the bot ships.** The 3-star tier came with four
+  fixed amounts — 250, 500, 1000 and 5000 — and an amount only means something
+  at one server's scaling, so shipping ours was a guess about your economy. A
+  coin reward is still entirely available: make a coin item at the amount you
+  want and put it in a banner, or type a key.
+- Banners you have already saved keep every coin reward they hold, including a
+  coin at 4-star. Nothing was rewritten; the change is what a *new* banner and a
+  fresh install start with.
+- **A new banner arrives with its 3-star tier already filled.** A 3-star can
+  never be the featured reward, so that tier is the same filler on every banner
+  and building one meant adding seven rewards one at a time. The two tiers you
+  actually choose — 4 and 5 star — still start with a single placeholder, because
+  those are the ones you would otherwise have to prune.
+- **And any tier can be filled from the shipped table in one click.** Each tier
+  heading offers to import what it is missing, showing the count, and the button
+  goes away once that tier is complete. Useful for the banners you already have,
+  where the new default cannot reach.
+- **A shop item that grants a role can be created again.** The role picker sends
+  Discord's id as text — an id is too long for a browser to hold as a number — and
+  the check on the other side insisted on a number, so every attempt was answered
+  with "needs a valid role and a day count between 1 and 3650" no matter how
+  correctly it was filled in.
+- **And the id is no longer damaged by opening the item.** The same length problem
+  in the other direction: the id was sent to the browser as a number, which
+  rounded it, so re-saving an existing role item wrote back an id that matched no
+  role. Only the creation bug above was keeping this one out of reach.
+- **A newly created item now appears in the gacha reward picker.** The list of
+  your own items was only read when the page first loaded, so an item created a
+  moment ago was not offered until you reloaded. It looked like vouchers
+  specifically were broken, because no built-in item is a voucher — so that list
+  was empty rather than merely missing the new entry, while the vault list still
+  showed the three built-in vaults.
+
 ## 2.10.0-beta.1
 
 - **Your own vouchers and timed roles can be gacha rewards.** Make an item that

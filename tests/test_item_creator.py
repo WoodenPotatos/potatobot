@@ -108,6 +108,42 @@ class TemplateRoundTripTests(unittest.TestCase):
         self.assertIn("ok", result.stdout)
 
 
+class CustomRewardPoolFreshnessTests(unittest.TestCase):
+    """An item created on the item page must be offerable on the gacha page.
+
+    `customRewards` was loaded by `loadGuild()` alone, so creating an item and
+    walking to the Gacha page left the reward picker holding the pool from before
+    it existed. It read as "vouchers are broken" rather than as staleness because
+    **no built-in item carries a `voucher` gacha kind**: that list is the custom
+    pool and nothing else, while the vault kinds still offered the three shipped
+    vaults and merely lacked the new one.
+
+    Driven through Node against the real client, because the defect is entirely
+    in when the browser re-reads a payload the server was always sending
+    correctly — the endpoint was verified against the deployment's own two items
+    and answered with both.
+    """
+
+    def test_a_new_item_reaches_the_reward_picker(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        if not (ROOT / "node_modules" / "jsdom").is_dir():
+            self.skipTest("jsdom is not installed; run `npm install`")
+        script = ROOT / "tests" / "js" / "gacha_custom_reward_refresh.js"
+        result = subprocess.run([node, str(script), str(ROOT)],
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, result.returncode,
+                         f"{result.stdout}\n{result.stderr}")
+
+    def test_no_builtin_item_offers_a_voucher(self):
+        """The premise the harness rests on, asserted here too: if a built-in
+        ever gained a `voucher` gacha kind, the empty-pool case would be masked
+        and that test would pass while telling nobody anything."""
+        kinds = {item.gacha_kind for item in item_catalog.SHOP_ITEMS.values()}
+        self.assertNotIn("voucher", kinds)
+
+
 class DashboardItemTestCase(unittest.TestCase):
     """A host session against a temporary database.
 
@@ -648,3 +684,139 @@ class CustomRewardLabelTests(unittest.TestCase):
 
         self.assertEqual("deleted_thing",
                          gacha_reward_label("deleted_thing", guild_id=1))
+
+
+class ItemConfigWireFormatTests(DashboardItemTestCase):
+    """A snowflake in an item's config crosses the wire as a string.
+
+    Two halves of one defect, both live and each masking the other.
+
+    `_validate_shop_item` demanded `isinstance(role_id, int)` while the role
+    picker hands over `option.value`, a decimal string — so *every* role item
+    created from the dashboard was refused with "needs a valid role", and the
+    operator reporting it was doing nothing wrong. Nothing caught it because
+    every Python fixture wrote `role_id` as an int literal, exercising the server
+    with a type the browser never sends.
+
+    And `guild_item_list` returned the stored id as a JSON *number*, which
+    `JSON.parse` rounds: 1420070400000000001 arrives as …000. So once creation
+    worked, opening a role item and saving it wrote the id back corrupted. That is
+    the settings defect `_wire_value` exists for, never applied here.
+
+    The check that matters drives the client's own `pack` through Node and POSTs
+    the result through the real route: two halves of a contract written in two
+    languages cannot be checked by reading them.
+    """
+
+    #: Above 2**53, so a regression cannot pass by using a small id.
+    ROLE_ID = 1420070400000000001
+
+    def packed_configs(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        script = Path(__file__).parent / "js" / "item_config_wire.js"
+        result = subprocess.run([node, str(script), str(SCRIPT)],
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, result.returncode, f"{result.stdout}\n{result.stderr}")
+        return json.loads(result.stdout)
+
+    def test_the_id_is_above_the_double_boundary(self):
+        self.assertGreater(self.ROLE_ID, 2 ** 53)
+
+    def test_every_template_the_client_packs_is_accepted(self):
+        """The route has to take what the browser actually sends, for every
+        template — not only for the one somebody happened to write a fixture
+        for."""
+        packed = self.packed_configs()
+        prices = {"coin_bundle": 100000}
+        for template, config in packed.items():
+            with self.subTest(template=template):
+                self.create_item({
+                    "item_key": f"wire_{template}", "template_type": template,
+                    "category": None, "enabled": True,
+                    "price": prices.get(template, 1), "config": config,
+                    "text": {"name": template, "description": "d"}})
+
+    def test_a_role_id_survives_creation_from_the_client(self):
+        packed = self.packed_configs()["timed_role"]
+        self.assertIsInstance(packed["role_id"], str,
+                             "the client sends an id as a string")
+        self.create_item({
+            "item_key": "premium_7d", "template_type": "timed_role",
+            "category": None, "enabled": True, "price": 1, "config": packed,
+            "text": {"name": "Premium", "description": "d"}})
+        stored = database.get_shop_item_definitions(123)[0]["config"]
+        # Storage is unchanged: an id stays an integer in `config_json`, so
+        # nothing the bot reads changes shape.
+        self.assertIsInstance(stored["role_id"], int)
+        self.assertEqual(int(packed["role_id"]), stored["role_id"])
+
+    def test_the_endpoint_sends_the_id_as_a_string(self):
+        self.create_item({
+            "item_key": "premium_7d", "template_type": "timed_role",
+            "category": None, "enabled": True, "price": 1,
+            "config": {"role_id": self.ROLE_ID, "duration_days": 7},
+            "text": {"name": "Premium", "description": "d"}})
+        rows = self.client.get("/api/guilds/123/items?lang=en").get_json()["data"]
+        row = next(r for r in rows if r["item_key"] == "premium_7d")
+        self.assertEqual(str(self.ROLE_ID), row["config"]["role_id"])
+        # And the raw body, because `get_json` parses with Python's arbitrary
+        # integers: an id sent as a JSON number would read back correct here and
+        # still be rounded by every browser. Whitespace-tolerant, since Flask
+        # serializes compactly.
+        body = self.client.get("/api/guilds/123/items?lang=en").get_data(as_text=True)
+        self.assertRegex(body, rf'"role_id":\s*"{self.ROLE_ID}"')
+        self.assertNotRegex(body, rf'"role_id":\s*{self.ROLE_ID}[,}}]')
+
+    def test_opening_a_role_item_and_saving_it_does_not_change_the_id(self):
+        """The failure this exists for: a save that changes nothing must write
+        back exactly what was there. Rounding made every such save destroy the
+        setting it was editing."""
+        self.create_item({
+            "item_key": "premium_7d", "template_type": "timed_role",
+            "category": None, "enabled": True, "price": 1,
+            "config": {"role_id": self.ROLE_ID, "duration_days": 7},
+            "text": {"name": "Premium", "description": "d"}})
+        rows = self.client.get("/api/guilds/123/items?lang=en").get_json()["data"]
+        row = next(r for r in rows if r["item_key"] == "premium_7d")
+        response = self.client.patch(
+            "/api/guilds/123/shop-items/premium_7d",
+            json={"template_type": row["effect"],
+                  "category": row["category_stored"], "enabled": row["enabled"],
+                  "price": row["price"], "config": row["config"],
+                  "text": {"name": row["name"],
+                           "description": row["description"]},
+                  "revision": row["revision"]},
+            headers={"X-CSRF-Token": "csrf-token"})
+        self.assertEqual(200, response.status_code,
+                         response.get_data(as_text=True))
+        stored = database.get_shop_item_definitions(123)[0]["config"]
+        self.assertEqual(self.ROLE_ID, stored["role_id"])
+
+    def test_a_non_numeric_role_id_is_still_refused(self):
+        """Accepting a string must not mean accepting any string."""
+        for value in ["not-an-id", "12.5", "", "0x10", None, True]:
+            with self.subTest(value=value):
+                response = self.client.post(
+                    "/api/guilds/123/shop-items",
+                    json={"item_key": "bad_role", "template_type": "timed_role",
+                          "category": None, "enabled": True, "price": 1,
+                          "config": {"role_id": value, "duration_days": 7},
+                          "text": {"name": "x", "description": "d"}},
+                    headers={"X-CSRF-Token": "csrf-token"})
+                self.assertEqual(400, response.status_code,
+                                 response.get_data(as_text=True))
+
+    def test_a_template_with_no_snowflake_is_untouched(self):
+        """The transform is declared per template, so a config that holds no id
+        must come back exactly as stored — a coin bundle's amount is a number and
+        has to stay one."""
+        self.create_item({
+            "item_key": "big_bundle", "template_type": "coin_bundle",
+            "category": None, "enabled": True, "price": 100000,
+            "config": {"amount": 5000, "repeatable": False},
+            "text": {"name": "Bundle", "description": "d"}})
+        rows = self.client.get("/api/guilds/123/items?lang=en").get_json()["data"]
+        row = next(r for r in rows if r["item_key"] == "big_bundle")
+        self.assertEqual({"amount": 5000, "repeatable": False}, row["config"])

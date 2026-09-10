@@ -13,7 +13,8 @@ import database
 
 from discord.ext import commands
 from datetime import datetime
-from cogs.utils import display_member_name, guild_member_ids, is_channel, t
+from cogs.utils import (display_member_name, guild_member_ids, is_channel,
+                        voice_reward_block, t)
 from feature_access import is_enabled, require_interaction_feature
 
 # These views are built per invocation and are not persistent, so a finite
@@ -170,6 +171,20 @@ class ProfileView(discord.ui.View):
                     value=t("profiles.pity_value", pity=pity["pity"],
                             five_stars=pity["five_stars"],
                             total=pity["total_pulls"]),
+                    inline=False,
+                )
+
+        # Why voice is paying nothing right now, when it is not. The rule itself
+        # is `voice_reward_block`, shared with the loop that pays, so this can
+        # never describe a rule the bot does not apply. Only the two states a
+        # member can act on are named: `not_in_voice` is the absence of a
+        # problem, and a member who *is* earning needs no notice at all.
+        if is_enabled(self.member.guild.id, "voice_rewards"):
+            blocked = voice_reward_block(self.member)
+            if blocked in ("deafened", "afk_channel"):
+                embed.add_field(
+                    name=t("profiles.voice_blocked_label"),
+                    value=t(f"profiles.voice_blocked_{blocked}"),
                     inline=False,
                 )
         return embed

@@ -4,6 +4,8 @@ import sys
 import logging
 import logging.handlers
 import asyncio
+import math
+import threading
 import time
 
 from dotenv import load_dotenv
@@ -42,6 +44,10 @@ bot_logger = configure_logger('PotatoBot')
 # Waitress logs its own queue-depth warnings, and they are worth reading in the
 # same format as everything else rather than in whatever basicConfig picks.
 configure_logger('waitress')
+# Before anything else can hang: a `kill -USR1` then prints every thread's Python
+# stack into the journal, which is what was missing when the gateway went away
+# and there was no way to see what the connection task was waiting on.
+logging_setup.enable_stack_dumps()
 
 # The database module is the single schema owner. Migrations are applied before
 # cogs or the dashboard can perform reads and writes.
@@ -90,6 +96,7 @@ tree = bot.tree
 feature_refresh_task = None
 event_loop_watchdog_task = None
 dashboard_action_task = None
+process_watchdog_thread = None
 legacy_adoption_checked = False
 commands_synchronized = False
 
@@ -160,17 +167,147 @@ async def refresh_feature_caches():
             # outage.
             bot_logger.exception("Settings cache refresh failed")
 
+#: How long the gateway may be gone before the process gives up and lets systemd
+#: rebuild it, and how long the event loop may stop breathing. Both are generous
+#: on purpose: a real Discord outage should be waited out rather than restarted
+#: through, and discord.py's own reconnect backoff needs room to work.
+#:
+#: The gateway grace also has to stay comfortably above the unit's
+#: `RestartSec`, because `StartLimitBurst=5` in `StartLimitIntervalSec=5min`
+#: gives up on the service entirely. At five minutes between exits the limit
+#: cannot be reached, so a long outage means periodic restarts rather than a bot
+#: systemd has washed its hands of.
+GATEWAY_GRACE_SECONDS = 300.0
+LOOP_GRACE_SECONDS = 120.0
+WATCHDOG_INTERVAL_SECONDS = 15.0
+
+#: Written by the event loop, read by the thread watching it. A plain float
+#: assignment, which is atomic under the GIL, so neither side needs a lock.
+_loop_heartbeat = 0.0
+
+
 async def monitor_event_loop_lag():
-    """Report blocking work before it grows into expired Discord interactions."""
+    """Report blocking work before it grows into expired Discord interactions.
+
+    Also the loop's proof of life: `_loop_heartbeat` is what tells the watchdog
+    thread that the loop is still turning at all.
+    """
+    global _loop_heartbeat
     interval = 1.0
     expected = time.monotonic() + interval
     while not bot.is_closed():
         await asyncio.sleep(interval)
         now = time.monotonic()
+        _loop_heartbeat = now
         lag = max(0.0, now - expected)
         if lag >= 0.25:
             bot_logger.warning("Event loop lag detected (lag_ms=%s)", round(lag * 1000))
         expected = now + interval
+
+
+def gateway_is_up(client) -> bool:
+    """Whether there is a live websocket to Discord right now.
+
+    `latency` is `nan` while there is no websocket, which is the one cheap signal
+    that distinguishes "connected" from "the connection is gone and nothing is
+    rebuilding it". Read from another thread, so it must stay an attribute read
+    with no awaiting: `Client.latency` is exactly that.
+    """
+    if client.is_closed():
+        return False
+    latency = client.latency
+    return latency is not None and not math.isnan(latency)
+
+
+def watchdog_verdict(now, heartbeat, gateway_down_since, *,
+                     loop_grace=LOOP_GRACE_SECONDS,
+                     gateway_grace=GATEWAY_GRACE_SECONDS):
+    """Why this process should be replaced, or None to keep waiting.
+
+    Pure, so the decision can be tested without threads or a clock: everything
+    it needs is an argument.
+
+    A zero heartbeat means the loop's monitor has not run yet — the bot is still
+    starting — and nothing is wrong yet. Arming on the first heartbeat rather
+    than on a timer is what keeps a slow start from being read as a hang.
+    """
+    if not heartbeat:
+        return None
+    if now - heartbeat > loop_grace:
+        return (f"the event loop stopped responding "
+                f"{round(now - heartbeat)}s ago")
+    if gateway_down_since is not None and now - gateway_down_since > gateway_grace:
+        return (f"the Discord gateway has been down for "
+                f"{round(now - gateway_down_since)}s with no reconnection")
+    return None
+
+
+def watch_for_a_wedged_process(client, interval=WATCHDOG_INTERVAL_SECONDS,
+                               loop_grace=LOOP_GRACE_SECONDS,
+                               gateway_grace=GATEWAY_GRACE_SECONDS):
+    """Exit when the bot has stopped being a bot, so systemd can rebuild it.
+
+    This runs in a **thread, not a task**, and that is the whole point. The
+    failure it exists for left the process alive and the event loop idle in
+    `epoll` with no Discord socket at all and no reconnection attempt, for
+    fourteen hours — systemd saw a healthy process because the process *was*
+    healthy, and the dashboard kept answering because it has its own thread. A
+    watchdog inside the loop would have caught that one, but not the other half
+    of the family: a loop wedged by blocking work cannot notice that it is
+    wedged.
+
+    `os._exit` rather than a graceful close, because the state this fires in is
+    one where an orderly shutdown is exactly what might hang. SQLite is in WAL
+    mode and crash-safe, so an interrupted transaction rolls back; the cost of a
+    hard exit is a log line, and the cost of hanging is another fourteen hours.
+    """
+    gateway_down_since = None
+    while True:
+        time.sleep(interval)
+        now = time.monotonic()
+        if gateway_is_up(client):
+            gateway_down_since = None
+        elif gateway_down_since is None:
+            gateway_down_since = now
+        reason = watchdog_verdict(now, _loop_heartbeat, gateway_down_since,
+                                  loop_grace=loop_grace,
+                                  gateway_grace=gateway_grace)
+        if reason is None:
+            continue
+        bot_logger.critical(
+            "Watchdog: %s. Exiting so the service manager can restart the bot.",
+            reason,
+        )
+        # Flush by hand: `os._exit` runs no handlers, and a watchdog whose own
+        # explanation never reached the journal would be indistinguishable from
+        # the crash it is reporting.
+        for handler in logging.getLogger("PotatoBot").handlers:
+            try:
+                handler.flush()
+            except Exception:
+                pass
+        os._exit(1)
+
+def start_process_watchdog():
+    """Start the watching thread once, on the first `on_ready`.
+
+    `on_ready` fires again on every gateway resume, so this is guarded the way
+    the background tasks beside it are. A daemon thread, so it can never be the
+    reason the process fails to exit.
+    """
+    global process_watchdog_thread
+    if process_watchdog_thread is not None and process_watchdog_thread.is_alive():
+        return
+    process_watchdog_thread = threading.Thread(
+        target=watch_for_a_wedged_process, args=(bot,),
+        name="process-watchdog", daemon=True,
+    )
+    process_watchdog_thread.start()
+    bot_logger.info(
+        "Process watchdog started (gateway_grace_s=%s, loop_grace_s=%s)",
+        int(GATEWAY_GRACE_SECONDS), int(LOOP_GRACE_SECONDS),
+    )
+
 
 # Load extensions before the gateway connection is established.
 bot.setup_hook = load_cogs
@@ -210,6 +347,7 @@ async def on_ready():
         event_loop_watchdog_task = asyncio.create_task(
             monitor_event_loop_lag(), name="event-loop-watchdog"
         )
+    start_process_watchdog()
     if deployment_settings.dashboard_enabled and (
         dashboard_action_task is None or dashboard_action_task.done()
     ):

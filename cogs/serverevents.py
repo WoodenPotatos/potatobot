@@ -16,8 +16,8 @@ from feature_access import is_enabled
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta
 from cogs.utils import (apply_database_result, guild_setting_sync,
-                        handle_loop_error, mark_top_ranker_dirty,
-                        update_user_data, t)
+                        handle_loop_error, is_premium, mark_top_ranker_dirty,
+                        update_user_data, voice_reward_block, t)
 
 event_logger = logging.getLogger("PotatoBot.ServerEvents")
 
@@ -196,20 +196,27 @@ class ServerEvents(commands.Cog):
             premium_reward = await database.run_read(
                 database.get_reward, guild.id, "voice_minute_premium", 10, 10
             )
+            # Who is paid is `voice_reward_block`, shared with `/profile` so the
+            # embed that explains the rule cannot drift from the loop that
+            # applies it. It covers the AFK channel, a missing voice state and
+            # deafening; the bot check stays here because it is about who we pay
+            # at all rather than about their voice state.
             members = {
                 member.id: member
                 for channel in guild.voice_channels
                 for member in channel.members
-                if not member.bot
-                and channel != guild.afk_channel
-                and member.voice is not None
-                and not member.voice.self_deaf
-                and not member.voice.deaf
+                if not member.bot and voice_reward_block(member) is None
             }
             deltas = []
             for member in members.values():
+                # `is_premium`, not `premium_since`: the latter is the Nitro
+                # boost timestamp alone, so a member holding the guild's premium
+                # role was paid the normal rate here and the premium rate
+                # everywhere else in the bot. One definition of premium, in
+                # `cogs.utils`, which is a settings-cache read and safe to call
+                # per member in a loop.
                 coin_rw, xp_rw = (
-                    premium_reward if member.premium_since else normal_reward
+                    premium_reward if is_premium(member) else normal_reward
                 )
                 if not levels_enabled_by_guild[guild.id]:
                     xp_rw = 0

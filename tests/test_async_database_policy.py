@@ -9,8 +9,31 @@ import database
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
+#: Pure functions in `database` that open no connection and may therefore be
+#: called straight from the event loop. The rule this test enforces is "no
+#: blocking database work off the executor", not "never name the module", and
+#: arithmetic over the level curve is not database work. Kept as an explicit
+#: list rather than letting a direct `from database import …` slip past the
+#: check, which would exempt every accessor at once.
+PURE_HELPERS = {"level_for_xp", "xp_for_level"}
+
 
 class AsyncDatabasePolicyTests(unittest.TestCase):
+    def test_the_allowlist_names_only_functions_that_touch_nothing(self):
+        """A name added here must be pure, or the allowlist becomes the hole.
+
+        `get_connection` is the only way into SQLite in that module, so a helper
+        whose source does not reach it cannot block.
+        """
+        import inspect
+
+        for name in PURE_HELPERS:
+            function = getattr(database, name)
+            source = inspect.getsource(function)
+            self.assertNotIn("get_connection", source,
+                             f"{name} opens a connection and is not pure")
+            self.assertNotIn("conn", source, f"{name} takes a connection")
+
     def test_async_code_uses_database_executor(self):
         violations = []
         paths = [ROOT / "main.py", *sorted((ROOT / "cogs").glob("*.py"))]
@@ -27,6 +50,7 @@ class AsyncDatabasePolicyTests(unittest.TestCase):
                     and isinstance(node.func.value, ast.Name)
                     and node.func.value.id in {"database", "database_layer"}
                     and node.func.attr not in {"run", "run_read", "run_write"}
+                    and node.func.attr not in PURE_HELPERS
                 ):
                     continue
                 current = node

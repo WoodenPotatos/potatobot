@@ -2,6 +2,8 @@
 
 Profiles change safe defaults and access policy; they must never select divergent
 feature implementations or permit data sharing between installations.
+
+Rules that bind changes here: docs/subsystems/deployment.md
 """
 
 from dataclasses import dataclass

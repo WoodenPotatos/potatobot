@@ -2,7 +2,7 @@ import concurrent.futures
 import os
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import database
 
@@ -228,3 +228,78 @@ class TransactionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EverydleStreakPayoutTests(unittest.TestCase):
+    """The bonus must follow the streak the member is shown.
+
+    `claim_everydle_reward` computed it from `streak_count + 1` — the streak
+    *before* this claim — while returning `new_streak` to the caller, so the
+    embed and the payout disagreed. Reported as "I lost my streak, it says 1
+    again, and I was paid more than last time".
+
+    Two branches were wrong and only one was noticed. Nothing caught either,
+    because **no test anywhere asserted a payout**: the existing everydle tests
+    check `streak_count` and item consumption. That gap is the reason a wrong
+    variable survived, so these assert coins.
+    """
+
+    BASE_COIN = 5000
+    BASE_XP = 100
+
+    def setUp(self):
+        self.original_path = database.DB_PATH
+        self.temp_dir = tempfile.TemporaryDirectory()
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.initialize_database()
+        self.day = datetime(2026, 9, 1, 12, 0)
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def claim(self, offset_days=0, column="last_valdle"):
+        when = (self.day + timedelta(days=offset_days)).isoformat()
+        return database.claim_everydle_reward(
+            1, column, when, self.BASE_COIN, self.BASE_XP)
+
+    def expected(self, streak):
+        return int(self.BASE_COIN * (1.0 + min(streak, 100) / 100.0))
+
+    def test_the_payout_matches_the_streak_that_is_shown(self):
+        for offset, streak in ((0, 1), (1, 2), (2, 3)):
+            with self.subTest(day=offset + 1):
+                result = self.claim(offset)
+                self.assertEqual(streak, result["streak"])
+                self.assertEqual(self.expected(streak), result["reward"])
+
+    def test_a_reset_streak_pays_a_reset_bonus(self):
+        """The reported bug. A week's gap shows streak 1, so it must pay
+        streak 1 — it used to pay the lapsed streak's bonus."""
+        self.claim(0)
+        self.claim(1)
+        self.claim(2)                       # streak 3
+        result = self.claim(12)             # ten days later
+        self.assertEqual(1, result["streak"])
+        self.assertEqual(self.expected(1), result["reward"])
+
+    def test_a_second_game_the_same_day_pays_its_own_streak(self):
+        """Never reported, same cause. `streak_count` and `last_streak_update`
+        are shared across every Everydle game, so a second game the same day
+        takes `day_gap == 0` and does not advance the streak — but the reward
+        added one anyway."""
+        first = self.claim(0)
+        second = self.claim(0, column="last_dbdle_killer")
+        self.assertEqual(first["streak"], second["streak"])
+        self.assertEqual(first["reward"], second["reward"])
+
+    def test_the_bonus_is_capped(self):
+        with database.get_connection() as conn:
+            conn.execute("INSERT OR IGNORE INTO users (user_id) VALUES (1)")
+            conn.execute(
+                "UPDATE users SET streak_count = 150, last_streak_update = ? "
+                "WHERE user_id = 1", ((self.day - timedelta(days=1)).isoformat(),))
+        result = self.claim(0)
+        self.assertEqual(151, result["streak"])
+        self.assertEqual(self.expected(100), result["reward"],
+                         "the cap applies to the payout, not only to the count")

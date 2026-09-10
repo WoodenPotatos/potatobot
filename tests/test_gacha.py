@@ -10,6 +10,8 @@ from pathlib import Path
 
 import database
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 class QueueRng:
     def __init__(self, *points):
@@ -630,14 +632,30 @@ class BannerRewardReconciliationTests(unittest.TestCase):
             {"key": "streak_freeze", "kind": "item", "amount": 1, "weight": 99})
         self.assertEqual({}, database.missing_shipped_rewards(config))
 
-    def test_a_new_banner_starts_with_one_placeholder_per_tier(self):
-        """Copying eighteen shipped rewards means the first thing an operator
-        does with a new banner is prune it. It cannot be literally empty, because
-        a tier can still be rolled and must have something to award."""
+    def test_a_new_banner_starts_with_the_filler_tier_only(self):
+        """A new banner seeds the tier that is the same everywhere and leaves the
+        two an operator actually chooses.
+
+        This rule was "one placeholder per tier", and the reason it gave — that
+        copying the shipped table means the first thing you do is prune it — is
+        still exactly right for tiers 4 and 5, which are what an event banner is
+        *about*. It was never right for tier 3: a 3-star can never be featured,
+        so every banner's filler tier wants the same shipped rows, and building
+        one meant adding seven by hand every time. Restated rather than deleted,
+        because the half that still holds is the half worth guarding.
+
+        A tier still cannot be literally empty, because it can be rolled and must
+        have something to award.
+        """
         config = database.new_banner_config()
-        for tier in ("3", "4", "5"):
+        self.assertEqual(
+            [entry["key"] for entry in database.shipped_reward_table()["3"]],
+            [entry["key"] for entry in config["rewards"]["3"]],
+            "the filler tier is identical on every banner and is seeded")
+        for tier in ("4", "5"):
             with self.subTest(tier=tier):
-                self.assertEqual(1, len(config["rewards"][tier]))
+                self.assertEqual(1, len(config["rewards"][tier]),
+                                 "a curated tier must not arrive pre-pruned")
         # The scalars are still the shipped starting points.
         self.assertEqual(database.DEFAULT_GACHA_CONFIG["cost"], config["cost"])
         self.assertEqual(database.DEFAULT_GACHA_CONFIG["tiers"], config["tiers"])
@@ -1180,3 +1198,140 @@ class PityHistoryTests(unittest.TestCase):
             )
         self.assertEqual([], database.get_five_star_history(10, 1))
         self.assertEqual(1, len(database.get_five_star_history(20, 1)))
+
+
+class GachaAssetsSurviveRentalsBeingOffTests(unittest.TestCase):
+    """A won emoji must still be made and still expire with `rentals` off.
+
+    Disabling `shop` cascades to `rentals`, which is what a gacha-only guild
+    does — sell nothing, hand everything out through the gacha. A `emoji_30d`,
+    `sticker_180d` or `sound_30d` reaches a member through machinery that only
+    *looks* like the shop's:
+
+        gacha voucher  -> /redeem -> fulfillment_requests
+                       -> Redeems page (no data-feature, the route checks only
+                          is_guild_authorized)
+                       -> timed_entitlements
+                       -> cogs/gacha.py entitlement_cleanup, no flag
+
+        shop rental    -> /shop (rentals) -> /rent_start (rentals)
+                       -> rented_items
+                       -> cogs/shop.py rental_cleanup, no flag
+
+    Two systems producing the same kind of Discord asset, which is why
+    `CLAUDE.md` says never to infer ownership from the reward type. Nothing
+    pinned it: `OBLIGATION_PAGES` protects the Redeems *nav entry*, not the
+    route, so a `rentals` check added to `complete_guild_fulfillment` — "it is
+    a rental after all" — would silently strand every asset voucher a member
+    had already spent a pull on. Nothing raises; the request just stays open.
+    """
+
+    GUILD = 4242
+    MEMBER = 77
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "gacha_assets.db")
+        database.initialize_database()
+        database.register_guild(self.GUILD, "Guild")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def grant_asset_voucher(self, voucher_id="v1", reward_key="emoji_30d", days=30):
+        with database.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO reward_vouchers (voucher_id, guild_id, user_id, "
+                "reward_key, source_type, duration_days, status, acquired_at) "
+                "VALUES (?, ?, ?, ?, 'gacha', ?, 'available', '2026-01-01')",
+                (voucher_id, self.GUILD, self.MEMBER, reward_key, days))
+            conn.commit()
+        return voucher_id
+
+    def test_the_whole_path_works_with_shop_and_rentals_disabled(self):
+        """The behavioural one. Every flag a shop rental needs is off."""
+        import feature_access
+
+        feature_access.seed_cached_feature(self.GUILD, "shop", False)
+        feature_access.seed_cached_feature(self.GUILD, "rentals", False)
+        self.assertFalse(feature_access.is_enabled(self.GUILD, "rentals"))
+
+        voucher = self.grant_asset_voucher()
+        redeemed = database.redeem_voucher(self.GUILD, self.MEMBER, voucher)
+        self.assertTrue(redeemed["redeemed"], redeemed)
+
+        requests = database.get_fulfillment_requests(self.GUILD)
+        self.assertEqual(1, len(requests),
+                         "redeeming must open a fulfilment request")
+
+        filled = database.fulfill_voucher_request(
+            self.GUILD, requests[0]["request_id"], actor_id=1,
+            discord_item_id="998877")
+        self.assertTrue(filled["fulfilled"], filled)
+
+        with database.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT entitlement_key, discord_item_id FROM timed_entitlements "
+                "WHERE guild_id = ? AND user_id = ?",
+                (self.GUILD, self.MEMBER)).fetchall()
+        self.assertEqual([("emoji", "998877")], rows,
+                         "the grant must land in timed_entitlements, not rented_items")
+
+        # And it must still be found when its time is up.
+        past_expiry = "2099-01-01T00:00:00+00:00"
+        expired = database.get_expired_entitlements(past_expiry)
+        self.assertIn("998877", [row["discord_item_id"] for row in expired],
+                      "a gacha asset must still expire with rentals off")
+
+    def test_no_rented_items_row_is_created(self):
+        """The two tables are the tell: if a gacha asset ever landed in
+        `rented_items`, the shop's pass would own expiring it and the ownership
+        rule would be broken from the other side."""
+        voucher = self.grant_asset_voucher(voucher_id="v2")
+        database.redeem_voucher(self.GUILD, self.MEMBER, voucher)
+        request = database.get_fulfillment_requests(self.GUILD)[0]
+        database.fulfill_voucher_request(
+            self.GUILD, request["request_id"], actor_id=1, discord_item_id="5")
+        with database.get_connection() as conn:
+            self.assertEqual(
+                0, conn.execute("SELECT COUNT(*) FROM rented_items").fetchone()[0])
+
+    def test_the_fulfilment_route_carries_no_feature_gate(self):
+        """Structural, against comment-stripped source: a comment explaining
+        why a gate is *absent* otherwise reads as the gate being present."""
+        source = (ROOT / "dashboard_api.py").read_text(encoding="utf-8")
+        start = source.index("def complete_guild_fulfillment(")
+        end = source.index("\ndef ", start + 1)
+        body = "\n".join(line for line in source[start:end].splitlines()
+                         if not line.strip().startswith("#"))
+        for flag in ("rentals", "shop"):
+            with self.subTest(flag=flag):
+                self.assertNotIn(
+                    f'"{flag}"', body,
+                    f"a {flag!r} gate here strands every asset voucher a member "
+                    "has already paid a pull for")
+
+    def test_the_rentals_flag_has_exactly_one_reader(self):
+        """The premise the reasoning above rests on. If a second reader
+        appears, whoever added it has to decide whether the gacha is affected
+        rather than discovering it from a member's missing emoji."""
+        import re
+
+        # An actual gate, not a `COMMAND_POLICIES` entry naming the same
+        # feature — `feature_access.py` declares `rent_start` under `rentals`
+        # and is not gating anything.
+        gate = re.compile(r'(?:is_enabled|require_interaction_feature)'
+                          r'\([^)]*["\']rentals["\']')
+        readers = []
+        for path in sorted(ROOT.glob("cogs/*.py")) + sorted(ROOT.glob("*.py")):
+            body = "\n".join(line for line in
+                             path.read_text(encoding="utf-8").splitlines()
+                             if not line.strip().startswith("#"))
+            if gate.search(body):
+                readers.append(path.name)
+        self.assertEqual(
+            ["shop.py"], readers,
+            "the rentals flag should gate only cogs/shop.py's purchase check; "
+            f"found {readers}")

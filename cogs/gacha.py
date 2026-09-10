@@ -1,4 +1,7 @@
-"""Potato Gacha commands, inventory, vouchers, and entitlement cleanup."""
+"""Potato Gacha commands, inventory, vouchers, and entitlement cleanup.
+
+Rules that bind changes here: docs/subsystems/gacha.md
+"""
 
 import asyncio
 import logging

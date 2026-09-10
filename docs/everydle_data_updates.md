@@ -344,3 +344,46 @@ nobody filled in, a new attribute label with no text in every language, and an
 entity that already exists — because renaming one re-draws the day's answer.
 After applying, run `?reload everydle` or restart; the datasets load at import.
 
+
+## The Genshindle adapter
+
+Moved out of `CLAUDE.md`, which is loaded into every session; this is reference
+for whoever next touches the adapter.
+
+**Genshindle is the first dataset with no lore attribute at all**, which is what
+made it worth building as a managed dataset rather than by hand. Two bulk
+endpoints — `genshin-db-api.vercel.app/api/v5/characters` and `.../talents`, both
+probed 2026-08-27 — publish element, weapon, region, rarity, gender and release
+version, so `fetch_genshindle` reports nothing as needing a person and the only
+local knowledge is the aliases. Two requests, not one per character.
+
+Three decisions there are not obvious.
+
+**The weekly boss is the talent *material*, not the boss's name.** The API does
+not say which boss drops what: the material's description only alludes to it in
+prose, and the domain list carries no weekly-boss drops, so naming the boss would
+mean inventing it here. `GENSHIN_WEEKLY_BOSS` is an empty, documented map; adding
+a row collapses that material into a boss, and because a boss's three materials
+all map to one name they stay one value.
+
+**The release version is packed as `major * 100 + minor`**, because `1.0` and
+`5.3` sort wrong as text and `1.10` collides with `1.1` as a float. It is a number
+so it compares higher/lower like Valdle's year.
+
+**A blank field is not always a missing one.** Upstream leaves `region` empty for
+eleven characters while still stating an `associationType` for every one, so the
+nation is published under another name. `GENSHIN_ASSOCIATION_REGION` is that
+translation, and the four associations naming no nation share the value
+`Outsider` rather than inventing four. An association that is *not* mapped leaves
+the field absent, so a nation added to the game becomes a drift finding instead of
+a silently wrong label. Likewise `elementText: "None"` is the Traveller, who has
+every element rather than none — seven talent records, one per element — so both
+element and weekly boss read `All`, which plays as a clue instead of a hole and
+covers any future Traveller form automatically.
+
+**`EXCLUDED_ENTITIES` holds two kinds of absence and the difference matters.**
+*Not playable* is permanent and verifiable — Manekin and Manekina appear in the
+roster with no talent record at all. *Not released yet* is temporary and is the
+one fact this source does not carry: `version` is when a character entered the
+data, so an upcoming character already has one. That entry names the date and the
+release it was checked against, and deleting the line is all it takes to add them.

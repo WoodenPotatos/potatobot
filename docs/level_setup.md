@@ -8,11 +8,15 @@ ladder that is known to work because it has been running on a real guild.
 
 ## How a level is earned
 
-One formula, in `database.py`:
+One formula, in `database.py` — `level_for_xp` and its inverse `xp_for_level`:
 
 ```
 level = floor(sqrt(xp / 10)) + 1        which inverts to        xp = 10 x (level - 1)^2
 ```
+
+**A level is derived from XP, never stored on its own.** Every write recomputes
+it, so there is no such thing as setting somebody's level and leaving their XP
+alone — it would be corrected away by their next message.
 
 Quadratic, so each level costs a little more than the last. Level 2 is ten XP;
 level 100 is ninety-eight thousand.
@@ -124,3 +128,27 @@ milestones — the milestones are where your role rewards sit, and moving them
 re-sorts everyone. Doubling `reward_voice_minute_normal_xp` halves every voice
 hour in the table above. Existing XP totals are untouched, so members keep the
 levels they have and climb faster from there.
+
+## Correcting a member by hand
+
+Two administrator commands, for when somebody is owed XP or has to lose some.
+
+```
+/givexp @member 1050 [reason]      gives or takes XP; the level follows
+/setlevel @member 12 [reason]      puts them on a level exactly
+```
+
+Reach for `/givexp` when compensating something measurable: the voice loop pays
+5 XP a minute, so three and a half hours missed is `210 x 5 = 1050`. Reach for
+`/setlevel` when the level itself is the point. Because a level is XP, setting
+one writes that level's **floor** — a member set to the level they are already on
+loses their progress within it, and the reply says so.
+
+The level role follows in both directions, including coming off entirely when the
+new level is below every milestone. A promotion is announced in the levels
+channel; a demotion is not. Either way the change is recorded in
+`moderation_log_channel` with who made it, the levels before and after, and the
+reason.
+
+Both refuse while the `levels` feature is off, since there would be nothing to
+correct.

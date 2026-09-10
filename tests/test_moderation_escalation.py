@@ -254,12 +254,19 @@ class EscalationTests(unittest.IsolatedAsyncioTestCase):
     async def _run(self, settings, *, alerts=True, actions=True,
                    member=None, guild=None, tag="spam", count=3):
         import cogs.moderation as moderation
+        import cogs.utils as utils
         guild = guild or self._guild()[0]
         member = member or self._member()
         flags = {"moderation_warn_alerts": alerts,
                  "moderation_warn_actions": actions}
+        # The log channel is resolved by `cogs.utils.send_moderation_log` now,
+        # the one reader of that setting, so the stand-in settings have to reach
+        # it too — otherwise the alert silently goes nowhere and every test that
+        # counts posted embeds is measuring the stub rather than the code.
         with patch.object(moderation, "guild_settings_many",
                           AsyncMock(return_value=settings)), \
+             patch.object(utils, "guild_setting",
+                          AsyncMock(side_effect=lambda gid, key: settings.get(key))), \
              patch.object(moderation, "is_enabled",
                           lambda gid, key: flags.get(key, True)):
             applied = await moderation.apply_warn_escalation(
@@ -567,17 +574,40 @@ class WarnDestinationTests(unittest.TestCase):
 
     def test_the_filter_alert_still_goes_only_to_the_log(self):
         """It quotes the matched term. Publishing that would re-post the word the
-        guild just deleted."""
+        guild just deleted.
+
+        The rule is unchanged; how it is checked is. Both alerts used to name
+        `moderation_log_channel` themselves, and now go through
+        `cogs.utils.send_moderation_log`, which is the only thing that reads that
+        setting. Asserting the call is asserting the same destination — what must
+        never appear is `warn_announce_channel`, the member-readable one.
+        """
         source = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
         report = _function_source(source, "_report_filter_match")
-        self.assertIn("moderation_log_channel", report)
+        self.assertIn("send_moderation_log(", report)
         self.assertNotIn("warn_announce_channel", report)
 
     def test_the_escalation_alert_still_goes_only_to_the_log(self):
         source = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
         escalation = _function_source(source, "apply_warn_escalation")
-        self.assertIn("moderation_log_channel", escalation)
+        self.assertIn("send_moderation_log(", escalation)
         self.assertNotIn("warn_announce_channel", escalation)
+
+    def test_the_shared_sender_is_the_only_reader_of_the_log_channel(self):
+        """What makes the two tests above equivalent to the ones they replaced.
+
+        If a caller went back to resolving the channel itself, asserting the
+        helper call would still pass while the destination could differ.
+        """
+        import cogs.utils
+
+        moderation = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
+        self.assertNotIn("moderation_log_channel", moderation,
+                         "the log channel is resolved by send_moderation_log alone")
+        sender = _function_source(
+            (ROOT / "cogs" / "utils.py").read_text(encoding="utf-8"),
+            "send_moderation_log")
+        self.assertIn("moderation_log_channel", sender)
 
     def test_modlogs_is_gated_on_the_staff_category(self):
         """Public inside the staff category, ephemeral without one, refused

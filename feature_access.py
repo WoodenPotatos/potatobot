@@ -117,6 +117,10 @@ COMMAND_POLICIES = {
     "testreset": _command("economy", ResponsePolicy.PRIVATE),
     "award": _command("economy"),
     "awardall": _command("economy"),
+    # `levels`, not `economy`: they write XP, and with the levels system off
+    # there is nothing to correct.
+    "setlevel": _command("levels"),
+    "givexp": _command("levels"),
     "testboost": _command("member_announcements", ResponsePolicy.PRIVATE),
     "checkperms": _command("general"),
     # Maintenance is an emergency administrator control, not a toggleable feature.

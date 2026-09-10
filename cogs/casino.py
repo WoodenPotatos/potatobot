@@ -1,3 +1,8 @@
+"""The casino games and the consumables that bend them.
+
+Rules that bind changes here: docs/subsystems/gacha.md
+"""
+
 import discord
 import asyncio
 import logging
@@ -18,8 +23,8 @@ import item_catalog
 from discord.ext import commands
 from datetime import datetime, timedelta
 from cogs.utils import (
-    BoundedCooldownMap, apply_database_result, currency_emoji, is_channel,
-    is_premium, item_mechanic_value, t,
+    BoundedCooldownMap, apply_database_result, currency_emoji, currency_plain,
+    is_channel, is_premium, item_mechanic_value, t,
 )
 from feature_access import require_interaction_feature
 
@@ -708,7 +713,7 @@ class HiloView(discord.ui.View):
         if self.marked_card:
             embed.add_field(name=t("casino.hilo_marked_label"),
                             value=t("casino.hilo_marked_value"), inline=False)
-        embed.set_footer(text=t("casino.hilo_footer", bet=self.bet))
+        embed.set_footer(text=t("casino.hilo_footer", bet=self.bet, coin=currency_plain()))
         return embed
 
     async def higher(self, interaction):
@@ -799,7 +804,7 @@ class HiloView(discord.ui.View):
             child.disabled = True
         embed = self.build_embed(result_msg=message, colour=colour)
         embed.set_footer(text=t("casino.hilo_footer_final", bet=self.bet,
-                                bal=new_bal))
+                                bal=new_bal, coin=currency_plain()))
         await interaction.response.edit_message(embed=embed, view=self)
         await interaction.followup.send(
             view=PlayAgainView(self.user, self.bet, start_hilo_game),
@@ -944,7 +949,7 @@ class CrashView(discord.ui.View):
                 name=t("casino.crash_parachute_label"),
                 value=t("casino.crash_parachute_value",
                         multiplier=f"{self.parachute / 100:.2f}"), inline=False)
-        embed.set_footer(text=t("casino.crash_footer", bet=self.bet))
+        embed.set_footer(text=t("casino.crash_footer", bet=self.bet, coin=currency_plain()))
         return embed
 
     async def advance(self, interaction: discord.Interaction):
@@ -1006,7 +1011,7 @@ class CrashView(discord.ui.View):
             child.disabled = True
         embed = self.build_embed(result_msg=message, colour=colour)
         embed.set_footer(text=t("casino.crash_footer_final", bet=self.bet,
-                                bal=new_bal))
+                                bal=new_bal, coin=currency_plain()))
         await interaction.response.edit_message(embed=embed, view=self)
         await interaction.followup.send(
             view=PlayAgainView(self.user, self.bet, start_crash_game),
@@ -1122,7 +1127,7 @@ class RussianRouletteView(discord.ui.View):
                 value=t("casino.russian_pot_value", pot=pot,
                         each=int(pot * CASINO_EDGE) // (len(self.players) - 1)),
                 inline=False)
-        embed.set_footer(text=t("casino.russian_footer", ante=self.ante))
+        embed.set_footer(text=t("casino.russian_footer", ante=self.ante, coin=currency_plain()))
         return embed
 
     async def join(self, interaction: discord.Interaction):
@@ -1295,7 +1300,7 @@ async def start_wheel_game(ctx_or_int, bet):
         embed.description += t(
             "casino.wheel_lucky_charm",
             multiplier=f"{result['second_multiplier'] / 100:.2f}")
-    embed.set_footer(text=t("casino.wheel_footer", bet=bet, bal=new_bal))
+    embed.set_footer(text=t("casino.wheel_footer", bet=bet, bal=new_bal, coin=currency_plain()))
     view = PlayAgainView(user, bet, start_wheel_game)
     if isinstance(ctx_or_int, discord.Interaction):
         await ctx_or_int.response.edit_message(embed=embed, view=view)

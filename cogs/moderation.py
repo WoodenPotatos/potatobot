@@ -20,7 +20,8 @@ from datetime import datetime, timedelta
 from feature_access import is_enabled, maintenance_blocks
 from settings_registry import WARN_DEFAULT_TAG, WARN_TAGS
 from cogs.utils import (is_staff, is_higher_than, role_autocomplete, t,
-                        guild_setting_sync, guild_settings_many)
+                        guild_setting_sync, guild_settings_many,
+                        send_moderation_log)
 
 moderation_logger = logging.getLogger("PotatoBot.Moderation")
 
@@ -87,7 +88,7 @@ async def apply_warn_escalation(guild, member, tag: str, tag_count: int,
     """
     settings = await guild_settings_many(guild.id, (
         f"warn_threshold_{tag}", f"warn_action_{tag}",
-        f"warn_timeout_minutes_{tag}", "moderation_log_channel",
+        f"warn_timeout_minutes_{tag}",
     ))
     try:
         threshold = int(settings.get(f"warn_threshold_{tag}") or 0)
@@ -136,33 +137,24 @@ async def apply_warn_escalation(guild, member, tag: str, tag_count: int,
     # Posted after the attempt so the record says what happened, not what was
     # intended, and posted even when actions are off — that is the split.
     if is_enabled(guild.id, "moderation_warn_alerts"):
-        channel_id = settings.get("moderation_log_channel")
-        channel = guild.get_channel(int(channel_id)) if channel_id else None
-        if channel is not None:
-            outcome = (t(f"moderation.escalation_applied_{applied}") if applied
-                       else t(f"moderation.escalation_blocked_{blocked}") if blocked
-                       else t("moderation.escalation_alert_only"))
-            embed = discord.Embed(
-                title=t("moderation.escalation_title"),
-                description=t("moderation.escalation_body",
-                              user=member.mention,
-                              tag=t(f"moderation.warn_tags.{tag}"),
-                              count=tag_count, threshold=threshold),
-                color=discord.Color.red() if applied else discord.Color.orange(),
-            )
-            embed.add_field(name=t("moderation.escalation_outcome_label"),
-                            value=outcome, inline=False)
-            # The reason is member-supplied text on the filter path.
-            embed.add_field(name=t("moderation.reason_label"),
-                            value=discord.utils.escape_mentions(reason)[:1024],
-                            inline=False)
-            try:
-                await channel.send(embed=embed)
-            except discord.HTTPException:
-                moderation_logger.warning(
-                    "Could not post a warn escalation alert (guild_id=%s, "
-                    "channel_id=%s)", guild.id, channel_id,
-                )
+        outcome = (t(f"moderation.escalation_applied_{applied}") if applied
+                   else t(f"moderation.escalation_blocked_{blocked}") if blocked
+                   else t("moderation.escalation_alert_only"))
+        embed = discord.Embed(
+            title=t("moderation.escalation_title"),
+            description=t("moderation.escalation_body",
+                          user=member.mention,
+                          tag=t(f"moderation.warn_tags.{tag}"),
+                          count=tag_count, threshold=threshold),
+            color=discord.Color.red() if applied else discord.Color.orange(),
+        )
+        embed.add_field(name=t("moderation.escalation_outcome_label"),
+                        value=outcome, inline=False)
+        # The reason is member-supplied text on the filter path.
+        embed.add_field(name=t("moderation.reason_label"),
+                        value=discord.utils.escape_mentions(reason)[:1024],
+                        inline=False)
+        await send_moderation_log(guild, embed, "a warn escalation alert")
     return applied
 
 
@@ -286,11 +278,6 @@ class Moderation(commands.Cog):
 
     async def _report_filter_match(self, guild, member, matched, channel_name,
                                    record):
-        settings = await guild_settings_many(guild.id, ("moderation_log_channel",))
-        channel_id = settings.get("moderation_log_channel")
-        channel = guild.get_channel(int(channel_id)) if channel_id else None
-        if channel is None:
-            return
         embed = discord.Embed(title=t("moderation.filter_alert_title"),
                               color=discord.Color.orange())
         embed.add_field(name=t("moderation.user_label"), value=member.mention)
@@ -303,12 +290,7 @@ class Moderation(commands.Cog):
         embed.set_footer(text=t("moderation.warn_footer_tagged",
                                 count=record["total"],
                                 tag_count=record["tag_count"]))
-        try:
-            await channel.send(embed=embed)
-        except discord.HTTPException:
-            moderation_logger.warning(
-                "Could not post a word-filter alert (guild_id=%s)", guild.id
-            )
+        await send_moderation_log(guild, embed, "a word-filter alert")
 
     @commands.hybrid_command(name="kick", description=t("general.cmd_kick"))
     @discord.app_commands.default_permissions(moderate_members=True)

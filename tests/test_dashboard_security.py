@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import threading
 import time
 import unittest
 import requests
@@ -393,6 +394,167 @@ class DashboardSecurityTests(unittest.TestCase):
         self.assertEqual(200, read.status_code, "a read must still be served")
         self.assertEqual(503, write.status_code,
                          "a write must still refuse on a stale snapshot")
+
+    def _rejected_with(self, status):
+        """A refresh that raises the way `requests` does for one HTTP status."""
+        response = requests.Response()
+        response.status_code = status
+
+        def rejected(session_id):
+            raise requests.HTTPError(response=response)
+
+        return rejected
+
+    def test_a_rate_limited_refresh_does_not_end_the_session(self):
+        """429 is Discord asking us to wait, not saying the grant is gone.
+
+        Every 4xx used to end the session, so a rate limit logged a real
+        administrator out — twelve times in one evening. The four reads
+        `loadGuild()` fires at once each made their own Discord call, Discord
+        rate-limited them, and the 429 read as a revocation: the dashboard
+        appeared for a second and then said the session had expired, which no
+        amount of logging back in could fix.
+
+        A 429 must degrade exactly as an unreachable Discord does: the read is
+        served from the session's snapshot, and only a write refuses.
+        """
+        self._authenticate_guild_admin()
+        dashboard_api._permission_cache._entries.clear()
+        original = dashboard_api._refresh_authorized_guilds
+        dashboard_api._refresh_authorized_guilds = self._rejected_with(429)
+        try:
+            read = self.client.get("/api/guilds/123/settings")
+            dashboard_api._permission_cache._entries.clear()
+            write = self.client.patch(
+                "/api/guilds/123/settings",
+                json={"changes": [{"key": "join_channel",
+                                   "value": "1420070400000000001",
+                                   "revision": 0}]},
+                headers={"X-CSRF-Token": "csrf-token"},
+            )
+        finally:
+            dashboard_api._refresh_authorized_guilds = original
+        self.assertEqual(200, read.status_code,
+                         "a rate-limited refresh must still serve the read")
+        self.assertEqual(503, write.status_code,
+                         "a write must refuse rather than act on a stale snapshot")
+        with self.client.session_transaction() as session:
+            self.assertTrue(session.get("logged_in"),
+                            "a rate limit must not log the operator out")
+
+    def test_a_revoked_grant_still_ends_the_session(self):
+        """The other half: 401 and 403 are definite answers and must still end
+        it, or narrowing the rule would keep a revoked session alive until the
+        twelve-hour cap."""
+        for status in (401, 403):
+            with self.subTest(status=status):
+                self._authenticate_guild_admin()
+                dashboard_api._permission_cache._entries.clear()
+                original = dashboard_api._refresh_authorized_guilds
+                dashboard_api._refresh_authorized_guilds = self._rejected_with(status)
+                try:
+                    response = self.client.get("/api/guilds/123/settings")
+                finally:
+                    dashboard_api._refresh_authorized_guilds = original
+                self.assertEqual(401, response.status_code)
+                with self.client.session_transaction() as session:
+                    self.assertIsNone(session.get("logged_in"))
+
+    def test_concurrent_guild_reads_make_one_discord_call(self):
+        """The burst that earned the 429 in the first place.
+
+        `loadGuild()` fires four `/api/guilds/…` reads at once and a fresh
+        session's permission cache is empty, so every one of them called Discord.
+        The refresh is single-flight per session now: the first caller asks and
+        stores, and the rest find the answer already there.
+
+        Driven at the helper rather than through the test client, which is not
+        safe to share across threads — one client per thread would be testing the
+        harness rather than the lock.
+        """
+        dashboard_api._permission_cache.forget("burst-session")
+        calls = []
+        barrier = threading.Barrier(4)
+
+        def refresh(session_id):
+            calls.append(session_id)
+            # Long enough that the others are certainly inside the critical
+            # section's queue, so a missing lock reliably shows as four calls.
+            time.sleep(0.05)
+            return ["123"]
+
+        def one_request():
+            barrier.wait()
+            with dashboard_api._session_refresh_lock("burst-session"):
+                cached = dashboard_api._permission_cache.get("burst-session")
+                if cached is not None:
+                    return
+                dashboard_api._permission_cache.put(
+                    "burst-session", refresh("burst-session"))
+
+        threads = [threading.Thread(target=one_request) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(1, len(calls),
+                         f"four concurrent reads made {len(calls)} Discord calls")
+        self.assertEqual(["123"],
+                         dashboard_api._permission_cache.get("burst-session"))
+
+    def test_the_route_refreshes_inside_the_lock(self):
+        """The test above proves the lock works; this proves the route uses it.
+
+        Driving four real requests would mean four test clients sharing a cookie,
+        which is not safe and would test the harness. So the structure is
+        asserted instead: every call to `_refresh_authorized_guilds` inside the
+        before-request hook must sit under `with _session_refresh_lock(...)`.
+        Read from the syntax tree, so a comment mentioning the lock does not read
+        as the lock being taken.
+        """
+        import ast
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "dashboard_api.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        hook = next(
+            node for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "recheck_mutation_guild_permissions"
+        )
+
+        def guarded(node, inside):
+            """Every `_refresh_authorized_guilds(...)` reached from here."""
+            found = []
+            if isinstance(node, ast.With):
+                inside = inside or any(
+                    isinstance(item.context_expr, ast.Call)
+                    and getattr(item.context_expr.func, "id", "")
+                    == "_session_refresh_lock"
+                    for item in node.items
+                )
+            if (isinstance(node, ast.Call)
+                    and getattr(node.func, "id", "") == "_refresh_authorized_guilds"):
+                found.append(inside)
+            for child in ast.iter_child_nodes(node):
+                found.extend(guarded(child, inside))
+            return found
+
+        calls = guarded(hook, False)
+        self.assertTrue(calls, "the hook no longer refreshes at all")
+        self.assertTrue(
+            all(calls),
+            "a permission refresh runs outside the single-flight lock, so a "
+            "burst of reads will call Discord once each and be rate-limited",
+        )
+
+    def test_the_refresh_lock_is_dropped_with_the_session(self):
+        """It is per-session state like the token and the cache, so it has to be
+        forgotten with them or the map grows one entry per login."""
+        dashboard_api._session_refresh_lock("ending-session")
+        self.assertIn("ending-session", dashboard_api._refresh_locks)
+        dashboard_api._forget_session("ending-session")
+        self.assertNotIn("ending-session", dashboard_api._refresh_locks)
 
     def test_a_session_route_is_not_gated_on_a_permission_refresh(self):
         """It has to keep working while a refresh cannot."""

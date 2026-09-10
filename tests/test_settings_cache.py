@@ -10,6 +10,7 @@ line away from `is_enabled`, which must fail the other way.
 import ast
 import asyncio
 import json
+import re
 import subprocess
 import shutil
 import os
@@ -943,3 +944,74 @@ class StartupWiringTests(unittest.TestCase):
             "the markup nor the client; getElementById returns null and the "
             "throw takes the whole page down if it happens during startup",
         )
+
+
+class GachaSettingsSurviveTheShopBeingOffTests(unittest.TestCase):
+    """Every setting the gacha reads must stay editable while the gacha runs.
+
+    `dashboard/script.js` hides a setting whose `owner_feature` is disabled, so
+    ownership decides when a setting can be *edited* — the value still resolves
+    either way, which is what made this invisible. `premium_role` was owned by
+    `shop` and read by `cogs/gacha.py`: it is the role a gacha premium voucher
+    grants. A guild switching the shop off to run a gacha-only server had the
+    bot handing out a role whose setting had vanished from the dashboard, and
+    nothing looked broken.
+
+    Scoped to `cogs/gacha.py` deliberately. The general rule — a setting must be
+    owned by a feature every reader requires — cannot be enforced from a
+    cog-to-feature map: a cog owns several features, `COMMAND_POLICIES` cannot
+    see a listener at all, and one spurious attribution excuses everything. An
+    earlier attempt at the general form passed while `premium_role` was still
+    mis-owned, which is worse than no test. This file is one feature family, so
+    the attribution is exact.
+    """
+
+    def requires(self, feature, target):
+        """Whether `feature` is `target` or depends on it, transitively."""
+        from settings_registry import FEATURE_DEFINITIONS
+
+        seen, pending = set(), [feature]
+        while pending:
+            current = pending.pop()
+            if current == target:
+                return True
+            if current in seen:
+                continue
+            seen.add(current)
+            definition = FEATURE_DEFINITIONS.get(current)
+            if definition:
+                pending.extend(definition.dependencies)
+        return False
+
+    def settings_read_by_the_gacha(self):
+        from settings_registry import SETTING_DEFINITIONS
+
+        source = (ROOT / "cogs" / "gacha.py").read_text(encoding="utf-8")
+        return {key: definition
+                for key, definition in SETTING_DEFINITIONS.items()
+                if f'"{key}"' in source or f"'{key}'" in source}
+
+    def test_the_premise_holds(self):
+        """If the gacha stopped reading settings this test would pass while
+        proving nothing."""
+        found = self.settings_read_by_the_gacha()
+        self.assertIn("premium_role", found,
+                      "the gacha no longer reads premium_role; re-scope this")
+
+    def test_no_setting_the_gacha_reads_hides_behind_a_feature_it_does_not_need(self):
+        stranded = []
+        for key, definition in sorted(self.settings_read_by_the_gacha().items()):
+            owner = definition.owner_feature
+            if owner and not self.requires("shop_gacha", owner):
+                stranded.append(
+                    f"{key} is owned by {owner!r}, which shop_gacha does not "
+                    f"require — switching {owner!r} off would hide it while the "
+                    f"gacha still reads it")
+        self.assertEqual([], stranded, "\n".join(stranded))
+
+    def test_the_gacha_does_not_require_the_shop(self):
+        """The other half of the same guarantee: a gacha-only guild. If this is
+        ever reversed, the test above stops meaning what it says."""
+        self.assertFalse(self.requires("shop_gacha", "shop"))
+        self.assertTrue(self.requires("shop_gacha", "economy"),
+                        "a pull spends coins")
