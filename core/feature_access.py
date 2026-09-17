@@ -10,9 +10,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-import database
-from bounded import BoundedTimestampMap
-from settings_registry import FEATURE_DEFINITIONS
+from core import database
+from core.bounded import BoundedTimestampMap
+from core.settings_registry import FEATURE_DEFINITIONS
 
 logger = logging.getLogger("PotatoBot.FeatureAccess")
 
@@ -163,7 +163,7 @@ def maintenance_blocks(guild, actor, command_name: str = "") -> bool:
     the bot-wide check, native application commands via the command tree, and
     component/modal callbacks via require_interaction_feature.
     """
-    import settings_cache
+    from core import settings_cache
 
     if command_name and command_name.split()[0] in MAINTENANCE_EXEMPT_COMMANDS:
         return False
@@ -205,7 +205,12 @@ def is_enabled(guild_id: int | None, feature_key: str) -> bool:
         logger.error("Unknown feature key requested (feature_key=%r)", feature_key)
         return False
     if guild_id is None:
-        return True
+        # Fail closed here too. Every command is guild-only and every component
+        # is posted in a guild, so nothing reaches this today -- which is
+        # exactly why it was the one branch in the gate that answered "yes" to
+        # a question it could not check. A DM-capable path added later inherits
+        # a refusal, not a free pass.
+        return False
     with _FEATURE_CACHE_LOCK:
         guild_states = _FEATURE_CACHE.get(int(guild_id))
         cache_state = _FEATURE_CACHE_STATES.get(

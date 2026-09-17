@@ -14,9 +14,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 load_dotenv(ENV_PATH)
 
-import database as database_layer
-from deployment import settings as deployment_settings
-from feature_access import (
+from core import database as database_layer
+from core.deployment import settings as deployment_settings
+from core.feature_access import (
     PotatoBot,
     PotatoCommandTree,
     feature_for_command,
@@ -24,12 +24,13 @@ from feature_access import (
     maintenance_blocks,
     refresh_feature_cache_async,
 )
-import settings_cache
+from core import settings_cache
 
 if deployment_settings.dashboard_enabled:
     import dashboard_api
 
-import logging_setup
+from core import logging_setup
+from core.bounded import BoundedCooldownMap
 from cogs.utils import config, reload_config, t
 from discord.ext import commands
 
@@ -99,6 +100,11 @@ dashboard_action_task = None
 process_watchdog_thread = None
 legacy_adoption_checked = False
 commands_synchronized = False
+# Any `?word` in chat is an unknown command, and the reply had no cooldown, so
+# `?a ?b ?c` from one member made the bot post three times. The anti-spam check
+# only runs for commands that exist.
+_unknown_command_times = BoundedCooldownMap(max_age=60)
+UNKNOWN_COMMAND_REPLY_COOLDOWN = 10.0
 
 bot.remove_command("help")
 
@@ -126,9 +132,13 @@ async def anti_spam_check(ctx):
 @bot.check
 async def feature_check(ctx):
     """Block disabled prefix/hybrid commands before they can mutate state."""
+    if ctx.guild is None:
+        # `guild_only_check` is registered first and already refuses a DM with
+        # its own message; `is_enabled(None, ...)` now fails closed, so without
+        # this a DM would be refused twice with two different reasons.
+        return True
     feature_key = feature_for_command(ctx.command.qualified_name if ctx.command else "")
-    guild_id = ctx.guild.id if ctx.guild else None
-    if feature_key is None or is_enabled(guild_id, feature_key):
+    if feature_key is None or is_enabled(ctx.guild.id, feature_key):
         return True
     await ctx.send(t("utils.feature_disabled"), ephemeral=True)
     return False
@@ -435,6 +445,10 @@ async def on_command_error(ctx, error):
     elif isinstance(error, commands.MaxConcurrencyReached):
         await ctx.send(t("utils.command_in_progress"), ephemeral=True)
     elif isinstance(error, commands.CommandNotFound):
+        now = time.monotonic()
+        if now - _unknown_command_times.get(ctx.author.id, 0) < UNKNOWN_COMMAND_REPLY_COOLDOWN:
+            return
+        _unknown_command_times[ctx.author.id] = now
         await ctx.send(t("system.command_not_found"))
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send(t("system.missing_argument", prefix=ctx.prefix, command=ctx.command.name))
@@ -487,7 +501,9 @@ else:
 TOKEN = os.getenv("DISCORD_TOKEN")
 if TOKEN is None:
     bot_logger.critical("DISCORD_TOKEN is not configured; startup aborted")
-    exit()
+    # A non-zero exit, and not the `site` builtin: this is a misconfiguration
+    # the service manager should see as a failure.
+    sys.exit(1)
 
 # `log_handler=None` because discord.py otherwise calls `setup_logging()` on the
 # `discord` logger this module has already configured, which was the other half

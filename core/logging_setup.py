@@ -16,7 +16,9 @@ import os
 import signal
 import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Two levels up: this module lives in `core/` and the log directory belongs
+# beside the entry points at the repository root.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 
 LOG_FORMAT = logging.Formatter(

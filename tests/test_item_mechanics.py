@@ -32,10 +32,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-import database
-import item_catalog
-import settings_cache
-from settings_registry import SETTING_DEFINITIONS, validate_setting_value
+from core import database
+from core import item_catalog
+from core import settings_cache
+from core.settings_registry import SETTING_DEFINITIONS, validate_setting_value
 
 
 class MechanicDeclarationTests(unittest.TestCase):
@@ -75,7 +75,7 @@ class MechanicDeclarationTests(unittest.TestCase):
         nothing else. Comments are stripped before matching, so a comment
         explaining the old literal does not read as the literal being back.
         """
-        source = open(os.path.join(ROOT, "database.py"), encoding="utf-8").read()
+        source = open(os.path.join(ROOT, "core", "database.py"), encoding="utf-8").read()
         code = "\n".join(line for line in source.split("\n")
                          if not line.strip().startswith("#"))
         self.assertNotIn("0.15 if inventory_lockpick", code)

@@ -105,7 +105,7 @@ is known to work and the maths behind it.
 ## 6. Create the database
 
 ```bash
-POTATOBOT_DB_PATH=/opt/potatobot/economy.db ./venv/bin/python update_db.py
+(umask 027; POTATOBOT_DB_PATH=/opt/potatobot/economy.db ./venv/bin/python update_db.py)
 ```
 
 This creates the schema, or upgrades an existing one. It is idempotent: running
@@ -188,9 +188,21 @@ generated beside the database.
   either create one and `chown -R` the tree, or change those two lines to the
   account that owns it. Do not run it as root.
 - It carries the sandboxing (`ProtectSystem=strict`, `ProtectHome`,
-  `NoNewPrivileges`, …) with `ReadWritePaths=/opt/potatobot`. Keep them. On the
-  reference deployment adopting this unit moved `systemd-analyze security` from
-  9.2 UNSAFE to 6.2 MEDIUM.
+  `NoNewPrivileges`, `UMask=0027`, `CapabilityBoundingSet=`,
+  `SystemCallFilter=@system-service`, …) with `ReadWritePaths=/opt/potatobot`.
+  Keep them. On the reference deployment the first version of this unit moved
+  `systemd-analyze security` from 9.2 UNSAFE to 6.2 MEDIUM; the 2026-09
+  additions measured **1.9 OK** on the same host. One directive depends on
+  *who* the service runs as: `RemoveIPC=true` deletes every System V and
+  POSIX IPC object owned by the unit's user when it stops, which is right for
+  a dedicated `potatobot` account and wrong for a human login — if you run the
+  service as your own user, drop that line from your copy. `UMask=0027` is why the migration command
+  above is wrapped in `(umask 027; …)`: the unit's umask covers what the
+  *service* writes, and a migration run by hand inherits your shell's instead —
+  which is how a backup of every member's balance once landed world-readable.
+  After the first start with `SystemCallFilter`, read the journal for `EPERM`;
+  a call outside `@system-service` is refused rather than fatal, so a surprise
+  shows up as a logged error and not an outage.
 
 ```bash
 sudo cp deploy/potatobot.service /etc/systemd/system/
@@ -267,7 +279,7 @@ nothing else.
 sudo systemctl stop potatobot
 git -C /opt/potatobot pull
 ./venv/bin/python -m pip install --requirement requirements.lock   # if it changed
-POTATOBOT_DB_PATH=/opt/potatobot/economy.db ./venv/bin/python update_db.py
+(umask 027; POTATOBOT_DB_PATH=/opt/potatobot/economy.db ./venv/bin/python update_db.py)
 sudo systemctl start potatobot
 ```
 

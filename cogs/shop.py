@@ -17,14 +17,15 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
-from feature_access import is_enabled, maintenance_blocks, require_interaction_feature
-from support_tickets import open_ticket
-import item_catalog
-from item_catalog import SELECT_OPTION_LIMIT, SHOP_ITEMS, ItemEffect
+from core import database
+from core.feature_access import is_enabled, maintenance_blocks, require_interaction_feature
+from core.support_tickets import open_ticket
+from core import item_catalog
+from core.item_catalog import SELECT_OPTION_LIMIT, SHOP_ITEMS, ItemEffect
 
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
+from core.clock import local_date, local_time, parse_stored, utc_now
 from cogs.tickets import TicketControl
 from cogs.utils import (can_self_assign_role, currency_emoji,
                         currency_select_emoji, guild_setting_sync,
@@ -298,7 +299,7 @@ async def purchase_item(guild, member, key, item) -> PurchaseResult:
         # A role item's catalog value is the setting key that names the role,
         # checked against the registry rather than trusted: an unregistered value
         # would otherwise raise inside the callback.
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
         setting_key = item["value"]
         role_id = (guild_setting_sync(guild.id, setting_key)
                    if setting_key in SETTING_DEFINITIONS else None)
@@ -330,7 +331,7 @@ async def purchase_item(guild, member, key, item) -> PurchaseResult:
             database.purchase_inventory_item, guild.id, user_id,
             item["price"], key)
     elif item_type == "rent":
-        expire_time = (datetime.now() + timedelta(hours=24)).isoformat()
+        expire_time = (utc_now() + timedelta(hours=24)).isoformat()
         purchase = await database.run(
             database.purchase_upgrade, user_id, item["price"], "bodyguard",
             expire_time)
@@ -681,8 +682,8 @@ class Shop(commands.Cog):
 
     async def _expire_guild_rentals(self, guild, rentals):
         for r_id, item_type, discord_item_id, expires_at, guild_id in rentals:
-            expire_date = datetime.fromisoformat(expires_at)
-            now = datetime.now(expire_date.tzinfo) if expire_date.tzinfo else datetime.now()
+            expire_date = parse_stored(expires_at)
+            now = utc_now()
             if now >= expire_date:
 
                 # Whether the asset was actually found *in this guild*. A

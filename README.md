@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.13.1-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.14.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -172,6 +172,18 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.14.0-beta.1
+
+- **A word chain now knows Hungarian letters.** `sz`, `gy`, `ny`, `cs`, `ly`, `ty`, `zs`, `dz` and `dzs` are single letters to anyone playing, but the bot compared one character at a time — so after `busz` it deleted `szék` and accepted `zebra`. It now joins words by the letter a player would name, and a doubled digraph like `rossz` ends in `sz` as it should. Servers set to English keep single letters, because `only` and `many` end in `y` there.
+- **A word only counts once in a chain.** Repeating a word from earlier is refused with a note saying so; only the word immediately before it was caught until now. `/minigame_reset` clears the used words along with the chain, and a chain already in progress keeps every word it played before this arrived.
+- **Only the bot's host can switch maintenance mode.** `/maintenance` stops the bot in every server it is in, and it used to accept anyone with a staff role. It now refuses everyone but the installation's owner, the same rule the dashboard already applied, and says so.
+- **Erasing a member now reaches the LFG parties they joined, the last-player mark in the counting and word-chain channels, and the queued erasure itself.** Those records arrived after the privacy work and were being left behind.
+- **Text settings have a length, and list settings have a size.** The currency symbol, the command prefix, filter words, ignored users, streamers and channels each carry a limit the form shows and the server enforces, because an over-long currency symbol would have broken every message that prints a balance.
+- **Amounts have a ceiling.** `/pay`, `/award`, `/awardall` and every casino stake refuse anything above a trillion with a message, instead of the command silently doing nothing on an absurd number.
+- **Moderation commands say why they could not act.** `/kick`, `/ban` and `/timeout` now tell the moderator when the target's role is above the bot's, and a reason can no longer ping roles or overflow the log embed.
+- **Cooldowns and daily resets keep the right length across a clock change.** Every timestamp is stored in one clock now, and a `/daily` countdown says how long until local midnight rather than until a moment that shifted with daylight saving.
+- …and 3 more, in [CHANGELOG.md](CHANGELOG.md).
+
 ### 2.13.1-beta.1
 
 - **The Genshindle grid's headings line up again.** A column was removed from the game a while back but not from the heading row, so everything to the right of "Nem" was labelled with the wrong name — the weekly boss under "Alkat", the version under "Heti boss".
@@ -191,18 +203,6 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - If Discord refuses the role — it was deleted, or sits above the bot — the voucher stays unspent rather than vanishing.
 - **Permanent roles are deliberately not offered.** A reward needs a duration, and a permanent role won by chance could not be taken back by anything. A 3650-day timed role does the same job and can still be removed.
 - **Genshindle no longer asks about body type.** It sounded like a good clue and was not: five values across 120 characters, most of them the same two, so a guess almost never learned anything from it while it took up a column. Gone from the game and from the weekly update check.
-
-### 2.9.0-beta.1
-
-- **Switching a feature off hides its page again.** It briefly only dimmed it, which was a workaround for an older problem — hiding the shop page once took away staff's only route to redemptions members had already paid for. Redeems has its own page now and is never hidden by anything, so the toggle can do what a toggle is for.
-- **The stray lines around the item creator's sections are gone.** They were the browser's own default box, because those sections had no styling at all. Same for the button row underneath them.
-- **Your own items can go in a gacha banner.** They always could, mechanically — what was missing is that the reward picker only offered the built-in items, so there was no way to choose one. They are offered by name now, with the amount filled in from the item.
-- A custom reward shows **its own name** to the member instead of a bracketed placeholder.
-- The item list now says whether the gacha can actually award each item, and "disabled" is only about the shop: a disabled item can still be a gacha reward, which is how you run something in the gacha without selling it.
-- **The "consumable" kind is no longer offered when creating an item.** It could only ever hand out an existing built-in item under a new name and price — it cannot change any of its numbers — so it invited an expectation it could not meet. Existing ones still open and edit normally.
-- **An LFG post keeps working after a restart.** Its buttons used to stop answering the moment the bot restarted — and the post expired on its own after two hours even if it didn't. Both are gone: the party is stored, so Join, Leave and Delete keep working for as long as the message is there.
-- Two people pressing Join at the same instant can no longer both take the last slot; one of them is told somebody got there first.
-- …and 9 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

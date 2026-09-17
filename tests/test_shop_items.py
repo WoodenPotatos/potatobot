@@ -23,9 +23,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-import database
-import item_catalog
-from settings_registry import SETTING_DEFINITIONS
+from core import database
+from core import item_catalog
+from core.settings_registry import SETTING_DEFINITIONS
 
 
 class ShippedRewardPoolTests(unittest.TestCase):

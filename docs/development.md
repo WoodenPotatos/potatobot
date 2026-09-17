@@ -4,7 +4,7 @@
 
 PotatoBot is a Hungarian-first Discord bot for a private community. It combines community administration with economy, profiles, games, music, activity automation, and a web control plane. It runs on a headless Linux server under systemd, behind a reverse proxy.
 
-The current private deployment is the compatibility target. **Schema version 16** is current; `database.LATEST_SCHEMA_VERSION` is the authority and this sentence is not. Since schema 5's typed guild settings, configurable shop definitions, inventory, gacha banners/pity/pull ledgers, fixed vault reserves, vouchers, timed entitlements, fulfillment, builder drafts and dashboard action outbox: schema 6 added the persistent tenth-pull guarantee counter and voucher subsystem ownership, 7 added ticket claim persistence and action leases, 8 put `guild_id` into the last single-tenant primary keys, 9 added banner display names and the `/work` response pool, 10 added the warning tag, 11 added `instance_settings` for values that have no guild dimension, 12 gave a posted Discord message an identity so the dashboard can edit it later, 13 widened that table so a plain embed is one too — which retired the builder drafts schema 5 introduced, leaving `dashboard_documents` with no reader — 14 added the gacha featured-split guarantees, 15 added `minigame_state` for the counting and word-chain channels, and 16 added a shop item's section so the menu could be split by shelf. Legacy economy callers still remain effectively single-guild — wallets are keyed by Discord user id alone. Treat `managed` and `self_hosted` profiles as architectural foundations, not as proof of completed production isolation.
+The current private deployment is the compatibility target. **Schema version 19** is current; `database.LATEST_SCHEMA_VERSION` is the authority and this sentence is not. Since schema 5's typed guild settings, configurable shop definitions, inventory, gacha banners/pity/pull ledgers, fixed vault reserves, vouchers, timed entitlements, fulfillment, builder drafts and dashboard action outbox: schema 6 added the persistent tenth-pull guarantee counter and voucher subsystem ownership, 7 added ticket claim persistence and action leases, 8 put `guild_id` into the last single-tenant primary keys, 9 added banner display names and the `/work` response pool, 10 added the warning tag, 11 added `instance_settings` for values that have no guild dimension, 12 gave a posted Discord message an identity so the dashboard can edit it later, 13 widened that table so a plain embed is one too — which retired the builder drafts schema 5 introduced, leaving `dashboard_documents` with no reader — 14 added the gacha featured-split guarantees, 15 added `minigame_state` for the counting and word-chain channels, 16 added a shop item's section so the menu could be split by shelf, 17 gave an LFG party post an identity so its buttons survive a restart, 18 added a voucher's subject, and 19 added `minigame_used_words` so a word chain cannot repeat itself. Legacy economy callers still remain effectively single-guild — wallets are keyed by Discord user id alone. Treat `managed` and `self_hosted` profiles as architectural foundations, not as proof of completed production isolation.
 
 The dashboard is **load-bearing, not experimental**: it is the only way an operator configures an installation, so a dashboard defect is a bot defect. Its raw JSON and global price/reward endpoints are gone and every setting is edited through a typed control. The remaining release boundary is complete multi-guild storage integration and service separation.
 
@@ -13,15 +13,17 @@ The dashboard is **load-bearing, not experimental**: it is the only way an opera
 | Area | Responsibility |
 | --- | --- |
 | `main.py` | Loads environment configuration, initializes the database, creates the bot, loads cogs, starts monitoring tasks, starts the dashboard thread, and connects to Discord. |
+| `core/` | The shared modules every entry point and cog imports, as the `core` package. The repository root keeps only what is *run* — `main.py`, `dashboard_api.py` and `update_db.py`, each named by a systemd unit, the Containerfile or `compose.yaml`. `core/__init__.py` re-exports nothing, so each module has exactly one importable spelling. |
 | `cogs/` | Commands, persistent controls, Discord event listeners, scheduled tasks, and feature implementations. |
 | `cogs/utils.py` | Localization, shared configuration, checks, user updates, level-role handling, and debounced top-ranker reconciliation. |
-| `feature_access.py` | Command-to-feature registry, response visibility policy, early interaction acknowledgement, runtime feature cache, and hybrid context behavior. |
-| `settings_registry.py` | Typed feature and setting definitions, categories, constraints, dependencies, scopes, defaults, and apply behavior. |
-| `database.py` | SQLite schema, migrations, connection policy, transactions, asynchronous executors, and persistence accessors. |
-| `deployment.py` | Deployment profile and dashboard origin validation. |
-| `permission_audit.py` | One Discord-permission diagnostic shared by `/checkperms` and the dashboard permissions page. Pure data: it takes a guild plus a feature-state map plus resolved settings and returns coded findings. |
-| `item_catalog.py` | The single definition of what a built-in item is; the shop and the gacha both derive from it. |
-| `bounded.py` | Bounded containers for every transient in-memory map. |
+| `core/feature_access.py` | Command-to-feature registry, response visibility policy, early interaction acknowledgement, runtime feature cache, and hybrid context behavior. |
+| `core/settings_registry.py` | Typed feature and setting definitions, categories, constraints, dependencies, scopes, defaults, and apply behavior. |
+| `core/database.py` | SQLite schema, migrations, connection policy, transactions, asynchronous executors, and persistence accessors. |
+| `core/deployment.py` | Deployment profile and dashboard origin validation. |
+| `core/clock.py` | The one clock: `utc_now()` for every stored timestamp, `parse_stored()` to read one back (a legacy value with no offset is host-local time, never UTC), and `local_date()` for the day gates. |
+| `core/permission_audit.py` | One Discord-permission diagnostic shared by `/checkperms` and the dashboard permissions page. Pure data: it takes a guild plus a feature-state map plus resolved settings and returns coded findings. |
+| `core/item_catalog.py` | The single definition of what a built-in item is; the shop and the gacha both derive from it. |
+| `core/bounded.py` | Bounded containers for every transient in-memory map. |
 | `dashboard_api.py`, `dashboard/` | Flask API, Discord OAuth, static dashboard client, and legacy host configuration surfaces. |
 | `locales/` | General Hungarian and structurally aligned secondary-language catalogs. |
 | `data/` | Stable Everydle datasets and game-specific locale catalogs. |
@@ -39,7 +41,7 @@ The dashboard is **load-bearing, not experimental**: it is the only way an opera
 Startup follows this order:
 
 1. `main.py` loads `.env` from the repository directory.
-2. `deployment.py` validates the deployment profile, dashboard bind address, external URL, and OAuth callback.
+2. `core/deployment.py` validates the deployment profile, dashboard bind address, external URL, and OAuth callback.
 3. `database.initialize_database()` creates or migrates SQLite before cogs or the dashboard access it.
 4. The dashboard module starts a daemon Flask thread when enabled.
 5. `PotatoBot` is created with the required gateway intents and safe default mention policy.
@@ -101,7 +103,7 @@ Economy changes must remain atomic. Wagers are reserved before games begin, sett
 
 For every schema change:
 
-1. Add an ordered, transactional, idempotent migration in `database.py`.
+1. Add an ordered, transactional, idempotent migration in `core/database.py`.
 2. Keep `update_db.py` on the identical initialization path.
 3. Back up the deployed database before migration.
 4. Test a clean database, a representative older schema, repeated initialization, and data preservation.
@@ -191,7 +193,7 @@ Three pages have no settings of their own. `GET /api/changelog` parses `CHANGELO
 
 Flask request handlers are synchronous and have no event loop, so dashboard reads use `database.run_read_sync()`. It marks the Waitress thread as a reader for one classified accessor, giving it the same `query_only` connection the read pool uses, and refuses anything absent from `READ_ONLY_OPERATIONS`. Mutations remain on the serialized writer. Before this split every page load took the process-wide write lock several times and stalled the bot's writer.
 
-The **Content** group holds five pages — Embeds, Rules panel, Role menus, Ticket launcher and Entry gate — and every one of them reads and writes `managed_messages`. Each lists what exists and offers Save, Post/Update and Delete against the message it already posted; before schema 12 nothing recorded a `message_id`, so a draft could be posted again but never updated, and schema 13 brought the last of them, the plain embed, into the same system. A message the bot posted earlier can be **adopted** by pasting its link, which is the other half of the sentence the schema-12 seed left open. Publishing still enters the durable outbox; the bot worker rechecks the actor, feature, channel, and bot permissions before a Discord send, and `managed_messages.py` renders the row for both the worker and the bot's own `/setup_*` and `/rules_group`. Shop creation accepts only fixed/timed roles, fixed vaults, approved consumables, non-inflationary repeatable coin bundles, and manual-fulfillment vouchers. Hungarian name and description are mandatory and item keys are immutable. The consumable and vault templates pick their item from `GET /api/item-catalog` instead of hand-written JSON, and the API validates against the same catalog. The gacha editor can add and remove reward rows, not only retune the ones a banner already stores — a guild that has saved a banner keeps its own configuration, so a newly shipped default reward reaches it only through that control. Waitress serves the application, but non-private deployment still requires separating and supervising the dashboard process.
+The **Content** group holds five pages — Embeds, Rules panel, Role menus, Ticket launcher and Entry gate — and every one of them reads and writes `managed_messages`. Each lists what exists and offers Save, Post/Update and Delete against the message it already posted; before schema 12 nothing recorded a `message_id`, so a draft could be posted again but never updated, and schema 13 brought the last of them, the plain embed, into the same system. A message the bot posted earlier can be **adopted** by pasting its link, which is the other half of the sentence the schema-12 seed left open. Publishing still enters the durable outbox; the bot worker rechecks the actor, feature, channel, and bot permissions before a Discord send, and `core/managed_messages.py` renders the row for both the worker and the bot's own `/setup_*` and `/rules_group`. Shop creation accepts only fixed/timed roles, fixed vaults, approved consumables, non-inflationary repeatable coin bundles, and manual-fulfillment vouchers. Hungarian name and description are mandatory and item keys are immutable. The consumable and vault templates pick their item from `GET /api/item-catalog` instead of hand-written JSON, and the API validates against the same catalog. The gacha editor can add and remove reward rows, not only retune the ones a banner already stores — a guild that has saved a banner keeps its own configuration, so a newly shipped default reward reaches it only through that control. Waitress serves the application, but non-private deployment still requires separating and supervising the dashboard process.
 
 The moderation surface has two destinations, and the split matters: `moderation_log_channel` carries the threshold alerts and the filter's matched term and is staff-only, while `warn_announce_channel` carries the `/warn` embed and declares member permissions because members read it. Unset, `/warn` posts where the moderator typed it. `/modlogs` is ephemeral.
 
@@ -237,6 +239,22 @@ both sides, so an accented entry joins the same chain as its bare form.
 `database.advance_minigame` is a conditional UPDATE against the value the caller
 believed was current, so two simultaneous turns cannot both be accepted.
 
+Word chain joins words by *letter*, and nine Hungarian letters are written with
+two characters and one with three. `HUNGARIAN_LETTERS` lists them longest-first
+— `dzs` contains both `dz` and `zs` — and doubled digraphs need no case of their
+own, because Hungarian doubles the first character and the last two of `rossz`
+already spell `sz`. `LETTER_GROUPS` keys the alphabet by language and
+`chain_letters()` reads it per message: an English chain plays by single letters,
+since `only` and `many` would otherwise demand a word beginning `ly` or `ny`.
+
+A word may be played once. `unique_value()` decides what a turn spends — the
+word, folded, or nothing at all for counting, whose values cannot repeat — and
+`advance_minigame` claims it with an `INSERT OR IGNORE` into `minigame_used_words`
+inside the same transaction that takes the turn, so the primary key *is* the
+duplicate check and a rolled-back turn gives the word back. Three answers come
+out of it: `None` for a race, `{"duplicate": True}` for a word already used, and
+the new state otherwise. `/minigame_reset` clears the words with the chain.
+
 A wrong message is deleted rather than resetting the chain, so the streak never
 breaks by itself; the 🏆 therefore marks every `MILESTONE_EVERY`-th turn rather
 than a new record, and `/minigame_reset` (Manage Server) is the way back to zero.
@@ -258,7 +276,7 @@ The 3-star pool is loaded die (40%), lockpick (10%), and 250/500/1,000/5,000 PC 
 
 #### One item catalog, two ways to obtain it
 
-`item_catalog.py` is the single definition of what a built-in item is: its stable key and the effect it applies. `database.SHOP_DEFAULTS`, `BUILTIN_SHOP_KEYS`, the `shop_price_*` settings, the shop cog's menu, and the dashboard's consumable validator all derive from it, so the Shop and Potato Gacha cannot drift into two versions of the same item. Adding an entry there gives the item a price field on the dashboard and makes it selectable in the shop builder and the banner reward picker without touching a second list.
+`core/item_catalog.py` is the single definition of what a built-in item is: its stable key and the effect it applies. `database.SHOP_DEFAULTS`, `BUILTIN_SHOP_KEYS`, the `shop_price_*` settings, the shop cog's menu, and the dashboard's consumable validator all derive from it, so the Shop and Potato Gacha cannot drift into two versions of the same item. Adding an entry there gives the item a price field on the dashboard and makes it selectable in the shop builder and the banner reward picker without touching a second list.
 
 Identity is shared; acquisition is not. Lockpicks, loaded dice and vault drills are one stackable `user_inventory` row whether bought (`purchase_inventory_item`) or pulled — a bought lockpick and a pulled one are the same object. Vaults use the shop's keys in both systems (`small_vault`, `med_vault`, `big_vault`), and `_validated_gacha_config` requires a catalog vault reward to award the catalog reserve, so `big_vault` protects 500,000 PC however it arrived. What differs is the rule for a duplicate: the shop refuses the purchase and charges nothing, while a pull pays the banner's configured compensation. Banners saved before the keys were shared keep `vault_25000`/`vault_500000`; those keys are absent from the catalog, stay valid, and keep their locale entries so recorded pulls remain readable.
 
@@ -457,3 +475,12 @@ After a successful change, update documentation when the work creates durable kn
 - `todo.md` for remaining work only.
 
 Do not create per-agent or per-feature TODO files. Delete completed backlog entries instead of retaining them as a changelog; Git history already records completed work.
+
+## What the move into `core/` had to satisfy
+
+The layout was flat until 2026-09-16, and the condition attached to changing it
+was that every cog and test import migrate in the same change: 233 imports across
+66 files, the five root globs that would otherwise have come back short and still
+passed, and the three `__file__` paths inside the moved modules. The three entry
+points stayed at the root because a systemd unit, the Containerfile and
+`compose.yaml` name them by path, so moving one is a production change.

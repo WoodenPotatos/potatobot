@@ -10,8 +10,8 @@ from pathlib import Path
 
 import discord
 
-import permission_audit
-from settings_registry import FEATURE_DEFINITIONS
+from core import permission_audit
+from core.settings_registry import FEATURE_DEFINITIONS
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -352,7 +352,7 @@ class PermissionFindingLocalizationTests(unittest.TestCase):
     )
 
     def test_the_declared_codes_are_the_codes_the_module_emits(self):
-        source = (ROOT / "permission_audit.py").read_text(encoding="utf-8")
+        source = (ROOT / "core" / "permission_audit.py").read_text(encoding="utf-8")
         for code in self.CODES:
             with self.subTest(code=code):
                 self.assertIn(f'code="{code}"', source)
@@ -395,7 +395,7 @@ class PermissionFindingLocalizationTests(unittest.TestCase):
                 self.assertEqual([], sorted(used - set(names)))
 
     def test_every_channel_kind_the_registry_offers_has_requirements(self):
-        from settings_registry import SETTING_DEFINITIONS, SettingValueType
+        from core.settings_registry import SETTING_DEFINITIONS, SettingValueType
 
         offered = {
             kind

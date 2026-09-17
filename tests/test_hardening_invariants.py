@@ -20,16 +20,16 @@ from types import SimpleNamespace
 
 import discord
 
-from bounded import BoundedCooldownMap, BoundedTimestampMap, BoundedValueMap
+from core.bounded import BoundedCooldownMap, BoundedTimestampMap, BoundedValueMap
 from cogs.utils import CONFIG_LOCK, config, save_config, snapshot_config
-from feature_access import (
+from core.feature_access import (
     MAINTENANCE_EXEMPT_COMMANDS,
     is_enabled,
     maintenance_blocks,
     require_interaction_feature,
     seed_cached_feature,
 )
-from settings_registry import FEATURE_DEFINITIONS
+from core.settings_registry import FEATURE_DEFINITIONS
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -218,7 +218,7 @@ class BoundedContainerTests(unittest.TestCase):
         self.assertIsNone(timings.pop(7))
 
     def test_interaction_timing_map_is_bounded(self):
-        import feature_access
+        from core import feature_access
 
         self.assertIsInstance(feature_access._INTERACTION_STARTED, BoundedTimestampMap)
 
@@ -286,7 +286,7 @@ class ConfigSnapshotTests(unittest.TestCase):
         configured. The result halved a 500 MB journal cap for nothing and made
         a grep count read double.
         """
-        setup = (ROOT / "logging_setup.py").read_text(encoding="utf-8")
+        setup = (ROOT / "core" / "logging_setup.py").read_text(encoding="utf-8")
         self.assertIn("configured.propagate = False", setup,
                       "a configured logger must not also reach the root logger")
         source = (ROOT / "main.py").read_text(encoding="utf-8")
@@ -308,7 +308,7 @@ class ConfigSnapshotTests(unittest.TestCase):
         """
         api = (ROOT / "dashboard_api.py").read_text(encoding="utf-8")
         self.assertIn("logging_setup.configure_dashboard_logging()", api)
-        setup = (ROOT / "logging_setup.py").read_text(encoding="utf-8")
+        setup = (ROOT / "core" / "logging_setup.py").read_text(encoding="utf-8")
         for name in ('"PotatoBot"', '"waitress"'):
             self.assertIn(f"configure_logger({name})", setup)
 
@@ -316,7 +316,7 @@ class ConfigSnapshotTests(unittest.TestCase):
         """Both entry points may configure the same logger in one process."""
         import logging
 
-        import logging_setup
+        from core import logging_setup
 
         name = "PotatoBot.TestDoubleConfigure"
         try:
@@ -378,13 +378,13 @@ class ConfigSnapshotTests(unittest.TestCase):
 
 class DashboardReadPathTests(unittest.TestCase):
     def test_read_helper_refuses_unclassified_operations(self):
-        import database
+        from core import database
 
         with self.assertRaises(ValueError):
             database.run_read_sync(database.set_feature_state, 1, 2, "economy", True)
 
     def test_dashboard_reads_do_not_take_the_writer_lock(self):
-        import database
+        from core import database
 
         self.temp_dir = tempfile.TemporaryDirectory()
         original_path = database.DB_PATH
@@ -415,7 +415,7 @@ class DashboardReadPathTests(unittest.TestCase):
             self.temp_dir.cleanup()
 
     def test_dashboard_module_has_no_unclassified_synchronous_reads(self):
-        import database
+        from core import database
 
         source = (ROOT / "dashboard_api.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -463,12 +463,20 @@ class UndefinedNameTests(unittest.TestCase):
         """The runtime tree. Tests are excluded: they legitimately reference
         names a harness injects."""
         roots = [ROOT / name for name in (
-            "main.py", "database.py", "dashboard_api.py", "managed_messages.py",
-            "settings_cache.py", "settings_registry.py", "feature_access.py",
-            "permission_audit.py", "item_catalog.py", "deployment.py",
-            "bounded.py", "minigame_data.py", "version.py",
+            "main.py", "dashboard_api.py",
+        )] + [ROOT / "core" / name for name in (
+            "database.py", "managed_messages.py", "settings_cache.py",
+            "settings_registry.py", "feature_access.py", "permission_audit.py",
+            "item_catalog.py", "deployment.py", "bounded.py",
+            "minigame_data.py", "version.py",
         )]
-        return sorted(ROOT.glob("cogs/*.py")) + [p for p in roots if p.exists()]
+        # Asserted rather than filtered by `.exists()`. The filter that used to
+        # sit here meant a renamed or moved module dropped out of the walk and
+        # the test kept passing over whatever was left -- the failure mode this
+        # whole file exists to catch, in the file itself.
+        missing = [str(p.relative_to(ROOT)) for p in roots if not p.exists()]
+        assert not missing, f"listed module(s) no longer exist: {missing}"
+        return sorted(ROOT.glob("cogs/*.py")) + roots
 
     def undefined(self, path):
         source = path.read_text(encoding="utf-8")
@@ -603,7 +611,7 @@ class ResponseVisibilityTests(unittest.TestCase):
     """
 
     def test_no_private_command_sends_publicly(self):
-        from feature_access import COMMAND_POLICIES, ResponsePolicy
+        from core.feature_access import COMMAND_POLICIES, ResponsePolicy
 
         offenders = []
         for path, node in _command_functions():

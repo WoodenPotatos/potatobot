@@ -1,6 +1,8 @@
+import ast
 import json
 import os
 import re
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -45,7 +47,7 @@ class ConfigurationCoverageTests(unittest.TestCase):
         return {path for path in walk(self.CONFIG)}
 
     def test_every_config_value_has_a_typed_setting(self):
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
 
         registered = {
             definition.legacy_path
@@ -61,7 +63,7 @@ class ConfigurationCoverageTests(unittest.TestCase):
     def test_every_setting_has_an_operator_facing_label(self):
         """The dashboard renders the label straight from the registry, so a
         missing one shows the operator a raw `[dashboard.settings.x]`."""
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
 
         labels = json.loads(
             (ROOT / "locales" / "hu.json").read_text(encoding="utf-8")
@@ -72,7 +74,7 @@ class ConfigurationCoverageTests(unittest.TestCase):
         self.assertEqual([], missing)
 
     def test_every_setting_page_has_a_section_heading(self):
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
 
         pages = json.loads(
             (ROOT / "locales" / "hu.json").read_text(encoding="utf-8")
@@ -101,7 +103,7 @@ class ConfigurationCoverageTests(unittest.TestCase):
 
     def test_loading_the_installation_settings_cannot_stop_startup(self):
         """The fallback above is only real if the load itself cannot raise."""
-        import settings_cache
+        from core import settings_cache
 
         original = settings_cache.database.get_instance_settings
         settings_cache.database.get_instance_settings = (
@@ -201,11 +203,17 @@ class ConfigurationSecurityTests(unittest.TestCase):
 
     #: What `CLAUDE.md` may cost. It is loaded into context on every turn of every
     #: session, so its size is paid continuously rather than when somebody opens
-    #: it. Set a little above what the 2026-09-01 pass achieved (2,091 lines /
-    #: 198,295 characters), which leaves room to record a rule and not room to
-    #: retell an incident.
-    CLAUDE_MD_MAX_LINES = 2200
-    CLAUDE_MD_MAX_CHARS = 210_000
+    #: it. Set a little above what the file currently is, which leaves room to
+    #: record a rule and not room to retell an incident. **Characters are the
+    #: honest measure** — the 2026-09-17 pass cut 33% of them while the line
+    #: count moved less, because it rewrapped paragraphs that had been single
+    #: 400-character lines. A budget left far above the file cannot catch creep,
+    #: so bring both down after a trim. Moving a *procedure* into a skill under
+    #: `.claude/skills/` frees very little here and is not done for the size:
+    #: what is left in this file is constraint, which has to stay loaded because
+    #: a skill applies only when something thought to load it.
+    CLAUDE_MD_MAX_LINES = 1350
+    CLAUDE_MD_MAX_CHARS = 106_000
 
     def test_the_instruction_file_stays_within_its_budget(self):
         """Nothing noticed `CLAUDE.md` reaching six times its recommended size.
@@ -228,9 +236,58 @@ class ConfigurationSecurityTests(unittest.TestCase):
             len(text), self.CLAUDE_MD_MAX_CHARS,
             f"CLAUDE.md is {len(text)} characters. Same remedy.")
 
-    def test_the_lessons_archive_is_never_published(self):
-        """It names this deployment, its channels and its dates, which is
-        exactly why the narrative was allowed to move there."""
+    def test_every_skill_declares_what_it_is_for(self):
+        """A skill with no `description` is one Claude will never load on its own.
+
+        That is this project's recurring failure shape applied to its own
+        tooling: the skill exists, `/name` still works, and the automatic path
+        silently does nothing. The body is only worth writing if the frontmatter
+        can be matched against, so the description is required rather than
+        recommended here. Skills are also excluded from the public snapshot by
+        the `.claude/` prefix, which is asserted alongside so a future publisher
+        change cannot start shipping them.
+        """
+        skills = ROOT / ".claude" / "skills"
+        if not skills.is_dir():
+            return
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "publish_public", ROOT / "scripts" / "publish_public.py")
+        publisher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(publisher)
+
+        found = sorted(child for child in skills.iterdir() if child.is_dir())
+        self.assertTrue(found, "docs/ says skills live here; none were found")
+        for directory in found:
+            definition = directory / "SKILL.md"
+            self.assertTrue(
+                definition.is_file(),
+                f"{directory.name} is a skill directory with no SKILL.md")
+            text = definition.read_text(encoding="utf-8")
+            self.assertTrue(
+                text.startswith("---\n"),
+                f"{directory.name}/SKILL.md has no frontmatter block")
+            frontmatter = text.split("---", 2)[1]
+            description = re.search(
+                r"^description:\s*(\S.*)$", frontmatter, re.M)
+            self.assertIsNotNone(
+                description,
+                f"{directory.name} declares no description, so nothing will "
+                f"load it unless the operator types /{directory.name}")
+            self.assertGreater(
+                len(description.group(1).strip()), 40,
+                f"{directory.name}'s description is too short to match against")
+            relative = f".claude/skills/{directory.name}/SKILL.md"
+            self.assertTrue(
+                publisher.is_excluded(relative),
+                f"{relative} would ship in the public snapshot")
+
+    def test_the_private_documents_are_never_published(self):
+        """Each names this deployment, its channels and its dates, which is
+        exactly why the narrative was allowed to move to them. A document that
+        exists to absorb detail from CLAUDE.md inherits CLAUDE.md's exclusion,
+        or the trim publishes what the file it came from never did."""
         import importlib.util
 
         spec = importlib.util.spec_from_file_location(
@@ -239,6 +296,7 @@ class ConfigurationSecurityTests(unittest.TestCase):
         spec.loader.exec_module(module)
         self.assertIn("docs/lessons.md", module.EXCLUDED_PATHS)
         self.assertIn("CLAUDE.md", module.EXCLUDED_PATHS)
+        self.assertIn("docs/deployment_host.md", module.EXCLUDED_PATHS)
 
     def test_secret_scanner_allowlist_stays_narrow(self):
         """The gitleaks allowlist exists only for the gacha reward identifiers.
@@ -265,7 +323,7 @@ class ConfigurationSecurityTests(unittest.TestCase):
         the one CI runs. A test that duplicates the artifact it guards can only
         ever agree with it by luck.
         """
-        import database
+        from core import database
 
         # Take the allowlist's own regexes out of the file and run them the way
         # gitleaks does — against the matched text — rather than reconstructing
@@ -307,8 +365,8 @@ class ConfigurationSecurityTests(unittest.TestCase):
         to be diffed in both directions: what the catalog offers against what
         the pool draws, and back.
         """
-        import database
-        import item_catalog
+        from core import database
+        from core import item_catalog
 
         shipped = {entry["key"]
                    for tier in database.DEFAULT_GACHA_CONFIG["rewards"].values()
@@ -336,8 +394,19 @@ class ConfigurationSecurityTests(unittest.TestCase):
             # commit:path:rule-id:line
             self.assertEqual(4, len(fingerprint.split(":")), fingerprint)
 
-        self.assertIn("ROTATION REQUIRED", ignore)
+        # Every fingerprint block carries a verdict. This used to assert the
+        # literal "ROTATION REQUIRED", which pinned the ledger to the day one
+        # credential was still open -- the rotation then failed the build. The
+        # invariant is that each finding *says* where it stands, whichever of
+        # the three that is.
+        verdicts = ("ROTATED 20", "NOTHING TO ROTATE", "ROTATION REQUIRED")
+        blocks = [block for block in ignore.split("\n# ---")[1:]]
+        self.assertEqual(len(blocks), 3, "one block per historical finding")
+        for block in blocks:
+            self.assertIn("# Status:", block, block[:80])
+            self.assertTrue(any(v in block for v in verdicts), block[:80])
         self.assertIn("Known credential exposure in Git history", security)
+        # The procedure stays even after rotation, for the next time.
         self.assertIn("dev.twitch.tv/console/apps", security)
 
     def test_workflow_actions_are_off_node20(self):
@@ -369,7 +438,16 @@ class ConfigurationSecurityTests(unittest.TestCase):
             with self.subTest(unit=unit):
                 for directive in ("User=potatobot", "Restart=on-failure",
                                   "NoNewPrivileges=true", "ProtectSystem=strict",
-                                  "ReadWritePaths=/opt/potatobot"):
+                                  "ReadWritePaths=/opt/potatobot",
+                                  # The audit's additions. `UMask=0027` is the one
+                                  # that would have kept a migration's backup of
+                                  # every member's balance from landing 0644.
+                                  "UMask=0027", "CapabilityBoundingSet=",
+                                  "SystemCallFilter=@system-service",
+                                  "SystemCallErrorNumber=EPERM",
+                                  "PrivateDevices=true", "ProtectProc=invisible",
+                                  "ProtectClock=true", "ProtectHostname=true",
+                                  "RemoveIPC=true"):
                     self.assertIn(directive, text)
 
         dashboard_unit = (ROOT / "deploy" / "potatobot-dashboard.service").read_text(
@@ -381,6 +459,8 @@ class ConfigurationSecurityTests(unittest.TestCase):
     def test_container_runs_unprivileged_and_keeps_data_outside_the_image(self):
         containerfile = (ROOT / "Containerfile").read_text(encoding="utf-8")
         self.assertIn("USER potatobot", containerfile)
+        # Pinned by digest: a tag is a moving name.
+        self.assertRegex(containerfile, r"FROM python:3\.13-slim@sha256:[0-9a-f]{64}")
         self.assertIn('VOLUME ["/data"]', containerfile)
         self.assertIn("POTATOBOT_DB_PATH=/data/economy.db", containerfile)
         # Music playback needs ffmpeg present in the image.
@@ -430,6 +510,119 @@ class ConfigurationSecurityTests(unittest.TestCase):
         )
         # The backlog is not published, so a snapshot correctly has none.
         self.assertEqual(todo_files, ["todo.md"] if (ROOT / "todo.md").exists() else [])
+
+
+class RepositoryLayoutTests(unittest.TestCase):
+    """The root holds what is *run*; `core/` holds what they import.
+
+    Sixteen modules used to sit in the root with nothing distinguishing the
+    three that get executed from the thirteen that only ever get imported. The
+    split is only worth anything if it holds, and nothing about adding a
+    fourteenth shared module to the root would look wrong at review time -- it
+    would simply work, the way all thirteen did.
+
+    The three entry points stay at the root because that is where the things
+    that run them look: `deploy/potatobot.service` names `main.py` by absolute
+    path, `compose.yaml` and the two units name `dashboard_api.py` and
+    `update_db.py`. Moving one is a production change, which is the other half
+    of why this is pinned.
+    """
+
+    ENTRY_POINTS = {"main.py", "dashboard_api.py", "update_db.py"}
+
+    def tracked_root_modules(self):
+        """Tracked files only -- a local scratch file is not committed clutter."""
+        listed = subprocess.run(
+            ["git", "ls-files", "*.py"], cwd=ROOT,
+            capture_output=True, text=True, check=True).stdout.split()
+        return {name for name in listed if "/" not in name}
+
+    def test_the_root_holds_only_the_entry_points(self):
+        self.assertEqual(self.ENTRY_POINTS, self.tracked_root_modules())
+
+    # Named rather than counted. A threshold reads as a guard and is not one:
+    # `len(modules) > 10` passes with three of them deleted, which is how the
+    # hardening walk in `test_hardening_invariants.py` came to cover nothing.
+    SHARED_MODULES = {
+        "__init__.py", "bounded.py", "clock.py", "database.py", "deployment.py",
+        "feature_access.py", "item_catalog.py", "logging_setup.py",
+        "managed_messages.py", "minigame_data.py", "permission_audit.py",
+        "settings_cache.py", "settings_registry.py", "support_tickets.py",
+        "version.py",
+    }
+
+    def test_the_shared_modules_live_in_core(self):
+        modules = {p.name for p in (ROOT / "core").glob("*.py")}
+        self.assertEqual(self.SHARED_MODULES, modules)
+        self.assertEqual(set(), modules & self.ENTRY_POINTS)
+
+    def test_every_entry_point_is_named_by_what_runs_it(self):
+        """A root module nothing invokes has no reason to be at the root."""
+        invocations = "\n".join(
+            (ROOT / name).read_text(encoding="utf-8") for name in (
+                "Containerfile", "compose.yaml", "README.md",
+                "deploy/potatobot.service", "deploy/potatobot-dashboard.service"))
+        for entry in sorted(self.ENTRY_POINTS):
+            with self.subTest(entry=entry):
+                self.assertIn(entry, invocations)
+
+    def test_core_re_exports_nothing(self):
+        """Two spellings for one module is worse than a long import line."""
+        source = (ROOT / "core" / "__init__.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        offenders = [type(node).__name__ for node in tree.body
+                     if not isinstance(node, ast.Expr)]
+        self.assertEqual([], offenders)
+
+
+class PinnedDependencyTests(unittest.TestCase):
+    """`pyproject.toml` and `requirements.lock` must pin the same versions.
+
+    Nothing held them together, and a dependency bot found the gap first: it
+    raised a pull request moving `yt-dlp` in `pyproject.toml` alone, which
+    looked mergeable and would have left the packaging metadata claiming one
+    version while the venv and `pip_audit -r requirements.lock` used another.
+
+    The lockfile is the authority for what actually runs, so a disagreement is
+    never resolved by preferring one — it is a bump that only got halfway, and
+    the fix is to finish it.
+    """
+
+    PIN = re.compile(r"^\s*[\"']?([A-Za-z0-9._-]+)==([^\"'\s]+)")
+
+    def _pins(self, path, lines):
+        found = {}
+        for line in lines:
+            match = self.PIN.match(line)
+            if match:
+                # PEP 503: the distribution name is case-insensitive and
+                # `-`/`_`/`.` are equivalent, so `yt-dlp` and `yt_dlp` are one
+                # package and must not read as two.
+                name = re.sub(r"[-_.]+", "-", match.group(1)).lower()
+                found[name] = match.group(2)
+        self.assertTrue(found, f"no pinned requirement found in {path}")
+        return found
+
+    def test_the_two_files_agree_on_every_shared_pin(self):
+        project = self._pins("pyproject.toml", (
+            (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+            .split("dependencies = [")[1].split("]")[0].splitlines()))
+        lock = self._pins("requirements.lock", (
+            (ROOT / "requirements.lock").read_text(encoding="utf-8").splitlines()))
+
+        disagreements = {name: (version, lock[name])
+                         for name, version in project.items()
+                         if name in lock and lock[name] != version}
+        self.assertEqual({}, disagreements)
+
+    def test_every_declared_dependency_is_locked(self):
+        """A dependency the lockfile never names is one nothing installs."""
+        project = self._pins("pyproject.toml", (
+            (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+            .split("dependencies = [")[1].split("]")[0].splitlines()))
+        lock = self._pins("requirements.lock", (
+            (ROOT / "requirements.lock").read_text(encoding="utf-8").splitlines()))
+        self.assertEqual(set(), set(project) - set(lock))
 
 
 if __name__ == "__main__":

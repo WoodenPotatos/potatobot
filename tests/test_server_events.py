@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from cogs.serverevents import ServerEvents
-import settings_cache
+from core import settings_cache
 from cogs.utils import config, is_premium, voice_reward_block
 
 

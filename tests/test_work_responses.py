@@ -19,9 +19,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import database
+from core import database
 from cogs import casino
-from settings_registry import SETTING_DEFINITIONS
+from core.settings_registry import SETTING_DEFINITIONS
 
 ROOT = Path(__file__).resolve().parents[1]
 

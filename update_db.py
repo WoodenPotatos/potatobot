@@ -1,4 +1,4 @@
-import database
+from core import database
 
 
 if __name__ == "__main__":

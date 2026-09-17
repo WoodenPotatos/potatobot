@@ -11,18 +11,19 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
-import permission_audit
-from managed_messages import render_managed_message
+from core import database
+from core import permission_audit
+from core.managed_messages import render_managed_message
 from discord.ext import commands
 from datetime import datetime, timedelta
+from core.clock import local_date, local_time, parse_stored, utc_now
 from cogs.utils import (
     BoundedCooldownMap, apply_admin_level_change, can_self_assign_role,
     currency_emoji, guild_setting_sync, guild_settings_sync, is_staff,
     send_moderation_log, set_guild_setting, t, update_user_data,
 )
-from settings_registry import SETTING_DEFINITIONS
-from feature_access import is_enabled, require_interaction_feature
+from core.settings_registry import SETTING_DEFINITIONS
+from core.feature_access import is_enabled, require_interaction_feature
 
 onboarding_interaction_times = BoundedCooldownMap()
 admin_logger = logging.getLogger("PotatoBot.Admin")
@@ -271,6 +272,10 @@ class EnterServerView(discord.ui.View):
         await interaction.user.add_roles(member_role)
         await interaction.response.send_message(t("admin.welcome_to_server"), ephemeral=True)
 
+#: Members per `apply_batch_balance` transaction in `/awardall`.
+AWARDALL_CHUNK = 500
+
+
 class Admin(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -407,7 +412,17 @@ class Admin(commands.Cog):
         # it writes the same row the dashboard writes — through the one write
         # path, so the value is validated, the revision bumps and the audit row
         # commits with it. It used to rewrite config.json instead.
-        await set_guild_setting(ctx.guild.id, ctx.author.id, "maintenance", status)
+        try:
+            await set_guild_setting(ctx.guild.id, ctx.author.id, "maintenance", status)
+        except database.ValidationError as error:
+            # `maintenance` is installation-wide, so `set_guild_setting` refuses
+            # anyone but the host -- the same refusal the dashboard gives, with
+            # the same words. `@is_staff()` stays as the outer gate so staff can
+            # still find the command and read why it will not run for them.
+            if error.reason != "instance_setting_host_only":
+                raise
+            return await ctx.send(
+                t("dashboard.errors.instance_setting_host_only"), ephemeral=True)
 
         state = t("admin.maintenance_enabled") if status else t("admin.maintenance_disabled")
         await ctx.send(t("admin.maintenance_status", state=state))
@@ -440,7 +455,7 @@ class Admin(commands.Cog):
         if item_type not in ["emoji", "sound"]:
             return await ctx.send(t("admin.invalid_rent_type"), ephemeral=True)
 
-        expires = (datetime.now() + timedelta(days=30)).isoformat()
+        expires = (utc_now() + timedelta(days=30)).isoformat()
         await database.run(database.add_rented_item, item_type, item_id, expires, ctx.guild.id)
 
         await ctx.send(t("admin.rent_registered", type=item_type, id=item_id), ephemeral=True)
@@ -449,6 +464,9 @@ class Admin(commands.Cog):
     @discord.app_commands.default_permissions(administrator=True)
     @commands.has_permissions(administrator=True)
     async def award(self, ctx, member: discord.Member, amount: int):
+        if abs(amount) > database.MAX_AMOUNT:
+            return await ctx.send(
+                t("casino.err_amount_range", limit=database.MAX_AMOUNT), ephemeral=True)
         new_bal, _, _, _, _ = await update_user_data(member, balance_change=amount, xp_change=0)
 
         title = t("admin.award_add_title") if amount > 0 else t("admin.award_remove_title")
@@ -559,9 +577,18 @@ class Admin(commands.Cog):
     async def awardall(self, ctx, amount: int):
         if amount <= 0:
             return await ctx.send(t("admin.awardall_negative_error"), ephemeral=True)
+        if amount > database.MAX_AMOUNT:
+            return await ctx.send(
+                t("casino.err_amount_range", limit=database.MAX_AMOUNT), ephemeral=True)
 
         member_ids = [member.id for member in ctx.guild.members if not member.bot]
-        count = await database.run(database.apply_batch_balance, member_ids, amount)
+        # In chunks: one transaction over a large guild holds the single writer
+        # for its whole duration, and every other write in the bot queues
+        # behind it.
+        count = 0
+        for start in range(0, len(member_ids), AWARDALL_CHUNK):
+            count += await database.run(
+                database.apply_batch_balance, member_ids[start:start + AWARDALL_CHUNK], amount)
             
         embed = discord.Embed(
             title=t("admin.awardall_title"), 
@@ -718,9 +745,13 @@ class Admin(commands.Cog):
     @discord.app_commands.default_permissions(administrator=True)
     @commands.has_permissions(administrator=True)
     async def rules_verify(self, ctx, color_hex: str, title: str, message: str, banner_url: str = None):
+        # The same rule the dashboard's `_validate_image_url` applies: Discord
+        # fetches whatever this names, so it is HTTPS and bounded or refused.
+        if banner_url and (not banner_url.startswith("https://") or len(banner_url) > 1024):
+            return await ctx.send(t("admin.invalid_banner_url"), ephemeral=True)
         try:
             target_color = discord.Color.from_str(color_hex)
-        except:
+        except ValueError:
             target_color = discord.Color.blue()
 
         embed = discord.Embed(title=title, description=message.replace("\\n", "\n"), color=target_color)

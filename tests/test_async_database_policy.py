@@ -4,7 +4,7 @@ import pathlib
 import time
 import unittest
 
-import database
+from core import database
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -15,7 +15,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 #: arithmetic over the level curve is not database work. Kept as an explicit
 #: list rather than letting a direct `from database import …` slip past the
 #: check, which would exempt every accessor at once.
-PURE_HELPERS = {"level_for_xp", "xp_for_level"}
+# `ValidationError` is here because raising `database.ValidationError(...)`
+# from a cog is, to the AST walk below, a call on the module -- and it is the
+# one exception type a cog is meant to raise to name a refusal. Constructing an
+# exception is not database work; the purity test below holds it to that.
+PURE_HELPERS = {"level_for_xp", "xp_for_level", "ValidationError"}
 
 
 class AsyncDatabasePolicyTests(unittest.TestCase):

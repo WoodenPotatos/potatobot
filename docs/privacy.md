@@ -36,14 +36,18 @@ Deletion is an *anonymisation*, not a wipe, and the distinction is deliberate:
 
 - **Deleted outright** — profile and behavioural data, warnings, tickets the member
   opened, voice preferences and permissions, inventory, gacha history, vouchers,
-  entitlements, fulfilment requests, sharing preferences and activity events.
+  entitlements, fulfilment requests, sharing preferences, activity events and the
+  LFG party posts they hosted.
 - **Retained under a tombstone** — the economy row, its scoped copy, settled wagers
   and reward claims. The tombstone is a fresh negative integer, which cannot
   collide with a Discord snowflake and is unique per erasure. Behavioural columns
   on the retained row (cooldowns, streaks, activity timestamps) are blanked.
 - **Dereferenced** — attribution on other members' rows. Nullable columns such as
-  `warnings.mod_id` and `tickets.claimer_id` become NULL; columns that cannot be
-  nulled, such as `settings_audit.actor_id`, point at the tombstone instead.
+  `warnings.mod_id`, `tickets.claimer_id` and `minigame_state.last_user_id` become
+  NULL; columns that cannot be nulled, such as `settings_audit.actor_id`, point at
+  the tombstone instead. The member leaves every LFG party they had joined, and
+  the outbox row that carried an operator's erasure request is re-keyed to the
+  tombstone rather than naming the member for the month it survives.
 
 Retaining the economy row is what satisfies "never silently alter financial
 totals": the installation's coin supply is provably unchanged, and the reward-claim

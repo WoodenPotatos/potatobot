@@ -1,3 +1,12 @@
+"""Support tickets: the launcher panel, the per-ticket channel and its transcript.
+
+The launcher is a persistent view whose button label an operator may rename, so
+the label is never part of the `custom_id`. Ticket ownership lives in SQLite
+rather than in the view, because the view outlives no restart.
+
+Rules that bind changes here: docs/subsystems/managed_messages.md
+"""
+
 import discord
 import asyncio
 import os
@@ -13,11 +22,12 @@ if ROOT_DIR not in sys.path:
 
 from discord.ext import commands
 from datetime import datetime
+from core.clock import local_date, local_time, parse_stored, utc_now
 from cogs.utils import BoundedCooldownMap, t, guild_setting_sync
-import database
-from feature_access import require_interaction_feature
-from managed_messages import render_managed_message
-from support_tickets import open_ticket
+from core import database
+from core.feature_access import require_interaction_feature
+from core.managed_messages import render_managed_message
+from core.support_tickets import open_ticket
 
 TICKET_OPEN_COOLDOWN = 300
 TRANSCRIPT_MESSAGE_LIMIT = 50_000
@@ -194,7 +204,7 @@ class TicketCloseModal(discord.ui.Modal):
         if log_channel:
             base_name = (
                 f"log_{interaction.channel.name}_"
-                f"{datetime.now().strftime('%Y-%m-%d')}"
+                f"{local_date(utc_now()).isoformat()}"
             )
             files = [
                 discord.File(

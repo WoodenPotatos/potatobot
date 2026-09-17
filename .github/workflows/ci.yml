@@ -31,7 +31,7 @@ jobs:
       # payload each creator submits. Without Node they call `skipTest` and pass,
       # so the checks guarding the defects that reached the deployment were the
       # ones CI never ran.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       # Test-only. The dashboard itself has no build step and no runtime
@@ -56,6 +56,15 @@ jobs:
   # three times, and so a Python failure cannot mask it or the reverse.
   secrets:
     runs-on: ubuntu-latest
+    # A job-level block replaces the workflow-level one, so `contents` is
+    # repeated rather than inherited. `pull-requests: read` is what the action
+    # needs on a pull request: it asks the API for the commit range to scan
+    # before it scans anything, so without it the job failed *before* the scan
+    # and every pull request went unscanned. Read is not downgraded for a
+    # dependency bot's pull request the way write is.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -69,6 +78,12 @@ jobs:
           # Pinned so a new upstream rule cannot turn a green build red without
           # a deliberate change here. Verified locally against this version.
           GITLEAKS_VERSION: 8.30.1
+          # Kept off alongside the read permission above. Commenting needs
+          # `pull-requests: write`, which a dependency bot's pull request never
+          # gets however a workflow declares it -- so leaving comments on would
+          # reintroduce the same failure on exactly the pull requests that
+          # found it. The exit code is the gate; the comment never was.
+          GITLEAKS_ENABLE_COMMENTS: false
           # GITLEAKS_LICENSE is required only for organization accounts, and
           # this repository belongs to a user account.
           #

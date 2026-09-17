@@ -8,7 +8,7 @@ ladder that is known to work because it has been running on a real guild.
 
 ## How a level is earned
 
-One formula, in `database.py` — `level_for_xp` and its inverse `xp_for_level`:
+One formula, in `core/database.py` — `level_for_xp` and its inverse `xp_for_level`:
 
 ```
 level = floor(sqrt(xp / 10)) + 1        which inverts to        xp = 10 x (level - 1)^2

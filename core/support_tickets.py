@@ -20,7 +20,7 @@ import logging
 
 import discord
 
-import database
+from core import database
 from cogs.utils import guild_setting_sync, t
 
 logger = logging.getLogger("PotatoBot.Tickets")

@@ -37,9 +37,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import database  # noqa: E402
-import settings_registry  # noqa: E402
-from settings_registry import (  # noqa: E402
+from core import database  # noqa: E402
+from core import settings_registry  # noqa: E402
+from core.settings_registry import (  # noqa: E402
     SETTING_DEFINITIONS,
     SettingScope,
     legacy_config_value,
@@ -99,7 +99,7 @@ def coerce_to_declared_type(definition, value):
     Anything else is left alone and fails validation, which is the right
     outcome: a value that is the wrong *shape* is a mistake in the file.
     """
-    from settings_registry import SettingValueType
+    from core.settings_registry import SettingValueType
 
     if definition.value_type is SettingValueType.STRING_LIST:
         if isinstance(value, list) and any(isinstance(item, int) for item in value):

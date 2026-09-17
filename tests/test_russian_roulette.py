@@ -26,7 +26,7 @@ import secrets
 import tempfile
 import unittest
 
-import database
+from core import database
 from cogs.casino import CASINO_EDGE, RUSSIAN_MAX_PLAYERS
 
 

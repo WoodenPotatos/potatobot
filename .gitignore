@@ -19,6 +19,12 @@ requirements.txt
 # throwaway config.json, so a local click can never rewrite the tracked one.
 .local-dev/
 
+# What scripts/rehearse_migration.py leaves behind: a pre-migration copy of
+# whatever database it was pointed at, plus two snapshots. `*.db*` already
+# covers the copy; this covers the directory it sits in, so a rehearsal never
+# shows up as something to commit.
+migration-rehearsal-*/
+
 # Python virtual environment and bytecode cache
 venv/
 .venv/

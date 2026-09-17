@@ -23,7 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-import logging_setup
+from core import logging_setup
 
 
 class FakeClient:
@@ -262,7 +262,7 @@ class StackDumpTests(unittest.TestCase):
         hang the same way."""
         import ast
 
-        with open(os.path.join(ROOT, "logging_setup.py"), encoding="utf-8") as handle:
+        with open(os.path.join(ROOT, "core", "logging_setup.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         setup = next(node for node in ast.walk(tree)
                      if isinstance(node, ast.FunctionDef)

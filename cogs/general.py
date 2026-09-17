@@ -11,11 +11,11 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from discord.ext import commands, tasks
-import database
+from core import database
 from cogs.utils import (BoundedCooldownMap, display_member_name,
                         guild_setting_sync, handle_loop_error, t)
-from version import REPOSITORY_URL, release_channel, version_display
-from feature_access import require_interaction_feature
+from core.version import REPOSITORY_URL, release_channel, version_display
+from core.feature_access import require_interaction_feature
 
 general_logger = logging.getLogger("PotatoBot.General")
 
@@ -251,6 +251,10 @@ def lfg_embed(guild, post):
                         value=t("general.lfg_nobody_yet"), inline=False)
     embed.description = desc
     return embed
+
+
+#: The longest game name `/search` accepts for a free-text party.
+LFG_GAME_TEXT_LIMIT = 200
 
 
 class LFGView(discord.ui.View):
@@ -503,6 +507,11 @@ class General(commands.Cog):
         elif channel_id_str == default_lfg_channel_id:
             if not game:
                 return await ctx.send(t("general.search_err_no_game"), ephemeral=True)
+            if len(game) > LFG_GAME_TEXT_LIMIT:
+                # It lands in an embed description; past 4096 Discord refuses
+                # the whole post, and long before that it is not a game name.
+                return await ctx.send(t("general.search_err_game_too_long",
+                                        limit=LFG_GAME_TEXT_LIMIT), ephemeral=True)
 
             custom_msg = t(
                 "general.search_custom_game_msg",

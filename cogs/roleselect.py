@@ -1,3 +1,13 @@
+"""Game, news and theme role menus.
+
+A menu's buttons are persistent, so the registered instance carries no role id
+at all: the label is the `custom_id` and the role is resolved per interaction
+from the guild the click came from. The rows the menus are built from live in
+`managed_messages`.
+
+Rules that bind changes here: docs/subsystems/managed_messages.md
+"""
+
 import discord
 import logging
 import os
@@ -11,9 +21,9 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from discord.ext import commands
-import database
+from core import database
 from cogs.utils import BoundedCooldownMap, can_self_assign_role, t
-from feature_access import require_interaction_feature
+from core.feature_access import require_interaction_feature
 
 role_logger = logging.getLogger("PotatoBot.RoleSelect")
 

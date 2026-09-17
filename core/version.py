@@ -39,7 +39,11 @@ _PRERELEASE = re.compile(r"^(?P<release>\d+\.\d+\.\d+)"
 _KIND_CHANNEL = {"a": CHANNEL_ALPHA, "b": CHANNEL_BETA, "rc": CHANNEL_BETA}
 _KIND_LABEL = {"a": "alpha", "b": "beta", "rc": "rc"}
 
-_PYPROJECT = Path(__file__).resolve().parent / "pyproject.toml"
+# `parents[1]`, not `parent`: this module lives in `core/` and the manifest
+# sits at the repository root. Getting this wrong is silent -- the read
+# simply misses and the version falls back to UNKNOWN_VERSION, so the bot
+# would report a made-up number rather than fail.
+_PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
 # Used only when neither source can be read, which means a broken deployment
 # rather than an unreleased one. It is deliberately not a plausible version.

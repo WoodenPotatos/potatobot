@@ -372,7 +372,7 @@ class BalanceChangeTests(unittest.TestCase):
         self.assertNotIn("release", authoritative)
 
     def test_a_drafted_balance_change_applies_and_keeps_the_power_state(self):
-        import minigame_data
+        from core import minigame_data
 
         self.set_label("the_hillbilly", "movement_speed", "4.2 m/s, 10.12 m/s")
         # Scoped: a patch covering every game is refused whole when any
@@ -517,7 +517,7 @@ class ProposeRoundTripTests(unittest.TestCase):
         return patch
 
     def test_a_completed_patch_applies_and_the_dataset_loads(self):
-        import minigame_data
+        from core import minigame_data
 
         changes = propose.apply_patch(self.completed_patch())
         self.assertTrue(any("added miks" in change for change in changes))
@@ -704,7 +704,7 @@ class GenshindleDatasetTests(unittest.TestCase):
     """The built dataset, as the cog will load it."""
 
     def test_it_loads_in_every_language_with_no_alias_collision(self):
-        import minigame_data
+        from core import minigame_data
 
         for language in ("hu", "en"):
             data, aliases = minigame_data.load_localized_dataset(
@@ -719,7 +719,7 @@ class GenshindleDatasetTests(unittest.TestCase):
         """A missing attribute raises in `_resolve_value`, and `load_or_disable`
         turns that into the whole game disappearing — so a gap is not a gap, it
         is an outage."""
-        import minigame_data
+        from core import minigame_data
 
         from cogs.everydle import GENSHIN_FIELDS
 

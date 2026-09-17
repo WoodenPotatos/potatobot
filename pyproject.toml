@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "potatobot"
-version = "2.13.1b1"
+version = "2.14.0b1"
 description = "A Hungarian-first Discord community bot and control plane"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
@@ -18,15 +18,15 @@ dependencies = [
   "python-dotenv==1.2.3",
   "requests==2.34.2",
   "waitress==3.0.2",
-  "yt-dlp==2026.7.4",
+  "yt-dlp==2026.8.19",
 ]
 
 [tool.setuptools]
-py-modules = [
-  "bounded", "dashboard_api", "database", "deployment", "feature_access",
-  "item_catalog", "main", "minigame_data", "permission_audit",
-  "settings_registry", "update_db", "version",
-]
+# The three entry points are modules at the root because that is how they are
+# run -- the systemd units and the Containerfile name them by filename. The
+# shared modules they import are the `core` package.
+py-modules = ["main", "dashboard_api", "update_db"]
+packages = ["core"]
 
 [tool.bandit]
 exclude_dirs = ["tests", "venv", ".venv"]

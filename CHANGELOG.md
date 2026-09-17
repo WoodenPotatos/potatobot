@@ -1,5 +1,60 @@
 # Changelog
 
+## 2.14.0-beta.1
+
+- **A word chain now knows Hungarian letters.** `sz`, `gy`, `ny`, `cs`, `ly`,
+  `ty`, `zs`, `dz` and `dzs` are single letters to anyone playing, but the bot
+  compared one character at a time — so after `busz` it deleted `szék` and
+  accepted `zebra`. It now joins words by the letter a player would name, and a
+  doubled digraph like `rossz` ends in `sz` as it should. Servers set to
+  English keep single letters, because `only` and `many` end in `y` there.
+- **A word only counts once in a chain.** Repeating a word from earlier is
+  refused with a note saying so; only the word immediately before it was caught
+  until now. `/minigame_reset` clears the used words along with the chain, and a
+  chain already in progress keeps every word it played before this arrived.
+- **Only the bot's host can switch maintenance mode.** `/maintenance` stops the
+  bot in every server it is in, and it used to accept anyone with a staff role.
+  It now refuses everyone but the installation's owner, the same rule the
+  dashboard already applied, and says so.
+- **Erasing a member now reaches the LFG parties they joined, the last-player
+  mark in the counting and word-chain channels, and the queued erasure itself.**
+  Those records arrived after the privacy work and were being left behind.
+- **Text settings have a length, and list settings have a size.** The currency
+  symbol, the command prefix, filter words, ignored users, streamers and
+  channels each carry a limit the form shows and the server enforces, because an
+  over-long currency symbol would have broken every message that prints a
+  balance.
+- **Amounts have a ceiling.** `/pay`, `/award`, `/awardall` and every casino
+  stake refuse anything above a trillion with a message, instead of the command
+  silently doing nothing on an absurd number.
+- **Moderation commands say why they could not act.** `/kick`, `/ban` and
+  `/timeout` now tell the moderator when the target's role is above the bot's,
+  and a reason can no longer ping roles or overflow the log embed.
+- **Cooldowns and daily resets keep the right length across a clock change.**
+  Every timestamp is stored in one clock now, and a `/daily` countdown says how
+  long until local midnight rather than until a moment that shifted with
+  daylight saving.
+- **The dashboard answers every error as data, keeps you signed in through a
+  stale login link, and edits a posted message where it is.** An unknown page
+  or an over-sized request no longer comes back as an HTML error page; opening
+  an old OAuth link no longer logs an administrator out; publishing a managed
+  message to a different channel updates the existing message instead of
+  posting a second copy with live buttons.
+- **The service files are tighter, and the container deployment starts with a
+  public URL.** Both systemd units create files group-readable only and drop
+  every capability and most system calls; the container image is pinned to an
+  exact build; and `compose.yaml` no longer fails its own preflight once OAuth
+  is configured.
+- **`/inventory` no longer times out for a member holding many different
+  custom items or vouchers.** Naming a custom item used to run a database
+  query per distinct item, every time, blocking the whole bot while it did —
+  the more different items or vouchers someone held, the slower it got, and
+  it slowed everyone else's commands down with it. Naming them is one lookup
+  per command now, not one per item, and vouchers are indexed so listing them
+  no longer scans every voucher the server has ever issued. An inventory large
+  enough to overflow Discord's own limits now says how many items or vouchers
+  did not fit instead of failing to send at all.
+
 ## 2.13.1-beta.1
 
 - **The Genshindle grid's headings line up again.** A column was removed from

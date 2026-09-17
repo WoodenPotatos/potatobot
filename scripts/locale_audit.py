@@ -49,6 +49,10 @@ DATA_DIR = ROOT / "data"
 
 PYTHON_SOURCES = [
     *ROOT.glob("*.py"),
+    # `core/` holds the shared modules; the root keeps only the entry points.
+    # Leaving it out is the dangerous kind of miss -- the collection simply
+    # comes back thirteen modules short and every check over it still passes.
+    *(ROOT / "core").glob("*.py"),
     *(ROOT / "cogs").glob("*.py"),
     *(ROOT / "scripts").glob("*.py"),
 ]
@@ -183,12 +187,12 @@ def composed_key_families() -> dict:
     registry, enum or catalog the code derives them from.
     """
     import dashboard_api
-    import database
-    import item_catalog
-    import permission_audit
-    from feature_access import COMMAND_POLICIES
-    import settings_registry
-    from settings_registry import (
+    from core import database
+    from core import item_catalog
+    from core import permission_audit
+    from core.feature_access import COMMAND_POLICIES
+    from core import settings_registry
+    from core.settings_registry import (
         FEATURE_DEFINITIONS,
         FEATURE_GROUP_ORDER,
         SETTING_DEFINITIONS,
@@ -232,7 +236,7 @@ def composed_key_families() -> dict:
     # name and logs an error if it is missing.
     reasons = sorted(set(re.findall(
         r'ValidationError\(\s*"([a-z0-9_]+)"',
-        (ROOT / "database.py").read_text(encoding="utf-8"),
+        (ROOT / "core" / "database.py").read_text(encoding="utf-8"),
     )))
     families["validation reasons"] = [
         f"dashboard.errors.{reason}" for reason in reasons
@@ -348,7 +352,7 @@ def composed_key_families() -> dict:
     ]
     finding_codes = sorted(set(re.findall(
         r'code="([a-z_]+)"',
-        (ROOT / "permission_audit.py").read_text(encoding="utf-8"),
+        (ROOT / "core" / "permission_audit.py").read_text(encoding="utf-8"),
     )))
     families["permission findings (bot)"] = [
         f"admin.permissions_finding_{code}" for code in finding_codes

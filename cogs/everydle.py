@@ -14,15 +14,16 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
-from minigame_data import load_or_disable
+from core import database
+from core.minigame_data import load_or_disable
 
 from discord.ext import commands
 from datetime import datetime
+from core.clock import local_date, local_time, parse_stored, utc_now
 from cogs.utils import (apply_database_result, guild_setting_sync,
                         is_channel, t)
-from feature_access import require_interaction_feature
-from feature_access import is_enabled
+from core.feature_access import require_interaction_feature
+from core.feature_access import is_enabled
 
 everydle_logger = logging.getLogger("PotatoBot.Everydle")
 
@@ -93,7 +94,7 @@ def get_daily_target(game_type: str, full_list: list, legacy_aliases=None) -> st
         else:
             state = {"decks": {}, "dailies": {}}
 
-        now_date = datetime.now().strftime("%Y-%m-%d")
+        now_date = local_date(utc_now()).isoformat()
 
         if "dailies" not in state: state["dailies"] = {}
         if "decks" not in state: state["decks"] = {}
@@ -177,7 +178,7 @@ class LoldleHardModal(discord.ui.Modal):
             )
             if not is_enabled(interaction.guild_id, "levels"):
                 base_xp = 0
-            now_iso = datetime.now().isoformat()
+            now_iso = utc_now().isoformat()
             result = await database.run(database.claim_everydle_reward,
                 interaction.user.id, "last_loldle_hard", now_iso, base_coin, base_xp,
                 interaction.guild_id
@@ -311,7 +312,7 @@ class LoldleModal(discord.ui.Modal):
             col_name = f"last_loldle_{v.difficulty}"
             if not is_enabled(interaction.guild_id, "levels"):
                 base_xp = 0
-            now_iso = datetime.now().isoformat()
+            now_iso = utc_now().isoformat()
             result = await database.run(database.claim_everydle_reward,
                 interaction.user.id, col_name, now_iso, base_coin, base_xp,
                 interaction.guild_id
@@ -388,7 +389,7 @@ class ValdleModal(discord.ui.Modal):
             )
             if not is_enabled(interaction.guild_id, "levels"):
                 base_xp = 0
-            now_iso = datetime.now().isoformat()
+            now_iso = utc_now().isoformat()
             result = await database.run(database.claim_everydle_reward,
                 interaction.user.id, "last_valdle", now_iso, base_coin, base_xp,
                 interaction.guild_id
@@ -482,7 +483,7 @@ class GenshindleModal(discord.ui.Modal):
             )
             if not is_enabled(interaction.guild_id, "levels"):
                 base_xp = 0
-            now_iso = datetime.now().isoformat()
+            now_iso = utc_now().isoformat()
             result = await database.run(
                 database.claim_everydle_reward, interaction.user.id,
                 "last_genshindle", now_iso, base_coin, base_xp,
@@ -606,7 +607,7 @@ class DbdleModal(discord.ui.Modal):
             )
             if not is_enabled(interaction.guild_id, "levels"):
                 base_xp = 0
-            now_iso = datetime.now().isoformat()
+            now_iso = utc_now().isoformat()
             result = await database.run(database.claim_everydle_reward,
                 interaction.user.id, "last_dbdle_killer", now_iso, base_coin, base_xp,
                 interaction.guild_id
@@ -659,7 +660,7 @@ class Everydle(commands.Cog):
             return await ctx.send(t("everydle.err_champions_json"), ephemeral=True)
         
         user_id = ctx.author.id
-        now = datetime.now()
+        now = utc_now()
     
         if difficulty not in ["easy", "medium"]:
             return await ctx.send(t("everydle.err_invalid_diff"), ephemeral=True)
@@ -668,8 +669,8 @@ class Everydle(commands.Cog):
         
         last_play_str = await database.run(database.get_cooldown, user_id, col_name)
         if last_play_str:
-            last_play = datetime.fromisoformat(last_play_str)
-            if last_play.date() == now.date():
+            last_play = parse_stored(last_play_str)
+            if local_date(last_play) == local_date(now):
                 diff_text = t("everydle.diff_easy") if difficulty == "easy" else t("everydle.diff_medium")
                 return await ctx.send(t("everydle.err_loldle_played", diff_text=diff_text), ephemeral=True)
 
@@ -697,12 +698,12 @@ class Everydle(commands.Cog):
             return await ctx.send(t("everydle.err_valdle_json"), ephemeral=True)
 
         user_id = ctx.author.id
-        now = datetime.now()
+        now = utc_now()
 
         last_play_str = await database.run(database.get_cooldown, user_id, "last_valdle")
         if last_play_str:
-            last_play = datetime.fromisoformat(last_play_str)
-            if last_play.date() == now.date():
+            last_play = parse_stored(last_play_str)
+            if local_date(last_play) == local_date(now):
                 return await ctx.send(t("everydle.err_valdle_played"), ephemeral=True)
 
         daily_agent = await asyncio.to_thread(
@@ -721,13 +722,13 @@ class Everydle(commands.Cog):
             return await ctx.send(t("everydle.err_genshindle_json"), ephemeral=True)
 
         user_id = ctx.author.id
-        now = datetime.now()
+        now = utc_now()
 
         last_play_str = await database.run(
             database.get_cooldown, user_id, "last_genshindle")
         if last_play_str:
-            last_play = datetime.fromisoformat(last_play_str)
-            if last_play.date() == now.date():
+            last_play = parse_stored(last_play_str)
+            if local_date(last_play) == local_date(now):
                 return await ctx.send(t("everydle.err_genshindle_played"),
                                       ephemeral=True)
 
@@ -743,15 +744,15 @@ class Everydle(commands.Cog):
     @is_channel("everydle_channel")
     async def dbdle(self, ctx):
         user_id = ctx.author.id
-        now = datetime.now()
+        now = utc_now()
 
         if not DBDLE_DATA["killer"]:
             return await ctx.send(t("everydle.err_dbdle_json"), ephemeral=True)
 
         last_play_str = await database.run(database.get_cooldown, user_id, "last_dbdle_killer")
         if last_play_str:
-            last_play = datetime.fromisoformat(last_play_str)
-            if last_play.date() == now.date():
+            last_play = parse_stored(last_play_str)
+            if local_date(last_play) == local_date(now):
                 return await ctx.send(t("everydle.err_dbdle_played"), ephemeral=True)
 
         daily_item = await asyncio.to_thread(

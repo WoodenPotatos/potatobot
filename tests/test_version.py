@@ -11,7 +11,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
-import version
+from core import version
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -78,7 +78,7 @@ class SingleSourceTests(unittest.TestCase):
     def test_version_is_no_longer_an_operator_setting(self):
         # The whole point of the move: a version a form can change is a version
         # that lies. Guards against either key being reintroduced.
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
         for key in ("release_version", "release_date"):
             self.assertNotIn(key, SETTING_DEFINITIONS)
 
@@ -214,13 +214,13 @@ class CurrencySymbolTests(unittest.TestCase):
 
     def test_the_fallback_matches_the_registry_default(self):
         from cogs.utils import DEFAULT_CURRENCY_EMOJI
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
         self.assertEqual(SETTING_DEFINITIONS["currency_emoji"].default,
                          DEFAULT_CURRENCY_EMOJI)
 
     def test_the_default_is_not_a_custom_emoji(self):
         """A custom emoji cannot exist in a guild the bot has never joined."""
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
         self.assertNotRegex(SETTING_DEFINITIONS["currency_emoji"].default,
                             r"<a?:[A-Za-z0-9_]+:\d+>")
 
@@ -254,7 +254,7 @@ class WorkResponseSubstitutionTests(unittest.TestCase):
     """
 
     def test_both_placeholders_are_substituted(self):
-        import database
+        from core import database
         from cogs.casino import work_response_text
         from cogs.utils import config, currency_emoji
 
@@ -281,7 +281,7 @@ class WorkResponseSubstitutionTests(unittest.TestCase):
                          work_response_text("normal", stored, 7))
 
     def test_the_shipped_defaults_use_the_token(self):
-        import database
+        from core import database
         for tier, message in database.WORK_DEFAULT_RESPONSES:
             with self.subTest(tier=tier, message=message[:40]):
                 self.assertNotRegex(message, r"<a?:[A-Za-z0-9_]+:\d+>")
@@ -311,7 +311,8 @@ class CoinArgumentTests(unittest.TestCase):
 
         pattern = re.compile(r"\bt\(\s*[\"'][^\"']+[\"'][^)]*\bcoin\s*=")
         offenders = []
-        for path in sorted(ROOT.glob("cogs/*.py")) + sorted(ROOT.glob("*.py")):
+        for path in (sorted(ROOT.glob("cogs/*.py")) + sorted(ROOT.glob("core/*.py"))
+                     + sorted(ROOT.glob("*.py"))):
             text = path.read_text(encoding="utf-8")
             for number, line in enumerate(text.splitlines(), 1):
                 if not pattern.search(line):

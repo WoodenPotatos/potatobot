@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from minigame_data import MinigameDataError, load_localized_dataset
+from core.minigame_data import MinigameDataError, load_localized_dataset
 
 
 ROOT = Path(__file__).resolve().parents[1]

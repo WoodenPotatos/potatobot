@@ -15,9 +15,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from settings_registry import FEATURE_DEFINITIONS, SETTING_DEFINITIONS  # noqa: E402
+from core.settings_registry import FEATURE_DEFINITIONS, SETTING_DEFINITIONS  # noqa: E402
 PYTHON_SOURCES = [
     *ROOT.glob("*.py"),
+    # `core/` holds the shared modules; the root keeps only the entry points.
+    # Leaving it out is the dangerous kind of miss -- the collection simply
+    # comes back thirteen modules short and every check over it still passes.
+    *(ROOT / "core").glob("*.py"),
     *(ROOT / "cogs").glob("*.py"),
     *(ROOT / "scripts").glob("*.py"),
 ]

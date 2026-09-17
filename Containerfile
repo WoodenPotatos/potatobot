@@ -9,7 +9,11 @@
 # Panel:  podman run --env-file .env -v potatobot-data:/data -p 127.0.0.1:5000:5000 \
 #             potatobot:2.0.0-rc.1 python dashboard_api.py
 
-FROM python:3.13-slim AS base
+# Pinned by digest, not tag: `3.13-slim` is a moving name, and an image that
+# changes under the same tag is a supply-chain change nobody reviewed.
+# Resolved 2026-09-17 with `skopeo inspect`; the image itself is dated
+# 2026-09-01. Bump the digest deliberately, with the date.
+FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS base
 
 # ffmpeg is required for music playback; the rest keeps the layer small.
 RUN apt-get update \

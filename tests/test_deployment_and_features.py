@@ -12,9 +12,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import discord
-import database
-from deployment import DeploymentProfile, load_deployment_settings
-from feature_access import (
+from core import database
+from core.deployment import DeploymentProfile, load_deployment_settings
+from core.feature_access import (
     COMMAND_POLICIES,
     PotatoContext,
     PotatoCommandTree,
@@ -24,13 +24,13 @@ from feature_access import (
     refresh_feature_cache_async,
     seed_cached_feature,
 )
-from settings_registry import (
+from core.settings_registry import (
     FEATURE_DEFINITIONS,
     FEATURE_GROUP_ORDER,
     SETTING_DEFINITIONS,
     SettingValueType,
 )
-from settings_registry import DataCategory, DataScopeType
+from core.settings_registry import DataCategory, DataScopeType
 
 
 class DeploymentSettingsTests(unittest.TestCase):
@@ -62,12 +62,125 @@ class DeploymentSettingsTests(unittest.TestCase):
             settings = load_deployment_settings()
         self.assertEqual(settings.discord_redirect_uri, environment["DISCORD_REDIRECT_URI"])
 
+    def test_compose_topology_loads_with_an_external_url(self):
+        """`compose.yaml` binds 0.0.0.0 inside the container and names one proxy
+        hop; the loopback rule used to refuse that combination outright, so the
+        documented two-service deployment could not start once OAuth was on."""
+        environment = {
+            "POTATOBOT_DASHBOARD_EXTERNAL_URL": "https://bot.example.ts.net",
+            "DISCORD_REDIRECT_URI": "https://bot.example.ts.net/api/callback",
+            "POTATOBOT_DASHBOARD_HOST": "0.0.0.0",
+            "POTATOBOT_TRUSTED_PROXY_HOPS": "1",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            settings = load_deployment_settings()
+        self.assertEqual("0.0.0.0", settings.dashboard_host)
+        self.assertEqual(1, settings.trusted_proxy_hops)
+
+    def test_a_non_loopback_bind_is_still_refused_without_a_stated_proxy(self):
+        environment = {
+            "POTATOBOT_DASHBOARD_EXTERNAL_URL": "https://bot.example.ts.net",
+            "DISCORD_REDIRECT_URI": "https://bot.example.ts.net/api/callback",
+            "POTATOBOT_DASHBOARD_HOST": "0.0.0.0",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            with self.assertRaisesRegex(ValueError, "loopback"):
+                load_deployment_settings()
+        # Saying "zero hops" is not saying there is a proxy.
+        with patch.dict(os.environ, {**environment, "POTATOBOT_TRUSTED_PROXY_HOPS": "0"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "loopback"):
+                load_deployment_settings()
+
     def test_self_hosted_dashboard_is_disabled_until_configured(self):
         with patch.dict(
             os.environ, {"POTATOBOT_DEPLOYMENT_PROFILE": "self_hosted"}, clear=True
         ):
             settings = load_deployment_settings()
         self.assertFalse(settings.dashboard_enabled)
+
+
+class InstanceSettingAuthorityTests(unittest.IsolatedAsyncioTestCase):
+    """An installation-wide setting is host-only on *both* write paths.
+
+    The dashboard refused a non-host writing `maintenance` from the day instance
+    scope existed; the `/maintenance` command did not, and it is `@is_staff()`,
+    so any member of `admin_roles` could stop the bot in every guild the
+    installation serves. The rule now lives in `cogs.utils.set_guild_setting`,
+    the one bot-side writer, so the two paths cannot drift apart again.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "authority.db")
+        database.initialize_database()
+        database.register_guild(123, "Guild")
+        from core import settings_cache
+        settings_cache.invalidate()
+        self.environment = patch.dict(os.environ, {"ADMIN_DISCORD_ID": "42"})
+        self.environment.start()
+
+    def tearDown(self):
+        self.environment.stop()
+        from core import settings_cache
+        settings_cache.invalidate()
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    async def test_a_staff_member_cannot_write_an_instance_setting(self):
+        from cogs.utils import set_guild_setting
+        with self.assertRaises(database.ValidationError) as caught:
+            await set_guild_setting(123, 9, "maintenance", True)
+        self.assertEqual("instance_setting_host_only", caught.exception.reason)
+        self.assertFalse(database.get_guild_settings(123).get("maintenance"))
+
+    async def test_the_host_can(self):
+        from cogs.utils import set_guild_setting
+        self.assertTrue(await set_guild_setting(123, 42, "maintenance", True))
+        self.assertTrue(database.get_guild_settings(123)["maintenance"]["value"])
+
+    async def test_a_guild_setting_is_not_affected(self):
+        from cogs.utils import set_guild_setting
+        await set_guild_setting(123, 9, "minigame_allow_double_turn", True)
+        self.assertTrue(
+            database.get_guild_settings(123)["minigame_allow_double_turn"]["value"])
+
+    async def test_an_unset_host_id_refuses_everyone(self):
+        """No configured host means nobody is the host, not everybody."""
+        from cogs.utils import set_guild_setting
+        with patch.dict(os.environ, {"ADMIN_DISCORD_ID": ""}):
+            with self.assertRaises(database.ValidationError):
+                await set_guild_setting(123, 42, "maintenance", True)
+
+    def test_the_two_write_paths_name_the_same_reason(self):
+        """The command answers with the dashboard's own locale key."""
+        source = (ROOT / "cogs" / "utils.py").read_text(encoding="utf-8")
+        route = (ROOT / "dashboard_api.py").read_text(encoding="utf-8")
+        command = (ROOT / "cogs" / "admin.py").read_text(encoding="utf-8")
+        for text in (source, route, command):
+            self.assertIn("instance_setting_host_only", text)
+
+
+class FailClosedWithoutGuildTests(unittest.TestCase):
+    """`is_enabled` answers no when it cannot ask the guild.
+
+    It answered *yes* for a `None` guild -- the one branch in the gate that
+    contradicted its own fail-closed rule. Nothing reached it, because every
+    command is guild-only and every component is posted in a guild, and that is
+    exactly the kind of branch a later DM-capable path inherits by accident.
+    """
+
+    def test_no_guild_means_disabled(self):
+        self.assertFalse(is_enabled(None, "economy"))
+        self.assertFalse(is_enabled(None, "general"))
+
+    def test_the_bot_check_leaves_a_dm_to_the_guild_only_check(self):
+        """One refusal for a DM, not two: `feature_check` steps aside."""
+        source = (ROOT / "main.py").read_text(encoding="utf-8")
+        body = source[source.index("async def feature_check("):]
+        body = body[:body.index("\nasync def ")]
+        self.assertIn("if ctx.guild is None:", body)
+        self.assertNotIn("is_enabled(guild_id", body)
 
 
 class FeaturePersistenceTests(unittest.TestCase):
@@ -400,7 +513,7 @@ class FeatureRefreshTests(unittest.IsolatedAsyncioTestCase):
             for key, definition in FEATURE_DEFINITIONS.items()
         }
         mocked_run = AsyncMock(side_effect=[5, states, 5])
-        with patch("feature_access.database.run_read", new=mocked_run):
+        with patch("core.feature_access.database.run_read", new=mocked_run):
             self.assertTrue(await refresh_feature_cache_async(guild_id, force=True))
             self.assertFalse(await refresh_feature_cache_async(guild_id))
         self.assertEqual(mocked_run.await_count, 3)
@@ -468,7 +581,7 @@ class LevelRoleTests(unittest.TestCase):
         import re
         from pathlib import Path
 
-        import database
+        from core import database
 
         root = Path(__file__).resolve().parents[1]
         # "PC" as a standalone token, so "PCem" or a stray acronym is not a hit.
@@ -514,7 +627,7 @@ class LevelRoleTests(unittest.TestCase):
         import re
         from pathlib import Path
 
-        import database
+        from core import database
 
         root = Path(__file__).resolve().parents[1]
         custom_emoji = re.compile(r"<a?:[A-Za-z0-9_]+:\d{17,20}>")
@@ -670,6 +783,56 @@ class RegistryPresentationTests(unittest.TestCase):
                     [], sorted(set(definition.required_discord_permissions) - valid)
                 )
 
+
+
+class SettingLengthTests(unittest.TestCase):
+    """Every free-text setting is bounded, and the bound is enforced.
+
+    `currency_emoji` reaches every embed footer and `command_prefix` every
+    command parse; neither had a length, so one over-long value from the form
+    would have made Discord refuse every embed the bot sent. A setting whose
+    values are enumerated by `choices` needs no length -- the enumeration is
+    the bound -- and every other STRING or STRING_LIST must declare one.
+    """
+
+    FREE_TEXT = (SettingValueType.STRING, SettingValueType.STRING_LIST)
+
+    def test_every_free_text_setting_declares_a_length(self):
+        unbounded = sorted(
+            key for key, d in SETTING_DEFINITIONS.items()
+            if d.value_type in self.FREE_TEXT and not d.choices
+            and d.max_length is None)
+        self.assertEqual([], unbounded)
+
+    def test_every_free_text_list_declares_a_size(self):
+        unbounded = sorted(
+            key for key, d in SETTING_DEFINITIONS.items()
+            if d.value_type is SettingValueType.STRING_LIST and not d.choices
+            and d.max_items is None)
+        self.assertEqual([], unbounded)
+
+    def test_the_validator_refuses_a_value_over_its_length(self):
+        from core.settings_registry import validate_setting_value
+        emoji = SETTING_DEFINITIONS["currency_emoji"]
+        self.assertEqual("x" * emoji.max_length,
+                         validate_setting_value(emoji, "x" * emoji.max_length))
+        with self.assertRaises(ValueError):
+            validate_setting_value(emoji, "x" * (emoji.max_length + 1))
+
+    def test_the_validator_refuses_a_list_that_is_too_long_or_too_wide(self):
+        from core.settings_registry import validate_setting_value
+        streamers = SETTING_DEFINITIONS["twitch_streamers"]
+        validate_setting_value(streamers, ["a"] * streamers.max_items)
+        with self.assertRaises(ValueError):
+            validate_setting_value(streamers, ["a"] * (streamers.max_items + 1))
+        with self.assertRaises(ValueError):
+            validate_setting_value(streamers, ["x" * (streamers.max_length + 1)])
+
+    def test_the_bound_reaches_the_browser(self):
+        """`public_dict` carries it, and the form applies it as `maxLength`."""
+        self.assertEqual(64, SETTING_DEFINITIONS["currency_emoji"].public_dict()["max_length"])
+        script = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        self.assertIn("input.maxLength = definition.max_length", script)
 
 
 class FeatureCascadePromptTests(unittest.TestCase):

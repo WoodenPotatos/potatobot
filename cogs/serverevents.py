@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import sys
+import time
 
 # Resolve repository imports independently of the process working directory.
 COG_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -10,12 +11,14 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
-from feature_access import is_enabled
+from core import database
+from core.feature_access import is_enabled
 
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta
-from cogs.utils import (apply_database_result, guild_setting_sync,
+from core.clock import local_date, local_time, parse_stored, utc_now
+from cogs.utils import (BoundedCooldownMap, BoundedValueMap,
+                        apply_database_result, guild_setting_sync,
                         handle_loop_error, is_premium, mark_top_ranker_dirty,
                         update_user_data, voice_reward_block, t)
 
@@ -24,8 +27,12 @@ event_logger = logging.getLogger("PotatoBot.ServerEvents")
 class ServerEvents(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.message_cooldowns = {}
-        self.daily_activity_cache = {}
+        # Bounded like every other transient map. These were plain dicts with
+        # a hand-rolled prune at 4096 entries, against the rule every other cog
+        # follows; the cooldown map holds monotonic seconds so the container's
+        # own eviction can compare them.
+        self.message_cooldowns = BoundedCooldownMap(max_age=300, max_entries=4096)
+        self.daily_activity_cache = BoundedValueMap(max_entries=8192)
         self._daily_activity_date = None
 
     @commands.Cog.listener()
@@ -70,8 +77,8 @@ class ServerEvents(commands.Cog):
 
         user_id = message.author.id
         activity_key = (message.guild.id, user_id)
-        now = datetime.now()
-        today_str = now.strftime("%Y-%m-%d")
+        now = utc_now()
+        today_str = local_date(now).isoformat()
 
         if is_enabled(message.guild.id, "inactivity") and self._daily_activity_pending(activity_key, today_str):
             await database.run(database.update_last_active, user_id, now.isoformat())
@@ -80,18 +87,10 @@ class ServerEvents(commands.Cog):
         if not is_enabled(message.guild.id, "chat_rewards"):
             return
 
-        if activity_key in self.message_cooldowns:
-            last_msg_time = self.message_cooldowns[activity_key]
-            if now < last_msg_time + timedelta(seconds=60):
-                return
-
-        if len(self.message_cooldowns) >= 4096:
-            cutoff = now - timedelta(minutes=5)
-            self.message_cooldowns = {
-                key: value for key, value in self.message_cooldowns.items()
-                if value >= cutoff
-            }
-        self.message_cooldowns[activity_key] = now
+        monotonic_now = time.monotonic()
+        if monotonic_now - self.message_cooldowns.get(activity_key, 0) < 60:
+            return
+        self.message_cooldowns[activity_key] = monotonic_now
         # Resolve rewards dynamically so administrative changes do not require restart.
         coin_rw, xp_rw = await database.run(
             database.get_reward, message.guild.id, "chat_message", 5, 2
@@ -102,8 +101,8 @@ class ServerEvents(commands.Cog):
     async def on_voice_state_update(self, member, before, after):
         if member.bot: return
         
-        now = datetime.now()
-        today_str = now.strftime("%Y-%m-%d")
+        now = utc_now()
+        today_str = local_date(now).isoformat()
         
         activity_key = (member.guild.id, member.id)
         if is_enabled(member.guild.id, "inactivity") and self._daily_activity_pending(activity_key, today_str):
@@ -112,7 +111,7 @@ class ServerEvents(commands.Cog):
 
     @tasks.loop(hours=24)
     async def inactivity_scanner(self):
-        now = datetime.now()
+        now = utc_now()
 
         for guild in self.bot.guilds:
             if not is_enabled(guild.id, "inactivity"):
@@ -148,13 +147,13 @@ class ServerEvents(commands.Cog):
                     if not last_active_str:
                         await database.run(database.update_last_active, member.id, now.isoformat())
                     else:
-                        last_active = datetime.fromisoformat(last_active_str)
+                        last_active = parse_stored(last_active_str)
                         diff = now - last_active
 
                         if diff.days >= 14 and warned == 0:
                             embed = discord.Embed(
                                 title=t("serverevents.inactive_title"),
-                                description=t("serverevents.inactive_desc", user=member.display_name, mention=member.mention, days=14, date=last_active.strftime('%Y-%m-%d %H:%M')),
+                                description=t("serverevents.inactive_desc", user=member.display_name, mention=member.mention, days=14, date=local_time(last_active).strftime('%Y-%m-%d %H:%M')),
                                 color=discord.Color.orange()
                             )
                             embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
@@ -273,7 +272,7 @@ class ServerEvents(commands.Cog):
         try:
             if not await database.run(database.user_exists, member.id):
                 await database.run(
-                    database.create_new_user, member.id, datetime.now().isoformat()
+                    database.create_new_user, member.id, utc_now().isoformat()
                 )
                 event_logger.info("Registered new user ID %s.", member.id)
             else:

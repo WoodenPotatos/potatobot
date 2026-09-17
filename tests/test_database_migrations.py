@@ -7,8 +7,8 @@ import threading
 import unittest
 from contextlib import closing
 
-import database
-import item_catalog
+from core import database
+from core import item_catalog
 
 
 class MigrationTests(unittest.TestCase):
@@ -81,6 +81,7 @@ class MigrationTests(unittest.TestCase):
             {
                 "idx_users_xp", "idx_users_balance", "idx_users_streak",
                 "idx_casino_wagers_pending", "idx_one_support_ticket_per_member",
+                "idx_reward_vouchers_user",
             } <= indexes
         )
         self.assertEqual(glob.glob(f"{database.DB_PATH}.backup-*"), [])
@@ -738,7 +739,7 @@ class RenamedSettingTests(unittest.TestCase):
         self.assertIsNone(self.stored(42, "other_games_channel"))
 
     def test_every_rename_names_a_setting_that_exists(self):
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
         for old_key, new_key in database.RENAMED_SETTINGS:
             with self.subTest(new_key=new_key):
                 self.assertIn(new_key, SETTING_DEFINITIONS)
@@ -1097,3 +1098,109 @@ class ShopSectionCapTests(unittest.TestCase):
         with self.assertRaises(database.ValidationError) as caught:
             database.create_shop_item_definition(1, 7, self._item("only"))
         self.assertEqual("shop_item_exists", caught.exception.reason)
+
+
+class Schema19UsedWordTests(unittest.TestCase):
+    """Schema 19 adds `minigame_used_words`, so a word chain cannot repeat itself.
+
+    A new *table* rather than a column, which is why there is no
+    `PRAGMA table_info` guard beside the ones schema 16 and 18 needed: the
+    executescript's `CREATE TABLE IF NOT EXISTS` is already gated on shape, so
+    running it against a database that has the table is a no-op and running it
+    against one that does not is the migration.
+
+    Nothing is written into it on upgrade. A chain already in progress carries
+    no record of what it has used — inventing one would be guessing — so the
+    words it played before this shipped stay available, and the chain tightens
+    from the next turn.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _downgrade(self):
+        """Reshape a current database into the pre-schema-19 shape."""
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("DROP TABLE minigame_used_words")
+            conn.execute("PRAGMA user_version = 18")
+            conn.commit()
+
+    def _tables(self):
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            return {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+    def test_a_clean_database_has_the_table(self):
+        database.initialize_database()
+        self.assertIn("minigame_used_words", self._tables())
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
+
+    def test_the_key_is_the_word_within_one_guild_and_game(self):
+        """Two guilds, and the two games, keep separate supplies of words."""
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'minigame_used_words'"
+            ).fetchone()[0]
+        self.assertIn("PRIMARY KEY (guild_id, game_key, word)", sql)
+        # No member id: who played a word is in the channel and in
+        # `minigame_state`, and a second copy would only join the erasure path.
+        self.assertNotIn("user_id", sql)
+
+    def test_an_older_database_gains_it_and_keeps_its_chain(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.advance_minigame(1, "word_chain", "alma", 11, "", "alma")
+        self._downgrade()
+        self.assertNotIn("minigame_used_words", self._tables())
+
+        database.initialize_database()
+
+        self.assertIn("minigame_used_words", self._tables())
+        state = database.get_minigame_state(1, "word_chain")
+        self.assertEqual("alma", state["value"])
+        self.assertEqual(1, state["streak"])
+
+    def test_the_upgrade_claims_nothing_on_a_chain_already_in_progress(self):
+        """A word played before this shipped is not recorded and stays playable."""
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.advance_minigame(1, "word_chain", "alma", 11, "", "alma")
+        self._downgrade()
+        database.initialize_database()
+
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(0, conn.execute(
+                "SELECT COUNT(*) FROM minigame_used_words").fetchone()[0])
+
+    def test_re_running_the_migration_changes_nothing(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.advance_minigame(1, "word_chain", "alma", 11, "", "alma")
+
+        database.initialize_database()
+
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            rows = conn.execute(
+                "SELECT guild_id, game_key, word FROM minigame_used_words"
+            ).fetchall()
+        self.assertEqual([(1, "word_chain", "alma")], rows)
+        # The claim survived the re-run, so the word is still spent.
+        self.assertEqual(
+            {"duplicate": True},
+            database.advance_minigame(1, "word_chain", "alma", 22, "alma",
+                                      "alma"))
+
+    def test_a_pre_migration_backup_is_written(self):
+        database.initialize_database()
+        self._downgrade()
+        database.initialize_database()
+        self.assertTrue(glob.glob(f"{database.DB_PATH}.backup-v18-*"))

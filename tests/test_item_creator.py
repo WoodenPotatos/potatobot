@@ -18,9 +18,9 @@ import unittest
 from pathlib import Path
 
 import dashboard_api
-import settings_cache
-import database
-import item_catalog
+from core import settings_cache
+from core import database
+from core import item_catalog
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -292,7 +292,7 @@ class ItemListEndpointTests(DashboardItemTestCase):
         """The interface has to be able to say "Casino 6/25" before a save is
         refused. A rule the API enforces but the form cannot express turns into
         an unexplained rejection, so the room travels with the items."""
-        import item_catalog
+        from core import item_catalog
 
         payload = self.get()
         self.assertEqual(0, payload["custom_count"])
@@ -326,7 +326,7 @@ class ItemListEndpointTests(DashboardItemTestCase):
     def test_hiding_a_builtin_frees_a_slot_and_keeps_the_row_visible(self):
         """A hidden item must still be listed, or an operator could never find
         it to un-hide it."""
-        import item_catalog
+        from core import item_catalog
 
         before = {entry["id"]: entry for entry in self.get()["categories"]}
         response = self.client.patch(
@@ -345,7 +345,7 @@ class ItemListEndpointTests(DashboardItemTestCase):
         rows = {entry["item_key"]: entry for entry in payload["data"]}
         self.assertTrue(rows["rent_sound"]["hidden"])
         # And it stays a reserved key, so nothing can shadow it.
-        import database as db
+        from core import database as db
         self.assertIn("rent_sound", db.BUILTIN_SHOP_KEYS)
 
 
@@ -423,7 +423,7 @@ class FreeFormVaultTests(DashboardItemTestCase):
         stored = database.get_shop_item_definitions(123)[0]
         self.assertEqual({"amount": 300000}, stored["config"])
         # Not one of the three built-in reserves, which is the whole point.
-        import item_catalog
+        from core import item_catalog
         self.assertNotIn(300000, [definition.value for definition
                                   in item_catalog.VAULT_ITEMS.values()])
 
@@ -488,7 +488,7 @@ class MechanicPayloadTests(DashboardItemTestCase):
         return {entry["item_key"]: entry for entry in payload["data"]}
 
     def test_a_configurable_item_carries_its_bounds_and_its_unit(self):
-        import item_catalog
+        from core import item_catalog
 
         rows = self.rows()
         for key, parameter in item_catalog.MECHANIC_PARAMETERS.items():
@@ -664,16 +664,21 @@ class CustomRewardLabelTests(unittest.TestCase):
         database.DB_PATH = self.original_path
         self.temp_dir.cleanup()
 
+    def _custom_items(self):
+        return {item["item_key"]: item["name"] or item["item_key"]
+                for item in database.get_shop_item_definitions(1)}
+
     def test_a_custom_key_reads_as_the_operators_own_name(self):
         from cogs.gacha import gacha_reward_label
 
-        self.assertEqual("Extra vault",
-                         gacha_reward_label("vault_extra", guild_id=1))
+        self.assertEqual(
+            "Extra vault",
+            gacha_reward_label("vault_extra", custom_items=self._custom_items()))
 
     def test_a_shipped_key_is_never_renamed_by_a_guild(self):
         from cogs.gacha import gacha_reward_label
 
-        label = gacha_reward_label("big_vault", guild_id=1)
+        label = gacha_reward_label("big_vault", custom_items=self._custom_items())
         self.assertFalse(label.startswith("["))
         self.assertNotEqual("big_vault", label)
 
@@ -682,8 +687,9 @@ class CustomRewardLabelTests(unittest.TestCase):
         key, which is what a member used to see."""
         from cogs.gacha import gacha_reward_label
 
-        self.assertEqual("deleted_thing",
-                         gacha_reward_label("deleted_thing", guild_id=1))
+        self.assertEqual(
+            "deleted_thing",
+            gacha_reward_label("deleted_thing", custom_items=self._custom_items()))
 
 
 class ItemConfigWireFormatTests(DashboardItemTestCase):

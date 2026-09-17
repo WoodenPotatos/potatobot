@@ -5,6 +5,7 @@ Rules that bind changes here: docs/subsystems/dashboard.md
 
 import logging
 import asyncio
+import concurrent.futures
 import copy
 import hashlib
 import os
@@ -36,27 +37,28 @@ from flask import (Flask, g, jsonify, redirect, request, send_from_directory,
                    session)
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-import version
+from core import version
+from core.clock import parse_stored
 
-import database
-import managed_messages
-from managed_messages import (
+from core import database
+from core import managed_messages
+from core.managed_messages import (
     MANAGED_KIND_FEATURES,
     render_managed_message,
 )
-import item_catalog
-import permission_audit
-import settings_cache
-from deployment import settings as deployment_settings
-from feature_access import is_enabled, update_cached_features
+from core import item_catalog
+from core import permission_audit
+from core import settings_cache
+from core.deployment import settings as deployment_settings
+from core.feature_access import is_enabled, update_cached_features
 # Imported by name, not as a module: a route below is called
 # `settings_registry` and would shadow it.
-from settings_registry import (FEATURE_GROUP_ORDER, SETTING_DEFINITIONS,
+from core.settings_registry import (FEATURE_GROUP_ORDER, SETTING_DEFINITIONS,
                                SettingScope, SettingValueType, wire_json_shape)
-from settings_registry import legacy_config_value as settings_registry_legacy_config_value
-from version import version_display
+from core.settings_registry import legacy_config_value as settings_registry_legacy_config_value
+from core.version import version_display
 
-import logging_setup
+from core import logging_setup
 
 dashboard_logger = logging.getLogger("PotatoBot.Dashboard")
 
@@ -128,6 +130,13 @@ SESSION_LIFETIME = timedelta(hours=12)
 # permanent cookie on each response, so the sliding window needs no bookkeeping
 # of its own; only the absolute cap above does.
 SESSION_IDLE_TIMEOUT = timedelta(minutes=10)
+
+# Flask's MAX_CONTENT_LENGTH below answers 413 once it sees the request, but
+# Waitress reads the whole body first and its own default cap is a gigabyte, so a
+# client could push that much to the request spool before Flask said no. The
+# server-side cap is passed to `serve()`; twice Flask's so a legitimate request
+# at the Flask limit is refused by Flask's message rather than Waitress's.
+MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024
 
 app.config.update(
     MAX_CONTENT_LENGTH=1024 * 1024,
@@ -458,7 +467,13 @@ def callback():
     expected_state = session.pop("oauth_state", None)
     supplied_state = request.args.get("state", "")
     if not expected_state or not hmac.compare_digest(expected_state, supplied_state):
-        session.clear()
+        # A logged-in session is left alone. `SameSite=Lax` still sends the
+        # cookie on a top-level navigation, so a link to this route with any
+        # made-up state was enough to log an administrator out. Refusing the
+        # exchange is all a bad state needs; an anonymous session is cleared as
+        # before, so a half-finished login leaves nothing behind.
+        if session.get("logged_in") is not True:
+            session.clear()
         return t("dashboard.oauth_invalid_state"), 400
     code = request.args.get("code")
     if not code:
@@ -665,23 +680,11 @@ def enforce_absolute_session_lifetime():
 
 
 @app.before_request
-def verify_csrf_token():
-    """Require the session-bound token for every state-changing API request."""
-    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
-        return None
-    if not request.path.startswith("/api/"):
-        return None
-    expected = session.get("csrf_token", "")
-    supplied = request.headers.get("X-CSRF-Token", "")
-    if not expected or not hmac.compare_digest(expected, supplied):
-        return jsonify(
-            {"status": "error", "message": t("dashboard.csrf_invalid")}
-        ), 403
-    return None
-
-
-@app.before_request
 def apply_request_rate_limits():
+    # Registered ahead of the CSRF check on purpose. Flask runs these in
+    # registration order, and with CSRF first a flood of token-less POSTs
+    # was answered 403 each and never counted -- the limiter only ever saw
+    # requests that had already passed the check it was meant to protect.
     if request.path in {"/api/auth/login", "/api/callback"}:
         allowed = _within_rate_limit("auth", 10, 60)
     elif request.method in {"POST", "PUT", "PATCH", "DELETE"}:
@@ -697,6 +700,24 @@ def apply_request_rate_limits():
             {"status": "error", "message": t("dashboard.rate_limited")}
         ), 429
     return None
+
+
+@app.before_request
+def verify_csrf_token():
+    """Require the session-bound token for every state-changing API request."""
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    if not request.path.startswith("/api/"):
+        return None
+    expected = session.get("csrf_token", "")
+    supplied = request.headers.get("X-CSRF-Token", "")
+    if not expected or not hmac.compare_digest(expected, supplied):
+        return jsonify(
+            {"status": "error", "message": t("dashboard.csrf_invalid")}
+        ), 403
+    return None
+
+
 
 
 def _refresh_authorized_guilds(session_id: str) -> list[str] | None:
@@ -910,8 +931,15 @@ def add_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
     response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+    response.headers.setdefault(
         "Content-Security-Policy",
-        "default-src 'self'; img-src 'self' https: data:; "
+        # Only the hosts the client actually draws images from: guild icons
+        # and avatars. `https:` admitted any origin, which is what an injected
+        # image would have needed to phone home.
+        "default-src 'self'; img-src 'self' data: https://cdn.discordapp.com "
+        "https://media.discordapp.net; "
         "style-src 'self'; script-src 'self'; frame-ancestors 'none'; "
         "connect-src 'self'; base-uri 'none'; form-action 'self'; "
         "object-src 'none'",
@@ -957,6 +985,39 @@ def unauthorized_response():
 
 def internal_error_response(operation):
     dashboard_logger.exception("Dashboard operation failed: %s", operation)
+    return jsonify({"status": "error", "message": t("dashboard.internal_error")}), 500
+
+
+# The client parses every answer as the JSON envelope and shows `message`.
+# Werkzeug's defaults are HTML pages, so an unknown path, a wrong method or an
+# escaped exception reached the operator as "HTTP 404" with no text, and named
+# the server in the page. Every status the framework can produce on its own
+# answers in the envelope instead.
+@app.errorhandler(404)
+def _not_found(error):
+    return jsonify({"status": "error", "message": t("dashboard.not_found")}), 404
+
+
+@app.errorhandler(405)
+def _method_not_allowed(error):
+    return jsonify({"status": "error",
+                    "message": t("dashboard.method_not_allowed")}), 405
+
+
+@app.errorhandler(413)
+def _request_too_large(error):
+    return jsonify({"status": "error",
+                    "message": t("dashboard.request_too_large")}), 413
+
+
+@app.errorhandler(500)
+def _internal_error(error):
+    original = getattr(error, "original_exception", None)
+    dashboard_logger.error(
+        "Unhandled dashboard error (method=%s, path=%s)", request.method,
+        request.path,
+        exc_info=(type(original), original, original.__traceback__) if original else None,
+    )
     return jsonify({"status": "error", "message": t("dashboard.internal_error")}), 500
 
 
@@ -1185,6 +1246,12 @@ def guild_data_scopes(guild_id):
         return jsonify(
             {"status": "success", "data": database.run_read_sync(database.get_guild_data_scopes, guild_id)}
         )
+    # Host-only while nothing reads a data scope. `resolve_data_context` has no
+    # runtime caller, so this was a write surface with no benefit open to every
+    # guild administrator; it stays reachable so the foundation keeps its
+    # exercise path, and widens again the day the wallet work wires it.
+    if not is_authorized():
+        return unauthorized_response()
     try:
         payload = require_json_object()
         require_exact_keys(payload, {"category", "scope_type", "realm_id", "revision"})
@@ -1244,11 +1311,21 @@ def realms():
 
 @app.route("/api/realms/<int:realm_id>/memberships", methods=["POST"])
 def request_realm_join(realm_id):
+    # Host-only, like realm creation and for the same reason as data scopes:
+    # nothing reads a membership yet. The guild id is validated as a snowflake
+    # before anything indexes on it -- `int()` of a list here was an unhandled
+    # 500.
+    if not is_authorized():
+        return unauthorized_response()
     try:
         payload = require_json_object()
-        if set(payload) != {"guild_id"} or not is_guild_authorized(payload["guild_id"]):
-            return unauthorized_response()
-        database.request_realm_membership(realm_id, int(payload["guild_id"]))
+        require_exact_keys(payload, {"guild_id"})
+        try:
+            guild_id = _snowflake_arg(payload["guild_id"])
+        except ValueError:
+            raise RequestValidationError(
+                "dashboard.errors.not_nonnegative_integer") from None
+        database.request_realm_membership(realm_id, guild_id)
         return jsonify(
             {"status": "success", "message": t("dashboard.realm_join_requested")}
         )
@@ -2562,6 +2639,13 @@ def delete_guild_managed_message(guild_id, kind, menu_key):
 # A Discord message link, as the client copies it out of Discord. The guild
 # segment is checked against the request rather than trusted, so a link from
 # somewhere else cannot name a channel of this guild by accident.
+# Above this many text channels a bare message id is refused in favour of a
+# link. `_find_message` has to try `fetch_message` in every channel the bot can
+# read -- one Discord request each, on a Waitress thread -- and Discord's own
+# API has no channel-less lookup, so the search is the only way and it does not
+# scale. A link names the channel and costs one request.
+ADOPT_BARE_ID_CHANNEL_LIMIT = 25
+
 MESSAGE_LINK = re.compile(
     # The guild segment is compared against the request rather than shape-checked
     # — the comparison is the real guard, and pinning its length would only make
@@ -2710,6 +2794,10 @@ def adopt_guild_managed_message(guild_id, kind):
         require_exact_keys(payload, {"message", "menu_key", "display_name"})
         channel_id, message_id = _parse_message_reference(payload["message"],
                                                           guild_id)
+        if (channel_id is None
+                and len(guild.text_channels) > ADOPT_BARE_ID_CHANNEL_LIMIT):
+            raise RequestValidationError(
+                "dashboard.errors.managed_adopt_link_required")
 
         # Nothing may be adopted twice: two rows editing one message would each
         # overwrite the other, and neither would say so.
@@ -2719,9 +2807,16 @@ def adopt_guild_managed_message(guild_id, kind):
                     and existing["menu_key"] != payload["menu_key"]):
                 raise RequestValidationError("dashboard.errors.managed_adopt_claimed")
 
-        message = asyncio.run_coroutine_threadsafe(
-            _find_message(guild, channel_id, message_id), _dashboard_bot.loop
-        ).result(timeout=15)
+        try:
+            message = asyncio.run_coroutine_threadsafe(
+                _find_message(guild, channel_id, message_id), _dashboard_bot.loop
+            ).result(timeout=15)
+        except concurrent.futures.TimeoutError:
+            # Discord did not answer in time. Not a `ValueError`, so it escaped
+            # the handler below as an unhandled 500; it is the same condition
+            # the resource routes already report as 503.
+            return jsonify({"status": "error",
+                            "message": t("dashboard.resources_unavailable")}), 503
         if message is None:
             raise RequestValidationError("dashboard.errors.managed_adopt_not_found")
         # Discord lets a bot edit only its own messages, so anything else could
@@ -2847,7 +2942,7 @@ def guild_entitlements(guild_id):
     data = []
     for row in rows:
         try:
-            expires = datetime.fromisoformat(row["expires_at"])
+            expires = parse_stored(row["expires_at"])
         except (TypeError, ValueError):
             # A row with an unreadable expiry is a data fault, not a reason to
             # fail the page: show it with no countdown rather than hiding it.
@@ -2916,6 +3011,10 @@ def run_api():
         # so four threads is four concurrent page loads before the rest queue,
         # which is what the journal's "Task queue depth is 3" warnings were.
         threads=8,
+        max_request_body_size=MAX_REQUEST_BODY_BYTES,
+        # No `Server: waitress` header: nothing a client needs, and one fewer
+        # thing that names a component and version to whoever is looking.
+        ident=None,
     )
 
 
@@ -2988,15 +3087,19 @@ async def execute_managed_publish(guild, channel, action):
         return view  # the error code
 
     if stored["message_id"]:
+        # The message is wherever it was posted -- the recorded channel -- and
+        # not necessarily the one the operator picked this time. Fetching it
+        # from the target meant a publish into a second channel found nothing
+        # there, posted a fresh copy, and left the first alive with working
+        # buttons. A recorded message is edited where it is; moving one is a
+        # delete and a re-post, which the delete route already does cleanly.
+        recorded = (guild.get_channel(int(stored["channel_id"]))
+                    if stored.get("channel_id") else None)
+        source = recorded if isinstance(recorded, discord.TextChannel) else channel
         try:
-            posted = await channel.fetch_message(int(stored["message_id"]))
+            posted = await source.fetch_message(int(stored["message_id"]))
             await posted.edit(embeds=embeds, view=view,
                               allowed_mentions=discord.AllowedMentions.none())
-            # Re-record: the operator may have published into a different
-            # channel than the one the message is in.
-            await database.run_write(database.record_managed_post, guild.id,
-                                     stored["kind"], stored["menu_key"],
-                                     posted.channel.id, posted.id)
             return None
         except discord.NotFound:
             dashboard_logger.info(

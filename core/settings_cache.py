@@ -32,8 +32,8 @@ line apart and opposite.
 import logging
 import threading
 
-import database
-from settings_registry import (
+from core import database
+from core.settings_registry import (
     SETTING_DEFINITIONS,
     SettingScope,
     legacy_config_value,

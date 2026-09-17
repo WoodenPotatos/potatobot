@@ -56,6 +56,28 @@ RestrictSUIDSGID=true
 RestrictRealtime=true
 LockPersonality=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Every file the service creates -- the database's WAL sidecars, a migration's
+# backup, a log -- lands group-readable and world-nothing. Without this the
+# service inherited 0022 and a backup of every member's balance sat 0644 beside
+# the database. A migration run *by hand* still uses the login shell's umask;
+# docs/installation.md wraps that command in `(umask 027; ...)`.
+UMask=0027
+# The process needs no capability at all: it binds no privileged port, changes
+# no ownership, and runs as its own account.
+CapabilityBoundingSet=
+# The service-wide syscall set: enough for Python, SQLite, ffmpeg and sockets,
+# not enough to load a kernel module or reboot. A call outside it answers EPERM
+# rather than killing the process, so a surprise is a logged error, not an
+# outage -- check the journal for `EPERM` after the first start with this.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# No device nodes but the pseudo ones; ffmpeg decodes from a URL, not a card.
+PrivateDevices=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectClock=true
+ProtectHostname=true
+RemoveIPC=true
 
 [Install]
 WantedBy=multi-user.target

@@ -21,10 +21,10 @@ from contextlib import closing
 
 from pathlib import Path
 
-import database
-import settings_cache
-import settings_registry
-from settings_registry import (
+from core import database
+from core import settings_cache
+from core import settings_registry
+from core.settings_registry import (
     JSON_SHAPE_ROLE_MENU,
     ROLE_MENU_ENTRY_LIMIT,
     SETTING_DEFINITIONS,
@@ -180,7 +180,7 @@ class CacheFallbackTests(unittest.TestCase):
         self.assertFalse(settings_cache.setting(111, "maintenance"))
 
     def test_maintenance_blocks_fails_open_when_the_cache_raises(self):
-        import feature_access
+        from core import feature_access
         from types import SimpleNamespace
 
         guild = SimpleNamespace(id=111)
@@ -314,7 +314,7 @@ class RoleMenuShapeTests(unittest.TestCase):
 
     def test_every_shape_has_a_validator_and_a_snowflake_declaration(self):
         """A shape the editor can render but the API cannot check is a hole."""
-        import settings_registry
+        from core import settings_registry
         for shape in (settings_registry.JSON_SHAPE_ITEM_VALUES,
                       settings_registry.JSON_SHAPE_ROLE_MENU,
                       settings_registry.JSON_SHAPE_LEVEL_ROLES,
@@ -341,7 +341,7 @@ class RoleMenuShapeTests(unittest.TestCase):
         The exemption is verified below rather than taken on trust.
         """
         import re
-        import settings_registry
+        from core import settings_registry
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         rendered = set(re.findall(r"^    (\w+): \{$", source, re.MULTILINE))
         for shape in settings_registry.JSON_SHAPE_SNOWFLAKE_FIELDS:
@@ -646,7 +646,8 @@ class EverySettingHasAReaderTests(unittest.TestCase):
 
     def test_every_setting_is_read_somewhere(self):
         searched = []
-        for path in (ROOT.glob("*.py"), (ROOT / "cogs").glob("*.py"),
+        for path in (ROOT.glob("*.py"), (ROOT / "core").glob("*.py"),
+                     (ROOT / "cogs").glob("*.py"),
                      (ROOT / "dashboard").glob("*.js"),
                      (ROOT / "dashboard").glob("*.html"),
                      (ROOT / "scripts").glob("*.py")):
@@ -968,7 +969,7 @@ class GachaSettingsSurviveTheShopBeingOffTests(unittest.TestCase):
 
     def requires(self, feature, target):
         """Whether `feature` is `target` or depends on it, transitively."""
-        from settings_registry import FEATURE_DEFINITIONS
+        from core.settings_registry import FEATURE_DEFINITIONS
 
         seen, pending = set(), [feature]
         while pending:
@@ -984,7 +985,7 @@ class GachaSettingsSurviveTheShopBeingOffTests(unittest.TestCase):
         return False
 
     def settings_read_by_the_gacha(self):
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
 
         source = (ROOT / "cogs" / "gacha.py").read_text(encoding="utf-8")
         return {key: definition

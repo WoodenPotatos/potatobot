@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import database
+from core import database
 from cogs import roleselect
 
 
@@ -111,7 +111,7 @@ class RetiredSettingsTests(unittest.TestCase):
     """The three settings are gone, and nothing may quietly read them again."""
 
     def test_the_settings_are_not_in_the_registry(self):
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
         for key in ("game_roles", "news_roles", "theme_roles"):
             with self.subTest(key=key):
                 self.assertNotIn(key, SETTING_DEFINITIONS)

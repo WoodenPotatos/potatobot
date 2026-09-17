@@ -2109,6 +2109,9 @@ function settingInput(definition, storedValue) {
     input.type = definition.value_type === 'integer' ? 'number' : 'text';
     if (definition.minimum !== null && definition.minimum !== undefined) input.min = definition.minimum;
     if (definition.maximum !== null && definition.maximum !== undefined) input.max = definition.maximum;
+    // The registry's own bound, so the form stops where the validator would
+    // refuse instead of producing an unexplained rejection on save.
+    if (definition.max_length) input.maxLength = definition.max_length;
     input.value = value ?? '';
     return input;
 }

@@ -10,8 +10,8 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
-from feature_access import is_enabled, require_interaction_feature
+from core import database
+from core.feature_access import is_enabled, require_interaction_feature
 from discord.ext import commands
 
 from cogs.utils import (BoundedCooldownMap, t, guild_setting_sync,
@@ -47,6 +47,15 @@ class LimitModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         if not await require_interaction_feature(interaction, "temporary_voice"):
             return
+        # The view's `interaction_check` throttles button clicks, but a modal
+        # submit is its own interaction and had no cooldown at all -- channel
+        # renames are limited to two per ten minutes by Discord, and a member
+        # could drive the bot into that limit from here.
+        now = time.monotonic()
+        if now - voice_interaction_times.get(interaction.user.id, 0) < 3:
+            return await interaction.response.send_message(
+                t("utils.command_cooldown", seconds=3), ephemeral=True)
+        voice_interaction_times[interaction.user.id] = now
         if not await owns_current_channel(self.channel, interaction.user):
             return await interaction.response.send_message(
                 t("voicemod.not_your_room"), ephemeral=True
@@ -79,6 +88,15 @@ class RenameModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         if not await require_interaction_feature(interaction, "temporary_voice"):
             return
+        # The view's `interaction_check` throttles button clicks, but a modal
+        # submit is its own interaction and had no cooldown at all -- channel
+        # renames are limited to two per ten minutes by Discord, and a member
+        # could drive the bot into that limit from here.
+        now = time.monotonic()
+        if now - voice_interaction_times.get(interaction.user.id, 0) < 3:
+            return await interaction.response.send_message(
+                t("utils.command_cooldown", seconds=3), ephemeral=True)
+        voice_interaction_times[interaction.user.id] = now
         if not await owns_current_channel(self.channel, interaction.user):
             return await interaction.response.send_message(
                 t("voicemod.not_your_room"), ephemeral=True

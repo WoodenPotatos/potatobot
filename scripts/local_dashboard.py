@@ -238,7 +238,7 @@ def migrate_and_report(path: Path) -> None:
     """Migrate the working copy and print the before/after comparison."""
     from db_snapshot import compare
 
-    import database
+    from core import database
 
     before = fingerprint(path)
     print(f"  before: schema {before['schema_version']}, "
@@ -276,7 +276,7 @@ def _collect_configured_ids() -> tuple[dict, dict]:
     configuration already references is what makes the page look real.
     """
     from cogs.utils import config
-    from settings_registry import (
+    from core.settings_registry import (
         CATEGORY_CHANNEL_TYPES,
         SETTING_DEFINITIONS,
         VOICE_CHANNEL_TYPES,
@@ -345,8 +345,8 @@ def _collect_stored_setting_ids(guild_ids) -> tuple[set, set]:
     schema 12 — without them every menu row on the builder page would render as
     an unavailable role.
     """
-    import database
-    from settings_registry import SETTING_DEFINITIONS, SettingValueType
+    from core import database
+    from core.settings_registry import SETTING_DEFINITIONS, SettingValueType
 
     channel_types = {SettingValueType.CHANNEL, SettingValueType.CHANNEL_LIST}
     role_types = {SettingValueType.ROLE, SettingValueType.ROLE_LIST}
@@ -578,7 +578,7 @@ def redirect_config_writes(target_dir: Path) -> None:
 
 def active_guild_ids(requested):
     """The guilds to expose, preferring what the copy actually has."""
-    import database
+    from core import database
 
     stored = database.get_active_guild_ids()
     if requested is not None:
@@ -631,7 +631,7 @@ def main() -> int:
     if arguments.skip_migration:
         print("  migration skipped at your request")
     else:
-        import database
+        from core import database
         try:
             migrate_and_report(arguments.db)
         except (database.DatabaseOperationError, SystemExit) as error:

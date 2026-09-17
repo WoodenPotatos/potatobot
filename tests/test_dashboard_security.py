@@ -3,13 +3,17 @@ import os
 import tempfile
 import threading
 import time
+import re
 import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
 import requests
 from urllib.parse import parse_qs, urlparse
 
 import dashboard_api
-import settings_cache
-import database
+from core import settings_cache
+from core import database
 
 
 class DashboardSecurityTests(unittest.TestCase):
@@ -773,7 +777,7 @@ class DashboardSecurityTests(unittest.TestCase):
         in. Every stored row counts, not just the enabled ones: counting only
         enabled rows let a guild accumulate disabled definitions and then
         re-enable past what a Discord select menu can display."""
-        import item_catalog
+        from core import item_catalog
 
         headers = self._headers()
         # `_create_item` posts a vault, which resolves to the protection shelf.
@@ -844,7 +848,7 @@ class DashboardSecurityTests(unittest.TestCase):
         import re
 
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(root, "database.py"), encoding="utf-8") as handle:
+        with open(os.path.join(root, "core", "database.py"), encoding="utf-8") as handle:
             source = handle.read()
         reasons = sorted(set(re.findall(r'ValidationError\("([a-z_]+)"', source)))
         self.assertTrue(reasons)
@@ -859,7 +863,7 @@ class DashboardSecurityTests(unittest.TestCase):
         registry entry without a translation shows a raw key to the operator.
         Adding a built-in shop item creates a price setting automatically, which
         is exactly the case that would slip through unnoticed."""
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
 
         missing = sorted(
             definition.key for definition in SETTING_DEFINITIONS.values()
@@ -868,7 +872,7 @@ class DashboardSecurityTests(unittest.TestCase):
         self.assertEqual([], missing)
 
     def test_item_catalog_requires_a_session_and_lists_the_shared_items(self):
-        import item_catalog
+        from core import item_catalog
 
         self.assertEqual(self.client.get("/api/item-catalog").status_code, 401)
         self.authenticate()
@@ -963,7 +967,7 @@ class DashboardSecurityTests(unittest.TestCase):
         )
 
     def test_custom_consumable_items_are_validated_against_the_catalog(self):
-        import item_catalog
+        from core import item_catalog
 
         headers = self._headers()
         for item_key in sorted(item_catalog.INVENTORY_ITEM_KEYS):
@@ -1426,7 +1430,7 @@ class SnowflakeWireFormatTests(unittest.TestCase):
     REAL_ID = 1420070400000000001
 
     def setUp(self):
-        from settings_registry import SETTING_DEFINITIONS
+        from core.settings_registry import SETTING_DEFINITIONS
         self.definitions = SETTING_DEFINITIONS
 
     def test_id_is_beyond_javascript_precision(self):
@@ -1447,7 +1451,7 @@ class SnowflakeWireFormatTests(unittest.TestCase):
         self.assertEqual(dashboard_api._wire_value(integer, 25), 25)
 
     def test_string_snowflake_is_accepted_and_normalised(self):
-        from settings_registry import validate_setting_value
+        from core.settings_registry import validate_setting_value
         single = self.definitions["join_channel"]
         listed = self.definitions["premium_roles"]
         self.assertEqual(validate_setting_value(single, str(self.REAL_ID)),
@@ -1456,7 +1460,7 @@ class SnowflakeWireFormatTests(unittest.TestCase):
                          [self.REAL_ID])
 
     def test_round_trip_preserves_the_exact_id(self):
-        from settings_registry import validate_setting_value
+        from core.settings_registry import validate_setting_value
         definition = self.definitions["premium_roles"]
         wired = dashboard_api._wire_value(definition, [self.REAL_ID])
         # What the browser would hand back untouched, now that it never
@@ -1465,9 +1469,135 @@ class SnowflakeWireFormatTests(unittest.TestCase):
         self.assertEqual(restored, [self.REAL_ID])
 
     def test_rubbish_is_still_rejected(self):
-        from settings_registry import validate_setting_value
+        from core.settings_registry import validate_setting_value
         single = self.definitions["join_channel"]
         for bad in ("12a", "", "-5", True, -1, 0, 1.5, "0x10"):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
                     validate_setting_value(single, bad)
+
+
+class AuditHardeningTests(unittest.TestCase):
+    """The dashboard items from the 2026-09-11 audit, each pinned.
+
+    Reuses the security suite's fixture by reference rather than by inheritance,
+    so discovery does not run every parent test a second time under this name.
+    """
+
+    setUp = DashboardSecurityTests.setUp
+    tearDown = DashboardSecurityTests.tearDown
+    authenticate = DashboardSecurityTests.authenticate
+
+    def test_a_csrf_less_burst_is_rate_limited_not_just_refused(self):
+        """The limiter runs before the CSRF check, so refusals are counted."""
+        statuses = [
+            self.client.post("/api/guilds/123/features", json={}).status_code
+            for _ in range(61)
+        ]
+        self.assertEqual(403, statuses[0])
+        self.assertIn(429, statuses)
+
+    def test_a_bad_oauth_state_does_not_end_a_live_session(self):
+        self.authenticate()
+        refused = self.client.get("/api/callback?code=x&state=wrong")
+        self.assertEqual(400, refused.status_code)
+        status = self.client.get("/api/auth/status").get_json()
+        self.assertTrue(status["logged_in"])
+
+    def test_a_bad_oauth_state_still_clears_an_anonymous_session(self):
+        with self.client.session_transaction() as session:
+            session["oauth_state"] = "expected"
+        self.assertEqual(
+            400, self.client.get("/api/callback?code=x&state=wrong").status_code)
+        with self.client.session_transaction() as session:
+            self.assertNotIn("oauth_state", session)
+            self.assertNotIn("logged_in", session)
+
+    def test_an_unknown_path_answers_in_the_json_envelope(self):
+        response = self.client.get("/api/definitely-not-a-route")
+        self.assertEqual(404, response.status_code)
+        body = response.get_json()
+        self.assertEqual("error", body["status"])
+        self.assertTrue(body["message"])
+
+    def test_a_wrong_method_answers_in_the_json_envelope(self):
+        self.authenticate()
+        response = self.client.post("/api/changelog", json={},
+                                    headers={"X-CSRF-Token": "csrf-token"})
+        self.assertEqual(405, response.status_code)
+        self.assertEqual("error", response.get_json()["status"])
+
+    def test_headers_carry_permissions_policy_and_a_narrow_img_src(self):
+        response = self.client.get("/api/locale")
+        self.assertIn("camera=()", response.headers["Permissions-Policy"])
+        policy = response.headers["Content-Security-Policy"]
+        self.assertIn("img-src 'self' data: https://cdn.discordapp.com", policy)
+        self.assertNotIn("img-src 'self' https:", policy)
+
+    def test_data_scope_writes_are_host_only(self):
+        self.authenticate(user_id="7")  # a guild administrator, not the host
+        # A non-host guild read goes through the live permission refresh; seed
+        # the cache so it answers from there rather than calling Discord.
+        dashboard_api._permission_cache.put("server-session", ["123"])
+        headers = {"X-CSRF-Token": "csrf-token"}
+        body = {"category": "profile", "scope_type": "instance",
+                "realm_id": None, "revision": 0}
+        self.assertEqual(401, self.client.post(
+            "/api/guilds/123/data-scopes", json=body, headers=headers).status_code)
+        # Reading stays with the guild's own administrator.
+        self.assertEqual(200, self.client.get("/api/guilds/123/data-scopes").status_code)
+
+    def test_realm_join_is_host_only_and_validates_the_guild_id(self):
+        headers = {"X-CSRF-Token": "csrf-token"}
+        self.authenticate()
+        realm_id = self.client.post("/api/realms", json={"name": "Trusted Guilds"},
+                                    headers=headers).get_json()["data"]["realm_id"]
+        # A list where a snowflake belongs used to be `int([...])`: a 500.
+        self.assertEqual(400, self.client.post(
+            f"/api/realms/{realm_id}/memberships", json={"guild_id": [123]},
+            headers=headers).status_code)
+        self.assertEqual(200, self.client.post(
+            f"/api/realms/{realm_id}/memberships", json={"guild_id": "123"},
+            headers=headers).status_code)
+        self.authenticate(user_id="7")
+        self.assertEqual(401, self.client.post(
+            f"/api/realms/{realm_id}/memberships", json={"guild_id": 123},
+            headers=headers).status_code)
+
+    def test_every_validation_reason_the_api_can_raise_has_words(self):
+        """A `RequestValidationError` key that no catalog holds reaches the
+        operator as `[dashboard.errors.something]`.
+
+        The locale audit's literal scanner reads `t("...")` calls and never saw
+        these, because the key is a constructor argument that only becomes a
+        `t()` call inside `invalid_request_response`. That is how
+        `instance_setting_host_only` shipped under `dashboard.hints` while the
+        route raised `dashboard.errors.instance_setting_host_only`, and every
+        refused instance write rendered as a bracketed key.
+        """
+        source = (dashboard_api.__file__)
+        text = open(source, encoding="utf-8").read()
+        keys = set(re.findall(
+            r'RequestValidationError\(\s*"(dashboard\.[a-z_.]+)"', text))
+        self.assertGreater(len(keys), 40, "the scan found too few keys to be real")
+        unresolved = sorted(k for k in keys if dashboard_api.t(k).startswith("["))
+        self.assertEqual([], unresolved)
+
+    def test_adopting_by_bare_id_needs_a_link_in_a_large_guild(self):
+        self.authenticate()
+        guild = SimpleNamespace(
+            id=123, me=SimpleNamespace(id=1),
+            text_channels=[MagicMock() for _ in range(
+                dashboard_api.ADOPT_BARE_ID_CHANNEL_LIMIT + 1)])
+        fake_bot = SimpleNamespace(get_guild=lambda gid: guild, loop=None)
+        with patch.object(dashboard_api, "_dashboard_bot", fake_bot):
+            response = self.client.post(
+                "/api/guilds/123/managed/rules/adopt",
+                json={"message": "123456789012345678", "menu_key": "rules",
+                      "display_name": "Rules"},
+                headers={"X-CSRF-Token": "csrf-token"})
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(
+            dashboard_api.t("dashboard.errors.managed_adopt_link_required"),
+            response.get_json()["message"])
+

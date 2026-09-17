@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 
-import database
+from core import database
 
 
 USERS_SCHEMA = """
@@ -303,3 +303,52 @@ class EverydleStreakPayoutTests(unittest.TestCase):
         self.assertEqual(151, result["streak"])
         self.assertEqual(self.expected(100), result["reward"],
                          "the cap applies to the payout, not only to the count")
+
+
+class AmountBoundTests(unittest.TestCase):
+    """An amount past MAX_AMOUNT is refused with an answer, not an OverflowError.
+
+    Past 2**63 a Python int cannot be bound by `sqlite3` at all; the failure was
+    `OverflowError`, which no `except sqlite3.Error` handler catches, so the
+    command died and the member saw nothing. The bound sits far below that.
+    """
+
+    HUGE = 10**19
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "bounds.db")
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        with database.get_connection() as conn:
+            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 500)")
+            conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 500)")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def test_an_instant_stake_past_the_bound_is_refused_not_raised(self):
+        self.assertIsNone(database.resolve_instant_wager(1, self.HUGE))
+        self.assertIsNone(database.resolve_dice_wager(1, 1, self.HUGE, 1, 1, 1))
+        self.assertIsNone(database.resolve_wheel_wager(1, 1, self.HUGE))
+        self.assertIsNone(database.resolve_slots_wager(1, 1, self.HUGE))
+
+    def test_an_interactive_reservation_past_the_bound_is_refused(self):
+        self.assertIsNone(database.begin_interactive_wager("w", 1, 1, "bj", self.HUGE))
+
+    def test_a_transfer_past_the_bound_is_refused(self):
+        self.assertIsNone(database.transfer_balance(1, 2, self.HUGE))
+        self.assertEqual(500, database.get_user_balance(2))
+
+    def test_a_raw_delta_past_the_bound_names_the_reason(self):
+        with self.assertRaises(database.ValidationError) as caught:
+            database.apply_user_delta(1, self.HUGE)
+        self.assertEqual("amount_out_of_range", caught.exception.reason)
+        self.assertEqual(500, database.get_user_balance(1))
+
+    def test_the_bound_is_generous_enough_for_any_real_balance(self):
+        result = database.apply_user_delta(1, database.MAX_AMOUNT)
+        self.assertEqual(500 + database.MAX_AMOUNT, result["stats"][0])
+

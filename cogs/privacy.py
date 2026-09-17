@@ -24,10 +24,10 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
+from core import database
 from cogs.gacha import revoke_entitlement
 from cogs.utils import t
-from settings_registry import SETTING_DEFINITIONS
+from core.settings_registry import SETTING_DEFINITIONS
 
 privacy_logger = logging.getLogger("PotatoBot.Privacy")
 

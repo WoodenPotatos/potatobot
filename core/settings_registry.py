@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any
 
-import item_catalog
+from core import item_catalog
 
 
 class ApplyBehavior(str, Enum):
@@ -133,6 +133,17 @@ class SettingDefinition:
     # half. The registry stays the single source of truth for the value; this
     # only says the settings form is not where it is typed.
     edited_elsewhere: bool = False
+    # The longest value a free-text STRING may hold, or the longest item a
+    # STRING_LIST may hold. Nothing bounded these, so `currency_emoji` accepted
+    # ten thousand characters -- and that value reaches every embed footer,
+    # where Discord answers 400 on all of them: a whole-bot outage from one form
+    # field. A setting constrained by `choices` needs no length; every other
+    # STRING or STRING_LIST must declare one, and a test says so.
+    max_length: int | None = None
+    # The most items a STRING_LIST may hold. `twitch_streamers` past 100 silently
+    # exceeded Helix's per-request `user_login` limit, so the excess was polled
+    # by nobody.
+    max_items: int | None = None
     # True when the bot has to *grant* this ROLE/ROLE_LIST, false when it only
     # recognises membership. The distinction decides whether a role above the
     # bot may be named: `premium_roles` and `admin_roles` are recognition, and
@@ -443,7 +454,9 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
              assignable_role: bool = False,
              bot_permissions: tuple[str, ...] = (),
              member_permissions: tuple[str, ...] = (),
-             edited_elsewhere: bool = False):
+             edited_elsewhere: bool = False,
+             max_length: int | None = None,
+             max_items: int | None = None):
     return SettingDefinition(
         key=key,
         locale_key=f"dashboard.settings.{key}",
@@ -465,6 +478,8 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
         bot_channel_permissions=bot_permissions,
         member_channel_permissions=member_permissions,
         edited_elsewhere=edited_elsewhere,
+        max_length=max_length,
+        max_items=max_items,
     )
 
 
@@ -495,7 +510,8 @@ SETTING_DEFINITIONS = {
         _setting("currency_emoji", "administration", "instance",
                  SettingValueType.STRING, "🥔",
                  scope=SettingScope.INSTANCE,
-                 legacy_path=("bot_settings", "currency_emoji")),
+                 legacy_path=("bot_settings", "currency_emoji"),
+                 max_length=64),
         _setting("maintenance", "administration", "instance", SettingValueType.BOOLEAN,
                  False, scope=SettingScope.INSTANCE,
                  legacy_path=("bot_settings", "maintenance")),
@@ -506,7 +522,8 @@ SETTING_DEFINITIONS = {
                  SettingValueType.STRING, "?",
                  scope=SettingScope.INSTANCE,
                  legacy_path=("bot_settings", "prefix"),
-                 apply=ApplyBehavior.RESTART),
+                 apply=ApplyBehavior.RESTART,
+                 max_length=8),
         # Days of inactivity after which a departed member's data is erased.
         # 0 retains indefinitely, so upgrading changes nothing until an operator
         # opts in. No legacy_path: retention has never lived in config.json.
@@ -605,7 +622,8 @@ SETTING_DEFINITIONS = {
         _setting("autoroles", "community", "onboarding", SettingValueType.ROLE_LIST,
                  [], feature="onboarding", legacy_path=("roles", "autoroles"), assignable_role=True),
         _setting("ignored_users", "moderation", "inactivity", SettingValueType.STRING_LIST,
-                 [], feature="inactivity", legacy_path=("roles", "ignored_users")),
+                 [], feature="inactivity", legacy_path=("roles", "ignored_users"),
+                 max_length=24, max_items=1000),
         # Where a crossed threshold is reported. Separate from bot_log_channel,
         # which is operational logging an operator reads, not moderation record.
         _setting("moderation_log_channel", "moderation", "warnings",
@@ -636,7 +654,8 @@ SETTING_DEFINITIONS = {
         # readable and an operator can see what they typed.
         _setting("word_filter_words", "moderation", "word_filter",
                  SettingValueType.STRING_LIST, [],
-                 feature="moderation_word_filter"),
+                 feature="moderation_word_filter",
+                 max_length=100, max_items=500),
         _setting("word_filter_delete_message", "moderation", "word_filter",
                  SettingValueType.BOOLEAN, True,
                  feature="moderation_word_filter"),
@@ -697,13 +716,15 @@ SETTING_DEFINITIONS = {
         _setting("youtube_role", "community", "socials", SettingValueType.ROLE,
                  None, feature="social_youtube", legacy_path=("socials", "youtube_role_id")),
         _setting("twitch_streamers", "community", "socials", SettingValueType.STRING_LIST,
-                 [], feature="social_twitch", legacy_path=("socials", "twitch_streamers")),
+                 [], feature="social_twitch", legacy_path=("socials", "twitch_streamers"),
+                 max_length=25, max_items=100),
         # Read by the YouTube RSS loop and registered nowhere, so it was a key
         # the code looked for and no operator could set — not in the dashboard
         # and not in the file. Registering it is what makes the feature reachable.
         _setting("youtube_channels", "community", "socials",
                  SettingValueType.STRING_LIST, [], feature="social_youtube",
-                 legacy_path=("socials", "youtube_channels")),
+                 legacy_path=("socials", "youtube_channels"),
+                 max_length=64, max_items=100),
         # `/work` outcome rarity and payouts. The three tier weights are drawn
         # against each other, so the shipped 998/1/1 reproduces the previous
         # hard-coded one-in-a-thousand chances exactly.
@@ -879,6 +900,8 @@ def validate_setting_value(definition: SettingDefinition, value):
             raise ValueError("setting must be string")
         if definition.choices and value not in definition.choices:
             raise ValueError("setting must be one of the allowed values")
+        if definition.max_length is not None and len(value) > definition.max_length:
+            raise ValueError("setting is too long")
     if kind in {SettingValueType.CHANNEL, SettingValueType.ROLE}:
         value = None if value is None else _snowflake(value)
     if kind in {SettingValueType.CHANNEL_LIST, SettingValueType.ROLE_LIST}:
@@ -889,6 +912,11 @@ def validate_setting_value(definition: SettingDefinition, value):
         if (not isinstance(value, list)
                 or any(not isinstance(item, str) for item in value)):
             raise ValueError("setting must be a string list")
+        if definition.max_items is not None and len(value) > definition.max_items:
+            raise ValueError("setting has too many items")
+        if definition.max_length is not None and any(
+                len(item) > definition.max_length for item in value):
+            raise ValueError("a setting item is too long")
         # `choices` used to constrain a STRING only, so a constrained *list*
         # accepted arbitrary junk — `shop_hidden_items` could have held a
         # misspelled item key that hid nothing and that nothing would report.

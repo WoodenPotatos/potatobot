@@ -18,28 +18,35 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
+from core import database
 from cogs.utils import (can_self_assign_role, guild_setting_sync,
                         handle_loop_error, is_channel, t)
-from feature_access import is_enabled, maintenance_blocks
-from support_tickets import open_ticket
+from core.feature_access import is_enabled, maintenance_blocks
+from core.support_tickets import open_ticket
 
 gacha_logger = logging.getLogger("PotatoBot.Gacha")
 
 
-def gacha_reward_label(key, duration_days=None, guild_id=None):
+def gacha_reward_label(key, duration_days=None, custom_items=None):
     """What a member is shown for one reward key.
 
-    `guild_id` lets a **custom shop item** used as a banner reward be named. A
-    banner has always accepted any key and the pull has always granted it
-    correctly — a custom vault really does set the reserve it configures — but
-    without this the member saw `[gacha.rewards.vault_extra]`, because the locale
-    family only covers the shipped rewards. The guild's own item carries the name
-    its operator typed, so that is what it is called.
+    `custom_items` lets a **custom shop item** used as a banner reward be
+    named. A banner has always accepted any key and the pull has always
+    granted it correctly — a custom vault really does set the reserve it
+    configures — but without this the member saw `[gacha.rewards.vault_extra]`,
+    because the locale family only covers the shipped rewards. The guild's own
+    item carries the name its operator typed, so that is what it is called.
 
     The locale catalog still wins where it has an entry, so a shipped reward is
     never renamed by a guild that happens to have created a key like it — which
     it cannot anyway, since built-in keys are reserved.
+
+    `custom_items` is a prefetched `{item_key: display_name}` map, built once
+    per command invocation by `resolve_custom_item_labels`. This function used
+    to query `get_shop_item_definitions` itself, synchronously and once per
+    call — a blocking event-loop call, repeated once per distinct key, for
+    every `/inventory` or `/gacha` result. A caller with no custom items to
+    resolve may omit the map entirely.
     """
     if duration_days is not None and key.split("_", 1)[0] in {"emoji", "sticker", "sound"}:
         known = {
@@ -53,20 +60,67 @@ def gacha_reward_label(key, duration_days=None, guild_id=None):
                 days=duration_days,
             )
     label = t(f"gacha.rewards.{key}")
-    if not label.startswith("[") or guild_id is None:
+    if not label.startswith("[") or not custom_items:
         return label
     # No shipped entry: this is one of the guild's own items, or a key from a
     # banner saved before the item was deleted. A stored name beats a bracketed
     # key, and the key itself beats a bracketed one.
+    return custom_items.get(key, key)
+
+
+async def resolve_custom_item_labels(guild_id) -> dict:
+    """Prefetch every custom item's display name once per command invocation.
+
+    `gacha_reward_label` no longer queries per key, so a result or an
+    inventory listing many distinct custom keys costs one pooled read here
+    rather than one blocking read per key.
+    """
     try:
-        for item in database.get_shop_item_definitions(int(guild_id)):
-            if item["item_key"] == key:
-                return item["name"] or key
+        items = await database.run_read(database.get_shop_item_definitions, int(guild_id))
     except database.DatabaseOperationError:
         gacha_logger.exception(
-            "Could not read a custom item's name for a reward label "
-            "(guild_id=%s, key=%s)", guild_id, key)
-    return key
+            "Could not read a guild's custom item names for reward labels "
+            "(guild_id=%s).", guild_id)
+        return {}
+    return {item["item_key"]: item["name"] or item["item_key"] for item in items}
+
+
+def _chunked_embed_fields(name, lines, *, field_limit=900, max_fields=3):
+    """Split `lines` across up to `max_fields` Discord embed fields.
+
+    A field's value cannot exceed 1024 characters and an embed answers nothing
+    if any field is too long, so packing every distinct item or voucher into
+    one field is how a heavy inventory fails to send at all. Content stops one
+    field early once `max_fields` would otherwise be exceeded, and the last
+    slot is spent on a count of what did not fit, so nothing is silently
+    dropped without saying so.
+    """
+    if not lines:
+        return [(name, t("gacha.inventory_empty"))]
+
+    packed = []
+    current, current_len = [], 0
+    for line in lines:
+        extra = len(line) + (1 if current else 0)
+        if current and current_len + extra > field_limit:
+            packed.append(current)
+            current, current_len = [], 0
+            extra = len(line)
+        current.append(line)
+        current_len += extra
+    if current:
+        packed.append(current)
+
+    if len(packed) > max_fields:
+        kept = packed[:max_fields - 1]
+        shown = sum(len(chunk) for chunk in kept)
+        hidden = len(lines) - shown
+        packed = kept + [[t("gacha.inventory_truncated", count=hidden)]]
+
+    fields = [(name, "\n".join(packed[0]))]
+    for chunk in packed[1:]:
+        fields.append((t("gacha.inventory_more_suffix", name=name), "\n".join(chunk)))
+    return fields
 
 
 async def revoke_entitlement(guild, entitlement) -> bool:
@@ -205,6 +259,7 @@ class Gacha(commands.Cog):
             }.get(result["reason"], "not_enough_money")
             return await ctx.send(t(f"gacha.{key}"), ephemeral=True)
 
+        custom_items = await resolve_custom_item_labels(ctx.guild.id)
         lines = []
         for reward in result["results"]:
             suffix = ""
@@ -226,7 +281,7 @@ class Gacha(commands.Cog):
                     "gacha.result_line",
                     stars="⭐" * reward["rarity"],
                     reward=gacha_reward_label(reward["key"],
-                                              guild_id=ctx.guild.id),
+                                              custom_items=custom_items),
                     suffix=suffix,
                 )
             )
@@ -256,35 +311,33 @@ class Gacha(commands.Cog):
     @commands.hybrid_command(name="inventory", description=t("general.cmd_inventory"))
     @is_channel("economy_channels")
     async def inventory(self, ctx):
-        items, vouchers = await asyncio.gather(
+        items, vouchers, custom_items = await asyncio.gather(
             database.run_read(database.get_user_inventory, ctx.guild.id, ctx.author.id),
             database.run_read(database.get_user_vouchers, ctx.guild.id, ctx.author.id),
+            resolve_custom_item_labels(ctx.guild.id),
         )
         item_lines = [
             t("gacha.inventory_item",
-              item=gacha_reward_label(key, guild_id=ctx.guild.id),
+              item=gacha_reward_label(key, custom_items=custom_items),
               amount=amount)
             for key, amount in items.items()
-        ] or [t("gacha.inventory_empty")]
+        ]
         voucher_lines = [
             t(
                 "gacha.inventory_voucher",
                 reward=gacha_reward_label(voucher["reward_key"],
                                           voucher["duration_days"],
-                                          guild_id=ctx.guild.id),
+                                          custom_items=custom_items),
                 voucher_id=voucher["voucher_id"],
                 status=t(f"gacha.voucher_status.{voucher['status']}"),
             )
             for voucher in vouchers
-        ] or [t("gacha.inventory_empty")]
+        ]
         embed = discord.Embed(title=t("gacha.inventory_title"), color=discord.Color.gold())
-        embed.add_field(
-            name=t("gacha.inventory_items"), value="\n".join(item_lines), inline=False
-        )
-        embed.add_field(
-            name=t("gacha.inventory_vouchers"),
-            value="\n".join(voucher_lines), inline=False,
-        )
+        for name, value in _chunked_embed_fields(t("gacha.inventory_items"), item_lines):
+            embed.add_field(name=name, value=value, inline=False)
+        for name, value in _chunked_embed_fields(t("gacha.inventory_vouchers"), voucher_lines):
+            embed.add_field(name=name, value=value, inline=False)
         await ctx.send(embed=embed, ephemeral=True)
 
     @commands.hybrid_command(name="pity", description=t("general.cmd_pity"))
@@ -330,10 +383,11 @@ class Gacha(commands.Cog):
             embed.add_field(name=t("gacha.pity_guarantee"),
                             value="\n".join(held), inline=False)
 
+        custom_items = await resolve_custom_item_labels(ctx.guild.id)
         lines = [
             t("gacha.pity_history_line",
               reward=gacha_reward_label(entry["reward_key"],
-                                        guild_id=ctx.guild.id),
+                                        custom_items=custom_items),
               pity=entry["pity"],
               marker=(t("gacha.pity_marker_hard") if entry["hard_pity"]
                       else t("gacha.pity_marker_featured") if entry["featured"]

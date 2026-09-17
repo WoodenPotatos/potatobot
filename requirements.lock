@@ -6,4 +6,4 @@ PyNaCl==1.6.2
 python-dotenv==1.2.3
 requests==2.34.2
 waitress==3.0.2
-yt-dlp==2026.7.4
+yt-dlp==2026.8.19

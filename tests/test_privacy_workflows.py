@@ -6,12 +6,13 @@ These tests pin each of those three properties.
 """
 
 import json
+import re
 import os
 import sqlite3
 import tempfile
 import unittest
 
-import database
+from core import database
 
 
 class PrivacyWorkflowTests(unittest.TestCase):
@@ -410,6 +411,177 @@ class PrivacyWorkflowTests(unittest.TestCase):
         self.assertEqual(
             len(database.get_retention_candidates("2021-01-01T00:00:00+00:00", 25)), 25
         )
+
+
+class ErasureColumnCoverageTests(unittest.TestCase):
+    """Every column that can hold a member is erased, re-keyed, scrubbed or named.
+
+    `SubjectTableCoverageTests` below asks whether a *table* is declared; this
+    asks about *columns*, in both directions, because the two gaps this closes
+    were columns on tables that were otherwise fine: `lfg_posts.host_id` and
+    `joined_json`, `minigame_state.last_user_id`, and the erasure action's own
+    `payload_json`. All three arrived after the privacy work and nothing noticed.
+
+    Classification is by column *name*, deliberately. A new table gets a new
+    row here only if its member column is called something new, and then the
+    test fails and says so -- which is the point. An allowlist of 95 specific
+    columns would be maintained by nobody.
+    """
+
+    # Columns that hold a member's id. Each (table, column) carrying one of
+    # these names must appear in an erase list or a scrub declaration.
+    MEMBER_COLUMNS = {
+        "user_id", "owner_id", "target_id", "opener_id", "claimer_id", "mod_id",
+        "host_id", "last_user_id", "actor_id", "completed_by", "approved_by",
+        "created_by", "updated_by",
+    }
+    # `_id`/`_by` columns that are not members, with why. A name absent from
+    # both sets is a finding.
+    NOT_MEMBERS = {
+        "guild_id": "a guild", "origin_guild_id": "a guild",
+        "channel_id": "a channel", "message_id": "a message",
+        "role_id": "a role", "game_role_id": "a role",
+        "realm_id": "a realm", "scope_id": "a guild or 0 for the instance",
+        # Surrogate primary keys.
+        "event_id": "row id", "action_id": "row id", "document_id": "row id",
+        "request_id": "row id", "pull_id": "row id", "entry_id": "row id",
+        "audit_id": "row id", "entitlement_id": "row id",
+        "response_id": "row id",
+    }
+    # JSON columns that never carry a member id, with why. The ones that can
+    # are declared in `database.ERASE_SCRUBBED_JSON` and rewritten there.
+    JSON_WITHOUT_MEMBERS = {
+        ("activity_events", "metadata_json"): "the row is deleted with the member",
+        ("casino_wagers", "resolution_json"): "outcome and credit only",
+        ("dashboard_documents", "content_json"): "operator-authored embed text",
+        ("gacha_banners", "config_json"): "the reward table",
+        ("gacha_pulls", "reward_json"): "the row is deleted with the member",
+        ("guild_settings", "value_json"): "operator configuration; `ignored_users` "
+            "may name a member and is the operator's to edit",
+        ("instance_settings", "value_json"): "installation-wide values",
+        ("managed_messages", "options_json"): "button labels and sections",
+        ("settings_audit", "new_value_json"): "settings values and the erasure "
+            "receipt, which names the tombstone only",
+        ("shop_item_definitions", "config_json"): "role ids and amounts",
+    }
+
+    def setUp(self):
+        self.original_path = database.DB_PATH
+        self.temp_dir = tempfile.TemporaryDirectory()
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.initialize_database()
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _columns(self):
+        with sqlite3.connect(database.DB_PATH) as conn:
+            tables = [row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name NOT LIKE 'sqlite_%'")]
+            for table in tables:
+                for _, name, ctype, *_ in conn.execute(f"PRAGMA table_info({table})"):
+                    yield table, name, (ctype or "").upper()
+
+    def _covered_member_columns(self):
+        covered = set()
+        for table, clause, _ in database.ERASE_DELETE_ORDER:
+            for column in re.findall(r"(\w+) = \?", clause):
+                covered.add((table, column))
+        for table in database.ERASE_REKEY_SUBJECT:
+            covered.add((table, "user_id"))
+        covered.update(database.ERASE_NULL_ACTOR)
+        covered.update(database.ERASE_REKEY_ACTOR)
+        return covered
+
+    def test_every_member_column_is_reached_by_the_erasure(self):
+        covered = self._covered_member_columns()
+        missing = sorted(
+            f"{table}.{name}" for table, name, ctype in self._columns()
+            if "INT" in ctype and name in self.MEMBER_COLUMNS
+            and (table, name) not in covered)
+        self.assertEqual([], missing)
+
+    def test_every_id_column_is_classified(self):
+        """A new id-shaped column has to be called a member or not, by name."""
+        unknown = sorted(
+            f"{table}.{name}" for table, name, ctype in self._columns()
+            if "INT" in ctype and (name.endswith("_id") or name.endswith("_by"))
+            and name not in self.MEMBER_COLUMNS and name not in self.NOT_MEMBERS)
+        self.assertEqual([], unknown)
+
+    def test_every_json_column_is_scrubbed_or_explained(self):
+        scrubbed = set(database.ERASE_SCRUBBED_JSON)
+        unexplained = sorted(
+            f"{table}.{name}" for table, name, _ in self._columns()
+            if name.endswith("_json")
+            and (table, name) not in scrubbed
+            and (table, name) not in self.JSON_WITHOUT_MEMBERS)
+        self.assertEqual([], unexplained)
+
+    def test_every_declared_column_exists(self):
+        """The other direction: a list naming a column that is gone is dead."""
+        real = {(table, name) for table, name, _ in self._columns()}
+        declared = self._covered_member_columns() | set(database.ERASE_SCRUBBED_JSON)
+        self.assertEqual(set(), declared - real)
+
+
+class ErasureReachesLateTablesTests(unittest.TestCase):
+    """The three columns that escaped, exercised rather than listed."""
+
+    def setUp(self):
+        self.original_path = database.DB_PATH
+        self.temp_dir = tempfile.TemporaryDirectory()
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.initialize_database()
+        database.register_guild(111, "Guild")
+        with database.get_connection() as conn:
+            conn.execute("INSERT INTO users (user_id, balance) VALUES (7, 10)")
+            conn.execute("INSERT INTO users (user_id, balance) VALUES (8, 10)")
+        # 7 hosts one post and has joined 8's post.
+        database.create_lfg_post(111, 1001, 5, host_id=7, needed=0)
+        database.create_lfg_post(111, 1002, 5, host_id=8, needed=0)
+        self.assertIn("joined", database.join_lfg_post(111, 1002, 7))
+        # 7 took the last counting turn.
+        database.advance_minigame(111, "counting", "1", 7, "")
+        # And an operator queued 7's erasure through the outbox.
+        self.action_id = database.queue_control_action(
+            111, 42, "erase_member", {"user_id": 7})
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def test_the_hosted_post_goes_and_the_joined_post_forgets_them(self):
+        receipt = database.anonymize_user(7, actor_id=42, guild_id=111)
+        self.assertEqual(1, receipt["deleted_rows"].get("lfg_posts"))
+        self.assertEqual(1, receipt["lfg_parties_left"])
+        self.assertIsNone(database.get_lfg_post(111, 1001))
+        self.assertEqual([], database.get_lfg_post(111, 1002)["joined"])
+
+    def test_the_last_turn_is_forgotten_and_the_chain_plays_on(self):
+        database.anonymize_user(7, actor_id=42, guild_id=111)
+        state = database.get_minigame_state(111, "counting")
+        self.assertIsNone(state["last_user_id"])
+        self.assertEqual("1", state["value"])
+        self.assertIsNotNone(database.advance_minigame(111, "counting", "2", 8, "1"))
+
+    def test_the_erasure_action_no_longer_names_the_member(self):
+        receipt = database.anonymize_user(7, actor_id=42, guild_id=111)
+        self.assertEqual(1, receipt["control_action_payloads_scrubbed"])
+        with sqlite3.connect(database.DB_PATH) as conn:
+            payload = json.loads(conn.execute(
+                "SELECT payload_json FROM control_actions WHERE action_id = ?",
+                (self.action_id,)).fetchone()[0])
+        self.assertEqual(receipt["tombstone_id"], payload["user_id"])
+
+    def test_a_longer_id_containing_this_one_is_left_alone(self):
+        """The LIKE prefilter is a prefilter; membership decides."""
+        database.create_lfg_post(111, 1003, 5, host_id=8, needed=0)
+        self.assertIn("joined", database.join_lfg_post(111, 1003, 1007))
+        database.anonymize_user(7, actor_id=42, guild_id=111)
+        self.assertEqual([1007], database.get_lfg_post(111, 1003)["joined"])
 
 
 class SubjectTableCoverageTests(unittest.TestCase):

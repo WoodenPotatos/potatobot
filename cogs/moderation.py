@@ -1,3 +1,14 @@
+"""Warnings, consequences, the word filter and the moderation log.
+
+A warning files a record and a threshold may act on it — time out, kick or ban —
+so this is the one command surface in the project where a mistake cannot be
+taken back. Tags are fixed mechanics rather than operator text, every shipped
+threshold is 0, and the filter files a warning rather than carrying a second
+copy of the escalation rules.
+
+Rules that bind changes here: docs/subsystems/moderation.md
+"""
+
 import discord
 import logging
 import os
@@ -12,13 +23,14 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
+from core import database
 
-from bounded import BoundedValueMap
+from core.bounded import BoundedValueMap
 from discord.ext import commands
 from datetime import datetime, timedelta
-from feature_access import is_enabled, maintenance_blocks
-from settings_registry import WARN_DEFAULT_TAG, WARN_TAGS
+from core.clock import local_date, local_time, parse_stored, utc_now
+from core.feature_access import is_enabled, maintenance_blocks
+from core.settings_registry import WARN_DEFAULT_TAG, WARN_TAGS
 from cogs.utils import (is_staff, is_higher_than, role_autocomplete, t,
                         guild_setting_sync, guild_settings_many,
                         send_moderation_log)
@@ -256,7 +268,7 @@ class Moderation(commands.Cog):
         record = await database.run(
             database.record_warning, member.id, self.bot.user.id,
             t("moderation.filter_warn_reason", channel=channel_name),
-            datetime.now().isoformat(), message.guild.id, tag,
+            utc_now().isoformat(), message.guild.id, tag,
         )
 
         # Tell the member privately. There is no public notice at all: naming
@@ -298,6 +310,9 @@ class Moderation(commands.Cog):
     async def kick(self, ctx, member: discord.Member, *, reason: str = None):
         if reason is None: 
             reason = t("moderation.no_reason_provided")
+        # Staff prose reaches an embed field (1024) and a DM; `/warn` already
+        # escapes and truncates, and these two did neither.
+        reason = discord.utils.escape_mentions(reason)[:1024]
 
         if member.id == ctx.author.id:
             return await ctx.send(t("moderation.self_kick_error"), ephemeral=True)
@@ -305,12 +320,16 @@ class Moderation(commands.Cog):
         # Discord rejects actions against peers or higher-ranked members; fail clearly first.
         if not is_higher_than(ctx.author, member):
             return await ctx.send(t("moderation.hierarchy_error", user=member.mention), ephemeral=True)
+        # And against members above the *bot*: without this the kick raised
+        # Forbidden after the DM had already gone out, and the moderator saw nothing.
+        if member.top_role >= ctx.guild.me.top_role:
+            return await ctx.send(t("moderation.bot_cannot_moderate", user=member.mention), ephemeral=True)
 
         # Notify before removal because the member may become unreachable afterward.
         try:
             await member.send(t("moderation.kick_dm", guild=ctx.guild.name, reason=reason))
-        except:
-            pass # If their DMs are closed, ignore it
+        except discord.HTTPException:
+            pass  # Closed DMs are the member's choice.
 
         await member.kick(reason=reason)
     
@@ -326,16 +345,19 @@ class Moderation(commands.Cog):
     async def ban(self, ctx, member: discord.Member, *, reason: str = None):
         if reason is None: 
             reason = t("moderation.no_reason_provided")
+        reason = discord.utils.escape_mentions(reason)[:1024]
     
         if member.id == ctx.author.id:
             return await ctx.send(t("moderation.self_ban_error"), ephemeral=True)
     
         if not is_higher_than(ctx.author, member):
             return await ctx.send(t("moderation.hierarchy_error", user=member.mention), ephemeral=True)
+        if member.top_role >= ctx.guild.me.top_role:
+            return await ctx.send(t("moderation.bot_cannot_moderate", user=member.mention), ephemeral=True)
 
         try:
             await member.send(t("moderation.ban_dm", guild=ctx.guild.name, reason=reason))
-        except:
+        except discord.HTTPException:
             pass
 
         await member.ban(reason=reason)
@@ -351,12 +373,15 @@ class Moderation(commands.Cog):
     async def timeout(self, ctx, member: discord.Member, minutes: int, *, reason: str = None):
         if reason is None: 
             reason = t("moderation.default_timeout_reason")
+        reason = discord.utils.escape_mentions(reason)[:1024]
     
         if member.id == ctx.author.id:
             return await ctx.send(t("moderation.self_timeout_error"), ephemeral=True)
     
         if not is_higher_than(ctx.author, member):
             return await ctx.send(t("moderation.hierarchy_error", user=member.mention), ephemeral=True)
+        if member.top_role >= ctx.guild.me.top_role:
+            return await ctx.send(t("moderation.bot_cannot_moderate", user=member.mention), ephemeral=True)
     
         if not 1 <= minutes <= 40320: # Discord limit is 28 days
             return await ctx.send(t("moderation.timeout_limit_error"), ephemeral=True)
@@ -427,7 +452,7 @@ class Moderation(commands.Cog):
         # transaction, because the threshold below is compared against them.
         record = await database.run(
             database.record_warning, member.id, ctx.author.id, reason,
-            datetime.now().isoformat(), ctx.guild.id, tag,
+            utc_now().isoformat(), ctx.guild.id, tag,
         )
 
         # Publish the moderation result to the invoking channel.
@@ -541,8 +566,8 @@ class Moderation(commands.Cog):
                 read_msg = t("moderation.no_data_old_member")
 
             if last_active_str:
-                last_active = datetime.fromisoformat(last_active_str)
-                now = datetime.now()
+                last_active = parse_stored(last_active_str)
+                now = utc_now()
                 diff = now - last_active
                 
                 if diff.days >= 14: active_msg = t("moderation.inactive_red", days=diff.days)
@@ -565,8 +590,7 @@ class Moderation(commands.Cog):
                 # A pre-schema-10 row has no tag and reads as the default.
                 tag_label = t(f"moderation.warn_tags."
                               f"{tag if tag in WARN_TAGS else WARN_DEFAULT_TAG}")
-                date_obj = datetime.fromisoformat(date)
-                date_str = date_obj.strftime("%Y-%m-%d %H:%M")
+                date_str = local_time(parse_stored(date)).strftime("%Y-%m-%d %H:%M")
                 mod = ctx.guild.get_member(mod_id)
                 mod_name = mod.display_name if mod else t("moderation.unknown_mod")
             

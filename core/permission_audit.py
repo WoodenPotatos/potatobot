@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 import discord
 
-from settings_registry import (
+from core.settings_registry import (
     FEATURE_DEFINITIONS,
     SETTING_DEFINITIONS,
     SettingValueType,

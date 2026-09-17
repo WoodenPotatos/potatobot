@@ -13,11 +13,13 @@ consumption happens inside the same transaction as the stake.
 import os
 import random
 import tempfile
+import pathlib
+import re
 import unittest
 from itertools import product
 
-import database
-import item_catalog
+from core import database
+from core import item_catalog
 
 
 GUILD = 10
@@ -264,7 +266,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_the_shop_menu_still_fits_discord(self):
         """Adding a casino item must not push its section past 25 options."""
-        import item_catalog
+        from core import item_catalog
 
         for category in item_catalog.SHOP_CATEGORY_ORDER:
             self.assertLessEqual(
@@ -453,8 +455,8 @@ class NewGameRegistrationTests(unittest.TestCase):
         import re
 
         from cogs.casino import CASINO_LAUNCHER_FEATURES
-        from feature_access import COMMAND_POLICIES
-        from settings_registry import FEATURE_DEFINITIONS
+        from core.feature_access import COMMAND_POLICIES
+        from core.settings_registry import FEATURE_DEFINITIONS
 
         # Read rather than imported: importing `main` starts the bot and exits.
         source = (pathlib.Path(__file__).resolve().parents[1] / "main.py"
@@ -473,3 +475,25 @@ class NewGameRegistrationTests(unittest.TestCase):
             # Without this the game inherits the three-second global cooldown
             # that every other casino game is exempt from.
             self.assertIn(command, exempt)
+
+
+class StakeBoundTests(unittest.TestCase):
+    """Every game launcher refuses a stake past MAX_STAKE before it reaches SQL."""
+
+    def test_every_launcher_checks_the_bound(self):
+        source = (pathlib.Path(__file__).resolve().parents[1] / "cogs" / "casino.py"
+                  ).read_text(encoding="utf-8")
+        launchers = re.findall(r"async def (start_\w+_game)\(ctx_or_int, (bet|bet_input|ante)\b",
+                               source)
+        self.assertGreaterEqual(len(launchers), 8, launchers)
+        for name, _ in launchers:
+            start = source.index(f"async def {name}(")
+            end = source.find("\nasync def ", start + 1)
+            body = source[start:end if end > 0 else None]
+            self.assertIn("MAX_STAKE", body, f"{name} does not check MAX_STAKE")
+
+    def test_the_bound_is_the_database_bound(self):
+        import cogs.casino
+        from core import database
+        self.assertEqual(database.MAX_AMOUNT, cogs.casino.MAX_STAKE)
+

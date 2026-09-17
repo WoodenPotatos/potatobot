@@ -18,8 +18,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 
-import database
-from settings_registry import (
+from core import database
+from core.settings_registry import (
     SETTING_DEFINITIONS,
     WARN_ACTIONS,
     WARN_DEFAULT_TAG,
@@ -145,7 +145,7 @@ class StreakFreezeTests(unittest.TestCase):
             self.user, column, self.now.isoformat(), 500, 100, guild_id)
 
     def test_the_item_is_one_catalog_entry_reachable_from_both_systems(self):
-        import item_catalog
+        from core import item_catalog
         definition = item_catalog.ITEM_DEFINITIONS["streak_freeze"]
         self.assertTrue(definition.sold_in_shop)
         self.assertTrue(definition.drawable_in_gacha)
@@ -376,7 +376,7 @@ class WordFilterListenerTests(unittest.IsolatedAsyncioTestCase):
         import cogs.moderation as moderation
         cog = moderation.Moderation.__new__(moderation.Moderation)
         cog.bot = SimpleNamespace(user=SimpleNamespace(id=99))
-        from bounded import BoundedValueMap
+        from core.bounded import BoundedValueMap
         cog._filter_cache = BoundedValueMap(max_entries=8)
         settings = {"word_filter_words": ["bad"],
                     "word_filter_exempt_roles": [],
@@ -637,7 +637,7 @@ class WarnDestinationTests(unittest.TestCase):
     def test_modlogs_stays_a_private_response_policy(self):
         """PRIVATE keeps the pre-command defer ephemeral, so a refusal in the
         wrong channel never flashes a public placeholder there."""
-        from feature_access import COMMAND_POLICIES, ResponsePolicy
+        from core.feature_access import COMMAND_POLICIES, ResponsePolicy
         self.assertIs(ResponsePolicy.PRIVATE, COMMAND_POLICIES["modlogs"].response)
 
     def test_the_public_embed_still_names_no_moderator(self):

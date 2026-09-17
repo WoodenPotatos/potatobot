@@ -9,13 +9,14 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
+from core import database
 
 from discord.ext import commands
 from datetime import datetime
+from core.clock import local_date, local_time, parse_stored, utc_now
 from cogs.utils import (display_member_name, guild_member_ids, is_channel,
                         voice_reward_block, t)
-from feature_access import is_enabled, require_interaction_feature
+from core.feature_access import is_enabled, require_interaction_feature
 
 # These views are built per invocation and are not persistent, so a finite
 # timeout is what lets discord.py drop them from its message view store.
@@ -129,8 +130,8 @@ class ProfileView(discord.ui.View):
         streak_count = streak_count or 0
 
         if streak_count > 0 and last_streak_update:
-            last_date = datetime.fromisoformat(last_streak_update).date()
-            today = datetime.now().date()
+            last_date = local_date(parse_stored(last_streak_update))
+            today = local_date(utc_now())
             diff = (today - last_date).days
 
             if diff == 0 or diff == 1:

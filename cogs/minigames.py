@@ -10,6 +10,8 @@ project. Two consequences shape the whole module. The channel check has to be a
 cheap in-memory read before anything else happens, and a failure must never
 raise out of the listener, because an exception there is a listener that stops
 running for every guild.
+
+Rules that bind changes here: docs/subsystems/minigames.md
 """
 
 import logging
@@ -27,9 +29,9 @@ if ROOT_DIR not in sys.path:
 import discord
 from discord.ext import commands
 
-import database
+from core import database
 from cogs.utils import guild_setting_sync, t
-from feature_access import is_enabled, maintenance_blocks
+from core.feature_access import is_enabled, maintenance_blocks
 
 minigame_logger = logging.getLogger("PotatoBot.Minigames")
 
@@ -58,6 +60,64 @@ MINIGAME_CHOICES = [
                                 value=key)
     for key in GAMES
 ]
+
+
+# Nine Hungarian letters are written with two characters and one with three,
+# and a chain that does not know them argues with every member who plays one:
+# `busz` ends in `sz`, so the next word is `szek` and not `zebra`. The order is
+# longest match first, because `dzs` contains both `dz` and `zs` — `bridzs`
+# ends in `dzs`, and a two-character match would read it as `zs`.
+#
+# Doubled digraphs need nothing extra. Hungarian doubles the *first* character
+# (`ssz`, `ggy`, `nny`, `ccs`), so the last two characters of `rossz` already
+# spell `sz`.
+HUNGARIAN_LETTERS = ("dzs", "cs", "dz", "gy", "ly", "ny", "sz", "ty", "zs")
+
+# Declared per language rather than applied to everyone. `only` and `many` end
+# in ordinary English letters, so a digraph alphabet in an English guild would
+# refuse every word after them that does not begin `ly` or `ny`. A language
+# with no entry here plays by single letters, which is what every chain did
+# before this existed.
+LETTER_GROUPS = {"hu": HUNGARIAN_LETTERS}
+
+
+def chain_letters() -> tuple[str, ...]:
+    """The multi-character letters the configured language writes.
+
+    Resolved per message rather than at import: `MINIGAME_CHOICES` above is
+    built while the module loads, which is before the settings cache is warm,
+    so an alphabet captured there would be whatever the fallback happened to
+    say. This is one in-memory dict lookup, the same cost `game_for` already
+    pays for every configured game.
+    """
+    return LETTER_GROUPS.get(guild_setting_sync(None, "language"), ())
+
+
+def first_letter(word: str, letters: tuple[str, ...]) -> str:
+    """The word's first letter, which may be more than one character."""
+    for candidate in letters:
+        if word.startswith(candidate):
+            return candidate
+    return word[:1]
+
+
+def last_letter(word: str, letters: tuple[str, ...]) -> str:
+    """The word's last letter, which may be more than one character."""
+    for candidate in letters:
+        if word.endswith(candidate):
+            return candidate
+    return word[-1:]
+
+
+def unique_value(game_key: str, value: str) -> str | None:
+    """What this turn spends out of the chain's supply, if anything.
+
+    A word may only be played once, and it is folded here for the same reason
+    every other comparison folds both sides. Counting spends nothing: the count
+    only ever goes up, so its values cannot repeat, and recording them would
+    grow a table that can never answer anything.
+    """
+    return fold(value) if game_key == "word_chain" else None
 
 
 def fold(word: str) -> str:
@@ -128,12 +188,14 @@ class Minigames(commands.Cog):
 
         moved = await database.run_write(
             database.advance_minigame, message.guild.id, game_key, value,
-            message.author.id, state["value"])
+            message.author.id, state["value"], unique_value(game_key, value))
         if moved is None:
             # Somebody else's turn landed first. Theirs stands; this one is a
             # duplicate rather than a mistake, so it is removed with a note that
             # says so.
             return await self.refuse(message, t("minigames.err_raced"))
+        if moved.get("duplicate"):
+            return await self.refuse(message, t("minigames.err_already_used"))
         # A wrong message is removed rather than breaking the chain, so the
         # streak never resets by itself and `streak == best_streak` always —
         # reacting on a new best would therefore put a trophy on *every*
@@ -163,11 +225,16 @@ class Minigames(commands.Cog):
         posted = match.group(1)
         previous = state["value"]
         if previous:
-            needed = fold(previous)[-1]
-            if fold(posted)[:1] != needed:
+            letters = chain_letters()
+            needed = last_letter(fold(previous), letters)
+            if first_letter(fold(posted), letters) != needed:
                 return False, None, t("minigames.err_next_letter",
                                       letter=needed.upper(), word=previous)
             if fold(posted) == fold(previous):
+                # Kept as a fast path even though the used-word claim would
+                # catch it too: this one names the word, and a guild upgrading
+                # mid-chain has its current word in `minigame_state` and not
+                # yet in `minigame_used_words`.
                 return False, None, t("minigames.err_same_word")
         return True, posted, None
 

@@ -12,7 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 
-import item_catalog
+from core.clock import local_date, parse_stored, utc_now
+
+from core import item_catalog
 
 # Reuse the application's database logger so file and console policies stay centralized.
 db_logger = logging.getLogger('PotatoBot.Database')
@@ -152,8 +154,10 @@ def shutdown_executors(wait: bool = True):
     _READ_EXECUTOR.shutdown(wait=wait, cancel_futures=True)
     _WRITE_EXECUTOR.shutdown(wait=wait, cancel_futures=True)
 
-# Resolve the database from an explicit deployment override or the repository root.
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Resolve the database from an explicit deployment override or the repository
+# root. This module lives in `core/`, so the root is two levels up -- one too
+# few would point a whole installation at `core/economy.db`.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.getenv("POTATOBOT_DB_PATH", os.path.join(BASE_DIR, "economy.db"))
 
 VALID_COOLDOWN_COLUMNS = {
@@ -163,7 +167,15 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_survivor", "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 18
+LATEST_SCHEMA_VERSION = 19
+
+# The largest amount any single balance change, stake or transfer may carry.
+# Far above any real balance, and far below 2**63: an amount past that reaches
+# `sqlite3` as a Python int it cannot bind and raises `OverflowError`, which no
+# `except sqlite3.Error` catches -- so `/pay` with a twenty-digit amount died silently
+# from the member's side. Every command refuses first with a message; this is
+# the backstop for the paths that do not.
+MAX_AMOUNT = 10**12
 
 # A claimed control action is re-queued only once its lease expires. The worker
 # renews the lease as it runs, so slowness never causes a duplicate Discord post.
@@ -641,6 +653,23 @@ def _create_scoped_schema(conn):
             updated_at TEXT NOT NULL,
             PRIMARY KEY (guild_id, game_key)
         );
+        -- Schema 19. Every word a chain has already used, so a word counts
+        -- once rather than once per member who remembers it. Purely additive,
+        -- rewriting no row, and a new table is gated on its own shape by
+        -- `IF NOT EXISTS` — there is nothing to ALTER.
+        --
+        -- The word is stored *folded*, by the caller, because the fold has to
+        -- be applied to both sides or a rule becomes an argument. No member id
+        -- is kept: who played a word is in the channel and in
+        -- `minigame_state.last_user_id`, and storing it again would put this
+        -- table on the erasure path for nothing.
+        CREATE TABLE IF NOT EXISTS minigame_used_words (
+            guild_id INTEGER NOT NULL,
+            game_key TEXT NOT NULL,
+            word TEXT NOT NULL,
+            used_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, game_key, word)
+        );
         CREATE TABLE IF NOT EXISTS guild_settings (
             guild_id INTEGER NOT NULL REFERENCES guilds(guild_id),
             setting_key TEXT NOT NULL,
@@ -852,6 +881,8 @@ def _create_control_plane_v5_schema(conn):
             expires_at TEXT,
             discord_item_id TEXT
         );
+        CREATE INDEX IF NOT EXISTS idx_reward_vouchers_user
+            ON reward_vouchers(guild_id, user_id, acquired_at DESC);
         CREATE TABLE IF NOT EXISTS timed_entitlements (
             entitlement_id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER NOT NULL,
@@ -1309,7 +1340,7 @@ def _promote_instance_settings(conn) -> int:
     logged rather than dropped silently — on a single-guild installation this
     never fires, and on any other it is the thing an operator needs to know.
     """
-    from settings_registry import SETTING_DEFINITIONS, SettingScope
+    from core.settings_registry import SETTING_DEFINITIONS, SettingScope
 
     instance_keys = [key for key, definition in SETTING_DEFINITIONS.items()
                      if definition.scope is SettingScope.INSTANCE]
@@ -1371,6 +1402,8 @@ def initialize_database():
                 "AND name NOT LIKE 'sqlite_%' LIMIT 1"
             ).fetchone() is not None
             if current_version < LATEST_SCHEMA_VERSION and has_existing_schema:
+                # Local time on purpose: a filename an operator reads beside the
+                # database, not a value anything parses.
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
                 backup_path = f"{DB_PATH}.backup-v{current_version}-{timestamp}"
                 with closing(sqlite3.connect(backup_path)) as backup_conn:
@@ -1464,7 +1497,7 @@ def _ensure_user(conn, user_id: int, timestamp: str = None):
             inactive_warned
         ) VALUES (?, 100, 0, 1, 0, 0, 0.0, 1.0, 0.0, ?, 0)
         """,
-        (user_id, timestamp or datetime.now().isoformat()),
+        (user_id, timestamp or utc_now().isoformat()),
     )
 
 
@@ -1493,6 +1526,9 @@ def xp_for_level(level: int) -> int:
 def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
                         xp_change: int = 0, win_inc: int = 0,
                         loss_inc: int = 0, clamp_balance: bool = True):
+    if abs(balance_change) > MAX_AMOUNT or abs(xp_change) > MAX_AMOUNT:
+        raise ValidationError("amount_out_of_range",
+                              "balance or xp change exceeds MAX_AMOUNT")
     _ensure_user(conn, user_id)
     row = conn.execute(
         "SELECT balance, xp, level, bj_wins, bj_losses FROM users WHERE user_id = ?",
@@ -1632,7 +1668,7 @@ def begin_interactive_wager(wager_id: str, guild_id: int, user_id: int,
     committed, so consuming the item separately would leave a spent item with no
     wager, or a wager with a free item, whenever one of the two writes failed.
     """
-    if not wager_id or not guild_id or stake <= 0:
+    if not wager_id or not guild_id or stake <= 0 or stake > MAX_AMOUNT:
         return None
     created_at = datetime.now(timezone.utc).isoformat()
     try:
@@ -1812,9 +1848,7 @@ def claim_periodic_reward(guild_id: int, user_id: int, reward_key: str,
                 (guild_id, user_id, reward_key),
             ).fetchone()
             if previous is not None:
-                last_claim = datetime.fromisoformat(previous[0])
-                if last_claim.tzinfo is None:
-                    last_claim = last_claim.replace(tzinfo=timezone.utc)
+                last_claim = parse_stored(previous[0])
                 if now - last_claim < timedelta(days=interval_days):
                     conn.rollback()
                     return None
@@ -1839,7 +1873,7 @@ def claim_periodic_reward(guild_id: int, user_id: int, reward_key: str,
 def resolve_instant_wager(user_id: int, stake: int, credit: int = 0,
                           win_inc: int = 0, loss_inc: int = 0):
     """Reserves and settles a non-interactive wager in one transaction."""
-    if stake <= 0 or credit < 0:
+    if stake <= 0 or stake > MAX_AMOUNT or credit < 0:
         return None
     try:
         with get_connection() as conn:
@@ -1866,7 +1900,7 @@ def resolve_instant_wager(user_id: int, stake: int, credit: int = 0,
 def resolve_dice_wager(guild_id: int, user_id: int, stake: int,
                        first_roll: int, second_roll: int, bot_roll: int):
     """Settle dice and consume a loaded die only after a valid paid wager."""
-    if stake <= 0 or any(roll not in range(1, 7)
+    if stake <= 0 or stake > MAX_AMOUNT or any(roll not in range(1, 7)
                          for roll in (first_roll, second_roll, bot_roll)):
         return None
     try:
@@ -1960,7 +1994,7 @@ def resolve_roulette_wager(guild_id: int, user_id: int, stake: int,
     roulette reading of "keeps the higher of two rolls". It is spent whether or
     not the second spin helped, exactly as in dice.
     """
-    if stake <= 0 or (selected_colour is None and selected_number is None):
+    if stake <= 0 or stake > MAX_AMOUNT or (selected_colour is None and selected_number is None):
         return None
     if selected_colour is not None and selected_colour not in {"red", "black", "green"}:
         return None
@@ -2039,7 +2073,7 @@ def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None):
     happen inside the transaction that debits the stake, or the item that changes
     it would be a second, separately-committed write.
     """
-    if stake <= 0:
+    if stake <= 0 or stake > MAX_AMOUNT:
         return None
     rng = rng or secrets.SystemRandom()
     try:
@@ -2081,7 +2115,7 @@ def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None):
     Same reasoning as roulette. A lucky charm spins a second set of reels and
     keeps whichever pays more, and is spent either way.
     """
-    if stake <= 0:
+    if stake <= 0 or stake > MAX_AMOUNT:
         return None
     rng = rng or secrets.SystemRandom()
     try:
@@ -2122,7 +2156,7 @@ def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None):
 def transfer_balance(sender_id: int, recipient_id: int, amount: int,
                      sender_xp: int = 0):
     """Moves funds between two users in one transaction."""
-    if amount <= 0 or sender_id == recipient_id:
+    if amount <= 0 or amount > MAX_AMOUNT or sender_id == recipient_id:
         return None
     try:
         with get_connection() as conn:
@@ -2206,7 +2240,7 @@ def claim_timed_reward(user_id: int, cooldown_column: str, timestamp: str,
     """Checks a cooldown and grants its reward in one write transaction."""
     if cooldown_column not in VALID_COOLDOWN_COLUMNS:
         raise ValueError(f"invalid cooldown column: {cooldown_column}")
-    now = datetime.fromisoformat(timestamp)
+    now = parse_stored(timestamp)
     try:
         with get_connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -2215,9 +2249,12 @@ def claim_timed_reward(user_id: int, cooldown_column: str, timestamp: str,
                 f"SELECT {cooldown_column} FROM users WHERE user_id = ?", (user_id,)
             ).fetchone()[0]
             if last_value:
-                last = datetime.fromisoformat(last_value)
+                last = parse_stored(last_value)
                 blocked = (
-                    once_per_day and last.date() == now.date()
+                    # "Today" is the host's calendar day, not UTC's: the gate keeps
+                    # the midnight it always had while the interval arithmetic
+                    # below stops caring about the clock change.
+                    once_per_day and local_date(last) == local_date(now)
                 ) or (
                     interval_seconds is not None
                     and (now - last).total_seconds() < interval_seconds
@@ -2292,7 +2329,7 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
     """
     if cooldown_column not in VALID_COOLDOWN_COLUMNS:
         raise ValueError(f"invalid cooldown column: {cooldown_column}")
-    now = datetime.fromisoformat(timestamp)
+    now = parse_stored(timestamp)
     try:
         with get_connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -2303,7 +2340,7 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
                 (user_id,),
             ).fetchone()
             last_claim, streak_count, last_streak_update = row
-            if last_claim and datetime.fromisoformat(last_claim).date() == now.date():
+            if last_claim and local_date(parse_stored(last_claim)) == local_date(now):
                 conn.rollback()
                 return {"claimed": False, "last_claim": last_claim}
 
@@ -2312,7 +2349,8 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
             if not last_streak_update:
                 new_streak = 1
             else:
-                day_gap = (now.date() - datetime.fromisoformat(last_streak_update).date()).days
+                day_gap = (local_date(now)
+                           - local_date(parse_stored(last_streak_update))).days
                 if day_gap == 0:
                     new_streak = streak_count
                 elif day_gap in (1, 2):
@@ -2495,7 +2533,7 @@ def get_connection():
 
 def register_guild(guild_id: int, display_name: str = None):
     """Create or refresh the installation-local record for a Discord guild."""
-    now = datetime.now().isoformat()
+    now = utc_now().isoformat()
     with get_connection() as conn:
         conn.execute(
             """
@@ -2515,7 +2553,7 @@ def mark_guild_inactive(guild_id: int):
     with get_connection() as conn:
         conn.execute(
             "UPDATE guilds SET active = 0, last_seen_at = ? WHERE guild_id = ?",
-            (datetime.now().isoformat(), int(guild_id)),
+            (utc_now().isoformat(), int(guild_id)),
         )
 
 
@@ -2556,7 +2594,7 @@ def get_active_guilds(guild_ids=None) -> list[dict]:
 
 def get_feature_states(guild_id: int) -> dict[str, dict]:
     """Return all registered flags, applying safe defaults for missing rows."""
-    from settings_registry import FEATURE_DEFINITIONS
+    from core.settings_registry import FEATURE_DEFINITIONS
 
     with get_connection() as conn:
         rows = {
@@ -2599,7 +2637,7 @@ def get_feature_revision(guild_id: int) -> int:
 
 def is_feature_enabled(guild_id: int, feature_key: str) -> bool:
     """Resolve a guild flag; missing tenant context preserves legacy behavior."""
-    from settings_registry import validate_feature_key
+    from core.settings_registry import validate_feature_key
 
     definition = validate_feature_key(feature_key)
     if guild_id is None:
@@ -2619,7 +2657,7 @@ def set_feature_state(guild_id: int, feature_key: str, enabled: bool,
     Enabling remains strict: all dependencies must already be enabled. Disabling
     cascades transitively so the persisted feature graph is never inconsistent.
     """
-    from settings_registry import FEATURE_DEFINITIONS, validate_feature_state
+    from core.settings_registry import FEATURE_DEFINITIONS, validate_feature_state
 
     guild_id = int(guild_id)
     with get_connection() as conn:
@@ -2660,7 +2698,7 @@ def set_feature_state(guild_id: int, feature_key: str, enabled: bool,
                         targets.add(key)
                         pending.append(key)
 
-        now = datetime.now().isoformat()
+        now = utc_now().isoformat()
         changes = {}
         for key in sorted(targets):
             new_enabled = enabled if key == feature_key else False
@@ -2715,7 +2753,7 @@ def create_realm(name: str, actor_id: int) -> int:
     normalized = " ".join(name.split()) if isinstance(name, str) else ""
     if not 3 <= len(normalized) <= 64:
         raise ValueError("realm name must contain between 3 and 64 characters")
-    now = datetime.now().isoformat()
+    now = utc_now().isoformat()
     with get_connection() as conn:
         cursor = conn.execute(
             "INSERT INTO realms (name, created_by, status, created_at) "
@@ -2783,7 +2821,7 @@ def approve_realm_membership(realm_id: int, guild_id: int, actor_id: int):
             WHERE realm_id = ? AND guild_id = ? AND status = 'pending'
             """,
             (
-                int(actor_id), datetime.now().isoformat(),
+                int(actor_id), utc_now().isoformat(),
                 int(realm_id), int(guild_id),
             ),
         )
@@ -2793,7 +2831,7 @@ def approve_realm_membership(realm_id: int, guild_id: int, actor_id: int):
 
 def get_guild_data_scopes(guild_id: int) -> dict[str, dict]:
     """Return all curated categories with guild-local defaults."""
-    from settings_registry import DataCategory
+    from core.settings_registry import DataCategory
 
     with get_connection() as conn:
         rows = {
@@ -2816,7 +2854,7 @@ def get_guild_data_scopes(guild_id: int) -> dict[str, dict]:
 
 def resolve_data_context(guild_id: int, category: str, user_id: int = None):
     """Resolve a guild operation to its isolated, realm, or instance account."""
-    from settings_registry import DataCategory, DataContext, DataScopeType
+    from core.settings_registry import DataCategory, DataContext, DataScopeType
 
     guild_id = int(guild_id)
     category_value = DataCategory(category)
@@ -2851,7 +2889,7 @@ def resolve_data_context(guild_id: int, category: str, user_id: int = None):
 def set_guild_data_scope(guild_id: int, category: str, scope_type: str,
                          realm_id: int, actor_id: int, expected_revision: int):
     """Select a data view without merging or deleting dormant scoped state."""
-    from settings_registry import DataCategory, DataScopeType
+    from core.settings_registry import DataCategory, DataScopeType
 
     try:
         category_value = DataCategory(category).value
@@ -2867,7 +2905,7 @@ def set_guild_data_scope(guild_id: int, category: str, scope_type: str,
     current = get_guild_data_scopes(guild_id)[category_value]
     if current["revision"] != int(expected_revision):
         raise RevisionConflictError("data-scope revision conflict")
-    now = datetime.now().isoformat()
+    now = utc_now().isoformat()
     with get_connection() as conn:
         if scope_value == DataScopeType.REALM.value:
             membership = conn.execute(
@@ -2925,7 +2963,7 @@ def set_guild_data_scope(guild_id: int, category: str, scope_type: str,
 def set_user_sharing_preference(user_id: int, guild_id: int, category: str,
                                 opted_out: bool):
     """Persist a member's local fallback choice for shareable categories."""
-    from settings_registry import DataCategory
+    from core.settings_registry import DataCategory
 
     if category not in {
         DataCategory.ECONOMY.value,
@@ -2946,7 +2984,7 @@ def set_user_sharing_preference(user_id: int, guild_id: int, category: str,
             """,
             (
                 int(user_id), int(guild_id), category, int(opted_out),
-                datetime.now().isoformat(),
+                utc_now().isoformat(),
             ),
         )
 
@@ -2960,7 +2998,7 @@ def adopt_legacy_database(guild_id: int) -> dict:
     """
     guild_id = int(guild_id)
     adoption_key = f"legacy-users-v1:{guild_id}"
-    now = datetime.now().isoformat()
+    now = utc_now().isoformat()
     user_columns = list(USER_COLUMNS)
     select_columns = ", ".join(["user_id", *user_columns])
     insert_columns = ", ".join(
@@ -3350,7 +3388,7 @@ def _warn_tag_filter(tag: str | None) -> tuple[str, tuple]:
     """
     if tag is None:
         return "", ()
-    from settings_registry import WARN_DEFAULT_TAG
+    from core.settings_registry import WARN_DEFAULT_TAG
     if tag == WARN_DEFAULT_TAG:
         return " AND (tag = ? OR tag IS NULL)", (tag,)
     return " AND tag = ?", (tag,)
@@ -3491,7 +3529,7 @@ def remove_warning(warning_id: int, user_id: int, guild_id: int,
             )
             if cursor.rowcount != 1:
                 raise DatabaseOperationError("warning removal conflict")
-            now = datetime.now().isoformat()
+            now = utc_now().isoformat()
             conn.execute(
                 """
                 INSERT INTO settings_audit
@@ -3741,9 +3779,12 @@ def get_cooldown(user_id: int, col_name: str):
             cursor = conn.execute(f"SELECT {col_name} FROM users WHERE user_id = ?", (user_id,))
             result = cursor.fetchone()
             return result[0] if result else None
-    except Exception as e:
-        db_logger.error(f"Hiba a {col_name} cooldown read failed: {e}")
-        return None
+    except sqlite3.Error as exc:
+        # Raised, not swallowed: returning None here read as "never played
+        # today" to the Everydle gates, so a database error opened a second
+        # game. The payout stays guarded by the atomic claim regardless.
+        db_logger.exception("Cooldown read failed (column=%s)", col_name)
+        raise DatabaseOperationError("cooldown read failed") from exc
 
 def set_cooldown(user_id: int, col_name: str, timestamp: str):
     """Write an allowlisted cooldown timestamp."""
@@ -3752,16 +3793,16 @@ def set_cooldown(user_id: int, col_name: str, timestamp: str):
     try:
         with get_connection() as conn:
             conn.execute(f"UPDATE users SET {col_name} = ? WHERE user_id = ?", (timestamp, user_id))
-    except Exception as e:
-        db_logger.error(f"Hiba a {col_name} cooldown update failed: {e}")
-        raise DatabaseOperationError("cooldown update failed") from e
+    except sqlite3.Error as exc:
+        db_logger.exception("Cooldown update failed (column=%s)", col_name)
+        raise DatabaseOperationError("cooldown update failed") from exc
 
 
 def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
                     base_chance: float, victim_passive_defense: float,
                     chance_roll: float, steal_percent: float, guild_id: int = 0):
     """Checks eligibility and resolves all robbery effects in one transaction."""
-    now = datetime.fromisoformat(timestamp)
+    now = parse_stored(timestamp)
     try:
         with get_connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -3789,7 +3830,7 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
                 conn.rollback()
                 return {"resolved": False, "reason": "missing_user"}
             if attacker[6]:
-                last = datetime.fromisoformat(attacker[6])
+                last = parse_stored(attacker[6])
                 if (now - last).total_seconds() < 3600:
                     conn.rollback()
                     return {"resolved": False, "reason": "cooldown", "last_claim": attacker[6]}
@@ -3801,7 +3842,7 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
                 return {"resolved": False, "reason": "victim_poor"}
 
             victim_defense = victim[1]
-            if victim[3] and now > datetime.fromisoformat(victim[3]):
+            if victim[3] and now > parse_stored(victim[3]):
                 victim_defense = 1.0
                 conn.execute(
                     "UPDATE users SET rob_defense = 1.0, bodyguard_until = NULL WHERE user_id = ?",
@@ -4091,7 +4132,7 @@ def get_instance_settings() -> dict[str, dict]:
 
 def set_guild_settings(guild_id: int, actor_id: int, changes: list[dict]):
     """Apply a typed settings patch atomically with optimistic revisions."""
-    from settings_registry import SETTING_DEFINITIONS, validate_setting_value
+    from core.settings_registry import SETTING_DEFINITIONS, validate_setting_value
     if not isinstance(changes, list) or not changes:
         raise ValidationError("settings_patch_empty", "settings patch must be a non-empty list")
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -4110,7 +4151,7 @@ def set_guild_settings(guild_id: int, actor_id: int, changes: list[dict]):
                 # An instance setting has no guild dimension, so it goes to the
                 # table that has none either. The audit row still records the
                 # guild the change was made from, because that is who did it.
-                from settings_registry import SettingScope
+                from core.settings_registry import SettingScope
                 instance = definition.scope is SettingScope.INSTANCE
                 table = "instance_settings" if instance else "guild_settings"
                 where = ("setting_key = ?" if instance
@@ -4968,15 +5009,44 @@ def get_minigame_state(guild_id: int, game_key: str) -> dict:
             "best_streak": row[3]}
 
 
+def _claim_used_value(conn, guild_id: int, game_key: str,
+                      value: str | None, timestamp: str) -> bool:
+    """Take a value out of a chain's supply, or report it was already gone.
+
+    Takes the caller's connection so the claim commits with the turn that made
+    it: a claim on its own connection would survive a rolled-back turn and
+    forbid a word nobody successfully played.
+    """
+    if value is None:
+        return True
+    return bool(conn.execute(
+        "INSERT OR IGNORE INTO minigame_used_words "
+        "(guild_id, game_key, word, used_at) VALUES (?, ?, ?, ?)",
+        (int(guild_id), game_key, value, timestamp)).rowcount)
+
+
 def advance_minigame(guild_id: int, game_key: str, value: str, user_id: int,
-                     expected: str) -> dict | None:
-    """Record one accepted turn, or None if somebody got there first.
+                     expected: str, unique_value: str | None = None
+                     ) -> dict | None:
+    """Record one accepted turn, or say why it was not one.
 
     `expected` is the value the caller believed was current. The UPDATE is
     conditional on it, so two people posting the next number in the same instant
     cannot both be accepted — one wins and the other is told the chain moved.
     Without that, the check would be a read followed by a write and a fast
     channel would let the count skip.
+
+    `unique_value` is a value this chain may only ever use once, already folded
+    by the caller. Claiming it is an `INSERT OR IGNORE` against a primary key,
+    which means the insert **is** the check: a `SELECT` followed by an `INSERT`
+    would be exactly the read-then-write shape the paragraph above exists to
+    avoid, and two people posting one word in the same instant would both pass
+    it. Word chain passes the word; counting passes nothing, because its values
+    are unique by construction — the chain only ever goes up.
+
+    Three answers, and a caller has to tell them apart before reading a streak:
+    `None` when somebody got there first, `{"duplicate": True}` when the value
+    has been used before, and the new state otherwise.
     """
     timestamp = datetime.now(timezone.utc).isoformat()
     try:
@@ -4990,6 +5060,10 @@ def advance_minigame(guild_id: int, game_key: str, value: str, user_id: int,
                 if expected != "":
                     conn.rollback()
                     return None
+                if not _claim_used_value(conn, guild_id, game_key,
+                                         unique_value, timestamp):
+                    conn.rollback()
+                    return {"duplicate": True}
                 streak, best = 1, 1
                 conn.execute(
                     "INSERT INTO minigame_state (guild_id, game_key, value, "
@@ -5002,6 +5076,10 @@ def advance_minigame(guild_id: int, game_key: str, value: str, user_id: int,
                 if row[0] != expected:
                     conn.rollback()
                     return None
+                if not _claim_used_value(conn, guild_id, game_key,
+                                         unique_value, timestamp):
+                    conn.rollback()
+                    return {"duplicate": True}
                 streak = row[1] + 1
                 best = max(row[2], streak)
                 conn.execute(
@@ -5031,6 +5109,11 @@ def reset_minigame(guild_id: int, game_key: str) -> None:
             "last_user_id = NULL, streak = 0, updated_at = excluded.updated_at",
             (int(guild_id), game_key, timestamp),
         )
+        # A reset that left ten thousand words forbidden would not be a reset,
+        # and this is the only escape valve a long chain has.
+        conn.execute(
+            "DELETE FROM minigame_used_words "
+            "WHERE guild_id = ? AND game_key = ?", (int(guild_id), game_key))
         conn.commit()
 
 
@@ -5678,7 +5761,7 @@ def _extend_timed_entitlement(conn, guild_id: int, user_id: int,
     ).fetchone()
     start = now
     if active:
-        current_expiry = datetime.fromisoformat(active[1])
+        current_expiry = parse_stored(active[1])
         if current_expiry > start:
             start = current_expiry
     expires = (start + timedelta(days=duration_days)).isoformat()
@@ -5746,7 +5829,7 @@ def redeem_voucher(guild_id: int, user_id: int, voucher_id: str) -> dict:
             ).fetchone()
             start = now
             if active:
-                current_expiry = datetime.fromisoformat(active[1])
+                current_expiry = parse_stored(active[1])
                 if current_expiry > start:
                     start = current_expiry
             expires = start + timedelta(days=duration_days)
@@ -5821,7 +5904,7 @@ def rollback_voucher_redemption(guild_id: int, user_id: int, voucher_id: str,
         if not voucher or voucher[1] != "active" or not active:
             conn.rollback()
             return False
-        restored = datetime.fromisoformat(active[1]) - timedelta(days=int(voucher[0]))
+        restored = parse_stored(active[1]) - timedelta(days=int(voucher[0]))
         if restored <= datetime.now(timezone.utc) + timedelta(minutes=1):
             conn.execute("DELETE FROM timed_entitlements WHERE entitlement_id = ?", (active[0],))
         else:
@@ -6080,7 +6163,7 @@ def guild_item_values(guild_id: int) -> dict:
     settlement transaction is not.
     """
     try:
-        import settings_cache
+        from core import settings_cache
 
         value = settings_cache.setting(int(guild_id), "shop_item_values")
     except Exception:
@@ -6391,7 +6474,7 @@ def purchase_custom_shop_item(guild_id: int, user_id: int, item_key: str) -> dic
             ).fetchone()
             base = datetime.now(timezone.utc)
             if active:
-                current_expiry = datetime.fromisoformat(active[1])
+                current_expiry = parse_stored(active[1])
                 if current_expiry > base:
                     base = current_expiry
             expires = base + timedelta(days=int(config_value["duration_days"]))
@@ -6435,7 +6518,7 @@ def rollback_custom_role_purchase(guild_id: int, user_id: int, charged_price: in
                 (int(guild_id), int(user_id), f"role:{int(role_id)}"),
             ).fetchone()
             if active:
-                restored = datetime.fromisoformat(active[1]) - timedelta(days=int(duration_days))
+                restored = parse_stored(active[1]) - timedelta(days=int(duration_days))
                 if restored <= datetime.now(timezone.utc) + timedelta(minutes=1):
                     conn.execute("DELETE FROM timed_entitlements WHERE entitlement_id = ?", (active[0],))
                 else:
@@ -6850,6 +6933,10 @@ ERASE_DELETE_ORDER = (
     ("active_channels", "owner_id = ?", 1),
     ("user_sharing_preferences", "user_id = ?", 1),
     ("user_identities", "user_id = ?", 1),
+    # A party post whose host is erased has no host; the row goes. Members who
+    # *joined* somebody else's post are inside `joined_json` and are scrubbed
+    # out of it below rather than deleting the host's post over them.
+    ("lfg_posts", "host_id = ?", 1),
 )
 
 # Re-keyed to the tombstone instead of deleted. ``users`` and ``scoped_accounts``
@@ -6873,6 +6960,9 @@ ERASE_NULL_ACTOR = (
     ("shop_item_definitions", "updated_by"),
     ("gacha_banners", "updated_by"),
     ("work_responses", "updated_by"),
+    # Who took the last turn in a counting or word-chain channel. Nullable, and
+    # NULL already means "nobody yet" to `police`, so the chain plays on.
+    ("minigame_state", "last_user_id"),
 )
 ERASE_REKEY_ACTOR = (
     ("settings_audit", "actor_id"),
@@ -6884,6 +6974,16 @@ ERASE_REKEY_ACTOR = (
 # What ``remove_warning`` writes into settings_audit.old_value_json. The subject's
 # id and the reason text live inside that payload, so an erasure has to rewrite it.
 _AUDIT_SUBJECT_ACTIONS = ("warning.delete",)
+
+# JSON columns that can carry a member id, each with the function that rewrites
+# it. Declared so the coverage test can hold the schema to this list: a column
+# holding member ids in JSON is invisible to the row-level lists above, and both
+# `lfg_posts.joined_json` and the erasure action's own payload were exactly that.
+ERASE_SCRUBBED_JSON = (
+    ("lfg_posts", "joined_json"),
+    ("control_actions", "payload_json"),
+    ("settings_audit", "old_value_json"),
+)
 
 
 def _rows_as_dicts(cursor) -> list[dict]:
@@ -7052,6 +7152,65 @@ def _scrub_audit_payloads_locked(conn, user_id: int, tombstone_id: int) -> int:
     return scrubbed
 
 
+def _scrub_lfg_parties_locked(conn, user_id: int) -> int:
+    """Take the member out of every party they joined.
+
+    `joined_json` is an ordered list of member ids and nothing else, so the
+    member simply leaves; the post keeps its other members and its host. A host
+    who is erased loses the post itself through `ERASE_DELETE_ORDER`.
+    """
+    rows = conn.execute(
+        "SELECT guild_id, message_id, joined_json FROM lfg_posts "
+        "WHERE joined_json LIKE ?", (f"%{int(user_id)}%",)
+    ).fetchall()
+    scrubbed = 0
+    for guild_id, message_id, stored in rows:
+        try:
+            party = [int(uid) for uid in json.loads(stored)]
+        except (TypeError, ValueError):
+            continue
+        if int(user_id) not in party:
+            continue  # the LIKE matched a longer id that contains this one
+        remaining = [uid for uid in party if uid != int(user_id)]
+        conn.execute(
+            "UPDATE lfg_posts SET joined_json = ? "
+            "WHERE guild_id = ? AND message_id = ?",
+            (json.dumps(remaining), guild_id, message_id),
+        )
+        scrubbed += 1
+    return scrubbed
+
+
+def _scrub_control_action_payloads_locked(conn, user_id: int,
+                                          tombstone_id: int) -> int:
+    """Re-key the erasure action's own record of whom it erased.
+
+    An operator-requested erasure travels through the outbox as
+    `{"user_id": <member>}`, and that row outlives the erasure it caused until
+    `prune_control_actions` removes it — so for up to a month the queue named
+    the member the rest of the transaction had just forgotten.
+    """
+    rows = conn.execute(
+        "SELECT action_id, payload_json FROM control_actions "
+        "WHERE action_type = 'erase_member'"
+    ).fetchall()
+    scrubbed = 0
+    for action_id, payload_json in rows:
+        try:
+            payload = json.loads(payload_json)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict) or payload.get("user_id") != int(user_id):
+            continue
+        payload["user_id"] = tombstone_id
+        conn.execute(
+            "UPDATE control_actions SET payload_json = ? WHERE action_id = ?",
+            (json.dumps(payload, sort_keys=True), action_id),
+        )
+        scrubbed += 1
+    return scrubbed
+
+
 def anonymize_user(user_id: int, actor_id: int, guild_id: int = 0,
                    reason: str = "member_request") -> dict:
     """Erase one member, retaining the economy row under a tombstone identifier.
@@ -7096,6 +7255,8 @@ def anonymize_user(user_id: int, actor_id: int, guild_id: int = 0,
                     (tombstone_id, user_id),
                 )
             scrubbed = _scrub_audit_payloads_locked(conn, user_id, tombstone_id)
+            parties = _scrub_lfg_parties_locked(conn, user_id)
+            actions = _scrub_control_action_payloads_locked(conn, user_id, tombstone_id)
 
             receipt = {
                 "tombstone_id": tombstone_id,
@@ -7105,6 +7266,8 @@ def anonymize_user(user_id: int, actor_id: int, guild_id: int = 0,
                 "retained_rows": {table: count for table, count in retained.items() if count},
                 "refunded_wagers": refunded,
                 "audit_payloads_scrubbed": scrubbed,
+                "lfg_parties_left": parties,
+                "control_action_payloads_scrubbed": actions,
             }
             # Deliberately not remove_warning's shape: the audit feed is readable by
             # any guild administrator, so the payload names the tombstone and the

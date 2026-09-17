@@ -168,7 +168,7 @@ class EnglishCatalogTests(unittest.TestCase):
         minigame entity name disables that minigame outright, so a language is
         only selectable once both are complete.
         """
-        from settings_registry import SUPPORTED_LANGUAGES, SETTING_DEFINITIONS
+        from core.settings_registry import SUPPORTED_LANGUAGES, SETTING_DEFINITIONS
 
         self.assertEqual(
             tuple(SUPPORTED_LANGUAGES),
@@ -207,7 +207,7 @@ class EnglishCatalogTests(unittest.TestCase):
                 self.assertIn("data/loldle/", document.read_text(encoding="utf-8"))
 
     def test_an_unsupported_language_is_rejected_on_save(self):
-        from settings_registry import SETTING_DEFINITIONS, validate_setting_value
+        from core.settings_registry import SETTING_DEFINITIONS, validate_setting_value
 
         definition = SETTING_DEFINITIONS["language"]
         for language in definition.choices:

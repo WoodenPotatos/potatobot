@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import shutil
@@ -7,8 +8,9 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
-import database
+from core import database
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1252,7 +1254,7 @@ class GachaAssetsSurviveRentalsBeingOffTests(unittest.TestCase):
 
     def test_the_whole_path_works_with_shop_and_rentals_disabled(self):
         """The behavioural one. Every flag a shop rental needs is off."""
-        import feature_access
+        from core import feature_access
 
         feature_access.seed_cached_feature(self.GUILD, "shop", False)
         feature_access.seed_cached_feature(self.GUILD, "rentals", False)
@@ -1325,7 +1327,8 @@ class GachaAssetsSurviveRentalsBeingOffTests(unittest.TestCase):
         gate = re.compile(r'(?:is_enabled|require_interaction_feature)'
                           r'\([^)]*["\']rentals["\']')
         readers = []
-        for path in sorted(ROOT.glob("cogs/*.py")) + sorted(ROOT.glob("*.py")):
+        for path in (sorted(ROOT.glob("cogs/*.py")) + sorted(ROOT.glob("core/*.py"))
+                     + sorted(ROOT.glob("*.py"))):
             body = "\n".join(line for line in
                              path.read_text(encoding="utf-8").splitlines()
                              if not line.strip().startswith("#"))
@@ -1335,3 +1338,101 @@ class GachaAssetsSurviveRentalsBeingOffTests(unittest.TestCase):
             ["shop.py"], readers,
             "the rentals flag should gate only cogs/shop.py's purchase check; "
             f"found {readers}")
+
+
+class RewardLabelResolutionTests(unittest.TestCase):
+    """`gacha_reward_label` must not perform its own database I/O.
+
+    It used to call `get_shop_item_definitions` directly and synchronously
+    once per distinct key, which blocked the whole event loop and scaled with
+    a guild's full custom-item table — the root cause of `/inventory` timing
+    out for a member with many distinct custom items or vouchers.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "labels.db")
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.create_shop_item_definition(1, 42, {
+            "item_key": "vault_extra", "template_type": "vault",
+            "category": None, "enabled": False, "price": 1,
+            "config": {"amount": 300000},
+            "text": {"name": "Extra vault", "description": "d"}})
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def test_gacha_reward_label_makes_no_database_call(self):
+        from cogs.gacha import gacha_reward_label
+
+        with patch("core.database.get_shop_item_definitions") as mocked:
+            label = gacha_reward_label(
+                "vault_extra", custom_items={"vault_extra": "Extra vault"})
+        mocked.assert_not_called()
+        self.assertEqual("Extra vault", label)
+
+    def test_resolve_custom_item_labels_is_one_query_regardless_of_key_count(self):
+        from cogs.gacha import resolve_custom_item_labels
+
+        with patch("core.database.get_shop_item_definitions",
+                   wraps=database.get_shop_item_definitions) as wrapped:
+            labels = asyncio.run(resolve_custom_item_labels(1))
+        self.assertEqual(1, wrapped.call_count)
+        self.assertEqual({"vault_extra": "Extra vault"}, labels)
+
+    def test_resolve_custom_item_labels_degrades_on_a_database_error(self):
+        """A lookup failure must not take the whole command down with it; the
+        caller falls back to bracketed/bare keys, exactly as the old per-key
+        try/except did."""
+        from cogs.gacha import resolve_custom_item_labels
+
+        with patch("core.database.get_shop_item_definitions",
+                   side_effect=database.DatabaseOperationError("boom")):
+            labels = asyncio.run(resolve_custom_item_labels(1))
+        self.assertEqual({}, labels)
+
+
+class InventoryEmbedFieldChunkingTests(unittest.TestCase):
+    """Discord refuses a field over 1024 characters and the whole embed with
+    it, so a heavy inventory must degrade to a truncation note rather than
+    fail to send outright."""
+
+    def test_short_list_is_one_field(self):
+        from cogs.gacha import _chunked_embed_fields
+
+        fields = _chunked_embed_fields("Items", ["a", "b", "c"])
+        self.assertEqual([("Items", "a\nb\nc")], fields)
+
+    def test_empty_list_reads_as_the_empty_placeholder(self):
+        from cogs.gacha import _chunked_embed_fields
+
+        fields = _chunked_embed_fields("Items", [])
+        self.assertEqual(1, len(fields))
+        name, value = fields[0]
+        self.assertEqual("Items", name)
+        self.assertTrue(value)
+
+    def test_every_field_value_stays_under_the_discord_limit(self):
+        from cogs.gacha import _chunked_embed_fields
+
+        lines = [f"custom item name number {i} x 1" for i in range(400)]
+        fields = _chunked_embed_fields("Items", lines)
+        self.assertLessEqual(len(fields), 3)
+        for _, value in fields:
+            self.assertLessEqual(len(value), 1024)
+
+    def test_hidden_lines_are_reported_rather_than_dropped(self):
+        import re
+
+        from cogs.gacha import _chunked_embed_fields
+
+        lines = [f"custom item name number {i} x 1" for i in range(400)]
+        fields = _chunked_embed_fields("Items", lines)
+        shown = sum(value.count("\n") + 1 for _, value in fields[:-1])
+        match = re.search(r"\+(\d+)", fields[-1][1])
+        self.assertIsNotNone(
+            match, "the last field must say how many lines were hidden")
+        self.assertEqual(len(lines), shown + int(match.group(1)))

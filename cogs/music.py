@@ -15,12 +15,12 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
+from core import database
 
 from discord.ext import commands
 from datetime import timedelta
 from cogs.utils import BoundedCooldownMap, t
-from feature_access import require_interaction_feature
+from core.feature_access import require_interaction_feature
 
 music_logger = logging.getLogger("PotatoBot.Music")
 
@@ -35,8 +35,12 @@ MUSIC_QUEUE_LIMIT = 100
 MUSIC_PLAYLIST_LIMIT = 25
 MUSIC_MAX_DURATION = 3 * 60 * 60
 MUSIC_EXTRACT_TIMEOUT = 20
+# Four workers for a semaphore of two: `extract_music_info` releases its slot
+# when `wait_for` times out, but the `yt_dlp` thread underneath runs on, so a
+# stuck extraction kept a worker and the next request queued behind it inside
+# the executor. Two spare workers mean two stuck jobs before anyone waits.
 music_extract_executor = ThreadPoolExecutor(
-    max_workers=2, thread_name_prefix="music-extract"
+    max_workers=4, thread_name_prefix="music-extract"
 )
 music_extract_slots = asyncio.Semaphore(2)
 

@@ -16,17 +16,21 @@ import sys
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import database
+import discord
+
+from core import database
 import dashboard_api
-import managed_messages
-import settings_cache
-from feature_access import refresh_feature_cache
+from core import managed_messages
+from core import settings_cache
+from core.feature_access import refresh_feature_cache
 
 
 class ManagedMessageRouteTests(unittest.TestCase):
@@ -510,7 +514,7 @@ class CreatorDeclarationTests(unittest.TestCase):
         """Three copies of that mapping would drift; this pins the two that
         exist. The old Panels page had no gate at all, so it offered a ticket
         launcher on a guild with tickets switched off."""
-        import managed_messages
+        from core import managed_messages
         for kind, page in self.declared_pages().items():
             owner = managed_messages.MANAGED_KIND_FEATURES[kind]
             match = re.search(rf'data-feature="(\w+)" data-page="{page}"', self.html)
@@ -823,7 +827,7 @@ class AdoptContentTests(unittest.TestCase):
 
     def test_every_kind_with_a_fixed_button_declares_its_custom_id(self):
         """A kind missing from the map would read every label as absent."""
-        import managed_messages
+        from core import managed_messages
         # A role menu's buttons are the operator's, and a plain embed has none.
         fixed = set(database.MANAGED_MESSAGE_KINDS) - {"role_menu", "embed"}
         self.assertEqual(fixed, set(dashboard_api.KIND_BUTTON_IDS))
@@ -859,8 +863,79 @@ class BuilderScopeTests(unittest.TestCase):
         source = (ROOT / "dashboard_api.py").read_text(encoding="utf-8")
         self.assertNotIn("list_dashboard_documents", source)
         self.assertIn("dashboard_documents",
-                      (ROOT / "database.py").read_text(encoding="utf-8"))
+                      (ROOT / "core" / "database.py").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PublishEditsThePostedMessageWhereItIsTests(unittest.IsolatedAsyncioTestCase):
+    """A recorded message is edited in its own channel, never re-posted elsewhere.
+
+    The worker fetched the recorded message from the channel the operator had
+    just picked. Publishing an existing panel into a different channel therefore
+    found nothing there, posted a fresh copy, and left the first message alive
+    with working buttons -- a duplicate nothing tracked.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "publish.db")
+        database.initialize_database()
+        database.register_guild(111, "Guild")
+        refresh_feature_cache(111)
+        database.save_managed_message(111, 42, "ticket", "help", "Help", 0,
+                                      title="Help", body="Open a ticket",
+                                      options={}, entries=[])
+        database.record_managed_post(111, "ticket", "help", 1, 5001)
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _channel(self, channel_id):
+        channel = MagicMock(spec=discord.TextChannel)
+        channel.id = channel_id
+        channel.send = AsyncMock()
+        channel.fetch_message = AsyncMock()
+        return channel
+
+    async def test_publishing_into_another_channel_edits_the_original(self):
+        recorded, target = self._channel(1), self._channel(2)
+        posted = MagicMock()
+        posted.edit = AsyncMock()
+        recorded.fetch_message.return_value = posted
+        guild = SimpleNamespace(
+            id=111, icon=None,
+            get_channel=lambda cid: {1: recorded, 2: target}.get(cid))
+
+        error = await dashboard_api.execute_managed_publish(
+            guild, target, {"payload": {"kind": "ticket", "menu_key": "help"}})
+
+        self.assertIsNone(error)
+        recorded.fetch_message.assert_awaited_once_with(5001)
+        posted.edit.assert_awaited_once()
+        target.fetch_message.assert_not_awaited()
+        target.send.assert_not_awaited()
+        stored = database.get_managed_message(111, "ticket", "help")
+        self.assertEqual(("1", "5001"), (stored["channel_id"], stored["message_id"]))
+
+    async def test_a_recorded_message_that_is_gone_is_posted_afresh(self):
+        recorded, target = self._channel(1), self._channel(2)
+        recorded.fetch_message.side_effect = discord.NotFound(
+            MagicMock(status=404), "gone")
+        target.send.return_value = SimpleNamespace(id=6001)
+        guild = SimpleNamespace(
+            id=111, icon=None,
+            get_channel=lambda cid: {1: recorded, 2: target}.get(cid))
+
+        error = await dashboard_api.execute_managed_publish(
+            guild, target, {"payload": {"kind": "ticket", "menu_key": "help"}})
+
+        self.assertIsNone(error)
+        target.send.assert_awaited_once()
+        stored = database.get_managed_message(111, "ticket", "help")
+        self.assertEqual(("2", "6001"), (stored["channel_id"], stored["message_id"]))
+

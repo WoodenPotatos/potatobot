@@ -17,13 +17,14 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
+from core import database
 
 # Re-exported so the many cogs that already import these from here keep working.
-from bounded import BoundedCooldownMap, BoundedValueMap  # noqa: F401
+from core.bounded import BoundedCooldownMap, BoundedValueMap  # noqa: F401
 
 from discord.ext import commands
 from datetime import datetime
+from core.clock import local_date, local_time, parse_stored, utc_now
 
 utility_logger = logging.getLogger("PotatoBot.Utils")
 TOP_RANKER_DEBOUNCE_SECONDS = 30
@@ -318,7 +319,7 @@ def item_mechanic_value(guild_id, item_key):
     run inside the writer, so a guild's override means the same thing wherever
     it is applied.
     """
-    import item_catalog
+    from core import item_catalog
 
     overrides = guild_setting_sync(guild_id, "shop_item_values")
     return item_catalog.mechanic_value(
@@ -334,13 +335,13 @@ def guild_setting_sync(guild_id: int, key: str):
     so a cold cache resolves exactly the way the bot resolved before the cache
     existed rather than resolving to nothing.
     """
-    import settings_cache
+    from core import settings_cache
     return settings_cache.setting(guild_id, key)
 
 
 def guild_settings_sync(guild_id: int, keys) -> dict:
     """Several typed settings from memory, for a synchronous read site."""
-    import settings_cache
+    from core import settings_cache
     return settings_cache.settings(guild_id, keys)
 
 
@@ -353,10 +354,30 @@ async def set_guild_setting(guild_id: int, actor_id: int, key: str, value):
     `/maintenance` is the one that does — goes through here rather than through
     raw SQL or, as it used to, by rewriting `config.json`.
 
+    Raises `database.ValidationError("instance_setting_host_only")` when a
+    non-host actor writes an INSTANCE-scoped key; callers map the reason to the
+    locale key of the same name.
+
     The revision is read immediately before the write, so a concurrent dashboard
     save still conflicts rather than being silently overwritten.
     """
-    import settings_cache
+    from core import settings_cache
+    from core.settings_registry import SETTING_DEFINITIONS, SettingScope
+
+    # An instance setting has no guild dimension, so a guild's staff cannot be
+    # the ones to write it: `maintenance` written here stops the bot in every
+    # guild. The dashboard has always refused this for anyone but the host,
+    # and the two write paths must agree, so the same rule lives here rather
+    # than in the one command that happened to call it. Host authority is
+    # ADMIN_DISCORD_ID -- re-read per call, never cached, exactly as
+    # `dashboard_api.is_host_session` re-derives it per request.
+    definition = SETTING_DEFINITIONS.get(key)
+    if definition is not None and definition.scope is SettingScope.INSTANCE:
+        host = (os.getenv("ADMIN_DISCORD_ID") or "").strip()
+        if not host or str(actor_id) != host:
+            raise database.ValidationError(
+                "instance_setting_host_only",
+                "an installation-wide setting may only be written by the host")
 
     stored = await database.run_read(database.get_guild_settings, guild_id)
     revision = (stored.get(key) or {}).get("revision", 0)
@@ -461,7 +482,7 @@ def mark_top_ranker_dirty(guild):
 
 async def update_user_data(member, balance_change=0, xp_change=0, win_inc=0, loss_inc=0):
     if xp_change:
-        from feature_access import is_enabled
+        from core.feature_access import is_enabled
         if not is_enabled(member.guild.id if member.guild else None, "levels"):
             xp_change = 0
     result = await database.run_write(
@@ -482,8 +503,8 @@ async def apply_database_result(member, result):
     return stats
 
 async def update_streak(user_id):
-    now = datetime.now()
-    today = now.date()
+    now = utc_now()
+    today = local_date(now)
     result = await database.run_read(database.get_streak_data, user_id)
 
     if not result:
@@ -495,7 +516,7 @@ async def update_streak(user_id):
     if not last_update_str:
         streak_count = 1
     else:
-        last_update = datetime.fromisoformat(last_update_str).date()
+        last_update = local_date(parse_stored(last_update_str))
         diff = (today - last_update).days
 
         if diff == 0:
@@ -779,7 +800,7 @@ def is_higher_than(moderator, victim):
     return moderator.top_role.position > victim.top_role.position
 
 async def role_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
-    from feature_access import is_enabled
+    from core.feature_access import is_enabled
     if not is_enabled(interaction.guild_id, "factions"):
         return []
     user = interaction.user

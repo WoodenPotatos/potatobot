@@ -8,11 +8,13 @@ with the dashboard as a separate service — and two renderers is exactly the
 disagreement this replaces, where `/rules_group` sent one message with the guild
 icon and an accept button while the dashboard sent one bare embed per section
 with no view at all.
+
+Rules that bind changes here: docs/subsystems/managed_messages.md
 """
 
 import discord
 
-from feature_access import is_enabled
+from core.feature_access import is_enabled
 
 # Which feature owns each kind of managed message. A page an operator cannot
 # reach is better than a Post button that queues an action the worker refuses.

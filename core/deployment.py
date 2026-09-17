@@ -71,6 +71,22 @@ def load_deployment_settings() -> DeploymentSettings:
 
     external_url = os.getenv("POTATOBOT_DASHBOARD_EXTERNAL_URL", "").strip() or None
     redirect_uri = os.getenv("DISCORD_REDIRECT_URI", "").strip() or None
+    # The documented deployment puts exactly one reverse proxy in front of the
+    # dashboard, so a configured external URL implies one trusted hop. Without
+    # this every client would share the loopback address as its rate-limit
+    # identity. Operators with a different topology override the count.
+    default_hops = 1 if external_url else 0
+    configured_hops = os.getenv("POTATOBOT_TRUSTED_PROXY_HOPS", "").strip()
+    if configured_hops:
+        try:
+            trusted_proxy_hops = int(configured_hops)
+        except ValueError as exc:
+            raise ValueError("POTATOBOT_TRUSTED_PROXY_HOPS must be an integer") from exc
+        if not 0 <= trusted_proxy_hops <= 4:
+            raise ValueError("POTATOBOT_TRUSTED_PROXY_HOPS must be between 0 and 4")
+    else:
+        trusted_proxy_hops = default_hops
+
     if external_url or redirect_uri:
         if not external_url or not redirect_uri:
             raise ValueError(
@@ -101,25 +117,18 @@ def load_deployment_settings() -> DeploymentSettings:
             raise ValueError(
                 "POTATOBOT_DASHBOARD_EXTERNAL_URL must be an origin without a path"
             )
-        if dashboard_host not in {"127.0.0.1", "localhost", "::1"}:
+        # A non-loopback bind is refused unless the operator has *said* there is
+        # a proxy in front, by configuring POTATOBOT_TRUSTED_PROXY_HOPS. Inside a
+        # container 0.0.0.0 is the only bind the port mapping can reach, and the
+        # mapping to 127.0.0.1 on the host is the loopback boundary this rule was
+        # inferring -- compose sets the hops explicitly for exactly that reason,
+        # and without this exemption the documented two-service deployment could
+        # not start once OAuth was configured.
+        if (dashboard_host not in {"127.0.0.1", "localhost", "::1"}
+                and not (configured_hops and trusted_proxy_hops > 0)):
             raise ValueError(
                 "Externally proxied dashboards must bind to a loopback address"
             )
-    # The documented deployment puts exactly one reverse proxy in front of the
-    # dashboard, so a configured external URL implies one trusted hop. Without
-    # this every client would share the loopback address as its rate-limit
-    # identity. Operators with a different topology override the count.
-    default_hops = 1 if external_url else 0
-    configured_hops = os.getenv("POTATOBOT_TRUSTED_PROXY_HOPS", "").strip()
-    if configured_hops:
-        try:
-            trusted_proxy_hops = int(configured_hops)
-        except ValueError as exc:
-            raise ValueError("POTATOBOT_TRUSTED_PROXY_HOPS must be an integer") from exc
-        if not 0 <= trusted_proxy_hops <= 4:
-            raise ValueError("POTATOBOT_TRUSTED_PROXY_HOPS must be between 0 and 4")
-    else:
-        trusted_proxy_hops = default_hops
 
     return DeploymentSettings(
         profile=profile,

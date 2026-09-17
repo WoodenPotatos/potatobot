@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import asyncio
+import time
 from defusedxml import ElementTree as ET
 
 # Resolve repository imports independently of the process working directory.
@@ -14,9 +15,13 @@ if ROOT_DIR not in sys.path:
 
 from discord.ext import commands, tasks
 from cogs.utils import guild_setting_sync, handle_loop_error, t
-from feature_access import is_enabled
+from core.feature_access import is_enabled
 
 social_logger = logging.getLogger("PotatoBot.Socials")
+
+#: Helix's cap on `user_login` values per `/streams` request.
+TWITCH_LOGINS_PER_REQUEST = 100
+
 
 class Socials(commands.Cog):
     def __init__(self, bot):
@@ -37,6 +42,11 @@ class Socials(commands.Cog):
         # second's own check was already satisfied, so it never caught up.
         self.live_twitch = set()
         self.latest_videos = {}
+        # The app token, held until it expires. It was minted on every poll for
+        # every guild -- one OAuth round-trip per five minutes per guild for a
+        # credential that lives for weeks.
+        self._twitch_token = None
+        self._twitch_token_expires_at = 0.0
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -88,6 +98,8 @@ class Socials(commands.Cog):
         return None, None
 
     async def get_twitch_token(self):
+        if self._twitch_token and time.monotonic() < self._twitch_token_expires_at - 60:
+            return self._twitch_token
         url = "https://id.twitch.tv/oauth2/token"
         form_data = {
             "client_id": self.twitch_client_id,
@@ -96,8 +108,33 @@ class Socials(commands.Cog):
         }
         status, data = await self.request("POST", url, data=form_data)
         if status == 200:
-            return data.get("access_token")
+            self._twitch_token = data.get("access_token")
+            self._twitch_token_expires_at = (
+                time.monotonic() + int(data.get("expires_in", 3600)))
+            return self._twitch_token
         return None
+
+    async def _live_streams(self, headers, url, logins):
+        """Every live stream among `logins`, asked for in Helix-sized requests.
+
+        `user_login` accepts at most TWITCH_LOGINS_PER_REQUEST values, so a
+        guild past that had its later streamers silently dropped from every
+        poll. Returns `(streams, complete)`; a failed request marks the poll
+        incomplete so nothing is marked offline on the strength of an answer
+        that never arrived. A 401 also drops the cached token, so the next poll
+        mints a fresh one instead of failing the same way for an hour.
+        """
+        streams = []
+        for start in range(0, len(logins), TWITCH_LOGINS_PER_REQUEST):
+            params = [("user_login", login)
+                      for login in logins[start:start + TWITCH_LOGINS_PER_REQUEST]]
+            status, data = await self.request("GET", url, headers=headers, params=params)
+            if status == 401:
+                self._twitch_token = None
+            if status != 200:
+                return streams, False
+            streams.extend(data.get("data", []))
+        return streams, True
 
     # Twitch live-status polling.
     @tasks.loop(minutes=5)
@@ -135,12 +172,8 @@ class Socials(commands.Cog):
         if token:
             headers = {"Client-ID": self.twitch_client_id, "Authorization": f"Bearer {token}"}
             url = "https://api.twitch.tv/helix/streams"
-            params = [("user_login", streamer) for streamer in twitch_streamers]
-            status, data = await self.request(
-                "GET", url, headers=headers, params=params
-            )
-            if status == 200:
-                streams = data.get("data", [])
+            streams, complete = await self._live_streams(headers, url, list(twitch_streamers))
+            if complete:
                 currently_live_logins = [stream['user_name'].lower() for stream in streams]
 
                 for stream_info in streams:

@@ -10,7 +10,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import database
+from core import database
 
 
 class GuildScopingTests(unittest.TestCase):

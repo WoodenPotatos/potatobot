@@ -23,7 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-import database
+from core import database
 
 
 def strip_comments(source: str) -> str:
@@ -66,7 +66,7 @@ class LevelCurveTests(unittest.TestCase):
 
     def test_the_formula_is_written_once(self):
         """It was inline in two places and about to be inline in a third."""
-        with open(os.path.join(ROOT, "database.py"), encoding="utf-8") as handle:
+        with open(os.path.join(ROOT, "core", "database.py"), encoding="utf-8") as handle:
             source = strip_comments(handle.read())
         self.assertEqual(
             1, len(re.findall(r"math\.sqrt", source)),
@@ -338,7 +338,7 @@ class CommandRegistrationTests(unittest.TestCase):
     """The guards that would otherwise be found by an operator."""
 
     def test_both_commands_have_a_policy(self):
-        from feature_access import COMMAND_POLICIES
+        from core.feature_access import COMMAND_POLICIES
 
         for name in ("setlevel", "givexp"):
             with self.subTest(name=name):

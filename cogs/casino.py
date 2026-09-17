@@ -17,21 +17,34 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-import database
-import item_catalog
+from core import database
+from core import item_catalog
 
 from discord.ext import commands
 from datetime import datetime, timedelta
+from core.clock import local_date, local_time, parse_stored, utc_now
 from cogs.utils import (
     BoundedCooldownMap, apply_database_result, currency_emoji, currency_plain,
     is_channel, is_premium, item_mechanic_value, t,
 )
-from feature_access import require_interaction_feature
+from core.feature_access import require_interaction_feature
 
 slots_cooldowns = BoundedCooldownMap()
 casino_logger = logging.getLogger("PotatoBot.Casino")
 
 RNG = secrets.SystemRandom()
+
+# One bound for every stake and transfer, shared with the database's backstop.
+# Past 2**63 an int cannot even be bound by sqlite3 and the command died with
+# an `OverflowError` nobody caught; this refuses long before that with words.
+MAX_STAKE = database.MAX_AMOUNT
+
+
+async def _send_ephemeral(ctx_or_int, message: str):
+    """Answer whichever of a context or an interaction launched a game."""
+    if isinstance(ctx_or_int, discord.Interaction):
+        return await ctx_or_int.response.send_message(message, ephemeral=True)
+    return await ctx_or_int.send(message, ephemeral=True)
 
 CASINO_LAUNCHER_FEATURES = {
     "start_bj_game": "casino_blackjack",
@@ -48,7 +61,7 @@ CASINO_LAUNCHER_FEATURES = {
 
 def work_settings(stored: dict) -> dict[str, int]:
     """This guild's `/work` numbers, defaulting from the registry per key."""
-    from settings_registry import SETTING_DEFINITIONS
+    from core.settings_registry import SETTING_DEFINITIONS
 
     resolved = {}
     for key, definition in SETTING_DEFINITIONS.items():
@@ -165,6 +178,9 @@ class UniversalNewBetModal(discord.ui.Modal):
 
         if isinstance(bet_amount, int) and bet_amount <= 0:
             return await interaction.response.send_message(t("casino.err_bet_min"), ephemeral=True)
+        if isinstance(bet_amount, int) and bet_amount > MAX_STAKE:
+            return await interaction.response.send_message(
+                t("casino.err_amount_range", limit=MAX_STAKE), ephemeral=True)
 
         await self.game_launcher(interaction, bet_amount, *self.args)
 
@@ -226,6 +242,9 @@ async def start_bj_game(ctx_or_int, bet):
     user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
     guild = ctx_or_int.guild
     bet = int(bet)
+    if bet > MAX_STAKE:
+        return await _send_ephemeral(
+            ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
     wager_id = secrets.token_urlsafe(24)
     reservation = await database.run_write(
         database.begin_interactive_wager,
@@ -476,7 +495,15 @@ class BlackjackView(discord.ui.View):
 async def start_dice_game(ctx_or_int, bet_input):
     user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
     bal = await database.run(database.get_user_balance, user.id)
-    amount = bal if str(bet_input).lower() == "all" else int(bet_input)
+    try:
+        amount = bal if str(bet_input).lower() == "all" else int(bet_input)
+    except ValueError:
+        # `/dice` takes a string so "all" can be typed; anything else that is
+        # not a number used to raise out of the command and reach nobody.
+        return await _send_ephemeral(ctx_or_int, t("casino.err_invalid_number_all"))
+    if amount > MAX_STAKE:
+        return await _send_ephemeral(
+            ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
 
     first_roll, second_roll, bot_roll = (
         RNG.randint(1, 6), RNG.randint(1, 6), RNG.randint(1, 6)
@@ -518,6 +545,9 @@ async def start_dice_game(ctx_or_int, bet_input):
 async def start_roulette_game(ctx_or_int, bet, choice):
     user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
     bet = int(bet)
+    if bet > MAX_STAKE:
+        return await _send_ephemeral(
+            ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
     choice = choice.casefold()
     localized_colors = {
         t("casino.roulette_color_red").casefold(): "red",
@@ -578,6 +608,9 @@ async def start_slots_game(ctx_or_int, bet):
     
     slots_cooldowns[user.id] = now
     bet = int(bet)
+    if bet > MAX_STAKE:
+        return await _send_ephemeral(
+            ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
     # Reels are spun inside the settlement transaction so a lucky charm is
     # consumed by the same write that debits the stake.
     result = await database.run_write(
@@ -828,6 +861,9 @@ class HiloView(discord.ui.View):
 async def start_hilo_game(ctx_or_int, bet):
     user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
     bet = int(bet)
+    if bet > MAX_STAKE:
+        return await _send_ephemeral(
+            ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
     wager_id = secrets.token_urlsafe(24)
     reservation = await database.run_write(
         database.begin_interactive_wager, wager_id, ctx_or_int.guild.id,
@@ -1033,6 +1069,9 @@ class CrashView(discord.ui.View):
 async def start_crash_game(ctx_or_int, bet):
     user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
     bet = int(bet)
+    if bet > MAX_STAKE:
+        return await _send_ephemeral(
+            ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
     wager_id = secrets.token_urlsafe(24)
     reservation = await database.run_write(
         database.begin_interactive_wager, wager_id, ctx_or_int.guild.id,
@@ -1243,6 +1282,9 @@ class RussianRouletteView(discord.ui.View):
 async def start_russian_game(ctx_or_int, bet):
     user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
     bet = int(bet)
+    if bet > MAX_STAKE:
+        return await _send_ephemeral(
+            ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
     view = RussianRouletteView(user, bet)
     wager_id = secrets.token_urlsafe(24)
     reservation = await database.run_write(
@@ -1275,6 +1317,9 @@ async def start_russian_game(ctx_or_int, bet):
 async def start_wheel_game(ctx_or_int, bet):
     user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
     bet = int(bet)
+    if bet > MAX_STAKE:
+        return await _send_ephemeral(
+            ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
     result = await database.run_write(
         database.resolve_wheel_wager, ctx_or_int.guild.id, user.id, bet)
     if result is None:
@@ -1515,6 +1560,9 @@ async def start_mines_game(ctx_or_int, bet):
     user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
     guild = ctx_or_int.guild
     bet = int(bet)
+    if bet > MAX_STAKE:
+        return await _send_ephemeral(
+            ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
     wager_id = secrets.token_urlsafe(24)
     reservation = await database.run_write(
         database.begin_interactive_wager,
@@ -1699,7 +1747,7 @@ class Casino(commands.Cog):
     @commands.hybrid_command(name="daily", description=t("general.cmd_daily"))
     @is_channel("economy_channels")
     async def daily(self, ctx):
-        now = datetime.now()
+        now = utc_now()
         
         # Resolve rewards at claim time so administrative reward changes apply immediately.
         if is_premium(ctx.author):
@@ -1710,7 +1758,7 @@ class Casino(commands.Cog):
             coin_rw, xp_rw = await database.run(
                 database.get_reward, ctx.guild.id, "daily_normal", 5000, 50
             )
-        from feature_access import is_enabled
+        from core.feature_access import is_enabled
         if not is_enabled(ctx.guild.id, "levels"):
             xp_rw = 0
 
@@ -1724,8 +1772,11 @@ class Casino(commands.Cog):
             # then raise KeyError('stats') inside apply_database_result. With
             # once_per_day the inner date check is always true today, which is
             # exactly what made the fall-through invisible.
-            midnight = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-            time_left = midnight - now
+            # The claim resets at the host's midnight, so the countdown is to
+            # the local one and not to UTC's.
+            local = local_time(now)
+            midnight = local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            time_left = midnight - local
             h, remainder = divmod(int(time_left.total_seconds()), 3600)
             m, _ = divmod(remainder, 60)
             return await ctx.send(t("casino.daily_cooldown", h=h, m=m), ephemeral=True)
@@ -1746,7 +1797,7 @@ class Casino(commands.Cog):
         the shipped locale lines for a guild that wrote none.
         """
         user_id = ctx.author.id
-        now = datetime.now()
+        now = utc_now()
 
         settings, responses = await asyncio.gather(
             database.run_read(database.get_guild_settings, ctx.guild.id),
@@ -1769,7 +1820,7 @@ class Casino(commands.Cog):
             xp_reward = settings["work_xp_normal"]
         if earnings and is_premium(ctx.author):
             earnings = int(earnings * 1.5)
-        from feature_access import is_enabled
+        from core.feature_access import is_enabled
         if not is_enabled(ctx.guild.id, "levels"):
             xp_reward = 0
 
@@ -1778,7 +1829,7 @@ class Casino(commands.Cog):
             earnings, xp_reward, interval_seconds=15 * 60,
         )
         if not result["claimed"]:
-            last_job_time = datetime.fromisoformat(result["last_claim"])
+            last_job_time = parse_stored(result["last_claim"])
             time_left = (last_job_time + timedelta(minutes=15)) - now
             m, s = divmod(max(0, int(time_left.total_seconds())), 60)
             return await ctx.send(t("casino.work_cooldown", m=m, s=s), ephemeral=True)
@@ -1806,7 +1857,7 @@ class Casino(commands.Cog):
     @is_channel("economy_channels")
     async def rob(self, ctx, victim: discord.Member):
         user_id = ctx.author.id
-        now = datetime.now()
+        now = utc_now()
 
         if victim.id == user_id: return await ctx.send(t("casino.rob_err_self"), ephemeral=True)
         if victim.bot: return await ctx.send(t("casino.rob_err_bot"), ephemeral=True)
@@ -1820,7 +1871,7 @@ class Casino(commands.Cog):
         if not result["resolved"]:
             reason = result["reason"]
             if reason == "cooldown":
-                last_rob_time = datetime.fromisoformat(result["last_claim"])
+                last_rob_time = parse_stored(result["last_claim"])
                 time_left = (last_rob_time + timedelta(hours=1)) - now
                 m, s = divmod(max(0, int(time_left.total_seconds())), 60)
                 return await ctx.send(t("casino.rob_cooldown", m=m, s=s), ephemeral=True)
@@ -1864,6 +1915,9 @@ class Casino(commands.Cog):
         
         if amount <= 0:
             return await ctx.send(t("casino.pay_err_zero"), ephemeral=True)
+        if amount > MAX_STAKE:
+            return await ctx.send(
+                t("casino.err_amount_range", limit=MAX_STAKE), ephemeral=True)
 
         result = await database.run(database.transfer_balance, ctx.author.id, member.id, amount, sender_xp=2)
         if result is None:
