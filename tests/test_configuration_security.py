@@ -226,6 +226,9 @@ class ConfigurationSecurityTests(unittest.TestCase):
         rule with one clause of why. Deleting a rule to get under the budget is
         the one wrong answer.
         """
+        if not (ROOT / "CLAUDE.md").exists():
+            # Excluded from a published tree by name, same as the skills below.
+            return
         text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
         lines = len(text.splitlines())
         self.assertLessEqual(
@@ -288,6 +291,10 @@ class ConfigurationSecurityTests(unittest.TestCase):
         exactly why the narrative was allowed to move to them. A document that
         exists to absorb detail from CLAUDE.md inherits CLAUDE.md's exclusion,
         or the trim publishes what the file it came from never did."""
+        if not (ROOT / "scripts" / "publish_public.py").exists():
+            # The publisher that would answer this is excluded from a
+            # published tree by name, for the reason this test asserts.
+            return
         import importlib.util
 
         spec = importlib.util.spec_from_file_location(
