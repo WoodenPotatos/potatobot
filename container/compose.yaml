@@ -1,0 +1,90 @@
+# PotatoBot as two supervised services sharing one database volume.
+#
+# Splitting them means a dashboard restart never interrupts the bot, and a
+# dashboard crash cannot take Discord connectivity with it. They coordinate
+# entirely through SQLite: feature changes converge by revision polling, and
+# queued Discord publishes travel through the control_actions outbox, which only
+# the bot executes.
+#
+# Invoke from the repository root:
+#   podman-compose -f container/compose.yaml up -d      (or: docker compose -f container/compose.yaml up -d)
+#
+# Copy .env.example to ../.env and fill in real values first -- both services
+# declare env_file: ../.env below and neither starts without it. Set a real
+# POTATOBOT_DASHBOARD_SESSION_SECRET there too: without one, the dashboard
+# falls back to a generated file under /app, which is not the /data volume
+# and is lost on every recreate, silently ending every session.
+#
+# Run migrations once, before first start:
+#   podman-compose -f container/compose.yaml run --rm bot python update_db.py
+#
+# The weekly Everydle drift check has no service here -- it is one-shot and
+# read-only, so a host-level cron/systemd-timer entry running this on the
+# same schedule the bare-metal deployment uses (deploy/potatobot-everydle-drift.timer)
+# is simpler than a sidecar container for it:
+#   podman-compose -f container/compose.yaml run --rm bot python scripts/everydle_drift.py
+
+name: potatobot
+
+# The container-native subset of deploy/potatobot.service's ~20 systemd
+# sandboxing directives -- compose cannot express most of them (there is no
+# equivalent of SystemCallFilter or ProtectKernelTunables), but these three
+# are real and the process already needs no more than this bare-metal.
+x-hardening: &hardening
+  security_opt:
+    - "no-new-privileges:true"
+  cap_drop:
+    - "ALL"
+
+services:
+  bot:
+    <<: *hardening
+    build:
+      context: ..
+      dockerfile: container/Containerfile
+    image: potatobot:2.14.0a1
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      POTATOBOT_DB_PATH: /data/economy.db
+      POTATOBOT_LOG_DIR: /data/logs
+      POTATOBOT_EVERYDLE_STATE_PATH: /data/everydle_state.json
+      # The bot owns schema creation, so it must not also serve the dashboard.
+      POTATOBOT_DASHBOARD_ENABLED: "false"
+    volumes:
+      - data:/data
+    # WAL needs the writers to see one filesystem; both services mount the same
+    # volume rather than copying the database.
+    stop_grace_period: 30s
+
+  dashboard:
+    <<: *hardening
+    build:
+      context: ..
+      dockerfile: container/Containerfile
+    image: potatobot:2.14.0a1
+    command: ["python", "dashboard_api.py"]
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      POTATOBOT_DB_PATH: /data/economy.db
+      POTATOBOT_LOG_DIR: /data/logs
+      POTATOBOT_DASHBOARD_ENABLED: "true"
+      POTATOBOT_DASHBOARD_HOST: 0.0.0.0
+      POTATOBOT_DASHBOARD_PORT: "5000"
+      # One reverse proxy in front, so exactly one forwarded hop is trusted.
+      # Also what permits the 0.0.0.0 bind above once an external URL is set:
+      # `core/deployment.py` refuses a non-loopback bind unless the proxy
+      # topology has been stated, and this is the statement.
+      POTATOBOT_TRUSTED_PROXY_HOPS: "1"
+    volumes:
+      - data:/data
+    ports:
+      # Loopback only. Terminate HTTPS with Tailscale Serve or nginx in front;
+      # never publish this port to an untrusted network.
+      - "127.0.0.1:5000:5000"
+    depends_on:
+      - bot
+
+volumes:
+  data:

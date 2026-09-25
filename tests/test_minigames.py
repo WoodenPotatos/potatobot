@@ -22,12 +22,14 @@ the chain moved rather than the count silently skipping.
 """
 
 import os
+import pathlib
 import tempfile
 import types
 import unittest
 
 from core import database
 from core import settings_cache
+from cogs.utils import t
 from cogs.minigames import (COUNT_PATTERN, WORD_PATTERN, HUNGARIAN_LETTERS,
                             MILESTONE_EVERY, Minigames, first_letter, fold,
                             last_letter, unique_value)
@@ -213,8 +215,9 @@ class HungarianLetterTests(unittest.TestCase):
 class WordChainLetterTests(unittest.TestCase):
     """The judgement itself, driven through the real method.
 
-    `judge_word` reads nothing off the message but its content, so a stand-in
-    with that one attribute exercises the real path.
+    `judge_word` used to read nothing off the message but its content; a
+    guild-scoped custom word list gave it a second reason to need `.guild.id`,
+    so the stand-in now carries that too.
     """
 
     def setUp(self):
@@ -229,9 +232,16 @@ class WordChainLetterTests(unittest.TestCase):
     def speak(self, language):
         settings_cache.apply_changes(GUILD, {"language": {"value": language}})
 
+    def allow_custom_words(self, words):
+        settings_cache.apply_changes(GUILD, {
+            "wordchain_custom_words_enabled": {"value": True},
+            "wordchain_custom_words": {"value": list(words)},
+        })
+
     def judge(self, posted, previous):
-        return self.cog.judge_word(types.SimpleNamespace(content=posted),
-                                   {"value": previous})
+        message = types.SimpleNamespace(
+            content=posted, guild=types.SimpleNamespace(id=GUILD))
+        return self.cog.judge_word(message, {"value": previous})
 
     def test_hungarian_joins_a_digraph_to_a_digraph(self):
         self.speak("hu")
@@ -263,6 +273,62 @@ class WordChainLetterTests(unittest.TestCase):
     def test_the_first_word_of_a_chain_needs_no_letter(self):
         self.speak("hu")
         self.assertTrue(self.judge("szek", "")[0])
+
+    def test_a_gibberish_word_that_chains_correctly_is_still_refused(self):
+        """Chaining and uniqueness alone used to be the whole rule: any
+        string satisfying WORD_PATTERN and the letter rule was accepted."""
+        self.speak("hu")
+        accepted, value, reason = self.judge("szklzklzklz", "busz")
+        self.assertFalse(accepted)
+        self.assertIsNone(value)
+        self.assertEqual(t("minigames.err_not_a_word"), reason)
+
+    def test_a_real_word_still_needs_to_chain_first(self):
+        """A real word in the wrong place is refused for the letter, not the
+        dictionary -- the chaining rule runs first."""
+        self.speak("hu")
+        accepted, _, reason = self.judge("alma", "busz")
+        self.assertFalse(accepted)
+        self.assertNotEqual(t("minigames.err_not_a_word"), reason)
+
+    def test_a_custom_word_is_refused_when_the_toggle_is_off(self):
+        """The setting's default is off, so a guild that never configured
+        one behaves exactly as before -- an unknown word stays refused even
+        if it happens to sit in `wordchain_custom_words`."""
+        self.speak("hu")
+        settings_cache.apply_changes(
+            GUILD, {"wordchain_custom_words": {"value": ["szklzklzklz"]}})
+        accepted, value, reason = self.judge("szklzklzklz", "busz")
+        self.assertFalse(accepted)
+        self.assertIsNone(value)
+        self.assertEqual(t("minigames.err_not_a_word"), reason)
+
+    def test_a_custom_word_is_accepted_once_the_toggle_is_on(self):
+        self.speak("hu")
+        self.allow_custom_words(["szklzklzklz"])
+        accepted, value, reason = self.judge("szklzklzklz", "busz")
+        self.assertTrue(accepted)
+        self.assertEqual("szklzklzklz", value)
+        self.assertIsNone(reason)
+
+    def test_a_custom_word_folds_the_same_way_the_built_in_check_does(self):
+        """Case and accents must fold on both sides, exactly as the
+        built-in dictionary check already does."""
+        self.speak("hu")
+        self.allow_custom_words(["SZÉGYSZÖGLET"])
+        accepted, _, _ = self.judge("szégyszöglet", "")
+        self.assertTrue(accepted)
+
+    def test_an_unlisted_word_still_falls_through_to_the_dictionary_refusal(self):
+        """The custom list is a top-up, not a replacement: a word in neither
+        list is refused exactly as before. Chains correctly from `busz`
+        (both start the digraph `sz`) so the refusal is the dictionary's,
+        not the letter rule's."""
+        self.speak("hu")
+        self.allow_custom_words(["szklzklzklz"])
+        accepted, _, reason = self.judge("szqqqqqqqq", "busz")
+        self.assertFalse(accepted)
+        self.assertEqual(t("minigames.err_not_a_word"), reason)
 
 
 class UsedWordTests(unittest.TestCase):
@@ -364,6 +430,157 @@ class UsedWordTests(unittest.TestCase):
         with database.get_connection() as conn:
             return conn.execute(
                 "SELECT COUNT(*) FROM minigame_used_words").fetchone()[0]
+
+
+class _FakeGuild:
+    def __init__(self, guild_id):
+        self.id = guild_id
+
+    def get_member(self, user_id):
+        return None  # never cached; police_edit must tolerate that
+
+
+class _FakePartialMessage:
+    def __init__(self, channel, message_id):
+        self.channel = channel
+        self.id = message_id
+
+    async def delete(self):
+        self.channel.deleted.append(self.id)
+
+
+class _FakeChannel:
+    def __init__(self, channel_id, guild):
+        self.id = channel_id
+        self.guild = guild
+        self.deleted = []
+        self.sent = []
+
+    def get_partial_message(self, message_id):
+        return _FakePartialMessage(self, message_id)
+
+    async def send(self, content, **kwargs):
+        self.sent.append(content)
+
+
+class _FakeBot:
+    def __init__(self, guild, channels, bot_user_id=999999):
+        self._guild = guild
+        self._channels = {c.id: c for c in channels}
+        self.user = types.SimpleNamespace(id=bot_user_id)
+
+    def get_guild(self, guild_id):
+        return self._guild if self._guild.id == guild_id else None
+
+    def get_channel(self, channel_id):
+        return self._channels.get(channel_id)
+
+
+class WordChainDictionaryTests(unittest.TestCase):
+    """A missing or unreadable wordlist disables the check for that language
+    only -- the same `load_or_disable` philosophy `core/minigame_data.py`
+    uses -- so word chain keeps working on chaining and uniqueness alone
+    rather than breaking over one file.
+    """
+
+    def test_a_language_with_no_bundled_file_answers_every_word_as_known(self):
+        from core import wordchain_dictionary
+        self.assertTrue(wordchain_dictionary.is_known_word("xx", "zzqxnotaword"))
+
+    def test_a_loaded_wordlist_actually_refuses_gibberish(self):
+        from core import wordchain_dictionary
+        self.assertFalse(wordchain_dictionary.is_known_word("hu", "zzqxnotaword"))
+        self.assertFalse(wordchain_dictionary.is_known_word("en", "zzqxnotaword"))
+
+    def test_the_index_is_keyed_on_the_folded_form(self):
+        from core import wordchain_dictionary
+        self.assertTrue(wordchain_dictionary.is_known_word(
+            "hu", wordchain_dictionary._fold("szék")))
+
+    def test_an_empty_directory_loads_no_language_at_all(self):
+        """`_load_all` is what `is_known_word` falls open against for a
+        language missing from its result -- proven separately above."""
+        from core import wordchain_dictionary
+        original = wordchain_dictionary.DATA_DIR
+        with tempfile.TemporaryDirectory() as empty_dir:
+            wordchain_dictionary.DATA_DIR = pathlib.Path(empty_dir)
+            try:
+                loaded = wordchain_dictionary._load_all()
+            finally:
+                wordchain_dictionary.DATA_DIR = original
+        self.assertEqual({}, loaded)
+
+
+class EditedMessageTests(unittest.IsolatedAsyncioTestCase):
+    """Neither game re-derives its state from a message's content, so an
+    edit cannot corrupt the chain -- but a member editing a message after
+    the fact can make the channel disagree with what was actually accepted.
+    An edit is therefore deleted and explained rather than re-judged.
+    """
+
+    COUNTING_CHANNEL = 501
+    WORD_CHANNEL = 502
+
+    def setUp(self):
+        settings_cache.invalidate()
+        settings_cache.apply_changes(GUILD, {
+            "counting_channel": {"value": self.COUNTING_CHANNEL},
+            "word_chain_channel": {"value": self.WORD_CHANNEL},
+        })
+        from core import feature_access
+        feature_access.seed_cached_feature(GUILD, "minigame_counting", True)
+        feature_access.seed_cached_feature(GUILD, "minigame_word_chain", True)
+        self.guild = _FakeGuild(GUILD)
+        self.counting_channel = _FakeChannel(self.COUNTING_CHANNEL, self.guild)
+        self.word_channel = _FakeChannel(self.WORD_CHANNEL, self.guild)
+        self.bot = _FakeBot(self.guild, [self.counting_channel, self.word_channel])
+        self.cog = Minigames(bot=self.bot)
+
+    def tearDown(self):
+        # A test that writes a setting must clear the cache: settings_cache is
+        # process-global and would otherwise answer for a later test.
+        settings_cache.invalidate()
+
+    def payload(self, channel_id, message_id=1, content="anything",
+               author_id=ALICE):
+        data = ({"content": content, "author": {"id": author_id}}
+                if content is not None else {"embeds": []})
+        return types.SimpleNamespace(guild_id=GUILD, channel_id=channel_id,
+                                     message_id=message_id, data=data)
+
+    async def test_a_counting_edit_is_deleted_and_explained(self):
+        await self.cog.police_edit(self.payload(self.COUNTING_CHANNEL))
+        self.assertEqual([1], self.counting_channel.deleted)
+        self.assertTrue(self.counting_channel.sent)
+
+    async def test_a_word_chain_edit_is_deleted_and_explained(self):
+        await self.cog.police_edit(self.payload(self.WORD_CHANNEL))
+        self.assertEqual([1], self.word_channel.deleted)
+        self.assertTrue(self.word_channel.sent)
+
+    async def test_an_embed_only_update_is_ignored(self):
+        """Discord omits `content` from the payload when only an embed
+        hydrates, and the listener -- not police_edit -- is what must skip
+        that before it looks like an edit at all."""
+        payload = self.payload(self.COUNTING_CHANNEL, content=None)
+        await self.cog.on_raw_message_edit(payload)
+        self.assertEqual([], self.counting_channel.deleted)
+
+    async def test_an_edit_outside_a_policed_channel_is_left_alone(self):
+        await self.cog.police_edit(self.payload(channel_id=999))
+        self.assertEqual([], self.counting_channel.deleted)
+        self.assertEqual([], self.word_channel.deleted)
+
+    async def test_the_bots_own_message_is_never_policed(self):
+        await self.cog.police_edit(
+            self.payload(self.COUNTING_CHANNEL, author_id=self.bot.user.id))
+        self.assertEqual([], self.counting_channel.deleted)
+
+    async def test_a_disabled_game_stops_policing_its_edits_too(self):
+        from core import feature_access
+        feature_access.seed_cached_feature(GUILD, "minigame_counting", False)
+        await self.cog.police_edit(self.payload(self.COUNTING_CHANNEL))
+        self.assertEqual([], self.counting_channel.deleted)
 
 
 if __name__ == "__main__":

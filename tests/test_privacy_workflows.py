@@ -433,7 +433,7 @@ class ErasureColumnCoverageTests(unittest.TestCase):
     MEMBER_COLUMNS = {
         "user_id", "owner_id", "target_id", "opener_id", "claimer_id", "mod_id",
         "host_id", "last_user_id", "actor_id", "completed_by", "approved_by",
-        "created_by", "updated_by",
+        "created_by", "updated_by", "granted_by",
     }
     # `_id`/`_by` columns that are not members, with why. A name absent from
     # both sets is a finding.

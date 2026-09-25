@@ -34,6 +34,7 @@ let activeBannerKey = null;
 // once and reused by the gacha reward picker and the shop item builder.
 let itemCatalog = [];
 let itemList = [];
+let supportedGames = [];
 let activePage = 'overview';
 let resources = {channels: [], roles: []};
 // The setup report, cached per guild: findings indexed by the setting they
@@ -648,6 +649,7 @@ function bindShell() {
     document.getElementById('gacha-form').addEventListener('submit', saveGacha);
     document.getElementById('gacha-banner-form').addEventListener('submit', createGachaBanner);
     document.getElementById('work-response-form').addEventListener('submit', createWorkResponse);
+    document.getElementById('manual-grant-form').addEventListener('submit', submitManualGrant);
     document.getElementById('erasure-form').addEventListener('submit', eraseMember);
 
 }
@@ -786,6 +788,7 @@ async function authenticate() {
     ]);
     registry = registryData.data;
     featureGroupOrder = registryData.feature_group_order || [];
+    supportedGames = registryData.supported_games || [];
     itemCatalog = catalogData.data;
     await loadGuild();
 }
@@ -1615,6 +1618,44 @@ const JSON_ROW_SHAPES = {
             manageable_ids: columns.manageable_ids || [],
         }),
     },
+    wheel_segments: {
+        // The key is the multiplier in hundredths (100 = 1x). The identity
+        // the server validates at save time is not "weights sum to 100" —
+        // the shipped default's weights only happen to — it is a weighted
+        // average: 98 * Σweight == Σ(multiplier × weight), mirroring
+        // core/settings_registry.py's WHEEL_HOUSE_RETURN. The literal is
+        // inlined rather than a named constant so this shape stays
+        // self-contained -- tests extract JSON_ROW_SHAPES on its own.
+        // `summary()` mirrors that live instead of leaving an admin to add
+        // it up by hand and find out only when the save is rejected; the
+        // server is still the authority that actually enforces it.
+        key: {kind: 'number', label: 'dashboard.wheel_multiplier', min: 0,
+              max: 100000},
+        columns: [{name: 'weight', kind: 'number',
+                   label: 'dashboard.wheel_weight', required: true, min: 1}],
+        unpack: (entry) => ({weight: entry}),
+        pack: (columns) => columns.weight,
+        summary: (rows) => {
+            const houseReturn = 98;
+            let totalWeight = 0;
+            let totalReturn = 0;
+            Object.entries(rows).forEach(([multiplier, weight]) => {
+                const w = Number(weight) || 0;
+                totalWeight += w;
+                totalReturn += Number(multiplier) * w;
+            });
+            if (totalWeight <= 0) {
+                return {text: tr('dashboard.wheel_return_unknown'), valid: false};
+            }
+            return {
+                text: format('dashboard.wheel_return_readout', {
+                    value: (totalReturn / totalWeight).toFixed(2),
+                    needed: houseReturn,
+                }),
+                valid: totalReturn === houseReturn * totalWeight,
+            };
+        },
+    },
 };
 
 /** A row editor for a shaped JSON setting.
@@ -1656,6 +1697,9 @@ function jsonRowEditor(definition, value) {
 
     const rows = element('div', 'menu-rows');
     wrapper.appendChild(rows);
+
+    const summaryNode = shape.summary ? element('div', 'row-editor-summary total-readout') : null;
+    if (summaryNode) wrapper.appendChild(summaryNode);
 
     /** One field, by kind. A picker field returns the ids it holds. */
     const field = (spec, current) => {
@@ -1729,6 +1773,11 @@ function jsonRowEditor(definition, value) {
         // Dispatched from the carrier, because the dirty-state listener is
         // bound to the real control.
         carrier.dispatchEvent(new Event('change', {bubbles: true}));
+        if (summaryNode) {
+            const {text, valid} = shape.summary(collected);
+            summaryNode.textContent = text;
+            summaryNode.className = `row-editor-summary total-readout ${valid ? 'valid' : 'invalid'}`;
+        }
     };
 
     /** A row nobody has typed in yet. Freshly added rows are empty by
@@ -1787,6 +1836,23 @@ function jsonRowEditor(definition, value) {
         if (first) first.focus();
     });
     wrapper.appendChild(add);
+
+    // LFG is the one shape a game name means something for: a channel and a
+    // role, one pair per game, by convention. Picking a game here writes
+    // nothing on its own -- it only best-effort matches an existing channel
+    // and role by name and hands them to addRow as its usual initial values,
+    // exactly as if the operator had picked them in the pickers themselves.
+    if (definition.json_shape === 'lfg_channels') {
+        const quickPick = gameQuickPick((label) => {
+            const textChannels = resources.channels.filter(
+                (channel) => channel.type === 'text' || channel.type === 'news');
+            const channelId = matchResourceByName(textChannels, label);
+            const roleId = matchResourceByName(resources.roles, label);
+            addRow(channelId || '', roleId || null);
+            serialise();
+        });
+        wrapper.appendChild(quickPick);
+    }
 
     serialise();
     return wrapper;
@@ -2192,6 +2258,27 @@ function bannerCanFeature() {
 const GACHA_TIER_FIELDS = ['tier_3', 'tier_4', 'tier_5'];
 const TIER_SCALE = 1000;
 
+/** A stored UTC ISO timestamp as a `datetime-local` input value, in the
+ *  viewer's own wall-clock time. `''` for no schedule, which the input
+ *  renders as empty rather than as some placeholder date. */
+function isoToLocalInputValue(iso) {
+    if (!iso) return '';
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+        + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** The reverse of `isoToLocalInputValue`: a `datetime-local` input's local
+ *  wall-clock string back to the UTC ISO string the server stores. `null`
+ *  for an empty input, meaning "no bound on this side." */
+function localInputValueToIso(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 /** Banner picker, name field and delete control for the selected banner. */
 function renderGachaBannerBar() {
     const bar = document.getElementById('gacha-banner-bar');
@@ -2223,6 +2310,15 @@ function renderGachaBannerBar() {
     name.value = gacha.display_name;
     name.setAttribute('aria-label', tr('dashboard.gacha_banner_name'));
     bar.appendChild(name);
+
+    // Only the two states a flat `enabled` checkbox cannot already say:
+    // "live" and "disabled" read from the checkbox itself, so a pill here
+    // would only repeat it.
+    if (gacha.status === 'scheduled') {
+        bar.appendChild(pill('dashboard.gacha_banner_scheduled', 'pending'));
+    } else if (gacha.status === 'expired') {
+        bar.appendChild(pill('dashboard.gacha_banner_expired', 'off'));
+    }
 
     if (gacha.is_default) {
         // `/gacha` with no argument resolves to it, so it is not deletable.
@@ -2311,12 +2407,13 @@ function renderGacha() {
         return;
     }
 
-    const values = {enabled: gacha.enabled};
+    const values = {enabled: gacha.enabled, starts_at: gacha.starts_at, ends_at: gacha.ends_at};
     GACHA_INTEGER_FIELDS.forEach((key) => { values[key] = config[key]; });
     GACHA_TIER_FIELDS.forEach((key) => {
         values[key] = (config.tiers[key.slice(-1)] ?? 0) / TIER_SCALE;
     });
 
+    const SCHEDULE_FIELDS = ['starts_at', 'ends_at'];
     Object.entries(values).forEach(([key, value]) => {
         const group = element('label', 'input-group');
         group.appendChild(element('span', 'field-label', tr(`dashboard.gacha_${key}`)));
@@ -2325,6 +2422,13 @@ function renderGacha() {
         if (key === 'enabled') {
             input.type = 'checkbox';
             input.checked = Boolean(value);
+        } else if (SCHEDULE_FIELDS.includes(key)) {
+            // A `datetime-local` input holds the viewer's own wall-clock time,
+            // with no offset at all -- `isoToLocalInputValue`/
+            // `localInputValueToIso` are the one place that conversion happens,
+            // so the stored value stays UTC on both sides of it.
+            input.type = 'datetime-local';
+            input.value = isoToLocalInputValue(value);
         } else {
             input.type = 'number';
             input.value = value;
@@ -2911,6 +3015,8 @@ async function saveGacha(event) {
                 revision: gacha.revision,
                 banner_key: gacha.banner_key,
                 display_name: document.getElementById('gacha-banner-display-name').value.trim(),
+                starts_at: localInputValueToIso(event.target.starts_at.value),
+                ends_at: localInputValueToIso(event.target.ends_at.value),
             }),
         });
         toast(result.message);
@@ -3225,6 +3331,7 @@ async function loadShopItems() {
     setSubtitle('dashboard.subtitle_shop_items',
                 {visible, total: itemList.length, custom});
     renderItemTable(itemsHost, itemList);
+    renderShopPreview(document.getElementById('shop-preview'));
 
     // One owner of the page-action slot: every render clears it and adds exactly
     // one action, or they accumulate one per save.
@@ -3399,6 +3506,76 @@ function renderItemSection(items) {
     const wrap = element('div', 'table-wrap');
     wrap.appendChild(node);
     return wrap;
+}
+
+// The 100-character bound `t("shop.select_option_label", ...)` truncates a
+// Discord select option's label to in `cogs/shop.py`'s `SELECT_LABEL_LIMIT`.
+// Kept as its own name here, rather than a bare `100`, because the two must
+// agree: this mocks the option Discord actually renders.
+const SHOP_PREVIEW_LABEL_LIMIT = 100;
+
+// Which section pill is showing its items. Module-level because the picker
+// and the item list are two separate render calls that have to agree on it,
+// the same reason `activeBannerKey` is held above rather than passed around.
+let shopPreviewCategoryId = null;
+
+/** A member never meets the item table above -- `/shop` is two steps, a
+ *  section then an item within it, so this mocks exactly that rather than
+ *  the operator's flat management view. An item table row and a member's
+ *  `/shop` option can disagree on what is even offered: hidden and disabled
+ *  items are both filtered out of `renderItemTable`'s counts already, but
+ *  the *rows* still show them (an operator has to be able to find and
+ *  un-hide one) -- this preview drops them entirely, the way `/shop` does.
+ */
+function renderShopPreview(host) {
+    const eligible = (item) => item.enabled && item.in_shop && !item.hidden;
+    const sections = itemCategories.filter(
+        (section) => itemList.some((item) => item.category === section.id && eligible(item)));
+
+    if (!sections.length) {
+        host.replaceChildren(emptyState('dashboard.shop_preview_empty', 'ic-shop'));
+        return;
+    }
+    if (!sections.some((section) => section.id === shopPreviewCategoryId)) {
+        shopPreviewCategoryId = sections[0].id;
+    }
+
+    const panel = element('div', 'shop-preview-panel');
+    panel.appendChild(renderShopPreviewSections(sections, shopPreviewCategoryId, host));
+    panel.appendChild(renderShopPreviewItems(
+        itemList.filter((item) => item.category === shopPreviewCategoryId && eligible(item))));
+    host.replaceChildren(panel);
+}
+
+function renderShopPreviewSections(sections, activeId, host) {
+    const bar = element('div', 'shop-preview-sections');
+    sections.forEach((section) => {
+        const button = element('button', `pill ${section.id === activeId ? 'on' : 'neutral'}`,
+                               section.label);
+        button.type = 'button';
+        button.addEventListener('click', () => {
+            shopPreviewCategoryId = section.id;
+            renderShopPreview(host);
+        });
+        bar.appendChild(button);
+    });
+    return bar;
+}
+
+function renderShopPreviewItems(items) {
+    const list = element('div', 'shop-preview-items');
+    items.forEach((item) => {
+        list.appendChild(element('div', 'shop-preview-item', shopPreviewOptionLabel(item)));
+    });
+    return list;
+}
+
+/** What `/buy`'s and `/shop`'s own autocomplete would show for this item --
+ *  mirrors `cogs/shop.py`'s `t("shop.select_option_label", ...)`, truncated
+ *  to the same bound the real Discord select enforces. */
+function shopPreviewOptionLabel(item) {
+    return format('dashboard.shop_preview_option_label',
+                  {name: item.name, price: item.price}).slice(0, SHOP_PREVIEW_LABEL_LIMIT);
 }
 
 /** Add or remove a built-in from this guild's hidden list.
@@ -3611,6 +3788,35 @@ async function loadRedeems() {
     renderActiveEntitlements(activeHost, active);
 }
 
+/** Award an emoji/sticker/sound with no voucher or pull behind it at all --
+ *  staff already made the asset in Discord and just wants the timer to start.
+ *  Mirrors `createWorkResponse`'s shape exactly. */
+async function submitManualGrant(event) {
+    event.preventDefault();
+    const submit = event.target.querySelector('button[type="submit"]');
+    const form = new FormData(event.target);
+    submit.disabled = true;
+    try {
+        const result = await api(`/guilds/${guildId}/entitlements`, {
+            method: 'POST',
+            headers: headers(),
+            body: JSON.stringify({
+                user_id: String(form.get('user_id') || '').trim(),
+                asset_type: form.get('asset_type'),
+                discord_item_id: String(form.get('discord_item_id') || '').trim(),
+                duration_days: Number(form.get('duration_days')),
+            }),
+        });
+        toast(result.message);
+        event.target.reset();
+        await loadRedeems();
+    } catch (error) {
+        handleApiError(error);
+    } finally {
+        submit.disabled = false;
+    }
+}
+
 /** Whole units only, largest first: "3d 11h" rather than a raw second count.
  *  Under a minute reads as "under a minute" — a countdown to zero on a page
  *  nobody is watching is precision with no purpose. */
@@ -3648,9 +3854,14 @@ function renderActiveEntitlements(host, rows) {
         }
         line.appendChild(grant);
 
-        line.appendChild(element('td', null, row.source_type
+        const source = element('td');
+        source.appendChild(element('div', null, row.source_type
             ? tr(`dashboard.source_${row.source_type}`)
             : tr('dashboard.source_none')));
+        if (row.granted_by) {
+            source.appendChild(element('div', 'cell-key', row.granted_by));
+        }
+        line.appendChild(source);
         line.appendChild(element('td', 'cell-mono',
                                  formatRemaining(row.remaining_seconds)));
         line.appendChild(element('td', 'cell-mono',
@@ -4567,6 +4778,7 @@ function renderManagedEditor(page, item) {
     const form = document.createElement('form');
     const readers = {};
     let repeat = null;
+    let menuKeyControl = null;
 
     spec.sections.forEach((section, index) => {
         const fieldset = document.createElement('fieldset');
@@ -4576,7 +4788,8 @@ function renderManagedEditor(page, item) {
         fieldset.appendChild(legend);
 
         if (section.repeat) {
-            repeat = managedRepeat(spec.repeat, values[spec.repeat.name] || []);
+            repeat = managedRepeat(spec.repeat, values[spec.repeat.name] || [],
+                                    menuKeyControl);
             fieldset.appendChild(repeat.node);
             readers[spec.repeat.name] = repeat.read;
         } else {
@@ -4587,6 +4800,7 @@ function renderManagedEditor(page, item) {
                                                     values[name], isNew);
                 grid.appendChild(managedFieldWrapper(fieldSpec, control.node));
                 readers[name] = control.read;
+                if (name === 'menu_key') menuKeyControl = control;
             });
             fieldset.appendChild(grid);
         }
@@ -4780,8 +4994,52 @@ function managedProblem(spec, values) {
     return null;
 }
 
-/** Repeatable rows: numbered embed blocks, or role-menu buttons. */
-function managedRepeat(spec, existing) {
+/** The first resource whose name contains `label`, case-insensitively, or
+ *  `null`. A convenience, never a constraint: the operator still confirms or
+ *  overrides whatever this suggests. */
+function matchResourceByName(list, label) {
+    if (!label) return null;
+    const needle = label.toLowerCase();
+    const match = (list || []).find(
+        (resource) => (resource.name || '').toLowerCase().includes(needle));
+    return match ? match.id : null;
+}
+
+/** The supported-games list as `{key, label}` pairs, translated, in the
+ *  server's declared order (`core/supported_games.py`). */
+function supportedGameOptions() {
+    return (supportedGames || []).map((key) => (
+        {key, label: tr(`dashboard.game_names.${key}`)}));
+}
+
+/** A quick-add `<select>` for a known game. Picking one calls `onPick` with
+ *  the resolved display name and resets to the placeholder; it never writes
+ *  anything by itself. Suggests a name so an operator does not retype
+ *  "Valorant", nothing more -- the channel/role it goes with is still the
+ *  operator's own pick, exactly like every other setting in this dashboard. */
+function gameQuickPick(onPick) {
+    const select = element('select', 'game-quick-pick');
+    const placeholder = element('option', null, tr('dashboard.game_quick_pick_placeholder'));
+    placeholder.value = '';
+    select.appendChild(placeholder);
+    supportedGameOptions().forEach(({key, label}) => {
+        const option = element('option', null, label);
+        option.value = key;
+        select.appendChild(option);
+    });
+    select.addEventListener('change', () => {
+        const chosen = supportedGameOptions().find((g) => g.key === select.value);
+        select.value = '';
+        if (chosen) onPick(chosen.label);
+    });
+    return select;
+}
+
+/** Repeatable rows: numbered embed blocks, or role-menu buttons. `menuKey` is
+ *  the live control for a role-menu panel's own `menu_key` field (undefined
+ *  for every other managed kind), read at click time so a game quick-pick
+ *  offers itself only while this panel is the "games" menu. */
+function managedRepeat(spec, existing, menuKeyControl) {
     const block = spec.layout === 'block';
     const node = element('div', 'json-row-editor');
     let notify = () => {};
@@ -4872,6 +5130,27 @@ function managedRepeat(spec, existing) {
     add.addEventListener('click', () => { addRow(); notify(); });
     node.appendChild(add);
 
+    // Offered only for a role menu's own button list, and only while this
+    // panel's `menu_key` reads "games" -- a menu for anything else has no
+    // business suggesting a game name. `menu_key` is free text the operator
+    // can still be typing, so this re-checks live rather than once at
+    // construction, or a brand-new "games" menu would never see it appear.
+    if (spec.name === 'entries' && menuKeyControl) {
+        const quickPickWrap = element('span', 'game-quick-pick-wrap');
+        const quickPick = gameQuickPick((label) => {
+            const roleId = matchResourceByName(resources.roles, label);
+            addRow({label, role_id: roleId || ''});
+            notify();
+        });
+        quickPickWrap.appendChild(quickPick);
+        const syncVisibility = () => {
+            quickPickWrap.hidden = menuKeyControl.read() !== 'games';
+        };
+        syncVisibility();
+        menuKeyControl.node.addEventListener('input', syncVisibility);
+        node.appendChild(quickPickWrap);
+    }
+
     const read = () => [...rows.children].map((row) => {
         const values = {};
         spec.fields.forEach((field) => {
@@ -4917,11 +5196,230 @@ async function deleteManaged(page, item, button) {
  *
  *  From the values rather than from the DOM, so the preview and the thing that
  *  is posted cannot disagree — the argument `collectSettingChanges` makes on the
- *  settings form. What it deliberately does not do is render markdown: Discord's
- *  flavour is large enough that a partial parser shows a *different* wrong
- *  answer than plain text, and a preview that is confidently wrong is worse than
- *  one that is plainly literal. The note under it says so.
+ *  settings form.
+ *
+ *  Decided 2026-09-25 to do markdown properly rather than leave it at mention
+ *  resolution: a hand-written scanner covering Discord's actual token set,
+ *  never `innerHTML` (the CSP trip-wire holds regardless of how much richer
+ *  the renderer gets), built from `element()`/`createTextNode` exactly like
+ *  the mention resolution it replaces. Two things keep it from being
+ *  "confidently wrong" the way a careless partial parser would be: code
+ *  spans and fenced code blocks are pulled out *before* anything else is
+ *  interpreted, so a stray `*` inside a code sample never turns into
+ *  emphasis; and every renderer call is wrapped in a fallback to plain text
+ *  (`renderMarkdownBody`), because a throw here must not take the whole
+ *  settings page down the way a missing locale key must not.
  */
+
+/** A single self-contained token, tried in this order at every position:
+ *  an escaped character, an inline code span, then emphasis from most to
+ *  least specific delimiter (`***`, `**`, `__`, `*`, `_`, `~~`, `||`), a
+ *  masked link, a timestamp, and the two mention forms `resolvedPreviewBody`
+ *  used to cover alone. A fresh `RegExp` per call rather than one shared
+ *  instance, because `appendInlineMarkdown` recurses to render emphasis'
+ *  own contents and a shared object's `lastIndex` would corrupt the outer
+ *  scan the moment the inner one finished (`g`-flag `exec` resets it to 0 on
+ *  a null match).
+ *
+ *  Discord also refuses `_underscore_` emphasis inside a word (`snake_case`
+ *  stays literal); that refinement is not implemented here; a preview is a
+ *  sketch and the plain form has no false positives worth chasing.
+ */
+const MARKDOWN_TOKEN_SOURCE =
+    '\\\\(.)' +                                          // 1 escaped char
+    '|`([^`]+)`' +                                       // 2 inline code
+    '|\\*\\*\\*([^*]+?)\\*\\*\\*' +                      // 3 bold + italic
+    '|\\*\\*([^*]+?)\\*\\*' +                            // 4 bold
+    '|__([^_]+?)__' +                                    // 5 underline
+    '|\\*([^*]+?)\\*' +                                  // 6 italic (*)
+    '|_([^_]+?)_' +                                      // 7 italic (_)
+    '|~~([^~]+?)~~' +                                    // 8 strikethrough
+    '|\\|\\|([^|]+?)\\|\\|' +                            // 9 spoiler
+    '|\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)' +    // 10 link text, 11 link url
+    '|<t:(-?\\d+)(?::([tTdDfFR]))?>' +                   // 12 ts seconds, 13 ts format
+    '|<#(\\d+)>' +                                       // 14 channel id
+    '|<@&(\\d+)>';                                       // 15 role id
+
+/** Discord's own relative/absolute styles are not reproduced -- a preview is
+ *  a sketch, and `Intl.RelativeTimeFormat`'s own rounding rules are a second
+ *  guess nobody asked for. `t`/`T` and `d`/`D` at least tell the two things
+ *  Discord's letters actually distinguish: time-only versus date-only. */
+function formatPreviewTimestamp(secondsText, formatLetter) {
+    const seconds = Number(secondsText);
+    if (!Number.isFinite(seconds)) return `<t:${secondsText}>`;
+    try {
+        const date = new Date(seconds * 1000);
+        if (formatLetter === 't' || formatLetter === 'T') return date.toLocaleTimeString();
+        if (formatLetter === 'd' || formatLetter === 'D') return date.toLocaleDateString();
+        return date.toLocaleString();
+    } catch (error) {
+        return `<t:${secondsText}>`;
+    }
+}
+
+function appendInlineMarkdown(target, text) {
+    const pattern = new RegExp(MARKDOWN_TOKEN_SOURCE, 'g');
+    let cursor = 0;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+        if (match.index > cursor) {
+            target.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+        }
+        if (match[1] !== undefined) {
+            target.appendChild(document.createTextNode(match[1]));
+        } else if (match[2] !== undefined) {
+            const inlineCode = element('code', 'preview-inline-code');
+            inlineCode.appendChild(document.createTextNode(match[2]));
+            target.appendChild(inlineCode);
+        } else if (match[3] !== undefined) {
+            const strong = element('strong', 'preview-strong');
+            const em = element('em', 'preview-em');
+            appendInlineMarkdown(em, match[3]);
+            strong.appendChild(em);
+            target.appendChild(strong);
+        } else if (match[4] !== undefined) {
+            const strong = element('strong', 'preview-strong');
+            appendInlineMarkdown(strong, match[4]);
+            target.appendChild(strong);
+        } else if (match[5] !== undefined) {
+            const underline = element('u', 'preview-underline');
+            appendInlineMarkdown(underline, match[5]);
+            target.appendChild(underline);
+        } else if (match[6] !== undefined) {
+            const em = element('em', 'preview-em');
+            appendInlineMarkdown(em, match[6]);
+            target.appendChild(em);
+        } else if (match[7] !== undefined) {
+            const em = element('em', 'preview-em');
+            appendInlineMarkdown(em, match[7]);
+            target.appendChild(em);
+        } else if (match[8] !== undefined) {
+            const strike = element('s', 'preview-strike');
+            appendInlineMarkdown(strike, match[8]);
+            target.appendChild(strike);
+        } else if (match[9] !== undefined) {
+            const spoiler = element('span', 'preview-spoiler');
+            appendInlineMarkdown(spoiler, match[9]);
+            target.appendChild(spoiler);
+        } else if (match[10] !== undefined) {
+            const link = element('a', 'preview-link');
+            link.href = match[11];
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            appendInlineMarkdown(link, match[10]);
+            target.appendChild(link);
+        } else if (match[12] !== undefined) {
+            target.appendChild(document.createTextNode(
+                formatPreviewTimestamp(match[12], match[13])));
+        } else if (match[14] !== undefined) {
+            const channel = resources.channels.find((c) => String(c.id) === match[14]);
+            target.appendChild(document.createTextNode(
+                channel ? `#${channel.name}` : match[0]));
+        } else if (match[15] !== undefined) {
+            const role = resources.roles.find((r) => String(r.id) === match[15]);
+            target.appendChild(document.createTextNode(
+                role ? `@${role.name}` : match[0]));
+        }
+        cursor = pattern.lastIndex;
+    }
+    if (cursor < text.length) {
+        target.appendChild(document.createTextNode(text.slice(cursor)));
+    }
+}
+
+/** The block-level pass over one fence-free run of text: a `#`/`##`/`###`
+ *  line becomes a heading, consecutive `> ` lines become one block quote,
+ *  consecutive `-`/`*`/`1.` lines become one list, and everything else is an
+ *  ordinary line -- each fed through `appendInlineMarkdown` so emphasis,
+ *  links, mentions and timestamps all work inside every one of them too. */
+function appendMarkdownLines(container, chunk) {
+    let quote = null;
+    let list = null;
+
+    chunk.split('\n').forEach((line, index, lines) => {
+        const heading = line.match(/^(#{1,3})\s+(.*)$/);
+        const quoteLine = line.match(/^>\s?(.*)$/);
+        const bullet = line.match(/^[-*]\s+(.*)$/);
+        const numbered = line.match(/^\d+\.\s+(.*)$/);
+
+        if (heading) {
+            quote = null; list = null;
+            const node = element('div', `preview-heading-${heading[1].length}`);
+            appendInlineMarkdown(node, heading[2]);
+            container.appendChild(node);
+            return;
+        }
+        if (quoteLine) {
+            list = null;
+            if (!quote) {
+                quote = element('blockquote', 'preview-quote');
+                container.appendChild(quote);
+            }
+            const quoteLineNode = element('div', 'preview-quote-line');
+            appendInlineMarkdown(quoteLineNode, quoteLine[1]);
+            quote.appendChild(quoteLineNode);
+            return;
+        }
+        quote = null;
+        const item = bullet || numbered;
+        if (item) {
+            const tag = numbered ? 'ol' : 'ul';
+            if (!list || list.tag !== tag) {
+                list = {tag, node: element(tag, 'preview-list')};
+                container.appendChild(list.node);
+            }
+            const entry = element('li', 'preview-list-item');
+            appendInlineMarkdown(entry, item[1]);
+            list.node.appendChild(entry);
+            return;
+        }
+        list = null;
+        if (line === '') {
+            if (index < lines.length - 1) container.appendChild(element('br'));
+            return;
+        }
+        const node = element('div', 'preview-line');
+        appendInlineMarkdown(node, line);
+        container.appendChild(node);
+    });
+}
+
+/** The embed body, fully rendered: fenced code blocks are pulled out first
+ *  since their content must never be interpreted as markdown, then every
+ *  remaining run of text goes through the block-level pass. */
+function renderMarkdownBodyUnsafe(text) {
+    const container = element('div', 'preview-embed-body');
+    const fence = /```(?:\w+\n)?([\s\S]*?)```/g;
+    let cursor = 0;
+    let match;
+    while ((match = fence.exec(text)) !== null) {
+        if (match.index > cursor) {
+            appendMarkdownLines(container, text.slice(cursor, match.index));
+        }
+        const pre = element('pre', 'preview-code-block');
+        const codeBlockInner = element('code', 'preview-code-block-inner');
+        codeBlockInner.appendChild(document.createTextNode(match[1]));
+        pre.appendChild(codeBlockInner);
+        container.appendChild(pre);
+        cursor = fence.lastIndex;
+    }
+    if (cursor < text.length) {
+        appendMarkdownLines(container, text.slice(cursor));
+    }
+    return container;
+}
+
+/** A throw here must not take the settings page down, exactly as a missing
+ *  locale key must render `[key]` rather than crash `tr()`. */
+function renderMarkdownBody(text) {
+    try {
+        return renderMarkdownBodyUnsafe(text);
+    } catch (error) {
+        console.error('[preview] markdown render failed', error);
+        return element('div', 'preview-embed-body', text);
+    }
+}
+
 function messagePreview(spec, values) {
     const wrapper = element('div');
     wrapper.appendChild(element('h3', 'token-help-title',
@@ -4950,9 +5448,9 @@ function messagePreview(spec, values) {
             text.appendChild(element('div', 'preview-embed-title', embed.title));
         }
         // The one transformation the renderer performs, mirrored here so the
-        // preview does not lie about it.
-        text.appendChild(element('div', 'preview-embed-body',
-                                 String(embed.body || '').replaceAll('\\n', '\n')));
+        // preview does not lie about it -- plus full markdown rendering.
+        text.appendChild(renderMarkdownBody(
+            String(embed.body || '').replaceAll('\\n', '\n')));
         card.appendChild(text);
         // The thumbnail is first-embed-only, exactly as the renderer does it.
         if (index === 0 && spec.kind === 'rules' && values.thumbnail
@@ -5146,6 +5644,34 @@ function permissionFindingSubject(finding) {
     return tr('dashboard.permissions_heading');
 }
 
+/** Queue the bot-side fix for one `channel_missing_permission` finding.
+ *
+ *  The server re-checks the finding is still live before queueing anything,
+ *  so this is safe to call from a report the operator has been looking at
+ *  for a while -- a stale click is refused there, not acted on here.
+ */
+async function repairChannelPermission(finding, button) {
+    if (!await confirmAction(tr('dashboard.permission_repair_confirm'))) return;
+    button.disabled = true;
+    try {
+        const result = await api(`/guilds/${guildId}/permissions/repair`, {
+            method: 'POST',
+            headers: headers(),
+            body: JSON.stringify({
+                channel_id: finding.channel_id,
+                subject: finding.subject,
+                confirm: true,
+            }),
+        });
+        toast(result.message);
+    } catch (error) {
+        handleApiError(error);
+    } finally {
+        button.disabled = false;
+    }
+    await loadPermissionReport();
+}
+
 async function loadPermissionReport() {
     const summary = document.getElementById('permission-summary');
     const findingsHost = document.getElementById('permission-findings');
@@ -5199,10 +5725,25 @@ async function loadPermissionReport() {
                 `dashboard.permissions_severity_${finding.severity}`,
                 finding.severity === 'blocking' ? 'off' : 'pending',
             ));
+            const actionCell = element('td');
+            actionCell.appendChild(element('div', null, permissionFindingText(finding)));
+            // Only the bot's own capability gap is ever repaired this way --
+            // a `channel_member_missing_permission` finding names someone
+            // else's grant, and granting that back could be overriding an
+            // intentional restriction rather than fixing a bug, so it never
+            // gets this button.
+            if (finding.code === 'channel_missing_permission' && finding.channel_id) {
+                const repair = element('button', 'btn btn-outline btn-sm',
+                                       tr('dashboard.permission_repair_button'));
+                repair.type = 'button';
+                repair.addEventListener('click',
+                    () => repairChannelPermission(finding, repair));
+                actionCell.appendChild(repair);
+            }
             row.append(
                 status,
                 element('td', null, permissionFindingSubject(finding)),
-                element('td', null, permissionFindingText(finding)),
+                actionCell,
             );
             findingBody.appendChild(row);
         });

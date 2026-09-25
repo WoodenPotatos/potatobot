@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.14.0-beta.3** &nbsp;·&nbsp; channel `beta`
+**Version 2.15.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -33,7 +33,7 @@ POTATOBOT_DB_PATH=$PWD/economy.db ./venv/bin/python update_db.py
 ./venv/bin/python main.py
 ```
 
-Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. `config.json` is optional: it is only a fallback for a setting an installation has never saved, and `python scripts/import_config.py` retires it. The full walkthrough — Discord application, intents, OAuth, HTTPS, systemd and the guild setup check — is in [docs/installation.md](docs/installation.md).
+Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Every setting lives in SQLite from the start and is editable from the dashboard once it is running. The full walkthrough — Discord application, intents, OAuth, HTTPS, systemd and the guild setup check — is in [docs/installation.md](docs/installation.md).
 <!-- END GENERATED: install -->
 
 ## Highlights
@@ -60,13 +60,15 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. `con
   or vault means the same thing however a member obtained it
 - Per-guild `/work` outcome odds, payouts and response text, editable as plain
   rows; a tier a guild has not touched uses the shipped set
+- Patch-notes announcements per game, per guild, for eleven supported titles,
+  with a configurable channel and an optional role ping for each
 
 ## Requirements
 
 - A **Linux server, headless**, supervised by systemd and reached through a
   reverse proxy. That is what it is developed and run on; `deploy/` holds the
-  units and `Containerfile`/`compose.yaml` hold a container build. Nothing here
-  is written for Windows or macOS.
+  units and `container/` holds a Containerfile and compose.yaml for a
+  container build. Nothing here is written for Windows or macOS.
 - Python 3.12, 3.13, or 3.14
 - A Discord application and bot token
 - Discord privileged Member and Message Content intents
@@ -81,9 +83,7 @@ Runtime dependencies are pinned in `requirements.lock`; development and security
 
 Environment variables own credentials and deployment settings. Typed guild settings,
 feature revisions, gacha state, inventory, vouchers, and dashboard audit records live in
-SQLite, which is the only thing that writes them. `config.json` is a read-only fallback
-for a setting an installation has never saved; `python scripts/import_config.py` gives
-each of those a row, after which the file is unused.
+SQLite, which is the only thing that writes them.
 
 Important environment variables are documented in `.env.example`. In particular:
 
@@ -172,6 +172,18 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.15.0-beta.1
+
+- **The bot now posts patch and update notes for eleven games**, one channel per game per guild: League of Legends, Valorant, Minecraft, Phasmophobia, Dead by Daylight, Genshin Impact, Counter-Strike 2, Rainbow Six Siege, Honkai: Star Rail, Wuthering Waves and Zenless Zone Zero. A master toggle turns the whole feature on or off, and each game has its own toggle and channel underneath it. Every source is checked once per tick regardless of how many guilds are watching, and one game's source being unreachable never stops the other ten from being checked.
+- **A wedged music extraction no longer needs a manual restart to clear.** `/play` could leave a worker permanently stuck if the source it was fetching from hung, and every stuck worker after that made the queue slower until nothing was left. A watchdog now recycles the whole extraction pool once a job has run far longer than any real one should.
+- **The weekly Everydle drift check no longer goes blind after the first unreachable game.** One game timing out used to abort the whole run before it reached the games after it in the list, which is how two new Genshin Impact characters went unnoticed for a week. Every game is now checked independently, and the report says exactly which ones it could not reach that week.
+- **A few Genshin Impact characters answer to their given name.** Raiden, Heizou, Shinobu, Ayaka, Ayato, Kazuha, Itto, Sara, Kokomi and Mizuki can now be guessed by their short name as well as their full one.
+- **Word-chain can take a custom word list.** A server can now allow extra words the built-in dictionary does not have, on top of it rather than instead of it, behind its own toggle in the dashboard.
+- **`/leaderboard` has a fourth board: luck.** Ranked by the fewest average pulls it takes a member to land a 5★, not by how many they have pulled overall — a member needs at least three 5★ pulls on a banner before they are ranked.
+- **The wheel segment editor shows whether the table still pays out correctly.** Editing `/wheel`'s weights in the dashboard now shows the actual expected return live, instead of only finding out it does not add up to exactly 98% after trying to save.
+- **The dashboard's message preview now renders real formatting**, not just channel and role mentions: bold, italic, underline, strikethrough, spoilers, code, code blocks, quotes, headings, lists, links and timestamps all show roughly the way Discord will actually render them.
+- …and 3 more, in [CHANGELOG.md](CHANGELOG.md).
+
 ### 2.14.0-beta.1
 
 - **A word chain now knows Hungarian letters.** `sz`, `gy`, `ny`, `cs`, `ly`, `ty`, `zs`, `dz` and `dzs` are single letters to anyone playing, but the bot compared one character at a time — so after `busz` it deleted `szék` and accepted `zebra`. It now joins words by the letter a player would name, and a doubled digraph like `rossz` ends in `sz` as it should. Servers set to English keep single letters, because `only` and `many` end in `y` there.
@@ -195,14 +207,6 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - The wait before it acts is deliberately several minutes, so a Discord outage or an ordinary reconnection is waited out rather than restarted through.
 - **And it can now be asked what it is doing.** The cause of that outage could not be established, because there was no way to see where the bot was stuck. `kill -USR1` now writes every thread's position into the log. See `docs/performance_recovery_plan.md`.
 - …and 14 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.10.0-beta.1
-
-- **Your own vouchers and timed roles can be gacha rewards.** Make an item that grants an emoji, sticker or sound, or a role for N days, and put it in a banner. A member wins a voucher and redeems it with `/redeem` as usual — the role lands with its expiry, and an asset opens the staff ticket with the right kind.
-- Previously a custom voucher was refused on redemption, because what it was for was worked out from its *name* rather than from the item. It is recorded when you win it now, so it also keeps working if you delete or rename the item afterwards.
-- If Discord refuses the role — it was deleted, or sits above the bot — the voucher stays unspent rather than vanishing.
-- **Permanent roles are deliberately not offered.** A reward needs a duration, and a permanent role won by chance could not be taken back by anything. A 3650-day timed role does the same job and can still be removed.
-- **Genshindle no longer asks about body type.** It sounded like a good clue and was not: five values across 120 characters, most of them the same two, so a guess almost never learned anything from it while it took up a column. Gone from the game and from the weekly update check.
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

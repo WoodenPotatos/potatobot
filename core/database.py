@@ -50,7 +50,7 @@ READ_ONLY_OPERATIONS = {
     "get_voice_permissions", "get_active_channel_owner", "get_ticket_opener",
     "get_open_support_ticket", "get_ticket_claimer",
     "user_exists", "get_warning_count", "get_warnings", "get_user_intel",
-    "get_top_levels", "get_top_balances", "get_top_streaks",
+    "get_top_levels", "get_top_balances", "get_top_streaks", "get_top_gacha_luck",
     "get_user_profile", "get_user_rank", "get_inactivity_data",
     "get_all_rentals", "get_cooldown", "get_rob_stats",
     "get_top_xp_user", "get_full_user_data", "get_streak_data",
@@ -70,6 +70,7 @@ READ_ONLY_OPERATIONS = {
     "get_expired_entitlements",
     "export_user_data", "get_active_entitlements_for_user",
     "get_retention_candidates",
+    "get_game_patch_state", "get_guild_patch_announcement",
 }
 
 
@@ -167,7 +168,7 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_survivor", "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 19
+LATEST_SCHEMA_VERSION = 22
 
 # The largest amount any single balance change, stake or transfer may carry.
 # Far above any real balance, and far below 2**63: an amount past that reaches
@@ -244,7 +245,7 @@ REWARD_DEFAULTS = {
     "voice_minute_normal": (5, 5), "voice_minute_premium": (10, 10),
 }
 
-DEFAULT_GACHA_CONFIG = {
+DEFAULT_GACHA_CONFIG: dict = {
     "cost": 5000,
     "hard_pity": 100,
     "soft_pity_start": 75,
@@ -670,6 +671,29 @@ def _create_scoped_schema(conn):
             used_at TEXT NOT NULL,
             PRIMARY KEY (guild_id, game_key, word)
         );
+        -- Schema 20. The latest patch seen upstream for a game, one row per
+        -- game rather than per guild: the newest League of Legends patch is
+        -- the same fact for every guild, so fetching it once and fanning the
+        -- announcement out to guilds is what makes patchbot poll upstream
+        -- once per tick instead of once per guild watching that game.
+        CREATE TABLE IF NOT EXISTS game_patch_state (
+            game_key TEXT PRIMARY KEY,
+            latest_version TEXT,
+            latest_url TEXT,
+            latest_title TEXT,
+            checked_at TEXT
+        );
+        -- A guild's own announcement history, kept separately from the global
+        -- state above and persisted rather than in-memory like socials.py's
+        -- dedup: a restart losing this would either re-announce an old patch
+        -- or (worse, if baselined naively) skip a real one, which is a worse
+        -- failure here than the live-stream case socials.py was built for.
+        CREATE TABLE IF NOT EXISTS guild_patch_announcements (
+            guild_id INTEGER NOT NULL,
+            game_key TEXT NOT NULL,
+            last_announced_version TEXT,
+            PRIMARY KEY (guild_id, game_key)
+        );
         CREATE TABLE IF NOT EXISTS guild_settings (
             guild_id INTEGER NOT NULL REFERENCES guilds(guild_id),
             setting_key TEXT NOT NULL,
@@ -829,6 +853,11 @@ def _create_control_plane_v5_schema(conn):
             revision INTEGER NOT NULL DEFAULT 1,
             updated_by INTEGER,
             updated_at TEXT NOT NULL,
+            -- Both NULL means "no schedule": pullability then depends only on
+            -- `enabled`, exactly as before schema 21. A bound present narrows
+            -- that further; `enabled` still applies on top as a manual override.
+            starts_at TEXT,
+            ends_at TEXT,
             PRIMARY KEY (guild_id, banner_key)
         );
         CREATE TABLE IF NOT EXISTS gacha_pity (
@@ -893,7 +922,12 @@ def _create_control_plane_v5_schema(conn):
             source_voucher_id TEXT UNIQUE REFERENCES reward_vouchers(voucher_id),
             discord_item_id TEXT,
             status TEXT NOT NULL DEFAULT 'active'
-                CHECK (status IN ('active', 'expired', 'cancelled'))
+                CHECK (status IN ('active', 'expired', 'cancelled')),
+            -- Schema 22. NULL means "derive it from the voucher join" -- see
+            -- the ALTER TABLE in _create_control_plane_v5_schema for why
+            -- these carry no CHECK.
+            source_type TEXT,
+            granted_by INTEGER
         );
         CREATE TABLE IF NOT EXISTS fulfillment_requests (
             request_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1080,6 +1114,12 @@ def _create_control_plane_v5_schema(conn):
         # identifier that pull history and pity rows reference. An existing
         # banner keeps a NULL name and falls back to its key.
         conn.execute("ALTER TABLE gacha_banners ADD COLUMN display_name TEXT")
+    if "starts_at" not in banner_columns:
+        # Schema 21, purely additive. NULL on every existing banner means "no
+        # schedule", so pullability is unchanged until an operator sets one.
+        conn.execute("ALTER TABLE gacha_banners ADD COLUMN starts_at TEXT")
+    if "ends_at" not in banner_columns:
+        conn.execute("ALTER TABLE gacha_banners ADD COLUMN ends_at TEXT")
     warning_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(warnings)")
     }
@@ -1102,6 +1142,29 @@ def _create_control_plane_v5_schema(conn):
             "ALTER TABLE reward_vouchers ADD COLUMN source_type TEXT "
             "NOT NULL DEFAULT 'gacha' CHECK (source_type IN ('gacha', 'shop'))"
         )
+    entitlement_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(timed_entitlements)")
+    }
+    if "source_type" not in entitlement_columns:
+        # Schema 22, purely additive. Every entitlement so far derives its
+        # provenance from the voucher it was redeemed from, via the join
+        # `get_active_entitlements`/`get_expired_entitlements` already make to
+        # `reward_vouchers`. A manually-granted entitlement has no voucher, so
+        # it needs to state its own provenance on the row rather than coming
+        # back NULL from that join -- which `entitlement_cleanup` would then
+        # skip forever, exactly the outlives-its-record failure this table
+        # exists to prevent.
+        #
+        # No CHECK, deliberately, the same reasoning `shop_item_definitions.
+        # category` carries: SQLite cannot alter a CHECK without rebuilding
+        # the table, and the set of legitimate sources is ours to grow. NULL
+        # keeps meaning "derive it from the voucher join" for every row that
+        # predates this column.
+        conn.execute("ALTER TABLE timed_entitlements ADD COLUMN source_type TEXT")
+    if "granted_by" not in entitlement_columns:
+        # Schema 22. The staff Discord id behind a manual grant -- NULL for
+        # every voucher-derived row, mirroring fulfillment_requests.completed_by.
+        conn.execute("ALTER TABLE timed_entitlements ADD COLUMN granted_by INTEGER")
 
 
 # The three role menus that shipped as typed settings, and the key each becomes.
@@ -1266,9 +1329,9 @@ def seed_role_menus_from_settings(conn) -> int:
     and posting a second copy on upgrade would be worse than asking.
 
     Only a guild's **stored** setting seeds a menu, never the `config.json`
-    fallback the runtime readers use: that file is single-tenant and names one
-    installation's roles with no guild attached, so seeding from it would hand a
-    second guild the legacy guild's role ids.
+    fallback the runtime readers used at the time: that file was single-tenant
+    and named one installation's roles with no guild attached, so seeding from
+    it would have handed a second guild the legacy guild's role ids.
 
     The settings rows are left in place. They stop being read in the same change
     that moves the readers over, and leaving them until then means an upgrade
@@ -1293,11 +1356,11 @@ def seed_role_menus_from_settings(conn) -> int:
                 (guild_id, setting_key),
             ).fetchone()
             # Only a stored row seeds a menu. The `config.json` fallback every
-            # other reader has is single-tenant — it names one installation's
-            # roles with no guild attached — so using it here would give a
-            # second guild the legacy guild's role ids. A guild that never saved
-            # the setting starts with no menu and creates one, which is the
-            # honest answer rather than a guessed one.
+            # other reader had at the time was single-tenant — it named one
+            # installation's roles with no guild attached — so using it here
+            # would have given a second guild the legacy guild's role ids. A
+            # guild that never saved the setting starts with no menu and
+            # creates one, which is the honest answer rather than a guessed one.
             if stored is None:
                 continue
             entries = json.loads(stored[0])
@@ -1690,8 +1753,8 @@ def begin_interactive_wager(wager_id: str, guild_id: int, user_id: int,
                 (wager_id, guild_id, user_id, game_key, stake, created_at),
             )
             # After the debit, so an unaffordable wager never spends an item.
-            consumed = bool(consume_item) and _consume_inventory_item(
-                conn, guild_id, user_id, consume_item, created_at)
+            consumed = bool(consume_item and _consume_inventory_item(
+                conn, guild_id, user_id, consume_item, created_at))
             balance = conn.execute(
                 "SELECT balance FROM users WHERE user_id = ?", (user_id,)
             ).fetchone()[0]
@@ -2056,14 +2119,38 @@ WHEEL_SEGMENTS = ((0, 54), (100, 19), (150, 12), (200, 7), (300, 4), (500, 3),
 WHEEL_TOTAL_WEIGHT = sum(weight for _, weight in WHEEL_SEGMENTS)
 
 
-def _wheel_spin(rng) -> int:
+def guild_wheel_segments(guild_id: int) -> tuple:
+    """This guild's `/wheel` segments, as `((multiplier, weight), ...)`.
+
+    Read through the settings cache like every other setting, so a dashboard
+    change is visible immediately and a spin does not open a connection per
+    round. Falls back to the shipped table on any failure or malformed shape:
+    a settlement transaction must never raise because a cached read came back
+    strange, and reverting to the shipped odds is a game that still works.
+    """
+    try:
+        from core import settings_cache
+
+        value = settings_cache.setting(int(guild_id), "casino_wheel_segments")
+        if not isinstance(value, dict) or not value:
+            return WHEEL_SEGMENTS
+        segments = tuple((int(m), int(w)) for m, w in value.items())
+    except Exception:
+        db_logger.exception(
+            "Could not read wheel segments (guild=%s); using the shipped table.",
+            guild_id)
+        return WHEEL_SEGMENTS
+    return segments
+
+
+def _wheel_spin(rng, segments, total_weight) -> int:
     """One segment's multiplier in hundredths."""
-    point = rng.randrange(WHEEL_TOTAL_WEIGHT)
-    for multiplier, weight in WHEEL_SEGMENTS:
+    point = rng.randrange(total_weight)
+    for multiplier, weight in segments:
         point -= weight
         if point < 0:
             return multiplier
-    return WHEEL_SEGMENTS[-1][0]
+    return segments[-1][0]
 
 
 def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None):
@@ -2076,6 +2163,8 @@ def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None):
     if stake <= 0 or stake > MAX_AMOUNT:
         return None
     rng = rng or secrets.SystemRandom()
+    segments = guild_wheel_segments(guild_id)
+    total_weight = sum(weight for _, weight in segments)
     try:
         with get_connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -2086,11 +2175,11 @@ def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None):
             ).rowcount != 1:
                 conn.rollback()
                 return None
-            multiplier = _wheel_spin(rng)
+            multiplier = _wheel_spin(rng, segments, total_weight)
             charm = _consume_inventory_item(conn, guild_id, user_id, "lucky_charm")
             second = None
             if charm:
-                second = _wheel_spin(rng)
+                second = _wheel_spin(rng, segments, total_weight)
                 multiplier = max(multiplier, second)
             payout = stake * multiplier // 100
             won = payout > 0
@@ -2679,7 +2768,10 @@ def set_feature_state(guild_id: int, feature_key: str, enabled: bool,
             )
             for key, definition in FEATURE_DEFINITIONS.items()
         }
-        states = {key: item["enabled"] for key, item in current.items()}
+        # `bool(...)`: the dict literals above hold "enabled" (a bool) beside
+        # "revision" (an int), so their inferred value type is the join of
+        # both rather than the bool this is actually always holding.
+        states = {key: bool(item["enabled"]) for key, item in current.items()}
         validate_feature_state(feature_key, enabled, states)
         if current[feature_key]["revision"] != int(expected_revision):
             raise RevisionConflictError("feature revision conflict")
@@ -2773,7 +2865,7 @@ def get_realms() -> list[dict]:
             "SELECT realm_id, guild_id, status FROM realm_guilds "
             "ORDER BY realm_id, guild_id"
         ).fetchall()
-    by_realm = {}
+    by_realm: dict[int, list[dict]] = {}
     for realm_id, guild_id, status in memberships:
         by_realm.setdefault(realm_id, []).append(
             {"guild_id": str(guild_id), "status": status}
@@ -3640,6 +3732,35 @@ def get_top_streaks(member_ids, limit: int = 10):
         db_logger.error(f"Failed to read streak leaderboard: {e}")
         return []
 
+def get_top_gacha_luck(guild_id: int, member_ids, banner_key: str = None,
+                        limit: int = 10, minimum_five_stars: int = 3):
+    """Ranked by best average luck -- lowest average pulls-per-5-star on one
+    banner, not the live pity counter -- so this is a different query shape
+    from `_ranked_members`: `gacha_pulls` already carries a real `guild_id`,
+    where `users` does not, so there is no member-id IN-list to chunk. A
+    member still needs `minimum_five_stars` 5-star pulls to qualify, or one
+    early lucky pull would top the board on no evidence, and the result is
+    still filtered to current guild members so a departed member drops off,
+    matching the other three leaderboards."""
+    key = banner_key or DEFAULT_GACHA_BANNER_KEY
+    ids = {int(member_id) for member_id in member_ids if int(member_id) > 0}
+    if not ids:
+        return []
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT user_id, AVG(pity_before + 1), COUNT(*) "
+                "FROM gacha_pulls WHERE guild_id = ? AND banner_key = ? "
+                "AND rarity = 5 GROUP BY user_id HAVING COUNT(*) >= ? "
+                "ORDER BY 2 ASC",
+                (guild_id, key, minimum_five_stars),
+            ).fetchall()
+    except Exception as e:
+        db_logger.error(f"Failed to read gacha luck leaderboard: {e}")
+        return []
+    return [row for row in rows if row[0] in ids][:limit]
+
+
 def get_user_profile(user_id: int):
     try:
         with get_connection() as conn:
@@ -4071,8 +4192,10 @@ def get_reward(guild_id: int, activity_id: str, def_coin: int = 0, def_xp: int =
         )
         return (def_coin, def_xp)
 
-def get_config_id(guild_id: int, config_key: str) -> int:
-    """Return a configured Discord snowflake as an integer."""
+def get_config_id(guild_id: int, config_key: str) -> int | None:
+    """Return a configured Discord snowflake as an integer, or `None` if unset
+    or unreadable. Unused: `server_config` has no writer, kept only for the
+    uniformity `docs/development.md`'s schema log describes."""
     try:
         with get_connection() as conn:
             cursor = conn.execute(
@@ -4732,6 +4855,38 @@ def validate_gacha_banner_name(display_name) -> str:
     return display_name
 
 
+def validate_gacha_banner_schedule(starts_at, ends_at) -> tuple:
+    """Accept an optional start/end window, refusing rather than clamping.
+
+    Each bound is independently optional -- `None` means "no bound on that
+    side," exactly as it means "no schedule" when both are `None`. A bound
+    that is present must be a real timestamp (`datetime.fromisoformat` raises
+    on anything else) and is normalized to UTC ISO before being stored, so a
+    later string comparison against another UTC ISO timestamp orders
+    correctly regardless of what offset the caller sent.
+    """
+    def _normalize(value):
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValidationError("gacha_banner_schedule_invalid",
+                                  "banner schedule bound must be a string or null")
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            raise ValidationError("gacha_banner_schedule_invalid",
+                                  "banner schedule bound is not a valid timestamp")
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
+
+    starts_at, ends_at = _normalize(starts_at), _normalize(ends_at)
+    if starts_at is not None and ends_at is not None and starts_at >= ends_at:
+        raise ValidationError("gacha_banner_schedule_order",
+                              "banner start must be before its end")
+    return starts_at, ends_at
+
+
 # The scalars a stored config may predate. A reader must fill these in, because
 # a banner saved before one existed simply has no key for it — and the dashboard
 # builds a number input per scalar, so an absent one renders empty and saves back
@@ -4750,15 +4905,42 @@ def _gacha_config_for_read(config_value: dict) -> dict:
     return config_value
 
 
-def _banner_row_dict(row) -> dict:
+def _banner_pull_status(enabled: bool, starts_at, ends_at, now: str) -> str:
+    """Whether a banner is currently pullable, and why not if it is not.
+
+    `enabled` is a manual override ANDed with the schedule, not replaced by
+    it: an operator can still force a banner off mid-window, and a
+    schedule-less banner (`starts_at`/`ends_at` both `None`) is always
+    `"live"` when enabled, exactly as every banner behaved before schema 21.
+    Comparisons are plain string comparisons because both bounds are stored
+    normalized to UTC ISO by `validate_gacha_banner_schedule`, which orders
+    the same as the timestamps they represent.
+    """
+    if not enabled:
+        return "disabled"
+    if starts_at and now < starts_at:
+        return "scheduled"
+    if ends_at and now >= ends_at:
+        return "expired"
+    return "live"
+
+
+def _banner_row_dict(row, now: str) -> dict:
     """Shape one gacha_banners row, defaulting a pre-schema-9 name to its key."""
+    enabled = bool(row["enabled"])
+    starts_at, ends_at = row["starts_at"], row["ends_at"]
+    status = _banner_pull_status(enabled, starts_at, ends_at, now)
     return {
         "banner_key": row["banner_key"],
         "display_name": row["display_name"] or row["banner_key"],
-        "enabled": bool(row["enabled"]),
+        "enabled": enabled,
         "config": _gacha_config_for_read(json.loads(row["config_json"])),
         "revision": row["revision"],
         "updated_at": row["updated_at"],
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "status": status,
+        "pullable": status == "live",
         "is_default": row["banner_key"] == DEFAULT_GACHA_BANNER_KEY,
     }
 
@@ -4770,13 +4952,15 @@ def list_gacha_banners(guild_id: int) -> list[dict]:
     from `DEFAULT_GACHA_CONFIG` rather than an empty list, so the dashboard and
     `/gacha` both have something to show before the first save.
     """
+    now = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT banner_key, display_name, enabled, config_json, revision, "
-            "updated_at FROM gacha_banners WHERE guild_id = ?", (int(guild_id),)
+            "updated_at, starts_at, ends_at FROM gacha_banners WHERE guild_id = ?",
+            (int(guild_id),)
         ).fetchall()
-    banners = [_banner_row_dict(row) for row in rows]
+    banners = [_banner_row_dict(row, now) for row in rows]
     if not any(banner["is_default"] for banner in banners):
         banners.append({
             "banner_key": DEFAULT_GACHA_BANNER_KEY,
@@ -4785,6 +4969,10 @@ def list_gacha_banners(guild_id: int) -> list[dict]:
             "config": json.loads(json.dumps(DEFAULT_GACHA_CONFIG)),
             "revision": 0,
             "updated_at": None,
+            "starts_at": None,
+            "ends_at": None,
+            "status": "live",
+            "pullable": True,
             "is_default": True,
         })
     banners.sort(key=lambda banner: (not banner["is_default"],
@@ -4797,7 +4985,8 @@ def get_gacha_banner(guild_id: int, banner_key: str = DEFAULT_GACHA_BANNER_KEY) 
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT banner_key, display_name, enabled, config_json, revision, "
-            "updated_at FROM gacha_banners WHERE guild_id = ? AND banner_key = ?",
+            "updated_at, starts_at, ends_at FROM gacha_banners "
+            "WHERE guild_id = ? AND banner_key = ?",
             (int(guild_id), banner_key)
         ).fetchone()
     if row is None:
@@ -4808,9 +4997,10 @@ def get_gacha_banner(guild_id: int, banner_key: str = DEFAULT_GACHA_BANNER_KEY) 
                                   banner=banner_key)
         return {"banner_key": banner_key, "display_name": banner_key,
                 "enabled": True, "revision": 0, "updated_at": None,
-                "is_default": True,
+                "starts_at": None, "ends_at": None, "status": "live",
+                "pullable": True, "is_default": True,
                 "config": json.loads(json.dumps(DEFAULT_GACHA_CONFIG))}
-    return _banner_row_dict(row)
+    return _banner_row_dict(row, datetime.now(timezone.utc).isoformat())
 
 
 def create_lfg_post(guild_id: int, message_id: int, channel_id: int,
@@ -5117,6 +5307,74 @@ def reset_minigame(guild_id: int, game_key: str) -> None:
         conn.commit()
 
 
+# ==========================================
+# Patchbot: per-game patch-notes state
+# ==========================================
+
+def get_game_patch_state(game_key: str) -> dict | None:
+    """What patchbot last saw upstream for a game, or `None` if never checked.
+
+    One row per game, not per guild: the newest patch for a game is the same
+    fact everywhere, so the poll loop fetches it once and compares against
+    this rather than once per guild watching that game.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT latest_version, latest_url, latest_title, checked_at "
+            "FROM game_patch_state WHERE game_key = ?", (game_key,)
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "latest_version": row[0], "latest_url": row[1],
+        "latest_title": row[2], "checked_at": row[3],
+    }
+
+
+def set_game_patch_state(game_key: str, version: str, url: str, title: str) -> None:
+    """Record the latest patch seen upstream for a game."""
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO game_patch_state "
+            "(game_key, latest_version, latest_url, latest_title, checked_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(game_key) DO UPDATE SET "
+            "latest_version = excluded.latest_version, "
+            "latest_url = excluded.latest_url, "
+            "latest_title = excluded.latest_title, "
+            "checked_at = excluded.checked_at",
+            (game_key, version, url, title, utc_now().isoformat()),
+        )
+
+
+def get_guild_patch_announcement(guild_id: int, game_key: str) -> str | None:
+    """The version a guild was last told about for a game, or `None`."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT last_announced_version FROM guild_patch_announcements "
+            "WHERE guild_id = ? AND game_key = ?", (int(guild_id), game_key)
+        ).fetchone()
+    return row[0] if row else None
+
+
+def set_guild_patch_announcement(guild_id: int, game_key: str, version: str) -> None:
+    """Record that a guild has now been told about this version of a game.
+
+    Persisted rather than kept in memory like socials.py's live-stream dedup:
+    a restart losing this would either re-announce an old patch to every
+    enabled guild or, if naively rebaselined, skip a real one — both worse
+    here than the live-stream case socials.py was built to tolerate.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO guild_patch_announcements "
+            "(guild_id, game_key, last_announced_version) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, game_key) DO UPDATE SET "
+            "last_announced_version = excluded.last_announced_version",
+            (int(guild_id), game_key, version),
+        )
+
+
 def get_five_star_history(guild_id: int, user_id: int, limit: int = 5) -> list[dict]:
     """A member's most recent 5-star pulls, newest first.
 
@@ -5243,18 +5501,23 @@ def new_banner_config() -> dict:
 
 def create_gacha_banner(guild_id: int, actor_id: int, banner_key: str,
                         display_name: str, config_value: dict,
-                        enabled: bool = False) -> dict:
+                        enabled: bool = False, starts_at=None, ends_at=None) -> dict:
     """Add a second, third … banner to one guild.
 
     A new banner starts disabled unless asked otherwise, so an unfinished reward
     table is never pullable, and the cap matches the 25 options a Discord choice
     list holds — beyond that the command could not offer the banner at all.
+
+    `starts_at`/`ends_at` are an optional schedule on top of `enabled`, not a
+    replacement for it: both `None` means no schedule, and either bound
+    present narrows `enabled` further rather than overriding it.
     """
     banner_key = validate_gacha_banner_key(banner_key)
     display_name = validate_gacha_banner_name(display_name)
     if not isinstance(enabled, bool):
         raise ValidationError("gacha_enabled_not_boolean", "banner enabled must be boolean")
     config_value = _validated_gacha_config(config_value, banner_key)
+    starts_at, ends_at = validate_gacha_banner_schedule(starts_at, ends_at)
     timestamp = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -5272,10 +5535,11 @@ def create_gacha_banner(guild_id: int, actor_id: int, banner_key: str,
                                   limit=GACHA_BANNER_LIMIT)
         conn.execute(
             "INSERT INTO gacha_banners (guild_id, banner_key, display_name, enabled, "
-            "config_json, revision, updated_by, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+            "config_json, revision, updated_by, updated_at, starts_at, ends_at) "
+            "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
             (int(guild_id), banner_key, display_name, int(enabled),
-             json.dumps(config_value, sort_keys=True), int(actor_id), timestamp),
+             json.dumps(config_value, sort_keys=True), int(actor_id), timestamp,
+             starts_at, ends_at),
         )
         write_settings_audit(
             conn, int(guild_id), actor_id, "gacha.create", f"gacha.{banner_key}",
@@ -5284,20 +5548,21 @@ def create_gacha_banner(guild_id: int, actor_id: int, banner_key: str,
         conn.commit()
     return {"banner_key": banner_key, "display_name": display_name,
             "enabled": enabled, "config": config_value, "revision": 1,
-            "updated_at": timestamp,
+            "updated_at": timestamp, "starts_at": starts_at, "ends_at": ends_at,
             "is_default": banner_key == DEFAULT_GACHA_BANNER_KEY}
 
 
 def set_gacha_banner(guild_id: int, actor_id: int, enabled: bool,
                      config_value: dict, expected_revision: int,
                      banner_key: str = DEFAULT_GACHA_BANNER_KEY,
-                     display_name=None) -> dict:
+                     display_name=None, starts_at=None, ends_at=None) -> dict:
     if not isinstance(enabled, bool):
         raise ValidationError("gacha_enabled_not_boolean", "banner enabled must be boolean")
     banner_key = validate_gacha_banner_key(banner_key)
     if display_name is not None:
         display_name = validate_gacha_banner_name(display_name)
     config_value = _validated_gacha_config(config_value, banner_key)
+    starts_at, ends_at = validate_gacha_banner_schedule(starts_at, ends_at)
     timestamp = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -5316,10 +5581,12 @@ def set_gacha_banner(guild_id: int, actor_id: int, enabled: bool,
             stored_name = display_name if display_name is not None else row[3]
             conn.execute(
                 "UPDATE gacha_banners SET enabled = ?, config_json = ?, revision = ?, "
-                "display_name = ?, updated_by = ?, updated_at = ? "
+                "display_name = ?, updated_by = ?, updated_at = ?, "
+                "starts_at = ?, ends_at = ? "
                 "WHERE guild_id = ? AND banner_key = ?",
                 (int(enabled), json.dumps(config_value, sort_keys=True), revision,
-                 stored_name, int(actor_id), timestamp, int(guild_id), banner_key),
+                 stored_name, int(actor_id), timestamp, starts_at, ends_at,
+                 int(guild_id), banner_key),
             )
         else:
             # Only the installation default may appear on first save. Every other
@@ -5336,9 +5603,11 @@ def set_gacha_banner(guild_id: int, actor_id: int, enabled: bool,
             conn.execute(
                 "INSERT INTO gacha_banners "
                 "(guild_id, banner_key, display_name, enabled, config_json, revision, "
-                "updated_by, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                "updated_by, updated_at, starts_at, ends_at) "
+                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
                 (int(guild_id), banner_key, stored_name, int(enabled),
-                 json.dumps(config_value, sort_keys=True), int(actor_id), timestamp),
+                 json.dumps(config_value, sort_keys=True), int(actor_id), timestamp,
+                 starts_at, ends_at),
             )
         new = {"enabled": enabled, "config": config_value,
                "display_name": stored_name}
@@ -5353,7 +5622,7 @@ def set_gacha_banner(guild_id: int, actor_id: int, enabled: bool,
     return {"banner_key": banner_key,
             "display_name": stored_name or banner_key, "enabled": enabled,
             "config": config_value, "revision": revision,
-            "updated_at": timestamp,
+            "updated_at": timestamp, "starts_at": starts_at, "ends_at": ends_at,
             "is_default": banner_key == DEFAULT_GACHA_BANNER_KEY}
 
 
@@ -5485,7 +5754,7 @@ def _grant_gacha_reward_locked(conn, guild_id: int, user_id: int,
 
 
 def _resolve_featured_pools(conn, guild_id: int, banner_key: str,
-                            config_value: dict) -> tuple[dict, dict]:
+                            config_value: dict, now: str) -> tuple[dict, dict]:
     """Work out, per rare tier, what a won and a lost split award.
 
     Returns ``(featured_entries, standard_pools)`` keyed by "4"/"5". A tier is
@@ -5500,9 +5769,9 @@ def _resolve_featured_pools(conn, guild_id: int, banner_key: str,
 
     * it *is* the banner being pulled — no split, because standard has no
       rate-up and all its rares are one rate;
-    * stored and enabled — split against its saved pool;
-    * stored and **disabled** — no split, so rares come only from this banner's
-      own table;
+    * stored and currently pullable — split against its saved pool;
+    * stored but **not currently pullable** (disabled, or outside its own
+      schedule) — no split, so rares come only from this banner's own table;
     * **absent** — split against the shipped table. `get_gacha_banner` and
       `list_gacha_banners` already synthesise an absent standard banner as
       enabled, so a guild that has simply never pulled it still gets a working
@@ -5519,13 +5788,13 @@ def _resolve_featured_pools(conn, guild_id: int, banner_key: str,
         return featured_entries, {}
 
     row = conn.execute(
-        "SELECT enabled, config_json FROM gacha_banners "
+        "SELECT enabled, config_json, starts_at, ends_at FROM gacha_banners "
         "WHERE guild_id = ? AND banner_key = ?",
         (int(guild_id), DEFAULT_GACHA_BANNER_KEY),
     ).fetchone()
     if row is None:
         standard_config = DEFAULT_GACHA_CONFIG
-    elif not row[0]:
+    elif _banner_pull_status(bool(row[0]), row[2], row[3], now) != "live":
         return featured_entries, {}
     else:
         try:
@@ -5560,14 +5829,22 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
         with get_connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             banner = conn.execute(
-                "SELECT enabled, config_json, revision, display_name FROM gacha_banners "
+                "SELECT enabled, config_json, revision, display_name, "
+                "starts_at, ends_at FROM gacha_banners "
                 "WHERE guild_id = ? AND banner_key = ?", (int(guild_id), banner_key)
             ).fetchone()
             banner_name = banner_key
             if banner:
-                if not banner[0]:
+                status = _banner_pull_status(bool(banner[0]), banner[4], banner[5], timestamp)
+                if status != "live":
                     conn.rollback()
-                    return {"purchased": False, "reason": "banner_disabled"}
+                    # Distinct reasons: "not yet" and "no longer" are different
+                    # things to tell a member, and neither is "disabled" once a
+                    # schedule exists to explain it.
+                    return {"purchased": False,
+                            "reason": {"disabled": "banner_disabled",
+                                       "scheduled": "banner_not_started",
+                                       "expired": "banner_expired"}[status]}
                 config_value, revision = _validated_gacha_config(json.loads(banner[1])), banner[2]
                 banner_name = banner[3] or banner_key
             elif banner_key != DEFAULT_GACHA_BANNER_KEY:
@@ -5608,7 +5885,7 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
             # raise on an unknown key. It must also never *create* the standard
             # row as a side effect of another banner's pull.
             featured_entries, standard_pools = _resolve_featured_pools(
-                conn, int(guild_id), banner_key, config_value)
+                conn, int(guild_id), banner_key, config_value, timestamp)
             split = config_value["featured_split"]
             results = []
             for _ in range(count):
@@ -5821,35 +6098,20 @@ def redeem_voucher(guild_id: int, user_id: int, voucher_id: str) -> dict:
             return {"redeemed": True, "kind": "role", "role_id": role_id,
                     "entitlement_key": subject, "expires_at": expires}
         if reward_key == "premium_30d":
-            active = conn.execute(
-                "SELECT entitlement_id, expires_at FROM timed_entitlements "
-                "WHERE guild_id = ? AND user_id = ? AND entitlement_key = 'premium' "
-                "AND status = 'active' ORDER BY expires_at DESC LIMIT 1",
-                (int(guild_id), int(user_id)),
-            ).fetchone()
-            start = now
-            if active:
-                current_expiry = parse_stored(active[1])
-                if current_expiry > start:
-                    start = current_expiry
-            expires = start + timedelta(days=duration_days)
-            if active:
-                conn.execute(
-                    "UPDATE timed_entitlements SET expires_at = ? WHERE entitlement_id = ?",
-                    (expires.isoformat(), active[0]),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO timed_entitlements "
-                    "(guild_id, user_id, entitlement_key, starts_at, expires_at, source_voucher_id) "
-                    "VALUES (?, ?, 'premium', ?, ?, ?)",
-                    (int(guild_id), int(user_id), timestamp, expires.isoformat(), voucher_id),
-                )
+            # `_extend_timed_entitlement` is exactly this branch's own logic,
+            # factored out for precisely this reason: two copies of "work out
+            # the new expiry" is two places for an off-by-one. This branch
+            # duplicated it anyway, which is also how it drifted into holding
+            # `expires` as a `datetime` in one place and a `str` everywhere
+            # else -- caught by running a type checker, not by inspection.
+            expires = _extend_timed_entitlement(
+                conn, guild_id, user_id, "premium", duration_days, now,
+                voucher_id, timestamp)
             conn.execute(
                 "UPDATE reward_vouchers SET status = 'active', redeemed_at = ?, expires_at = ? "
-                "WHERE voucher_id = ?", (timestamp, expires.isoformat(), voucher_id)
+                "WHERE voucher_id = ?", (timestamp, expires, voucher_id)
             )
-            result = {"redeemed": True, "kind": "premium", "expires_at": expires.isoformat()}
+            result = {"redeemed": True, "kind": "premium", "expires_at": expires}
         else:
             # The stored subject when there is one, and the old key parse when
             # there is not — which is every voucher granted before the column
@@ -5970,6 +6232,48 @@ def fulfill_voucher_request(guild_id: int, request_id: int, actor_id: int,
         return {"fulfilled": True, "expires_at": expires.isoformat()}
 
 
+def grant_manual_entitlement(guild_id: int, user_id: int, asset_type: str,
+                             discord_item_id: str, duration_days: int,
+                             granted_by: int) -> dict:
+    """Start a timed asset entitlement with no voucher or pull behind it.
+
+    For an emoji, sticker or soundboard sound staff already created in Discord
+    for a special event and want to hand to a member outright. Mirrors the
+    `INSERT` half of `fulfill_voucher_request` exactly -- same table, same
+    shape -- with `source_voucher_id` left NULL since there is no redemption
+    to link back to, and `source_type`/`granted_by` written directly onto the
+    row so `entitlement_cleanup` can find and revoke it without a voucher join.
+
+    Refuses a second active entitlement for the same Discord asset in this
+    guild: two live rows guarding one physical asset means the first expiry to
+    run deletes it out from under the second, which then fails forever with
+    `discord.NotFound` and never reaches `expire_entitlement`.
+    """
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(days=duration_days)
+    with get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        duplicate = conn.execute(
+            "SELECT 1 FROM timed_entitlements WHERE guild_id = ? "
+            "AND discord_item_id = ? AND status = 'active'",
+            (int(guild_id), str(discord_item_id)),
+        ).fetchone()
+        if duplicate:
+            conn.rollback()
+            return {"granted": False, "reason": "duplicate_active"}
+        entitlement_id = conn.execute(
+            "INSERT INTO timed_entitlements "
+            "(guild_id, user_id, entitlement_key, starts_at, expires_at, "
+            "discord_item_id, source_type, granted_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'manual', ?)",
+            (int(guild_id), int(user_id), asset_type, now.isoformat(),
+             expires.isoformat(), str(discord_item_id), int(granted_by)),
+        ).lastrowid
+        conn.commit()
+        return {"granted": True, "entitlement_id": entitlement_id,
+                "expires_at": expires.isoformat()}
+
+
 def get_active_entitlements(guild_id: int, timestamp: str) -> list[dict]:
     """Every live grant in one guild, soonest to expire first.
 
@@ -5986,7 +6290,8 @@ def get_active_entitlements(guild_id: int, timestamp: str) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT e.entitlement_id, e.user_id, e.entitlement_key, e.starts_at, "
-            "e.expires_at, e.discord_item_id, v.source_type, v.reward_key "
+            "e.expires_at, e.discord_item_id, COALESCE(e.source_type, v.source_type), "
+            "v.reward_key, e.granted_by "
             "FROM timed_entitlements e "
             "LEFT JOIN reward_vouchers v ON v.voucher_id = e.source_voucher_id "
             "WHERE e.guild_id = ? AND e.status = 'active' AND e.expires_at > ? "
@@ -5994,7 +6299,8 @@ def get_active_entitlements(guild_id: int, timestamp: str) -> list[dict]:
             (int(guild_id), timestamp),
         ).fetchall()
     keys = ("entitlement_id", "user_id", "entitlement_key", "starts_at",
-            "expires_at", "discord_item_id", "source_type", "reward_key")
+            "expires_at", "discord_item_id", "source_type", "reward_key",
+            "granted_by")
     return [dict(zip(keys, row)) for row in rows]
 
 
@@ -6002,7 +6308,7 @@ def get_expired_entitlements(timestamp: str) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT e.entitlement_id, e.guild_id, e.user_id, e.entitlement_key, "
-            "e.discord_item_id, v.source_type "
+            "e.discord_item_id, COALESCE(e.source_type, v.source_type) "
             "FROM timed_entitlements e LEFT JOIN reward_vouchers v "
             "ON v.voucher_id = e.source_voucher_id "
             "WHERE e.status = 'active' AND e.expires_at <= ?",
@@ -6072,7 +6378,7 @@ def get_shop_item_definitions(guild_id: int, language: str = None) -> list[dict]
             "SELECT item_key, language, name, description "
             "FROM shop_item_localizations WHERE guild_id = ?", (int(guild_id),)
         ).fetchall()
-    texts = {}
+    texts: dict[str, dict[str, dict]] = {}
     for item_key, lang, name, description in localized:
         texts.setdefault(item_key, {})[lang] = {"name": name,
                                                 "description": description}
@@ -6563,7 +6869,7 @@ def list_managed_messages(guild_id: int, kind: str = None) -> list[dict]:
                 "title, body, colour, options_json, revision, updated_at "
                 "FROM managed_messages WHERE guild_id = ? AND kind = ? "
                 "ORDER BY menu_key", (int(guild_id), kind)).fetchall()
-        entries = {}
+        entries: dict[tuple[str, str], list[dict]] = {}
         for row in conn.execute(
             "SELECT kind, menu_key, label, role_id, emoji FROM "
             "managed_message_entries WHERE guild_id = ? ORDER BY position",
@@ -6773,7 +7079,8 @@ def queue_control_action(guild_id: int, actor_id: int, action_type: str,
     # `managed_messages` row, which is what "add a role and press update" needs.
     # A row of a retired type left in an older queue settles as unsupported
     # rather than being retried forever.
-    if action_type not in {"publish_managed", "delete_managed", "erase_member"}:
+    if action_type not in {"publish_managed", "delete_managed", "erase_member",
+                          "repair_channel_permission"}:
         raise ValueError("unsupported control action")
     with get_connection() as conn:
         action_id = conn.execute(
@@ -6900,7 +7207,10 @@ SUBJECT_TABLES = (
     ("gacha_pity", "user_id = ?", 1),
     ("gacha_pulls", "user_id = ?", 1),
     ("reward_vouchers", "user_id = ?", 1),
-    ("timed_entitlements", "user_id = ?", 1),
+    # The subject may be the recipient or the staff member who manually granted
+    # someone else's entitlement, and both are personal data about them --
+    # same reasoning as fulfillment_requests just below.
+    ("timed_entitlements", "user_id = ? OR granted_by = ?", 2),
     # The subject may be the requester or the operator who fulfilled someone else's
     # request, and both are personal data about them.
     ("fulfillment_requests", "user_id = ? OR completed_by = ?", 2),
@@ -6951,6 +7261,7 @@ ERASE_NULL_ACTOR = (
     ("warnings", "mod_id"),
     ("tickets", "claimer_id"),
     ("fulfillment_requests", "completed_by"),
+    ("timed_entitlements", "granted_by"),
     ("realm_guilds", "approved_by"),
     ("guild_data_scopes", "updated_by"),
     ("feature_flags", "updated_by"),

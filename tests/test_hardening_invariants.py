@@ -21,7 +21,6 @@ from types import SimpleNamespace
 import discord
 
 from core.bounded import BoundedCooldownMap, BoundedTimestampMap, BoundedValueMap
-from cogs.utils import CONFIG_LOCK, config, save_config, snapshot_config
 from core.feature_access import (
     MAINTENANCE_EXEMPT_COMMANDS,
     is_enabled,
@@ -62,6 +61,11 @@ class FakeFollowup:
 def fake_interaction(done=False, user=MEMBER):
     return SimpleNamespace(
         id=1,
+        # A component interaction, never autocomplete -- `_deny_interaction`
+        # branches on this to answer an autocomplete-typed denial with an
+        # empty result instead of a message, which only application-command
+        # and autocomplete interactions can even reach.
+        type=discord.InteractionType.component,
         guild=GUILD,
         guild_id=GUILD.id,
         user=user,
@@ -72,11 +76,14 @@ def fake_interaction(done=False, user=MEMBER):
 
 class MaintenanceGateTests(unittest.TestCase):
     def setUp(self):
-        self._previous = config.get("bot_settings", {}).get("maintenance", False)
-        config.setdefault("bot_settings", {})["maintenance"] = True
+        from core import settings_cache
+
+        settings_cache.apply_changes(GUILD.id, {"maintenance": {"value": True}})
 
     def tearDown(self):
-        config.setdefault("bot_settings", {})["maintenance"] = self._previous
+        from core import settings_cache
+
+        settings_cache.invalidate()
 
     def test_maintenance_refuses_an_ordinary_member(self):
         self.assertTrue(maintenance_blocks(GUILD, MEMBER, "bal"))
@@ -113,7 +120,9 @@ class MaintenanceGateTests(unittest.TestCase):
         self.assertFalse(asyncio.run(require_interaction_feature(interaction, None)))
 
     def test_normal_operation_allows_the_same_component(self):
-        config["bot_settings"]["maintenance"] = False
+        from core import settings_cache
+
+        settings_cache.apply_changes(GUILD.id, {"maintenance": {"value": False}})
         seed_cached_feature(GUILD.id, "economy", True)
         interaction = fake_interaction()
         self.assertTrue(asyncio.run(require_interaction_feature(interaction, "economy")))
@@ -223,59 +232,7 @@ class BoundedContainerTests(unittest.TestCase):
         self.assertIsInstance(feature_access._INTERACTION_STARTED, BoundedTimestampMap)
 
 
-class ConfigSnapshotTests(unittest.TestCase):
-    def setUp(self):
-        import cogs.utils as utils
-
-        self.utils = utils
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = utils.CONFIG_PATH
-        self.original_root = utils.ROOT_DIR
-        self.original_config = json.loads(json.dumps(dict(config)))
-        # save_config stages its temp file in ROOT_DIR before os.replace, so both
-        # must move together or the rename crosses a filesystem boundary.
-        utils.ROOT_DIR = self.temp_dir.name
-        utils.CONFIG_PATH = os.path.join(self.temp_dir.name, "config.json")
-
-    def tearDown(self):
-        self.utils.CONFIG_PATH = self.original_path
-        self.utils.ROOT_DIR = self.original_root
-        config.clear()
-        config.update(self.original_config)
-        self.temp_dir.cleanup()
-
-    def test_snapshot_is_deeply_isolated_from_the_live_dictionary(self):
-        config["bot_settings"] = {"language": "hu"}
-        snapshot = snapshot_config()
-        snapshot["bot_settings"]["language"] = "en"
-        self.assertEqual(config["bot_settings"]["language"], "hu")
-
-    def test_concurrent_read_modify_write_keeps_both_keys(self):
-        config.clear()
-        config.update({"bot_settings": {}})
-        errors = []
-
-        def writer(key):
-            try:
-                for _ in range(40):
-                    with CONFIG_LOCK:
-                        updated = snapshot_config()
-                        updated["bot_settings"][key] = key
-                        save_config(updated)
-            except Exception as error:  # pragma: no cover - surfaced by assertion
-                errors.append(error)
-
-        threads = [threading.Thread(target=writer, args=(name,))
-                   for name in ("alpha", "beta")]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
-
-        self.assertEqual([], errors)
-        self.assertEqual(config["bot_settings"].get("alpha"), "alpha")
-        self.assertEqual(config["bot_settings"].get("beta"), "beta")
-
+class LoggingSetupTests(unittest.TestCase):
     def test_the_journal_is_not_written_twice(self):
         """Both halves of a duplication that doubled every log line.
 
@@ -329,40 +286,52 @@ class ConfigSnapshotTests(unittest.TestCase):
         finally:
             logging.getLogger(name).handlers.clear()
 
-    def test_nothing_in_the_dashboard_writes_config_json(self):
-        """The mirror is gone, and this is what stops it coming back.
+
+class RetiredConfigMirrorTests(unittest.TestCase):
+    def test_nothing_reads_or_writes_config_json_any_more(self):
+        """The whole mechanism is gone, and this is what stops it coming back.
 
         `config.json` was written by the dashboard on every save and rebuilt
         from the rows at startup, which is why the read-modify-write had to hold
         CONFIG_LOCK for its whole sequence — a snapshot taken under the lock and
-        saved after it still dropped a concurrent writer's keys. There is now one
-        fewer writer than that: the file is a read-only fallback for a setting an
-        installation has never saved, and every reader goes through
-        `settings_cache`.
+        saved after it still dropped a concurrent writer's keys. That mirror was
+        retired first, leaving the file as a read-only fallback; the file itself
+        was deleted 2026-09-21, once the one-time import was confirmed on 2026-09-18 to have run
+        everywhere. Every reader resolves stored row → registry default now, with
+        no file in between. Parsed rather than grepped, so a comment explaining
+        the absence does not read as the thing being present.
         """
-        source = (ROOT / "dashboard_api.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        # Parsed rather than grepped, so a comment explaining the absence does
-        # not read as the thing being present.
-        called = {
-            node.func.id for node in ast.walk(tree)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-        }
-        defined = {
-            node.name for node in ast.walk(tree)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        imported = {
-            alias.asname or alias.name for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) for alias in node.names
-        }
-        for gone in ("save_config", "snapshot_config", "CONFIG_LOCK"):
-            self.assertNotIn(gone, called | imported,
-                             f"{gone} writes or guards config.json")
-        for gone in ("_apply_legacy_config_values",
-                     "reconcile_legacy_config_mirror", "_legacy_guild_id"):
-            self.assertNotIn(gone, called | defined,
-                             f"{gone} is mirror machinery")
+        retired = ("save_config", "snapshot_config", "CONFIG_LOCK", "CONFIG_PATH",
+                  "reload_config", "config", "legacy_config_value",
+                  "_apply_legacy_config_values", "reconcile_legacy_config_mirror",
+                  "_legacy_guild_id")
+        for relative in ("dashboard_api.py", "cogs/utils.py", "main.py",
+                        "core/settings_cache.py", "core/permission_audit.py",
+                        "core/settings_registry.py"):
+            source = (ROOT / relative).read_text(encoding="utf-8")
+            tree = ast.parse(source)
+            called = {
+                node.func.id for node in ast.walk(tree)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            }
+            defined = {
+                node.name for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            assigned = {
+                target.id for node in ast.walk(tree)
+                if isinstance(node, ast.Assign)
+                for target in node.targets if isinstance(target, ast.Name)
+            }
+            imported = {
+                alias.asname or alias.name for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom) for alias in node.names
+            }
+            names = called | defined | assigned | imported
+            for gone in retired:
+                with self.subTest(file=relative, name=gone):
+                    self.assertNotIn(gone, names,
+                                     f"{gone} is retired config.json machinery")
 
     def test_the_per_guild_price_and_reward_rows_are_still_written(self):
         """Deleting the mirror must not take these with it.

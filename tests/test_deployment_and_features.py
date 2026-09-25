@@ -443,6 +443,77 @@ class InteractionAcknowledgementTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(allowed)
         self.assertEqual(deferred, [])
 
+    async def test_an_autocomplete_denial_is_an_empty_result_not_a_message(self):
+        """Discovered live in the journal (2026-09-25): a disabled feature's
+        autocomplete interaction denied with `send_message` gets Discord's
+        `400 (error code: 50035): In type: Value must be one of {8}` --
+        autocomplete accepts only an autocomplete-result response. `pity` is
+        owned by `shop_gacha`; disabling it must deny the autocomplete with
+        an empty result, and `send_message` must never even be attempted."""
+        seed_cached_feature(987654321, "shop_gacha", False)
+        autocompleted = []
+
+        async def autocomplete(choices):
+            autocompleted.append(choices)
+
+        async def forbidden_send_message(*args, **kwargs):
+            raise AssertionError(
+                "an autocomplete interaction must never receive a message response"
+            )
+
+        interaction = SimpleNamespace(
+            id=115,
+            command=SimpleNamespace(qualified_name="pity"),
+            guild_id=987654321,
+            guild=GUILD,
+            user=MEMBER,
+            type=discord.InteractionType.autocomplete,
+            response=SimpleNamespace(
+                is_done=lambda: False,
+                send_message=forbidden_send_message,
+                autocomplete=autocomplete,
+            ),
+        )
+        allowed = await PotatoCommandTree.interaction_check(None, interaction)
+        self.assertFalse(allowed)
+        self.assertEqual(autocompleted, [[]])
+
+    async def test_a_maintenance_denial_during_autocomplete_is_also_an_empty_result(self):
+        from core import settings_cache
+
+        settings_cache.apply_changes(987654321, {"maintenance": {"value": True}})
+        try:
+            autocompleted = []
+
+            async def autocomplete(choices):
+                autocompleted.append(choices)
+
+            async def forbidden_send_message(*args, **kwargs):
+                raise AssertionError(
+                    "an autocomplete interaction must never receive a message response"
+                )
+
+            interaction = SimpleNamespace(
+                id=116,
+                # Not `version`: it is `MAINTENANCE_EXEMPT_COMMANDS`, which
+                # would make maintenance never block it and prove nothing.
+                command=SimpleNamespace(qualified_name="help"),
+                guild_id=987654321,
+                guild=GUILD,
+                user=MEMBER,
+                type=discord.InteractionType.autocomplete,
+                response=SimpleNamespace(
+                    is_done=lambda: False,
+                    send_message=forbidden_send_message,
+                    autocomplete=autocomplete,
+                ),
+            )
+            allowed = await PotatoCommandTree.interaction_check(None, interaction)
+            self.assertFalse(allowed)
+            self.assertEqual(autocompleted, [[]])
+        finally:
+            settings_cache.invalidate()
+
     def test_command_registry_has_no_implicit_visibility(self):
         self.assertTrue(COMMAND_POLICIES)
         self.assertTrue(
@@ -536,7 +607,7 @@ class LevelRoleTests(unittest.TestCase):
         `/work` responses had. A role id cannot be guessed for somebody else's
         guild, so there is no honest default; `docs/level_setup.md` documents
         the recommended ladder instead, and this installation's own mapping
-        lives in `config.json` like every other id it uses.
+        lives in `guild_settings` like every other id it uses.
         """
         default = SETTING_DEFINITIONS["level_roles"].default
         self.assertEqual({}, default)

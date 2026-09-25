@@ -214,6 +214,30 @@ class OutageTests(unittest.TestCase):
             sources.fetch_json("https://example.invalid/nope",
                                sources.fixture_opener({}))
 
+    def test_one_games_outage_does_not_hide_drift_in_the_others(self):
+        """`dbdle` sits between `valdle` and `genshindle` in `MANAGED_DATASETS`;
+        it going unreachable must not blind the check to the game after it."""
+        responses = {}
+        for url, name in drift.FIXTURE_FILES.items():
+            if url in (sources.DBD_CHARACTERS_URL, sources.DBD_DLC_URL):
+                continue
+            responses[url] = json.loads(
+                (FIXTURES / name).read_text(encoding="utf-8")
+            )
+        opener = sources.fixture_opener(responses)
+
+        reports, unreachable = drift.run_checks(opener)
+
+        checked = {(report["game"], report["dataset"]) for report in reports}
+        self.assertIn(("valdle", "agents"), checked)
+        self.assertIn(("genshindle", "characters"), checked)
+        self.assertNotIn(("dbdle", "killers"), checked)
+        self.assertEqual(
+            [{"game": "dbdle", "dataset": "killers"}],
+            [{"game": entry["game"], "dataset": entry["dataset"]}
+             for entry in unreachable],
+        )
+
 
 class DriftReportTests(unittest.TestCase):
     def setUp(self):
@@ -704,6 +728,15 @@ class GenshindleDatasetTests(unittest.TestCase):
     """The built dataset, as the cog will load it."""
 
     def test_it_loads_in_every_language_with_no_alias_collision(self):
+        """`load_localized_dataset` raises `MinigameDataError` on any real
+        collision (core/minigame_data.py), so loading the real files without
+        raising *is* the collision guard. The equality this test used to
+        assert instead (`len(data) == len(aliases)`) held only because every
+        genshindle entity used to carry exactly one alias; it stopped being
+        true once nickname aliases were added deliberately (todo.md's
+        Genshindle nickname entry), and it was never what "no collision"
+        actually means. Every entity still owes the alias map at least its
+        own display name."""
         from core import minigame_data
 
         for language in ("hu", "en"):
@@ -713,7 +746,7 @@ class GenshindleDatasetTests(unittest.TestCase):
                 "characters",
             )
             self.assertGreater(len(data), 100, language)
-            self.assertEqual(len(data), len(aliases), f"{language}: alias collision")
+            self.assertGreaterEqual(len(aliases), len(data), language)
 
     def test_every_character_carries_every_attribute(self):
         """A missing attribute raises in `_resolve_value`, and `load_or_disable`

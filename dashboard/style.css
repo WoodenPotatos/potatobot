@@ -304,7 +304,20 @@ svg[hidden] { display: none; }
     display: flex;
     flex-direction: column;
     gap: 2px;
+    /* The chrome surface is deliberately similar-dark in both themes (see the
+       header comment above), so one rule using its own tokens themes the
+       scrollbar correctly in light and dark without a separate override. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-chrome) transparent;
 }
+
+.nav-links::-webkit-scrollbar { width: 8px; }
+.nav-links::-webkit-scrollbar-track { background: transparent; }
+.nav-links::-webkit-scrollbar-thumb {
+    background-color: var(--border-chrome);
+    border-radius: 4px;
+}
+.nav-links::-webkit-scrollbar-thumb:hover { background-color: var(--accent); }
 
 .nav-group { display: flex; flex-direction: column; gap: 2px; }
 
@@ -1212,6 +1225,11 @@ input[type="color"] { width: 100%; height: 38px; padding: 2px; cursor: pointer; 
 .total-readout.invalid { background: var(--danger-soft); }
 .total-readout.invalid .total-value { color: var(--danger); }
 
+/* Same live-validation readout, placed under a JSON row editor's rows
+   instead of above a grid, so it needs its own top margin rather than
+   `.total-readout`'s bottom-only one. */
+.row-editor-summary { margin-top: var(--space-3); }
+
 /* ------------------------------------------------------------- responsive */
 
 .mobile-toggle { display: none; }
@@ -1679,12 +1697,67 @@ input[type="color"] { width: 100%; height: 38px; padding: 2px; cursor: pointer; 
 
 .preview-embed-body {
   /* `pre-wrap` is what makes a line break visible without a markup sink, and
-     `anywhere` stops a pasted URL widening the column. */
+     `anywhere` stops a pasted URL widening the column. Markdown rendering
+     (2026-09-25) splits the body into its own block elements per line, so
+     this now only preserves runs of literal spaces within one line -- the
+     line breaks between blocks are the elements themselves. */
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: .82rem;
   color: var(--text-body);
 }
+
+.preview-line { margin-top: 2px; }
+.preview-strong { font-weight: 700; }
+.preview-em { font-style: italic; }
+.preview-underline { text-decoration: underline; }
+.preview-strike { text-decoration: line-through; }
+
+.preview-inline-code {
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  background: var(--surface-input);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.preview-code-block {
+  background: var(--surface-input);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  margin-top: 4px;
+  overflow-x: auto;
+}
+.preview-code-block-inner { font-family: var(--font-mono); font-size: .78rem; white-space: pre; }
+
+/* Discord hides a spoiler behind a click; a static preview cannot reproduce
+   that interaction, so hover is the closest sketch -- the note under the
+   preview already says this page is a sketch, not a pixel match. */
+.preview-spoiler {
+  background: var(--text-strong);
+  color: var(--text-strong);
+  border-radius: 3px;
+  padding: 0 2px;
+  cursor: default;
+}
+.preview-spoiler:hover { background: transparent; color: inherit; }
+
+.preview-link { color: var(--accent); text-decoration: underline; }
+
+.preview-heading-1 { font-size: 1.1rem; font-weight: 700; margin-top: 6px; }
+.preview-heading-2 { font-size: 1rem; font-weight: 700; margin-top: 6px; }
+.preview-heading-3 { font-size: .92rem; font-weight: 700; margin-top: 4px; }
+
+.preview-quote {
+  border-inline-start: 3px solid var(--border-strong);
+  padding-inline-start: var(--space-3);
+  margin: 4px 0;
+  color: var(--text-muted);
+}
+.preview-quote-line { margin-top: 2px; }
+
+.preview-list { margin: 4px 0; padding-inline-start: 1.4em; }
+.preview-list-item { margin-top: 2px; }
 
 /* The banner sits under the leading embed, as Discord draws it. */
 .preview-banner { width: 100%; border-radius: var(--radius-sm); }
@@ -1709,6 +1782,28 @@ input[type="color"] { width: 100%; height: 38px; padding: 2px; cursor: pointer; 
 .preview-button.primary { background: #5865F2; }
 .preview-button.success { background: #248046; }
 .preview-button.secondary { background: #4E5058; }
+
+/* The item page's mock of `/shop`'s own two steps: a row of section pills,
+   then that section's items below it. `.pill` itself is reused unstyled. */
+.shop-preview-panel { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.shop-preview-sections { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.shop-preview-sections .pill {
+  cursor: pointer;
+  border: none;
+  font: inherit;
+}
+
+.shop-preview-items { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.shop-preview-item {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  font-size: .85rem;
+  color: var(--text-strong);
+}
 
 /* What an operator may type into a work response. A token list had no
    precedent — the only prose styles were `.card-hint`, which needs a
@@ -1815,6 +1910,17 @@ input[type="color"] { width: 100%; height: 38px; padding: 2px; cursor: pointer; 
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* A suggestion beside the real "add" button, never a replacement for it --
+   picking one still leaves an ordinary row the operator confirms or edits. */
+.game-quick-pick-wrap {
+  display: inline-flex;
+  margin-left: var(--space-2);
+}
+
+.game-quick-pick {
+  max-width: 220px;
 }
 
 /* Several columns do not fit a phone, so every field takes the full width and

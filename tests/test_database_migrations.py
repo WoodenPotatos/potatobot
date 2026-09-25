@@ -1204,3 +1204,259 @@ class Schema19UsedWordTests(unittest.TestCase):
         self._downgrade()
         database.initialize_database()
         self.assertTrue(glob.glob(f"{database.DB_PATH}.backup-v18-*"))
+
+
+class Schema20PatchbotTests(unittest.TestCase):
+    """Schema 20 adds `game_patch_state` and `guild_patch_announcements`.
+
+    Both are purely additive `CREATE TABLE IF NOT EXISTS` tables, gated on
+    shape like schema 19's `minigame_used_words`, so there is nothing to
+    backfill: a guild or a game with no prior row simply has never been
+    checked or announced to yet.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _downgrade(self):
+        """Reshape a current database into the pre-schema-20 shape."""
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("DROP TABLE game_patch_state")
+            conn.execute("DROP TABLE guild_patch_announcements")
+            conn.execute("PRAGMA user_version = 19")
+            conn.commit()
+
+    def _tables(self):
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            return {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+    def test_a_clean_database_has_both_tables(self):
+        database.initialize_database()
+        self.assertTrue(
+            {"game_patch_state", "guild_patch_announcements"} <= self._tables()
+        )
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
+
+    def test_game_state_has_no_prior_row_until_checked(self):
+        database.initialize_database()
+        self.assertIsNone(database.get_game_patch_state("valorant"))
+
+    def test_setting_and_reading_back_game_state(self):
+        database.initialize_database()
+        database.set_game_patch_state(
+            "valorant", "13.05", "https://playvalorant.com/patch-13-05",
+            "VALORANT Patch Notes 13.05",
+        )
+        state = database.get_game_patch_state("valorant")
+        self.assertEqual("13.05", state["latest_version"])
+        self.assertEqual("https://playvalorant.com/patch-13-05", state["latest_url"])
+        self.assertEqual("VALORANT Patch Notes 13.05", state["latest_title"])
+        self.assertIsNotNone(state["checked_at"])
+
+    def test_setting_state_twice_updates_the_one_row(self):
+        database.initialize_database()
+        database.set_game_patch_state("valorant", "13.04", "u1", "t1")
+        database.set_game_patch_state("valorant", "13.05", "u2", "t2")
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            rows = conn.execute(
+                "SELECT latest_version FROM game_patch_state "
+                "WHERE game_key = 'valorant'").fetchall()
+        self.assertEqual([("13.05",)], rows)
+
+    def test_guild_announcement_round_trip_is_independent_per_guild(self):
+        database.initialize_database()
+        self.assertIsNone(database.get_guild_patch_announcement(1, "valorant"))
+        database.set_guild_patch_announcement(1, "valorant", "13.05")
+        self.assertEqual("13.05", database.get_guild_patch_announcement(1, "valorant"))
+        self.assertIsNone(database.get_guild_patch_announcement(2, "valorant"))
+
+    def test_an_older_database_gains_both_tables_and_keeps_other_rows(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        self._downgrade()
+        self.assertFalse(
+            {"game_patch_state", "guild_patch_announcements"} <= self._tables()
+        )
+
+        database.initialize_database()
+
+        self.assertTrue(
+            {"game_patch_state", "guild_patch_announcements"} <= self._tables()
+        )
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(
+                1, conn.execute(
+                    "SELECT COUNT(*) FROM guilds WHERE guild_id = 1"
+                ).fetchone()[0]
+            )
+
+    def test_re_running_the_migration_changes_nothing(self):
+        database.initialize_database()
+        database.set_game_patch_state("valorant", "13.05", "u", "t")
+        database.set_guild_patch_announcement(1, "valorant", "13.05")
+
+        database.initialize_database()
+
+        self.assertEqual(
+            "13.05", database.get_game_patch_state("valorant")["latest_version"]
+        )
+        self.assertEqual(
+            "13.05", database.get_guild_patch_announcement(1, "valorant")
+        )
+
+    def test_a_pre_migration_backup_is_written(self):
+        database.initialize_database()
+        self._downgrade()
+        database.initialize_database()
+        self.assertTrue(glob.glob(f"{database.DB_PATH}.backup-v19-*"))
+
+
+class Schema21GachaScheduleTests(unittest.TestCase):
+    """Schema 21 adds `gacha_banners.starts_at`/`.ends_at`.
+
+    Both nullable with no default, like `display_name` before them: NULL on
+    both means "no schedule", so an upgrade changes nothing about pullability
+    for a banner that never gets one.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _downgrade(self):
+        """Reshape a current database into the pre-schema-21 shape."""
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("ALTER TABLE gacha_banners DROP COLUMN starts_at")
+            conn.execute("ALTER TABLE gacha_banners DROP COLUMN ends_at")
+            conn.execute("PRAGMA user_version = 20")
+            conn.commit()
+
+    def test_a_clean_database_has_both_columns(self):
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
+            columns = {row[1] for row in conn.execute(
+                "PRAGMA table_info(gacha_banners)")}
+        self.assertTrue({"starts_at", "ends_at"} <= columns)
+
+    def test_an_existing_banner_survives_with_no_schedule_and_stays_pullable(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.set_gacha_banner(1, 7, True, database.new_banner_config(), 0)
+        self._downgrade()
+        database.initialize_database()
+
+        banner = database.get_gacha_banner(1)
+        self.assertIsNone(banner["starts_at"])
+        self.assertIsNone(banner["ends_at"])
+        self.assertEqual("live", banner["status"])
+        self.assertTrue(banner["pullable"])
+
+    def test_re_running_the_migration_changes_nothing(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.set_gacha_banner(1, 7, True, database.new_banner_config(), 0)
+        self._downgrade()
+        database.initialize_database()
+        first = database.get_gacha_banner(1)
+        database.initialize_database()
+        self.assertEqual(first, database.get_gacha_banner(1))
+
+
+class Schema22ManualEntitlementTests(unittest.TestCase):
+    """Schema 22 adds `timed_entitlements.source_type`/`.granted_by`.
+
+    Both nullable with no default. NULL on `source_type` means "derive it from
+    the voucher join", the same third state `shop_item_definitions.category`
+    carries, and for the same reason: the set of legitimate sources is ours to
+    grow and SQLite cannot alter a CHECK without rebuilding the table.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _downgrade(self):
+        """Reshape a current database into the pre-schema-22 shape."""
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("ALTER TABLE timed_entitlements DROP COLUMN source_type")
+            conn.execute("ALTER TABLE timed_entitlements DROP COLUMN granted_by")
+            conn.execute("PRAGMA user_version = 21")
+            conn.commit()
+
+    def test_a_clean_database_has_both_columns(self):
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
+            columns = {row[1] for row in conn.execute(
+                "PRAGMA table_info(timed_entitlements)")}
+        self.assertTrue({"source_type", "granted_by"} <= columns)
+
+    def test_the_columns_are_nullable_and_unconstrained(self):
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'timed_entitlements'"
+            ).fetchone()[0]
+        self.assertIn("source_type TEXT", sql)
+        self.assertNotIn("source_type TEXT NOT NULL", sql)
+        self.assertNotIn("CHECK (source_type", sql)
+        self.assertIn("granted_by INTEGER", sql)
+        self.assertNotIn("granted_by INTEGER NOT NULL", sql)
+
+    def test_an_existing_grant_survives_with_no_provenance_and_still_expires(self):
+        """A pre-schema-22 row keeps deriving its source from the voucher join
+        -- unchanged behaviour is the whole point of a NULL default here."""
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        with database.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO reward_vouchers (voucher_id, guild_id, user_id, "
+                "reward_key, source_type, duration_days, status, acquired_at) "
+                "VALUES ('v', 1, 7, 'emoji_30d', 'gacha', 30, 'available', "
+                "'2026-01-01')")
+            conn.commit()
+        database.redeem_voucher(1, 7, "v")
+        request = database.get_fulfillment_requests(1)[0]
+        database.fulfill_voucher_request(1, request["request_id"], 1, "555")
+        self._downgrade()
+        database.initialize_database()
+
+        with database.get_connection() as conn:
+            conn.execute("UPDATE timed_entitlements SET expires_at = '2020-01-01'")
+            conn.commit()
+        expired = database.get_expired_entitlements("2026-12-31T00:00:00+00:00")
+        self.assertEqual(1, len(expired))
+        self.assertEqual("gacha", expired[0]["source_type"])
+
+    def test_re_running_the_migration_changes_nothing(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.grant_manual_entitlement(1, 7, "emoji", "1", 30, 42)
+        self._downgrade()
+        database.initialize_database()
+        first = database.get_active_entitlements(1, "2000-01-01T00:00:00+00:00")
+        database.initialize_database()
+        self.assertEqual(
+            first, database.get_active_entitlements(1, "2000-01-01T00:00:00+00:00"))

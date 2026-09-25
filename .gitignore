@@ -45,6 +45,10 @@ backup.sh
 todo*
 !todo.md
 
+# The drafted Discord dev-log post (.claude/skills/guild-message/). Generated
+# fresh each time and meant to be copied out and posted, not diffed or kept.
+docs/guild_message.md
+
 # Dashboard design reference: local screenshots, several megabytes each.
 dashboard-reference/
 node_modules/

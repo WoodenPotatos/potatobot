@@ -24,6 +24,9 @@ const SECTIONS = [
     {id: 'casino', label: 'Casino', limit: 25, builtin: 6, custom: 19, used: 25, remaining: 0},
     // Empty, which is a legal destination and must still be offered.
     {id: 'heist', label: 'Heist', limit: 25, builtin: 0, custom: 0, used: 0, remaining: 25},
+    // Its only item is real and eligible, so the preview below must offer it
+    // -- unlike Casino, whose one item is hidden, and Heist, which has none.
+    {id: 'protection', label: 'Protection', limit: 25, builtin: 0, custom: 1, used: 1, remaining: 24},
 ];
 const ITEMS = [
     {item_key: 'premium', source: 'builtin', name: 'Premium', description: 'd',
@@ -39,6 +42,11 @@ const ITEMS = [
      in_gacha: false, enabled: true, editable: true, price_setting: null,
      revision: 2, config: {amount: 10, repeatable: false},
      category: 'perks', category_stored: null, hidden: false},
+    {item_key: 'lockpick', source: 'custom', name: 'Lockpick', description: 'd',
+     effect: 'coin_bundle', value: null, price: 200, in_shop: true,
+     in_gacha: false, enabled: true, editable: true, price_setting: null,
+     revision: 1, config: {amount: 5, repeatable: false},
+     category: 'protection', category_stored: null, hidden: false},
 ];
 
 const dom = new JSDOM(html, {url: 'https://d.test/', runScripts: 'outside-only'});
@@ -129,6 +137,27 @@ window.fetch = async (url) => {
     assert.ok(!option('heist').disabled);
     assert.ok(option('casino').textContent.includes('25/25'),
         'a full section must say why it cannot be picked');
+
+    // The two-step preview: a real /shop meets a section, then that
+    // section's items. Casino's one item is hidden and Heist has none, so
+    // neither may offer a pill -- only Perks and Protection are eligible.
+    const previewPills = () => [...window.document.querySelectorAll(
+        '.shop-preview-sections .pill')];
+    assert.deepStrictEqual(previewPills().map((node) => node.textContent),
+        ['Perks', 'Protection'],
+        'an all-hidden or empty section must not appear in the preview');
+
+    const previewItemText = () => [...window.document.querySelectorAll(
+        '.shop-preview-item')].map((node) => node.textContent);
+    assert.deepStrictEqual(
+        previewItemText(),
+        ['Premium | Price: 300000', 'VIP | Price: 500'],
+        'the default section must be the first eligible one');
+
+    previewPills().find((node) => node.textContent === 'Protection').click();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepStrictEqual(previewItemText(), ['Lockpick | Price: 200'],
+        'clicking a section pill must swap in that section\'s items');
 
     console.log('ok');
     // Explicit, because an authenticated boot starts the session

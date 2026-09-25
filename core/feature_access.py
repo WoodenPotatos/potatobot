@@ -47,9 +47,7 @@ COMMAND_POLICIES = {
     "version": _command("general"),
     "search": _command("lfg"),
     "profile": _command("profiles"),
-    "lvls": _command("profiles"),
-    "ranks": _command("profiles"),
-    "topstreak": _command("profiles"),
+    "leaderboard": _command("profiles"),
     "bal": _command("economy"),
     "daily": _command("economy"),
     "work": _command("economy"),
@@ -57,6 +55,9 @@ COMMAND_POLICIES = {
     "pay": _command("economy"),
     "shop": _command("shop", ResponsePolicy.PRIVATE),
     "buy": _command("shop", ResponsePolicy.PRIVATE),
+    # Break-glass control for `shop_hidden_items`, the same argument that gives
+    # `/maintenance` its command: PUBLIC with an ephemeral refusal, mirroring it.
+    "shop_hide": _command("shop"),
     # PUBLIC because the result embed *is* the command. Declared PRIVATE, the
     # tree deferred ephemerally and the public success branch made
     # PotatoContext.send delete the original response — stranding Discord's
@@ -113,7 +114,7 @@ COMMAND_POLICIES = {
     "rules_group": _command("onboarding", ResponsePolicy.PRIVATE),
     "update_rules_group": _command("onboarding", ResponsePolicy.PRIVATE),
     "rules_verify": _command("onboarding", ResponsePolicy.PRIVATE),
-    "rent_start": _command("rentals", ResponsePolicy.PRIVATE),
+    "rent_start": _command("shop", ResponsePolicy.PRIVATE),
     "testreset": _command("economy", ResponsePolicy.PRIVATE),
     "award": _command("economy"),
     "awardall": _command("economy"),
@@ -133,9 +134,9 @@ COMMAND_POLICIES = {
     "getraw": _command("general", ResponsePolicy.PRIVATE),
 }
 
-_FEATURE_CACHE = {}
-_FEATURE_REVISIONS = {}
-_FEATURE_CACHE_STATES = {}
+_FEATURE_CACHE: dict[int, dict[str, bool]] = {}
+_FEATURE_REVISIONS: dict[int, int] = {}
+_FEATURE_CACHE_STATES: dict[int, FeatureCacheState] = {}
 _FEATURE_CACHE_LOCK = threading.RLock()
 # Only PotatoContext.send retires an entry, so commands that raise before
 # replying would otherwise leak one snowflake key each for the process lifetime.
@@ -170,10 +171,9 @@ def maintenance_blocks(guild, actor, command_name: str = "") -> bool:
     # Read from memory: this runs on every interaction, including every
     # component and modal callback. It must also fail *open* — the mirror image
     # of `is_enabled`, which fails closed. An unreadable cache resolves
-    # `maintenance` through config.json and then the registry default, both of
-    # which are "not in maintenance", so a settings problem cannot take the
-    # whole bot down. Do not copy this from `is_enabled`; they are one line
-    # apart and opposite.
+    # `maintenance` to its registry default, "not in maintenance", so a
+    # settings problem cannot take the whole bot down. Do not copy this from
+    # `is_enabled`; they are one line apart and opposite.
     guild_id = getattr(guild, "id", None)
     try:
         if not settings_cache.setting(guild_id, "maintenance"):
@@ -189,7 +189,22 @@ def maintenance_blocks(guild, actor, command_name: str = "") -> bool:
 
 
 async def _deny_interaction(interaction: discord.Interaction, locale_key: str) -> None:
-    """Send one ephemeral refusal regardless of prior acknowledgement state."""
+    """Send one ephemeral refusal regardless of prior acknowledgement state.
+
+    An autocomplete interaction cannot take that refusal at all: Discord
+    accepts only an autocomplete-result response (type 8) for one, and
+    `interaction.response.send_message` sends type 4 -- refused with `400
+    (error code: 50035): In type: Value must be one of {8}`, discovered live
+    in the journal (2026-09-25) the first time a disabled feature's
+    autocomplete actually fired. There is no text to show either way --
+    autocomplete has no room for one -- so an empty result list is the
+    refusal; the caller who invoked autocomplete still learns nothing was
+    found, which is the same "no data leaks past the gate" guarantee this
+    function gives every other entry point.
+    """
+    if interaction.type is discord.InteractionType.autocomplete:
+        await interaction.response.autocomplete([])
+        return
     from cogs.utils import t
 
     if interaction.response.is_done():
@@ -384,18 +399,12 @@ class PotatoCommandTree(app_commands.CommandTree):
     async def interaction_check(self, interaction: discord.Interaction, /) -> bool:
         command_name = getattr(interaction.command, "qualified_name", "")
         if interaction.guild_id is None:
-            from cogs.utils import t
-            await interaction.response.send_message(
-                t("utils.guild_only"), ephemeral=True
-            )
+            await _deny_interaction(interaction, "utils.guild_only")
             return False
         policy = command_policy(command_name)
         if policy is None:
             logger.error("Application command has no response policy (command=%s)", command_name)
-            from cogs.utils import t
-            await interaction.response.send_message(
-                t("utils.command_unavailable"), ephemeral=True
-            )
+            await _deny_interaction(interaction, "utils.command_unavailable")
             return False
 
         # Maintenance outranks the feature flag, so it is evaluated first.

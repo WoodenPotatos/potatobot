@@ -123,6 +123,48 @@ def _chunked_embed_fields(name, lines, *, field_limit=900, max_fields=3):
     return fields
 
 
+# How many recent 5-stars `/pity` shows.
+PITY_HISTORY_LIMIT = 10
+
+
+def _pity_history_field(history, custom_items) -> str:
+    """The `/pity` history field's value, kept under Discord's 1024-character
+    field limit.
+
+    A custom reward's name and a banner's display name are both free text up
+    to 64 characters each, so `PITY_HISTORY_LIMIT` worst-case lines can run
+    well past what one field holds -- the same problem `_chunked_embed_fields`
+    solves for inventory listings, but that function's multi-field, "+N more"
+    wording is inventory-specific, so this is its own small, single-field
+    version instead of a reuse that would read wrong here.
+    """
+    if not history:
+        return t("gacha.pity_history_empty")
+    lines = [
+        t("gacha.pity_history_line",
+          reward=gacha_reward_label(entry["reward_key"], custom_items=custom_items),
+          pity=entry["pity"],
+          marker=(t("gacha.pity_marker_hard") if entry["hard_pity"]
+                  else t("gacha.pity_marker_featured") if entry["featured"]
+                  else ""),
+          banner=entry["banner_key"])
+        for entry in history
+    ]
+    # Headroom reserved for the truncation note itself, so appending it can
+    # never be what pushes the field back over the limit.
+    budget = 1024 - 40
+    kept, total = [], 0
+    for line in lines:
+        extra = len(line) + (1 if kept else 0)
+        if kept and total + extra > budget:
+            break
+        kept.append(line)
+        total += extra
+    if len(kept) < len(lines):
+        kept.append(t("gacha.pity_history_truncated", count=len(lines) - len(kept)))
+    return "\n".join(kept)
+
+
 async def revoke_entitlement(guild, entitlement) -> bool:
     """Remove the Discord side of one gacha entitlement.
 
@@ -200,7 +242,12 @@ class Gacha(commands.Cog):
         self.entitlement_cleanup.cancel()
 
     async def banner_autocomplete(self, interaction: discord.Interaction, current: str):
-        """Offer the guild's enabled banners.
+        """Offer the guild's currently pullable banners.
+
+        Pullable means enabled *and* inside its schedule, if it has one --
+        the same check `perform_gacha_pulls` makes, so offering a banner here
+        can never be followed by a pull refusing it for a reason this list
+        did not already rule out.
 
         Autocomplete is its own interaction, so it carries the same gates as the
         command: a disabled feature or maintenance mode must not disclose which
@@ -223,7 +270,7 @@ class Gacha(commands.Cog):
                 name=banner["display_name"], value=banner["banner_key"]
             )
             for banner in banners
-            if banner["enabled"]
+            if banner["pullable"]
             and (needle in banner["display_name"].casefold()
                  or needle in banner["banner_key"].casefold())
         ][:25]
@@ -256,6 +303,8 @@ class Gacha(commands.Cog):
             key = {
                 "banner_disabled": "banner_disabled",
                 "banner_unknown": "banner_unknown",
+                "banner_not_started": "banner_not_started",
+                "banner_expired": "banner_expired",
             }.get(result["reason"], "not_enough_money")
             return await ctx.send(t(f"gacha.{key}"), ephemeral=True)
 
@@ -345,7 +394,7 @@ class Gacha(commands.Cog):
     @discord.app_commands.autocomplete(banner=banner_autocomplete)
     @discord.app_commands.describe(banner=t("general.gacha_banner_description"))
     async def pity(self, ctx, banner: str = None):
-        """Live pity plus the last five 5-stars, with the pity each landed at."""
+        """Live pity plus the last ten 5-stars, with the pity each landed at."""
         banner_key = banner or database.DEFAULT_GACHA_BANNER_KEY
         try:
             stored = await database.run_read(
@@ -356,7 +405,8 @@ class Gacha(commands.Cog):
         pity = await database.run_read(
             database.get_gacha_pity, ctx.guild.id, ctx.author.id, banner_key)
         history = await database.run_read(
-            database.get_five_star_history, ctx.guild.id, ctx.author.id, 5)
+            database.get_five_star_history, ctx.guild.id, ctx.author.id,
+            PITY_HISTORY_LIMIT)
         # Not named `config`: that is the legacy module-level dictionary's name,
         # and the test that keeps cogs off it matches the subscript by name.
         banner_config = stored["config"]
@@ -384,18 +434,8 @@ class Gacha(commands.Cog):
                             value="\n".join(held), inline=False)
 
         custom_items = await resolve_custom_item_labels(ctx.guild.id)
-        lines = [
-            t("gacha.pity_history_line",
-              reward=gacha_reward_label(entry["reward_key"],
-                                        custom_items=custom_items),
-              pity=entry["pity"],
-              marker=(t("gacha.pity_marker_hard") if entry["hard_pity"]
-                      else t("gacha.pity_marker_featured") if entry["featured"]
-                      else ""),
-              banner=entry["banner_key"])
-            for entry in history
-        ] or [t("gacha.pity_history_empty")]
-        embed.add_field(name=t("gacha.pity_history"), value="\n".join(lines),
+        embed.add_field(name=t("gacha.pity_history"),
+                        value=_pity_history_field(history, custom_items),
                         inline=False)
         embed.set_footer(text=t("gacha.pity_footer",
                                 total=pity["total_pulls"],
@@ -517,7 +557,7 @@ class Gacha(commands.Cog):
             kind = entitlement["entitlement_key"]
             if (
                 kind not in {"premium", "emoji", "sticker", "sound"}
-                or entitlement["source_type"] != "gacha"
+                or entitlement["source_type"] not in {"gacha", "manual"}
             ):
                 continue
             guild = self.bot.get_guild(entitlement["guild_id"])
@@ -529,6 +569,11 @@ class Gacha(commands.Cog):
             # revocation, so switching the gacha off left members holding premium
             # roles and rented assets past their expiry with nothing left to
             # withdraw them — the grant outlived the record that measured it.
+            #
+            # `manual` covers a staff-granted asset with no voucher behind it at
+            # all (the dashboard's Redeems page "Grant Manually" form) -- it is
+            # always an emoji/sticker/sound, which this cog already fully owns
+            # revoking, so there is no reason to give it a third loop.
             if not await revoke_entitlement(guild, entitlement):
                 continue
             await database.run_write(

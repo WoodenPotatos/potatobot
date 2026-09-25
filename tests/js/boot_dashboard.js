@@ -118,8 +118,21 @@ window.fetch = async (url) => {
             earnings_placeholder: '{earnings}', coin_placeholder: '{coin}'}});
     }
     if (u.includes('/permissions')) {
+        // Non-empty on purpose, one of each finding shape: `channel_missing_permission`
+        // is the one that gets a Repair button, `channel_member_missing_permission`
+        // never does — an empty list here would draw the row renderer never at all.
         return ok({status: 'success', data: {
-            findings: [], features: [], blocking_count: 0, degraded_count: 0,
+            findings: [
+                {code: 'channel_missing_permission', severity: 'blocking',
+                 subject: 'bot_log_channel', feature: 'general',
+                 identifier: 'bot-log', permissions: ['send_messages'],
+                 channel_id: '1420070400000000010'},
+                {code: 'channel_member_missing_permission', severity: 'degraded',
+                 subject: 'economy_channels', feature: 'economy',
+                 identifier: 'casino', permissions: ['use_application_commands'],
+                 channel_id: '1420070400000000011'},
+            ],
+            features: [], blocking_count: 1, degraded_count: 1,
             administrator: false}});
     }
     if (u.includes('/gacha')) {

@@ -11,54 +11,13 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class ConfigurationCoverageTests(unittest.TestCase):
-    """Every value in `config.json` must be reachable from the dashboard.
+class SettingRegistryCoverageTests(unittest.TestCase):
+    """Every registered setting must be reachable from the dashboard.
 
-    A value that only a file edit can change is not configurable at all for an
-    operator who only has the control plane, and nothing else in the suite would
-    notice one being added.
+    A value nothing labels or sections is not configurable at all for an
+    operator who only has the control plane, and nothing else in the suite
+    would notice one being added with neither.
     """
-
-    CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
-
-    # Paths that are deliberately not dashboard settings. Nothing is exempt
-    # today; an entry added here needs a stated reason, because the alternative
-    # is a value only a file edit can change.
-    EXEMPT_PATHS = frozenset()
-    # Top-level keys registered whole, as one JSON setting, rather than per leaf.
-    # Settings whose whole value is one JSON document. The walk stops at the
-    # top key rather than treating each entry — a role menu, a level milestone —
-    # as a setting of its own.
-    WHOLE_KEY_SETTINGS = {
-        "factions", "lfg_channels", "level_roles",
-    }
-
-    def config_paths(self):
-        """Every leaf path in config.json, stopping at whole-key settings."""
-        def walk(node, prefix=()):
-            if prefix and prefix[0] in self.WHOLE_KEY_SETTINGS:
-                yield prefix[:1]
-                return
-            if isinstance(node, dict):
-                for key, value in node.items():
-                    yield from walk(value, prefix + (key,))
-            else:
-                yield prefix
-        return {path for path in walk(self.CONFIG)}
-
-    def test_every_config_value_has_a_typed_setting(self):
-        from core.settings_registry import SETTING_DEFINITIONS
-
-        registered = {
-            definition.legacy_path
-            for definition in SETTING_DEFINITIONS.values()
-            if definition.legacy_path
-        }
-        unreachable = sorted(
-            ".".join(path) for path in self.config_paths()
-            if path not in registered and path not in self.EXEMPT_PATHS
-        )
-        self.assertEqual([], unreachable)
 
     def test_every_setting_has_an_operator_facing_label(self):
         """The dashboard renders the label straight from the registry, so a
@@ -117,31 +76,21 @@ class ConfigurationCoverageTests(unittest.TestCase):
 class LocalDevelopmentDashboardTests(unittest.TestCase):
     """`scripts/local_dashboard.py` runs the control plane with no Discord.
 
-    Two properties are load-bearing and neither is visible at a glance. It must
-    not be able to serve a real installation, and it must not be able to write
-    the tracked `config.json` — which it would by default, because the legacy
-    mirror target is *inferred* from "private profile with one active guild",
-    and a local copy of the server database has exactly one.
+    The one load-bearing property that is not visible at a glance: it must not
+    be able to serve a real installation.
     """
 
     SOURCE = (ROOT / "scripts" / "local_dashboard.py").read_text(encoding="utf-8")
 
-    def test_the_legacy_config_mirror_is_disabled(self):
-        self.assertIn('os.environ["POTATOBOT_LEGACY_GUILD_ID"] = "0"', self.SOURCE)
-
-    def test_config_writes_are_redirected_away_from_the_tracked_file(self):
-        self.assertIn("def redirect_config_writes", self.SOURCE)
-        self.assertIn("utils.CONFIG_PATH = str(local_config)", self.SOURCE)
-        self.assertIn("redirect_config_writes(arguments.db.parent)", self.SOURCE)
-
     def test_the_legacy_guild_id_is_still_pinned_to_zero(self):
-        """The mirror it disabled is gone; the variable is not.
+        """A dead guard here is cheap insurance against a live one elsewhere.
 
-        `POTATOBOT_LEGACY_GUILD_ID` has a second reader in `main.py`, which uses
-        it to adopt a legacy database into scoped accounts. Pinning it to 0 kept
-        the launcher from writing the tracked `config.json`; it now keeps the
-        launcher from adopting a copy of the deployment's data, which is the same
-        class of accident.
+        `POTATOBOT_LEGACY_GUILD_ID` has a reader in `main.py`, which uses it to
+        adopt a legacy database into scoped accounts. This script never starts a
+        bot, so nothing on its path reads the variable today — but the script
+        working on a private-profile, single-active-guild copy is exactly the
+        shape that reader looks for, so pinning it to 0 costs nothing and
+        survives the script growing a path that does.
         """
         self.assertIn('os.environ["POTATOBOT_LEGACY_GUILD_ID"] = "0"', self.SOURCE)
 
@@ -169,37 +118,10 @@ class LocalDevelopmentDashboardTests(unittest.TestCase):
 
 
 class ConfigurationSecurityTests(unittest.TestCase):
-    def test_tracked_config_contains_no_twitch_credentials(self):
-        config = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
-        socials = config.get("socials", {})
-        self.assertNotIn("twitch_client_id", socials)
-        self.assertNotIn("twitch_client_secret", socials)
-
     def test_environment_template_documents_twitch_credentials(self):
         template = (ROOT / ".env.example").read_text(encoding="utf-8")
         self.assertIn("TWITCH_CLIENT_ID=", template)
         self.assertIn("TWITCH_CLIENT_SECRET=", template)
-
-    def test_sanitized_config_example_matches_the_real_shape(self):
-        """The example is what a new installation copies, so it must stay in
-        step with the real file without carrying any of its identifiers."""
-        root = Path(__file__).resolve().parents[1]
-        real = json.loads((root / "config.json").read_text(encoding="utf-8"))
-        example_text = (root / "config.json.example").read_text(encoding="utf-8")
-        example = json.loads(example_text)
-
-        self.assertEqual(sorted(real), sorted(example))
-        for section in real:
-            if isinstance(real[section], dict) and not any(
-                re.fullmatch(r"\d{15,20}", key) for key in real[section]
-            ):
-                self.assertEqual(
-                    sorted(real[section]), sorted(example[section]),
-                    f"section {section} drifted from config.json",
-                )
-
-        leaked = re.findall(r"\d{15,20}", example_text)
-        self.assertEqual([], leaked, "config.json.example leaks Discord identifiers")
 
     #: What `CLAUDE.md` may cost. It is loaded into context on every turn of every
     #: session, so its size is paid continuously rather than when somebody opens
@@ -433,7 +355,7 @@ class ConfigurationSecurityTests(unittest.TestCase):
     def test_split_deployment_keeps_one_schema_owner(self):
         """Only the bot may create the schema, so the packaged dashboard must
         never also start an in-process one."""
-        compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        compose = (ROOT / "container" / "compose.yaml").read_text(encoding="utf-8")
         self.assertIn('POTATOBOT_DASHBOARD_ENABLED: "false"', compose)
         # Exec form, so the process is PID 1 and receives signals directly.
         self.assertIn('command: ["python", "dashboard_api.py"]', compose)
@@ -464,7 +386,7 @@ class ConfigurationSecurityTests(unittest.TestCase):
         self.assertIn("After=potatobot.service", dashboard_unit)
 
     def test_container_runs_unprivileged_and_keeps_data_outside_the_image(self):
-        containerfile = (ROOT / "Containerfile").read_text(encoding="utf-8")
+        containerfile = (ROOT / "container" / "Containerfile").read_text(encoding="utf-8")
         self.assertIn("USER potatobot", containerfile)
         # Pinned by digest: a tag is a moving name.
         self.assertRegex(containerfile, r"FROM python:3\.13-slim@sha256:[0-9a-f]{64}")
@@ -530,9 +452,9 @@ class RepositoryLayoutTests(unittest.TestCase):
 
     The three entry points stay at the root because that is where the things
     that run them look: `deploy/potatobot.service` names `main.py` by absolute
-    path, `compose.yaml` and the two units name `dashboard_api.py` and
-    `update_db.py`. Moving one is a production change, which is the other half
-    of why this is pinned.
+    path, `container/compose.yaml` and the two units name `dashboard_api.py`
+    and `update_db.py`. Moving one is a production change, which is the other
+    half of why this is pinned.
     """
 
     ENTRY_POINTS = {"main.py", "dashboard_api.py", "update_db.py"}
@@ -555,7 +477,7 @@ class RepositoryLayoutTests(unittest.TestCase):
         "feature_access.py", "item_catalog.py", "logging_setup.py",
         "managed_messages.py", "minigame_data.py", "permission_audit.py",
         "settings_cache.py", "settings_registry.py", "support_tickets.py",
-        "version.py",
+        "supported_games.py", "version.py", "wordchain_dictionary.py",
     }
 
     def test_the_shared_modules_live_in_core(self):
@@ -567,7 +489,7 @@ class RepositoryLayoutTests(unittest.TestCase):
         """A root module nothing invokes has no reason to be at the root."""
         invocations = "\n".join(
             (ROOT / name).read_text(encoding="utf-8") for name in (
-                "Containerfile", "compose.yaml", "README.md",
+                "container/Containerfile", "container/compose.yaml", "README.md",
                 "deploy/potatobot.service", "deploy/potatobot-dashboard.service"))
         for entry in sorted(self.ENTRY_POINTS):
             with self.subTest(entry=entry):

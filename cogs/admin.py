@@ -157,6 +157,35 @@ async def store_rules_panel(ctx, color_hex, add_button, arguments) -> dict:
                                    "rules", RULES_PANEL_KEY)
 
 
+async def store_quick_rules_panel(ctx, color_hex, title, message, banner_url) -> dict:
+    """Save a one-section rules panel and hand back the stored row.
+
+    `/rules_verify` used to post an embed and forget it, so it was the only
+    poster left `/update_rules_group` could not later edit -- and it shares
+    `RULES_PANEL_KEY` with `/rules_group` on purpose, the same way
+    `store_simple_panel`'s two callers share one key each: there is one rules
+    panel per guild, and whichever command last wrote it owns its content.
+    """
+    try:
+        colour = discord.Color.from_str(color_hex).value
+    except (ValueError, TypeError):
+        colour = discord.Color.blue().value
+
+    existing = await database.run_read(database.get_managed_message,
+                                       ctx.guild.id, "rules", RULES_PANEL_KEY)
+    await database.run_write(
+        database.save_managed_message, ctx.guild.id, ctx.author.id, "rules",
+        RULES_PANEL_KEY, (existing or {}).get("display_name") or RULES_PANEL_KEY,
+        (existing or {}).get("revision", 0), colour=colour,
+        # Stored raw, exactly as `store_rules_panel` stores its own sections --
+        # `core/managed_messages.py`'s renderer is what turns a literal `\n`
+        # into a real newline, not the write path.
+        options={"sections": [{"title": title, "body": message}],
+                 "accept_button": True, "thumbnail": True, "image_url": banner_url})
+    return await database.run_read(database.get_managed_message, ctx.guild.id,
+                                   "rules", RULES_PANEL_KEY)
+
+
 # The one entry gate the commands address, the way `RULES_PANEL_KEY` names the
 # one rules panel. A guild may create others from the dashboard.
 ENTRY_GATE_KEY = "airlock"
@@ -361,13 +390,11 @@ class Admin(commands.Cog):
         report = permission_audit.build_report(
             ctx.guild, feature_states,
             # Resolved through the settings cache, which owns the same fallback
-            # chain `permission_audit.resolved_settings` reproduces by hand —
-            # stored row, then `config.json`, then the registry default. That
-            # fallback is not optional: `guild_settings` is sparse, so without it
-            # every channel and role resolves to nothing and the report comes
-            # back clean because it checked nothing. This command used to pass
-            # `config` directly and the name stopped being imported, so it raised
-            # instead.
+            # `permission_audit.resolved_settings` reproduces by hand — stored
+            # row, else the registry default. That fallback is not optional:
+            # `guild_settings` is sparse, so without it every channel and role
+            # resolves to nothing and the report comes back clean because it
+            # checked nothing.
             guild_settings_sync(ctx.guild.id, SETTING_DEFINITIONS),
         )
 
@@ -426,6 +453,54 @@ class Admin(commands.Cog):
 
         state = t("admin.maintenance_enabled") if status else t("admin.maintenance_disabled")
         await ctx.send(t("admin.maintenance_status", state=state))
+
+    async def shop_hide_item_autocomplete(self, interaction: discord.Interaction, current: str):
+        """Offer built-in shop item keys, marking which are already hidden.
+
+        Built-in only: `shop_hidden_items` never governs custom items, which are
+        hidden by deleting their row instead.
+        """
+        hidden = set(guild_setting_sync(interaction.guild_id, "shop_hidden_items") or ())
+        needle = (current or "").casefold()
+        choices = []
+        for key in sorted(database.BUILTIN_SHOP_KEYS):
+            if needle and needle not in key.casefold():
+                continue
+            marker = "🚫" if key in hidden else "✅"
+            choices.append(discord.app_commands.Choice(name=f"{marker} {key}", value=key))
+        return choices[:25]
+
+    @commands.hybrid_command(name="shop_hide", description=t("general.cmd_shop_hide"))
+    @discord.app_commands.default_permissions(manage_guild=True)
+    @discord.app_commands.autocomplete(item=shop_hide_item_autocomplete)
+    @is_staff()
+    async def shop_hide(self, ctx, item: str, hidden: bool):
+        # The break-glass path for when the dashboard is the broken thing --
+        # same argument and the same write path as `/maintenance` above, but
+        # for a guild-scoped setting rather than an instance one.
+        if item not in database.BUILTIN_SHOP_KEYS:
+            return await ctx.send(t("admin.shop_hide_unknown_item", item=item), ephemeral=True)
+
+        current = set(guild_setting_sync(ctx.guild.id, "shop_hidden_items") or ())
+        if hidden:
+            current.add(item)
+        else:
+            current.discard(item)
+
+        try:
+            await set_guild_setting(
+                ctx.guild.id, ctx.author.id, "shop_hidden_items", sorted(current))
+        except database.ValidationError as error:
+            # Un-hiding is the only direction this can refuse -- hiding always
+            # frees a slot. Reuse the dashboard's own wording for the same
+            # reason code so the two surfaces never say this differently.
+            if error.reason != "shop_unhide_no_room":
+                raise
+            return await ctx.send(
+                t(f"dashboard.errors.{error.reason}", **error.params), ephemeral=True)
+
+        state = t("admin.shop_hide_hidden") if hidden else t("admin.shop_hide_shown")
+        await ctx.send(t("admin.shop_hide_status", item=item, state=state))
 
     @commands.hybrid_command(name="testboost", description=t("general.cmd_testboost"))
     @discord.app_commands.default_permissions(administrator=True)
@@ -749,18 +824,19 @@ class Admin(commands.Cog):
         # fetches whatever this names, so it is HTTPS and bounded or refused.
         if banner_url and (not banner_url.startswith("https://") or len(banner_url) > 1024):
             return await ctx.send(t("admin.invalid_banner_url"), ephemeral=True)
-        try:
-            target_color = discord.Color.from_str(color_hex)
-        except ValueError:
-            target_color = discord.Color.blue()
 
-        embed = discord.Embed(title=title, description=message.replace("\\n", "\n"), color=target_color)
-        if banner_url: embed.set_image(url=banner_url)
-        if ctx.guild.icon: embed.set_thumbnail(url=ctx.guild.icon.url)
-
-        await ctx.channel.send(embed=embed, view=RuleAcceptView())
-        if ctx.interaction:
-            await ctx.send(t("utils.command_completed"), ephemeral=True)
+        # Writes and posts from the same `RULES_PANEL_KEY` row `/rules_group`
+        # owns, so this is no longer the one poster `/update_rules_group`
+        # could never later edit.
+        stored = await store_quick_rules_panel(ctx, color_hex, title, message, banner_url)
+        embeds, view = render_managed_message(ctx.guild, stored)
+        if embeds is None:
+            return await ctx.send(t("admin.operation_failed"), ephemeral=True)
+        posted = await ctx.channel.send(embeds=embeds, view=view)
+        await database.run_write(database.record_managed_post, ctx.guild.id,
+                                 "rules", RULES_PANEL_KEY, ctx.channel.id,
+                                 posted.id)
+        await ctx.send(t("admin.rules_posted"), ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Admin(bot))

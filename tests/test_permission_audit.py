@@ -5,6 +5,8 @@ what lets these tests drive it with stand-ins instead of a live Discord guild.
 """
 
 import json
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -145,6 +147,11 @@ class PermissionAuditTests(unittest.TestCase):
         self.assertEqual("bot-log", finding.identifier)
         self.assertEqual(("send_messages",), finding.permissions)
         self.assertEqual(permission_audit.SEVERITY_BLOCKING, finding.severity)
+        # A repair action targets the channel by id, never by its display
+        # name -- the finding has to carry one for that to be possible.
+        self.assertEqual(500, finding.channel_id)
+        self.assertEqual("500", finding.as_dict()["channel_id"],
+                         "a snowflake must cross as a string, never a number")
 
     def test_a_deleted_channel_is_a_warning_rather_than_a_block(self):
         guild = FakeGuild(FakeMember(permissions(), self.bot_role))
@@ -153,6 +160,9 @@ class PermissionAuditTests(unittest.TestCase):
                        if item.code == "channel_missing")
         self.assertEqual(permission_audit.SEVERITY_DEGRADED, finding.severity)
         self.assertEqual("404", finding.identifier)
+        # No live channel to repair, so no id and no repair option either.
+        self.assertEqual(0, finding.channel_id)
+        self.assertIsNone(finding.as_dict()["channel_id"])
 
     def test_a_channel_owned_by_a_disabled_feature_is_not_checked(self):
         denied = permissions()
@@ -225,6 +235,7 @@ class PermissionAuditTests(unittest.TestCase):
         # The bot is fine, so this must not be reported as blocking.
         self.assertEqual(permission_audit.SEVERITY_DEGRADED, finding.severity)
         self.assertNotIn("channel_missing_permission", codes(report))
+        self.assertEqual(802, finding.channel_id)
 
     def test_the_member_check_resolves_against_the_configured_member_role(self):
         """An airlock guild denies `@everyone` on purpose.
@@ -407,6 +418,22 @@ class PermissionFindingLocalizationTests(unittest.TestCase):
         self.assertEqual(
             [], sorted(offered - set(permission_audit.CHANNEL_KIND_REQUIREMENTS))
         )
+
+
+class PermissionRepairButtonTests(unittest.TestCase):
+    """Only `channel_missing_permission` may offer the dashboard's Repair
+    button, driven through the real renderer rather than a re-implementation
+    of the rule in Python."""
+
+    def test_only_the_bots_own_finding_gets_a_repair_button(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        script = ROOT / "tests" / "js" / "permission_repair.js"
+        result = subprocess.run([node, str(script), str(ROOT)],
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, result.returncode,
+                         f"{result.stdout}\n{result.stderr}")
 
 
 if __name__ == "__main__":

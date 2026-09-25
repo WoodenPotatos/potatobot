@@ -82,15 +82,6 @@ class SingleSourceTests(unittest.TestCase):
         for key in ("release_version", "release_date"):
             self.assertNotIn(key, SETTING_DEFINITIONS)
 
-    def test_config_carries_no_version_metadata(self):
-        import json
-        for name in ("config.json", "config.json.example"):
-            with self.subTest(name=name):
-                with open(ROOT / name, encoding="utf-8") as handle:
-                    settings = json.load(handle)["bot_settings"]
-                self.assertNotIn("version", settings)
-                self.assertNotIn("release_date", settings)
-
     def test_the_repository_url_is_public_and_https(self):
         self.assertTrue(version.REPOSITORY_URL.startswith("https://github.com/"))
         self.assertNotIn("potatobotbeta", version.REPOSITORY_URL,
@@ -191,25 +182,21 @@ class CurrencySymbolTests(unittest.TestCase):
     """
 
     def setUp(self):
-        from cogs.utils import config
-        self.config = config
-        self.original = config.get("bot_settings", {}).get("currency_emoji")
-        self.addCleanup(self._restore)
+        from core import settings_cache
+        self.settings_cache = settings_cache
+        self.addCleanup(settings_cache.invalidate)
 
-    def _restore(self):
-        if self.original is None:
-            self.config["bot_settings"].pop("currency_emoji", None)
-        else:
-            self.config["bot_settings"]["currency_emoji"] = self.original
+    def _set(self, value):
+        self.settings_cache.apply_changes(0, {"currency_emoji": {"value": value}})
 
     def test_the_reader_falls_back_when_unset_or_blank(self):
         from cogs.utils import DEFAULT_CURRENCY_EMOJI, currency_emoji
         for value in (None, "", "   "):
             with self.subTest(value=value):
                 if value is None:
-                    self.config["bot_settings"].pop("currency_emoji", None)
+                    self.settings_cache.invalidate()
                 else:
-                    self.config["bot_settings"]["currency_emoji"] = value
+                    self._set(value)
                 self.assertEqual(DEFAULT_CURRENCY_EMOJI, currency_emoji())
 
     def test_the_fallback_matches_the_registry_default(self):
@@ -226,7 +213,7 @@ class CurrencySymbolTests(unittest.TestCase):
 
     def test_t_substitutes_coin_without_the_caller_supplying_it(self):
         from cogs.utils import t
-        self.config["bot_settings"]["currency_emoji"] = "🪙"
+        self._set("🪙")
         rendered = t("admin.testboost_desc", lang="en", user="Woody", amount=5)
         self.assertEqual("Huge thanks for the boost, Woody! Your reward: **5 🪙**.",
                          rendered)
@@ -239,7 +226,7 @@ class CurrencySymbolTests(unittest.TestCase):
 
     def test_an_explicit_coin_argument_still_wins(self):
         from cogs.utils import t
-        self.config["bot_settings"]["currency_emoji"] = "🪙"
+        self._set("🪙")
         rendered = t("admin.testboost_desc", lang="en", user="Woody", amount=5,
                      coin="XYZ")
         self.assertIn("XYZ", rendered)
@@ -254,12 +241,11 @@ class WorkResponseSubstitutionTests(unittest.TestCase):
     """
 
     def test_both_placeholders_are_substituted(self):
-        from core import database
         from cogs.casino import work_response_text
-        from cogs.utils import config, currency_emoji
+        from cogs.utils import currency_emoji
+        from core import settings_cache
 
-        original = config.get("bot_settings", {}).get("currency_emoji")
-        config["bot_settings"]["currency_emoji"] = "🪙"
+        settings_cache.apply_changes(0, {"currency_emoji": {"value": "🪙"}})
         try:
             stored = [{"tier": "normal", "scope": "guild", "enabled": True,
                        "weight": 1,
@@ -268,10 +254,7 @@ class WorkResponseSubstitutionTests(unittest.TestCase):
             self.assertEqual("You earned 250 🪙 today.", rendered)
             self.assertEqual("🪙", currency_emoji())
         finally:
-            if original is None:
-                config["bot_settings"].pop("currency_emoji", None)
-            else:
-                config["bot_settings"]["currency_emoji"] = original
+            settings_cache.invalidate()
 
     def test_a_stray_brace_does_not_raise(self):
         from cogs.casino import work_response_text
@@ -342,13 +325,17 @@ class CoinArgumentTests(unittest.TestCase):
         self.assertNotIn("{coin}", label)
 
     def test_the_shop_option_emoji_follows_the_setting(self):
-        from cogs.utils import config, currency_select_emoji
-        original = config.get("bot_settings", {}).get("currency_emoji")
+        from cogs.utils import currency_select_emoji
+        from core import settings_cache
+
+        def set_emoji(value):
+            settings_cache.apply_changes(0, {"currency_emoji": {"value": value}})
+
         try:
-            config["bot_settings"]["currency_emoji"] = "🪙"
+            set_emoji("🪙")
             self.assertEqual("🪙", currency_select_emoji())
 
-            config["bot_settings"]["currency_emoji"] = "<:coin:1420070400000000001>"
+            set_emoji("<:coin:1420070400000000001>")
             parsed = currency_select_emoji()
             self.assertEqual(1420070400000000001, parsed.id)
 
@@ -357,10 +344,7 @@ class CoinArgumentTests(unittest.TestCase):
             # ambiguous is dropped instead of guessed.
             for junk in ("not an emoji", "<a:x:123>", "PC"):
                 with self.subTest(junk=junk):
-                    config["bot_settings"]["currency_emoji"] = junk
+                    set_emoji(junk)
                     self.assertIsNone(currency_select_emoji())
         finally:
-            if original is None:
-                config["bot_settings"].pop("currency_emoji", None)
-            else:
-                config["bot_settings"]["currency_emoji"] = original
+            settings_cache.invalidate()

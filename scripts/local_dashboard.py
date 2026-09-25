@@ -17,9 +17,9 @@ What it does, in order:
    after check `scripts/rehearse_migration.py` performs, so a stale copy is also
    a migration rehearsal: this one is at schema 2, so it exercises every ordered
    migration including the schema 8 table rebuild.
-3. Builds a stand-in Discord guild from the ids in `config.json` and the stored
-   settings, so every channel and role selector resolves a real configured id to
-   a readable name instead of rendering "unavailable".
+3. Builds a stand-in Discord guild from the stored settings and the role-menu
+   entries, so a saved channel or role selector resolves to a name instead of
+   rendering "unavailable".
 4. Signs you in as the host without OAuth, by injecting a session ahead of every
    other request hook.
 5. Serves on 127.0.0.1.
@@ -268,111 +268,52 @@ def migrate_and_report(path: Path) -> None:
 
 # --------------------------------------------------------------- stand-in Discord
 
-def _collect_configured_ids() -> tuple[dict, dict]:
-    """Map every Discord id in `config.json` to a readable label and a kind.
+def _collect_stored_setting_ids(guild_ids) -> tuple[dict, dict]:
+    """Every stored channel/role id, labeled by the setting key that holds it.
 
     Selectors are the main thing worth looking at locally, and a stored id that
-    is absent from the resource list renders as "unavailable". Naming the ids the
-    configuration already references is what makes the page look real.
-    """
-    from cogs.utils import config
-    from core.settings_registry import (
-        CATEGORY_CHANNEL_TYPES,
-        SETTING_DEFINITIONS,
-        VOICE_CHANNEL_TYPES,
-    )
-
-    channels: dict[int, tuple[str, str]] = {}
-    roles: dict[int, str] = {}
-
-    def add_channel(identifier, label, kind="text"):
-        if isinstance(identifier, int) and not isinstance(identifier, bool):
-            channels.setdefault(int(identifier), (label, kind))
-
-    def add_role(identifier, label):
-        if isinstance(identifier, int) and not isinstance(identifier, bool):
-            roles.setdefault(int(identifier), label)
-
-    # Channel kinds come from the registry, so a category setting produces a
-    # category here and a voice lobby produces a voice channel.
-    kind_by_legacy_key = {}
-    for definition in SETTING_DEFINITIONS.values():
-        if not definition.legacy_path or definition.legacy_path[0] != "channels":
-            continue
-        if set(definition.channel_types) & set(CATEGORY_CHANNEL_TYPES):
-            kind_by_legacy_key[definition.legacy_path[-1]] = "category"
-        elif set(definition.channel_types) & set(VOICE_CHANNEL_TYPES):
-            kind_by_legacy_key[definition.legacy_path[-1]] = "voice"
-
-    for key, value in (config.get("channels") or {}).items():
-        kind = kind_by_legacy_key.get(key, "text")
-        for index, entry in enumerate(value if isinstance(value, list) else [value]):
-            suffix = f"-{index + 1}" if isinstance(value, list) and len(value) > 1 else ""
-            add_channel(entry, f"{key.replace('_', '-')}{suffix}", kind)
-
-    for key, value in (config.get("roles") or {}).items():
-        if key == "ignored_users":
-            continue  # Member ids, not roles.
-        for index, entry in enumerate(value if isinstance(value, list) else [value]):
-            suffix = f"-{index + 1}" if isinstance(value, list) and len(value) > 1 else ""
-            add_role(entry, f"{key.replace('_', '-')}{suffix}")
-
-    socials = config.get("socials") or {}
-    add_channel(socials.get("notification_channel"), "social-notifications")
-    add_role(socials.get("twitch_role_id"), "twitch")
-    add_role(socials.get("youtube_role_id"), "youtube")
-
-
-    for name, faction in (config.get("factions") or {}).items():
-        if not isinstance(faction, dict):
-            continue
-        add_role(faction.get("leader_role_id"), f"{name}-leader")
-        for index, entry in enumerate(faction.get("manageable_ids") or []):
-            add_role(entry, f"{name}-member-{index + 1}")
-
-    for channel_id, role_id in (config.get("lfg_channels") or {}).items():
-        if str(channel_id).isdigit():
-            add_channel(int(channel_id), "lfg", "text")
-        add_role(role_id, "lfg-target")
-
-    return channels, roles
-
-
-def _collect_stored_setting_ids(guild_ids) -> tuple[set, set]:
-    """Snowflakes already saved in the database, so those resolve too.
-
+    is absent from the resource list renders as "unavailable". Naming the ids
+    the database already references is what makes the page look real.
     `guild_settings` plus the role-menu entries, which stopped being settings at
     schema 12 — without them every menu row on the builder page would render as
     an unavailable role.
     """
     from core import database
-    from core.settings_registry import SETTING_DEFINITIONS, SettingValueType
+    from core.settings_registry import (
+        CATEGORY_CHANNEL_TYPES,
+        SETTING_DEFINITIONS,
+        SettingValueType,
+        VOICE_CHANNEL_TYPES,
+    )
 
     channel_types = {SettingValueType.CHANNEL, SettingValueType.CHANNEL_LIST}
     role_types = {SettingValueType.ROLE, SettingValueType.ROLE_LIST}
-    channels, roles = set(), set()
+    channels: dict[int, tuple[str, str]] = {}
+    roles: dict[int, str] = {}
     for guild_id in guild_ids:
         for key, row in database.get_guild_settings(guild_id).items():
             definition = SETTING_DEFINITIONS.get(key)
             if definition is None:
                 continue
-            value = row["value"]
-            entries = value if isinstance(value, list) else [value]
-            target = (channels if definition.value_type in channel_types
-                      else roles if definition.value_type in role_types else None)
-            if target is None:
-                continue
-            target.update(
-                int(entry) for entry in entries
-                if isinstance(entry, int) and not isinstance(entry, bool)
-            )
+            label = key.replace("_", "-")
+            entries = row["value"] if isinstance(row["value"], list) else [row["value"]]
+            entries = [entry for entry in entries
+                      if isinstance(entry, int) and not isinstance(entry, bool)]
+            if definition.value_type in channel_types:
+                kind = ("category" if set(definition.channel_types) & set(CATEGORY_CHANNEL_TYPES)
+                        else "voice" if set(definition.channel_types) & set(VOICE_CHANNEL_TYPES)
+                        else "text")
+                for entry in entries:
+                    channels.setdefault(int(entry), (label, kind))
+            elif definition.value_type in role_types:
+                for entry in entries:
+                    roles.setdefault(int(entry), label)
         for menu in database.list_managed_messages(guild_id, "role_menu"):
             stored = database.get_managed_message(guild_id, "role_menu",
                                                   menu["menu_key"])
-            roles.update(
-                int(entry["role_id"]) for entry in (stored or {})["entries"]
-                if entry.get("role_id")
-            )
+            for entry in (stored or {})["entries"]:
+                if entry.get("role_id"):
+                    roles.setdefault(int(entry["role_id"]), "role-menu")
     return channels, roles
 
 
@@ -451,12 +392,7 @@ def build_dev_bot(guild_ids):
     """
     import discord
 
-    configured_channels, configured_roles = _collect_configured_ids()
-    stored_channels, stored_roles = _collect_stored_setting_ids(guild_ids)
-    for channel_id in stored_channels:
-        configured_channels.setdefault(channel_id, (f"stored-{channel_id}", "text"))
-    for role_id in stored_roles:
-        configured_roles.setdefault(role_id, f"stored-{role_id}")
+    configured_channels, configured_roles = _collect_stored_setting_ids(guild_ids)
 
     # A realistic bot permission set rather than administrator: the permissions
     # page is one of the things worth looking at, and granting everything would
@@ -559,23 +495,6 @@ def install_session_injection(dashboard_api, guild_ids) -> None:
     hooks.insert(0, inject_local_session)
 
 
-def redirect_config_writes(target_dir: Path) -> None:
-    """Point `save_config` at a throwaway copy of config.json.
-
-    The mirror is already disabled by POTATOBOT_LEGACY_GUILD_ID=0, but this is
-    the file holding the live deployment's channel, role and faction ids, and it
-    is tracked. A second guard costs one copy and removes any path by which a
-    local click rewrites it.
-    """
-    import cogs.utils as utils
-
-    local_config = target_dir / "config.json"
-    if not local_config.exists():
-        shutil.copy2(utils.CONFIG_PATH, local_config)
-    utils.CONFIG_PATH = str(local_config)
-    print(f"  config writes redirected to {local_config}")
-
-
 def active_guild_ids(requested):
     """The guilds to expose, preferring what the copy actually has."""
     from core import database
@@ -620,11 +539,12 @@ def main() -> int:
     os.environ["ADMIN_DISCORD_ID"] = LOCAL_HOST_ID
     os.environ.pop("POTATOBOT_DASHBOARD_EXTERNAL_URL", None)
     os.environ.pop("DISCORD_REDIRECT_URI", None)
-    # config.json is mirrored into the one designated legacy guild, and with the
-    # private profile and a single active guild that designation is *inferred* —
-    # so leaving this unset makes a local save rewrite the tracked config.json.
-    # Zero is a legal digit string that can never be a guild id, which turns the
-    # mirror off outright.
+    # `POTATOBOT_LEGACY_GUILD_ID` also gates `adopt_legacy_database`, which
+    # `main.py`'s `on_ready` runs for a private profile with one active guild —
+    # exactly what a copy of the server database looks like. This script never
+    # starts a bot, so nothing here calls it today, but zero is a legal digit
+    # string that can never be a guild id, so leaving the guard set costs
+    # nothing and survives the script growing a path that does.
     os.environ["POTATOBOT_LEGACY_GUILD_ID"] = "0"
     sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -641,8 +561,6 @@ def main() -> int:
                 "  python scripts/local_dashboard.py --fresh"
             ) from error
 
-    redirect_config_writes(arguments.db.parent)
-
     print("\nDiscord stand-ins")
     import dashboard_api
 
@@ -658,7 +576,6 @@ def main() -> int:
     print("    appear; role hierarchy findings can")
     print("  - queued Discord publishes stay pending; no bot consumes the outbox")
     print("  - saves are written to the working copy, not to the server")
-    print("  - config.json mirroring is off and writes go to .local-dev/")
 
     print("\n" + "=" * 72)
     print(f"Open http://127.0.0.1:{port}/")

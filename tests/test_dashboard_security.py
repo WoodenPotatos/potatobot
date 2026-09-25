@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 import dashboard_api
 from core import settings_cache
 from core import database
+from core import permission_audit
 
 
 class DashboardSecurityTests(unittest.TestCase):
@@ -88,9 +89,55 @@ class DashboardSecurityTests(unittest.TestCase):
         with self.client.session_transaction() as session:
             self.assertEqual(session["oauth_state"], query["state"][0])
 
+    def test_login_sends_a_pkce_challenge_matching_the_stored_verifier(self):
+        """Discord verifies `code_challenge` against the `code_verifier` this
+        server sends back at the token exchange -- the two have to be the
+        S256 pair, not independently generated values."""
+        import base64
+        import hashlib
+
+        response = self.client.get("/api/auth/login")
+        query = parse_qs(urlparse(response.location).query)
+        self.assertEqual(query["code_challenge_method"], ["S256"])
+        with self.client.session_transaction() as session:
+            verifier = session["oauth_code_verifier"]
+        expected = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode()).digest()
+        ).decode().rstrip("=")
+        self.assertEqual(query["code_challenge"], [expected])
+
     def test_callback_rejects_missing_or_mismatched_state_before_network(self):
         response = self.client.get("/api/callback?code=unused&state=wrong")
         self.assertEqual(response.status_code, 400)
+
+    def test_callback_rejects_a_valid_state_with_no_stored_verifier(self):
+        """A code without its matching verifier is exactly as suspect as a
+        mismatched state, and refused the same way -- checked before any
+        network call, not merely a 400 for some other reason downstream."""
+        with self.client.session_transaction() as session:
+            session["oauth_state"] = "expected"
+        with patch.object(dashboard_api.requests, "post") as post:
+            response = self.client.get("/api/callback?code=x&state=expected")
+        post.assert_not_called()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_data(as_text=True),
+                         dashboard_api.t("dashboard.oauth_invalid_state"))
+        with self.client.session_transaction() as session:
+            self.assertNotIn("oauth_state", session)
+
+    def test_callback_sends_the_verifier_in_the_token_exchange(self):
+        with self.client.session_transaction() as session:
+            session["oauth_state"] = "expected"
+            session["oauth_code_verifier"] = "the-verifier"
+        with patch.object(dashboard_api.requests, "post") as post, \
+                patch.object(dashboard_api.requests, "get") as get:
+            post.return_value = MagicMock(
+                status_code=200, json=lambda: {"access_token": "tok"})
+            get.return_value = MagicMock(
+                status_code=200, json=lambda: {"id": "42", "username": "tester",
+                                               "avatar": None})
+            self.client.get("/api/callback?code=abc&state=expected")
+        self.assertEqual("the-verifier", post.call_args.kwargs["data"]["code_verifier"])
 
     def test_mutation_requires_csrf(self):
         self.authenticate()
@@ -204,7 +251,7 @@ class DashboardSecurityTests(unittest.TestCase):
         banner["config"]["soft_pity_start"] = 76
         saved = self.client.patch(
             "/api/guilds/123/gacha",
-            json={"enabled": True, "config": banner["config"], "revision": 0},
+            json={"enabled": True, "starts_at": None, "ends_at": None, "config": banner["config"], "revision": 0},
             headers=headers,
         )
         self.assertEqual(saved.status_code, 200)
@@ -212,10 +259,43 @@ class DashboardSecurityTests(unittest.TestCase):
         invalid["tiers"] = {"3": 1, "4": 1, "5": 1}
         rejected = self.client.patch(
             "/api/guilds/123/gacha",
-            json={"enabled": True, "config": invalid, "revision": 1},
+            json={"enabled": True, "starts_at": None, "ends_at": None, "config": invalid, "revision": 1},
             headers=headers,
         )
         self.assertEqual(rejected.status_code, 400)
+
+    def test_gacha_schedule_round_trips_and_a_reversed_one_is_refused(self):
+        self.authenticate()
+        headers = {"X-CSRF-Token": "csrf-token"}
+        banner = self.default_banner()
+
+        saved = self.client.patch(
+            "/api/guilds/123/gacha",
+            json={"enabled": True,
+                  "starts_at": "2026-01-01T00:00:00+00:00",
+                  "ends_at": "2026-12-31T00:00:00+00:00",
+                  "config": banner["config"], "revision": banner["revision"]},
+            headers=headers,
+        )
+        self.assertEqual(saved.status_code, 200)
+        reloaded = self.default_banner()
+        self.assertEqual("2026-01-01T00:00:00+00:00", reloaded["starts_at"])
+        self.assertEqual("2026-12-31T00:00:00+00:00", reloaded["ends_at"])
+        self.assertIn(reloaded["status"], ("scheduled", "live", "expired"))
+
+        reversed_order = self.client.patch(
+            "/api/guilds/123/gacha",
+            json={"enabled": True,
+                  "starts_at": "2026-12-31T00:00:00+00:00",
+                  "ends_at": "2026-01-01T00:00:00+00:00",
+                  "config": banner["config"], "revision": reloaded["revision"]},
+            headers=headers,
+        )
+        self.assertEqual(reversed_order.status_code, 400)
+        self.assertEqual(
+            reversed_order.get_json()["message"],
+            dashboard_api.t("dashboard.errors.gacha_banner_schedule_order"),
+        )
 
     # ---------------------------------------------------------- validation
 
@@ -237,9 +317,9 @@ class DashboardSecurityTests(unittest.TestCase):
             ("patch", "/api/guilds/123/settings", {"changes": "not-a-list"}),
             ("patch", "/api/guilds/123/settings", {"changes": [{"key": {}, "value": 1, "revision": 0}]}),
             ("patch", "/api/guilds/123/gacha",
-             {"enabled": True, "config": "not-an-object", "revision": 0}),
+             {"enabled": True, "starts_at": None, "ends_at": None, "config": "not-an-object", "revision": 0}),
             ("patch", "/api/guilds/123/gacha",
-             {"enabled": True, "config": {}, "revision": None}),
+             {"enabled": True, "starts_at": None, "ends_at": None, "config": {}, "revision": None}),
             ("post", "/api/guilds/123/data-scopes",
              {"category": {}, "scope_type": "guild", "realm_id": None, "revision": 0}),
         ]
@@ -586,6 +666,68 @@ class DashboardSecurityTests(unittest.TestCase):
         self.assertEqual(response.get_json()["message"],
                          dashboard_api.t("dashboard.errors.discord_item_id_too_long"))
 
+    def _manual_grant_payload(self, **overrides):
+        payload = {"user_id": "7", "asset_type": "emoji",
+                   "discord_item_id": "998877", "duration_days": 30}
+        payload.update(overrides)
+        return payload
+
+    def test_manual_grant_creates_an_active_entitlement(self):
+        headers = self._headers()
+        response = self.client.post(
+            "/api/guilds/123/entitlements",
+            json=self._manual_grant_payload(),
+            headers=headers,
+        )
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+        listed = self.client.get("/api/guilds/123/entitlements", headers=headers)
+        rows = listed.get_json()["data"]
+        self.assertEqual(1, len(rows))
+        self.assertEqual("manual", rows[0]["source_type"])
+        self.assertEqual("998877", rows[0]["discord_item_id"])
+        self.assertEqual("42", rows[0]["granted_by"],
+                         "the acting staff member's id, as a wire-format string")
+
+    def test_manual_grant_of_the_same_asset_twice_is_refused(self):
+        headers = self._headers()
+        self.client.post("/api/guilds/123/entitlements",
+                         json=self._manual_grant_payload(), headers=headers)
+        second = self.client.post(
+            "/api/guilds/123/entitlements",
+            json=self._manual_grant_payload(user_id="8"), headers=headers)
+        self.assertEqual(409, second.status_code)
+
+    def test_manual_grant_rejects_an_unknown_asset_type(self):
+        headers = self._headers()
+        response = self.client.post(
+            "/api/guilds/123/entitlements",
+            json=self._manual_grant_payload(asset_type="role"), headers=headers)
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(response.get_json()["message"],
+                         dashboard_api.t("dashboard.errors.manual_grant_asset_type_invalid"))
+
+    def test_manual_grant_rejects_a_duration_outside_the_bound(self):
+        headers = self._headers()
+        for duration in (0, 3651):
+            with self.subTest(duration=duration):
+                response = self.client.post(
+                    "/api/guilds/123/entitlements",
+                    json=self._manual_grant_payload(duration_days=duration),
+                    headers=headers)
+                self.assertEqual(400, response.status_code)
+                self.assertEqual(
+                    response.get_json()["message"],
+                    dashboard_api.t("dashboard.errors.manual_grant_duration_invalid"))
+
+    def test_manual_grant_rejects_a_non_snowflake_user_id(self):
+        headers = self._headers()
+        response = self.client.post(
+            "/api/guilds/123/entitlements",
+            json=self._manual_grant_payload(user_id="not-a-user"), headers=headers)
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(response.get_json()["message"],
+                         dashboard_api.t("dashboard.errors.manual_grant_user_id_invalid"))
+
     def test_shop_item_audit_commits_with_the_item(self):
         headers = self._headers()
         created = self.client.post(
@@ -836,7 +978,7 @@ class DashboardSecurityTests(unittest.TestCase):
                 config.update(override)
                 response = self.client.patch(
                     "/api/guilds/123/gacha",
-                    json={"enabled": True, "config": config, "revision": 0},
+                    json={"enabled": True, "starts_at": None, "ends_at": None, "config": config, "revision": 0},
                     headers=headers,
                 )
                 self.assertEqual(response.status_code, 400)
@@ -901,7 +1043,7 @@ class DashboardSecurityTests(unittest.TestCase):
         ]
         saved = self.client.patch(
             "/api/guilds/123/gacha",
-            json={"enabled": True, "config": config, "revision": 0},
+            json={"enabled": True, "starts_at": None, "ends_at": None, "config": config, "revision": 0},
             headers=headers,
         )
         self.assertEqual(saved.status_code, 200)
@@ -916,7 +1058,7 @@ class DashboardSecurityTests(unittest.TestCase):
         )
         added = self.client.patch(
             "/api/guilds/123/gacha",
-            json={"enabled": True, "config": stored["config"],
+            json={"enabled": True, "starts_at": None, "ends_at": None, "config": stored["config"],
                   "revision": stored["revision"]},
             headers=headers,
         )
@@ -929,7 +1071,7 @@ class DashboardSecurityTests(unittest.TestCase):
         # the optimistic check.
         conflicted = self.client.patch(
             "/api/guilds/123/gacha",
-            json={"enabled": True, "config": final["config"], "revision": 0},
+            json={"enabled": True, "starts_at": None, "ends_at": None, "config": final["config"], "revision": 0},
             headers=headers,
         )
         self.assertEqual(conflicted.status_code, 409)
@@ -944,7 +1086,7 @@ class DashboardSecurityTests(unittest.TestCase):
         ]
         response = self.client.patch(
             "/api/guilds/123/gacha",
-            json={"enabled": True, "config": mismatched, "revision": 0},
+            json={"enabled": True, "starts_at": None, "ends_at": None, "config": mismatched, "revision": 0},
             headers=headers,
         )
         self.assertEqual(response.status_code, 400)
@@ -960,7 +1102,7 @@ class DashboardSecurityTests(unittest.TestCase):
         self.assertEqual(
             self.client.patch(
                 "/api/guilds/123/gacha",
-                json={"enabled": True, "config": emptied, "revision": 0},
+                json={"enabled": True, "starts_at": None, "ends_at": None, "config": emptied, "revision": 0},
                 headers=headers,
             ).status_code,
             400,
@@ -1004,32 +1146,20 @@ class DashboardSecurityTests(unittest.TestCase):
         )
         self.assertEqual(rejected.status_code, 400)
 
-    def test_a_setting_save_no_longer_writes_the_legacy_file(self):
+    def test_a_setting_save_has_one_destination(self):
         """There is nothing left to reconcile, because nothing diverges.
 
-        `set_guild_settings` committed to SQLite and only then wrote
-        `config.json`, so an OSError on that write left the two permanently
-        apart and startup had to replay every committed setting to repair it.
-        The file is a read-only fallback now: SQLite is the only authority, and a
-        save has one destination.
+        `config.json` and its mirror are both gone (2026-09-21); SQLite is the
+        only authority a setting save writes to.
         """
-        from unittest.mock import patch
-
-        import cogs.utils
-
-        writes = []
-        with patch.object(cogs.utils, "save_config",
-                          lambda data: writes.append(data)):
-            self.authenticate(user_id="42")
-            response = self.client.patch(
-                "/api/guilds/123/settings",
-                json={"changes": [{"key": "shop_price_premium",
-                                   "value": 777, "revision": 0}]},
-                headers={"X-CSRF-Token": "csrf-token"},
-            )
+        self.authenticate(user_id="42")
+        response = self.client.patch(
+            "/api/guilds/123/settings",
+            json={"changes": [{"key": "shop_price_premium",
+                               "value": 777, "revision": 0}]},
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([], writes, "a settings save must not write config.json")
-        # And the row it *does* own is written.
         self.assertEqual(
             777, database.get_guild_settings(123)["shop_price_premium"]["value"])
 
@@ -1241,16 +1371,61 @@ class DashboardSecurityTests(unittest.TestCase):
         )
 
     def test_changelog_requires_a_session_and_arrives_parsed(self):
-        """The front end may not parse markdown, so the API has to."""
+        """The front end may not parse markdown, so the API has to.
+
+        The remote fetch is patched to fail here, so this exercises exactly
+        the local-fallback path -- a real network call has no place in this
+        suite, and the remote path has its own tests below.
+        """
         self.assertEqual(self.client.get("/api/changelog").status_code, 401)
         self.authenticate()
         dashboard_api._changelog_cache._entries.clear()
-        response = self.client.get("/api/changelog")
+        with patch.object(dashboard_api, "_fetch_remote_changelog", return_value=None):
+            response = self.client.get("/api/changelog")
         self.assertEqual(response.status_code, 200)
         releases = response.get_json()["data"]
         self.assertTrue(releases)
         self.assertTrue(all(release["version"] for release in releases))
         self.assertTrue(all(release["entries"] for release in releases))
+
+    def test_changelog_prefers_the_remote_copy_when_it_is_reachable(self):
+        """A successful fetch is the one actually served, not a coincidence
+        of both sources agreeing."""
+        self.authenticate()
+        dashboard_api._changelog_cache._entries.clear()
+        remote_text = "# Changelog\n\n## 9.9.9 - 2099-01-01\n\n- Only in the remote copy.\n"
+        with patch.object(dashboard_api, "_fetch_remote_changelog",
+                          return_value=remote_text):
+            response = self.client.get("/api/changelog")
+        self.assertEqual(response.status_code, 200)
+        releases = response.get_json()["data"]
+        self.assertEqual(1, len(releases))
+        self.assertEqual("9.9.9", releases[0]["version"])
+        self.assertEqual(["Only in the remote copy."], releases[0]["entries"])
+
+    def test_changelog_falls_back_to_the_local_file_when_both_fail(self):
+        with patch.object(dashboard_api, "_fetch_remote_changelog", return_value=None), \
+                patch.object(dashboard_api, "CHANGELOG_PATH", "/no/such/file.md"):
+            self.authenticate()
+            dashboard_api._changelog_cache._entries.clear()
+            response = self.client.get("/api/changelog")
+        self.assertEqual(response.status_code, 503)
+
+    def test_fetch_remote_changelog_returns_none_on_any_request_failure(self):
+        with patch.object(dashboard_api.requests, "get",
+                          side_effect=requests.exceptions.Timeout("slow")):
+            self.assertIsNone(dashboard_api._fetch_remote_changelog())
+
+        response = SimpleNamespace(
+            raise_for_status=MagicMock(
+                side_effect=requests.exceptions.HTTPError("404")))
+        with patch.object(dashboard_api.requests, "get", return_value=response):
+            self.assertIsNone(dashboard_api._fetch_remote_changelog())
+
+    def test_fetch_remote_changelog_returns_the_response_text_on_success(self):
+        response = SimpleNamespace(raise_for_status=MagicMock(), text="ok text")
+        with patch.object(dashboard_api.requests, "get", return_value=response):
+            self.assertEqual("ok text", dashboard_api._fetch_remote_changelog())
 
     def test_changelog_rejoins_a_bullet_wrapped_across_source_lines(self):
         parsed = dashboard_api._parse_changelog(
@@ -1311,7 +1486,7 @@ class DashboardSecurityTests(unittest.TestCase):
         banner = self.default_banner()
         self.assertEqual(400, self.client.patch(
             "/api/guilds/123/gacha",
-            json={"enabled": True, "config": banner["config"], "revision": 0,
+            json={"enabled": True, "starts_at": None, "ends_at": None, "config": banner["config"], "revision": 0,
                   "banner_key": "never_created"},
             headers=headers,
         ).status_code)
@@ -1387,6 +1562,9 @@ class DashboardSecurityTests(unittest.TestCase):
             ("/api/guilds/123/gacha/banners",
              {"banner_key": "x", "display_name": "x"}),
             ("/api/guilds/123/work-responses", {"tier": "normal", "message": "x"}),
+            ("/api/guilds/123/entitlements",
+             {"user_id": "7", "asset_type": "emoji", "discord_item_id": "1",
+              "duration_days": 30}),
         ):
             with self.subTest(path=path):
                 self.assertEqual(403, self.client.post(path, json=body).status_code)
@@ -1600,4 +1778,82 @@ class AuditHardeningTests(unittest.TestCase):
         self.assertEqual(
             dashboard_api.t("dashboard.errors.managed_adopt_link_required"),
             response.get_json()["message"])
+
+    def test_permission_repair_requires_confirmation(self):
+        self.authenticate()
+        response = self.client.post(
+            "/api/guilds/123/permissions/repair",
+            json={"channel_id": "500", "subject": "bot_log_channel", "confirm": False},
+            headers={"X-CSRF-Token": "csrf-token"})
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(dashboard_api.t("dashboard.errors.confirmation_required"),
+                         response.get_json()["message"])
+
+    def test_permission_repair_refuses_a_finding_that_is_no_longer_present(self):
+        """The client's own copy of the report is not trusted -- the finding
+        has to still be there the moment the repair is queued."""
+        self.authenticate()
+        guild = SimpleNamespace(me=SimpleNamespace(id=1))
+        fake_bot = SimpleNamespace(get_guild=lambda gid: guild)
+        with patch.object(dashboard_api, "_dashboard_bot", fake_bot), \
+                patch.object(permission_audit, "build_report",
+                            return_value=SimpleNamespace(findings=[])):
+            response = self.client.post(
+                "/api/guilds/123/permissions/repair",
+                json={"channel_id": "500", "subject": "bot_log_channel", "confirm": True},
+                headers={"X-CSRF-Token": "csrf-token"})
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(dashboard_api.t("dashboard.errors.permission_finding_stale"),
+                         response.get_json()["message"])
+
+    def test_permission_repair_refuses_a_finding_for_a_different_channel(self):
+        """A live finding existing somewhere is not enough -- it has to be
+        for the exact channel and setting the request named, or a stale
+        click could repair the wrong thing."""
+        self.authenticate()
+        guild = SimpleNamespace(me=SimpleNamespace(id=1))
+        fake_bot = SimpleNamespace(get_guild=lambda gid: guild)
+        other_channel = permission_audit.Finding(
+            code="channel_missing_permission", severity="blocking",
+            subject="bot_log_channel", permissions=("send_messages",),
+            feature="general", identifier="other", channel_id=999,
+        )
+        with patch.object(dashboard_api, "_dashboard_bot", fake_bot), \
+                patch.object(permission_audit, "build_report",
+                            return_value=SimpleNamespace(findings=[other_channel])):
+            response = self.client.post(
+                "/api/guilds/123/permissions/repair",
+                json={"channel_id": "500", "subject": "bot_log_channel", "confirm": True},
+                headers={"X-CSRF-Token": "csrf-token"})
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(dashboard_api.t("dashboard.errors.permission_finding_stale"),
+                         response.get_json()["message"])
+
+    def test_permission_repair_queues_exactly_the_findings_permissions(self):
+        self.authenticate()
+        guild = SimpleNamespace(me=SimpleNamespace(id=1))
+        fake_bot = SimpleNamespace(get_guild=lambda gid: guild)
+        finding = permission_audit.Finding(
+            code="channel_missing_permission", severity="blocking",
+            subject="bot_log_channel", permissions=("send_messages",),
+            feature="general", identifier="bot-log", channel_id=500,
+        )
+        with patch.object(dashboard_api, "_dashboard_bot", fake_bot), \
+                patch.object(permission_audit, "build_report",
+                            return_value=SimpleNamespace(findings=[finding])):
+            response = self.client.post(
+                "/api/guilds/123/permissions/repair",
+                json={"channel_id": "500", "subject": "bot_log_channel", "confirm": True},
+                headers={"X-CSRF-Token": "csrf-token"})
+        self.assertEqual(200, response.status_code)
+        action_id = response.get_json()["data"]["action_id"]
+        # `claim_control_action` is what the worker itself reads, so this
+        # checks the payload the worker will actually see, not a copy of it.
+        claimed = database.claim_control_action()
+        self.assertEqual(action_id, claimed["action_id"])
+        self.assertEqual("repair_channel_permission", claimed["action_type"])
+        self.assertEqual(
+            {"channel_id": 500, "permissions": ["send_messages"],
+             "setting_key": "bot_log_channel"},
+            claimed["payload"])
 

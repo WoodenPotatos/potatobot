@@ -1,10 +1,10 @@
 """Schema 11, the settings cache, and the role-menu editor's contract.
 
 Two failures here are silent and expensive, which is why each has its own test.
-A cache that falls back to *nothing* instead of to `config.json` does not refuse
-a command, it changes where every command is allowed. And maintenance failing
-closed instead of open turns an unreadable setting into an outage — it is one
-line away from `is_enabled`, which must fail the other way.
+A cache that falls back to *nothing* instead of to the registry default does
+not refuse a command, it changes where every command is allowed. And
+maintenance failing closed instead of open turns an unreadable setting into an
+outage — it is one line away from `is_enabled`, which must fail the other way.
 """
 
 import ast
@@ -143,40 +143,27 @@ class CacheFallbackTests(unittest.TestCase):
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
         database.initialize_database()
         database.register_guild(111, "One")
-        from cogs.utils import config
-        self.config = config
-        self.original_config = dict(config)
-        config.clear()
-        config.update({
-            "bot_settings": {"maintenance": False, "language": "hu"},
-            "channels": {"economy": [777], "join": 555},
-            "roles": {"member": 222},
-        })
         settings_cache.invalidate()
 
     def tearDown(self):
-        self.config.clear()
-        self.config.update(self.original_config)
         database.DB_PATH = self.original_path
         self.temp_dir.cleanup()
         settings_cache.invalidate()
 
-    def test_a_cold_cache_resolves_through_the_file_not_to_nothing(self):
+    def test_a_cold_cache_resolves_to_the_registry_default_not_to_nothing(self):
         """The one place copying `feature_access` would be a defect.
 
         An empty `economy_channels` does not refuse a command, it changes which
-        channels every economy command is allowed in.
+        channels every economy command is allowed in — so a cold cache has to
+        answer with a safe typed value, never `None` or a crash.
         """
         self.assertFalse(settings_cache.is_loaded())
-        self.assertEqual([777], settings_cache.setting(111, "economy_channels"))
-        self.assertEqual(222, settings_cache.setting(111, "member_role"))
+        self.assertEqual([], settings_cache.setting(111, "economy_channels"))
+        self.assertIsNone(settings_cache.setting(111, "member_role"))
 
     def test_maintenance_fails_open(self):
         """`is_enabled` fails closed. This must not, or a settings problem is
         an outage for the whole installation."""
-        self.assertFalse(settings_cache.setting(111, "maintenance"))
-        # Even with the file gone as well: the registry default is the floor.
-        self.config.clear()
         self.assertFalse(settings_cache.setting(111, "maintenance"))
 
     def test_maintenance_blocks_fails_open_when_the_cache_raises(self):
@@ -192,7 +179,8 @@ class CacheFallbackTests(unittest.TestCase):
         finally:
             settings_cache.setting = original
 
-    def test_a_stored_row_wins_over_the_file(self):
+    def test_a_stored_row_wins_over_the_registry_default(self):
+        self.assertEqual([], settings_cache.setting(111, "economy_channels"))
         database.set_guild_settings(
             111, 9, [{"key": "economy_channels", "value": [999], "revision": 0}])
         asyncio.run(settings_cache.refresh([111], force=True))
@@ -216,33 +204,6 @@ class CacheFallbackTests(unittest.TestCase):
             111, 9, [{"key": "ticket_logs", "value": 7, "revision": 0}])
         settings_cache.apply_changes(111, result)
         self.assertEqual(7, settings_cache.setting(111, "ticket_logs"))
-
-    def test_the_file_is_a_read_only_fallback_for_an_unsaved_setting(self):
-        """Which is what makes the import a migration, not a prerequisite.
-
-        Pull the change and `config.json` still answers for anything never saved
-        in the dashboard; run `scripts/import_config.py` and the rows answer
-        instead. Nothing writes the file any more.
-        """
-        # Never saved: the file answers.
-        self.assertEqual([777], settings_cache.setting(111, "economy_channels"))
-        database.set_guild_settings(
-            111, 9, [{"key": "economy_channels", "value": [999], "revision": 0}])
-        asyncio.run(settings_cache.refresh([111], force=True))
-        # Saved: the row answers, and the file is left exactly as it was.
-        self.assertEqual([999], settings_cache.setting(111, "economy_channels"))
-        self.assertEqual([777], self.config["channels"]["economy"])
-
-    def test_the_cache_never_writes_the_configuration_it_reads(self):
-        """It used to project rows back into `config` so unconverted readers went
-        live. Every reader goes through the cache now, so that bridge is gone —
-        and a cache that mutates its own fallback cannot be reasoned about."""
-        import inspect
-        source = inspect.getsource(settings_cache)
-        self.assertNotIn("save_config", source)
-        self.assertNotIn("CONFIG_LOCK", source)
-        self.assertNotIn("project_into_config", source)
-
 
 class RoleMenuShapeTests(unittest.TestCase):
     """The editor can express it, so the API has to validate it."""
@@ -495,13 +456,15 @@ class NoCogReadsTheLegacyFileTests(unittest.TestCase):
     Every cog read `config` directly, which meant a dashboard save in a separate
     process needed `?reloadconfig` before the bot saw it, and it meant a setting
     could only ever be single-tenant. They all resolve through `settings_cache`
-    now. This walks the cogs' syntax trees rather than grepping, so a comment
-    about `config` does not read as a use of it.
+    now, and `config.json` itself is gone (2026-09-21) along with the dictionary
+    `cogs/utils.py` used to own — so nothing is exempt from this check any more.
+    This walks the cogs' syntax trees rather than grepping, so a comment about
+    `config` does not read as a use of it.
     """
 
-    #: `cogs/utils.py` owns the dictionary and the resolver, so it is the one
-    #: module allowed to touch it. `main.py` reloads it for `?reloadconfig`.
-    ALLOWED = {"utils.py"}
+    #: Nothing is exempt: the dictionary this used to protect no longer exists
+    #: anywhere for a cog to read.
+    ALLOWED: frozenset[str] = frozenset()
 
     def _config_subscripts(self, tree):
         """`config[...]` and `config.get(...)`, as the cogs used to write them."""
@@ -548,76 +511,13 @@ class NoCogReadsTheLegacyFileTests(unittest.TestCase):
         self.assertEqual([], offenders)
 
 
-class LegacyImportTests(unittest.TestCase):
-    """`scripts/import_config.py` runs once against a real installation.
-
-    Both cases here came out of running it against this repository's own
-    `config.json` rather than a synthetic one, which is the only reason either
-    was found.
-    """
-
-    def setUp(self):
-        import scripts.import_config as importer
-        self.importer = importer
-        self.definitions = SETTING_DEFINITIONS
-
-    def test_a_legacy_id_list_is_converted_to_the_declared_type(self):
-        """`roles.ignored_users` holds integers and the setting is a string list.
-
-        A snowflake cannot cross to a browser as a number, so the string list is
-        correct; `config.json` predates that and holds integers. Refusing would
-        make the import unusable on a real installation, and coercing silently
-        would hide a genuine mismatch — so it converts only losslessly, and says
-        that it did.
-        """
-        definition = self.definitions["ignored_users"]
-        converted = self.importer.coerce_to_declared_type(
-            definition, [1420070400000000007, 1420070400000000008])
-        self.assertEqual(["1420070400000000007", "1420070400000000008"], converted)
-        validate_setting_value(definition, converted)
-
-    def test_a_wrongly_shaped_value_is_left_to_fail_validation(self):
-        """A value that is the wrong *shape* is a mistake in the file, and the
-        import must refuse rather than invent a conversion for it."""
-        definition = self.definitions["ignored_users"]
-        self.assertEqual(
-            {"not": "a list"},
-            self.importer.coerce_to_declared_type(definition, {"not": "a list"}))
-        with self.assertRaises(ValueError):
-            validate_setting_value(definition, {"not": "a list"})
-
-    def test_a_value_equal_to_the_default_is_not_imported(self):
-        """A missing row and a row holding the default are different states.
-
-        The dashboard shows the second as configured, so importing a value that
-        equals the default would mark a setting nobody ever set.
-        """
-        import json
-        import tempfile
-        from pathlib import Path
-
-        original = self.importer.CONFIG_PATH
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "config.json"
-            # `hu` is the shipped default for `language`.
-            path.write_text(json.dumps({"bot_settings": {"language": "hu"}}),
-                            encoding="utf-8")
-            self.importer.CONFIG_PATH = path
-            try:
-                loaded = self.importer.load_config()
-            finally:
-                self.importer.CONFIG_PATH = original
-        self.assertEqual("hu", self.definitions["language"].default)
-        self.assertEqual("hu", loaded["bot_settings"]["language"])
-
-
 class IgnoredUsersComparisonTests(unittest.TestCase):
     def test_the_ignore_list_is_compared_as_ids_not_as_stored(self):
         """It is a string list and `member.id` is an integer.
 
         Comparing them directly was False for anything ever saved from the
         dashboard, so the list silently stopped ignoring anyone — a defect that
-        was invisible while the value only ever came from `config.json`.
+        was invisible while the value only ever came from a hand-edited file.
         """
         source = (ROOT / "cogs" / "serverevents.py").read_text(encoding="utf-8")
         self.assertNotIn("if member.id in ignored_users: continue\n"
@@ -642,6 +542,7 @@ class EverySettingHasAReaderTests(unittest.TestCase):
         "reward_",                  # database.get_reward, by activity
         "warn_threshold_", "warn_action_", "warn_timeout_minutes_",
         "work_tier_", "work_xp_",
+        "patchbot_",                 # cogs/patchbot.py, by SUPPORTED_GAMES key
     )
 
     def test_every_setting_is_read_somewhere(self):
@@ -761,8 +662,9 @@ class RowEditorReportsCleanTests(unittest.TestCase):
         spec = source[source.index("const JSON_ROW_SHAPES = {"):]
         spec = spec[:spec.index("\n};")]
         # One per shape: the role a menu grants, the role a level grants, the
-        # role an LFG channel pings, the role that leads a faction.
-        self.assertEqual(4, spec.count("required: true"))
+        # role an LFG channel pings, the role that leads a faction, the weight
+        # a wheel segment carries.
+        self.assertEqual(5, spec.count("required: true"))
 
 
 class NavigationReachabilityTests(unittest.TestCase):
@@ -898,6 +800,54 @@ class NavigationReachabilityTests(unittest.TestCase):
             for feature in features:
                 self.assertTrue(catalog["features"].get(feature),
                                 f"{path}: no label for feature {feature}")
+
+
+class SupportedGameQuickPickTests(unittest.TestCase):
+    """The LFG and role-menu quick-picks are a suggestion, never a write.
+
+    `matchResourceByName` and `supportedGameOptions` are the two pure
+    functions both quick-picks are built from; driven through Node because
+    they are JavaScript, with no DOM involved since neither touches
+    `document`.
+    """
+
+    def _node(self):
+        return shutil.which("node")
+
+    def test_the_matching_and_option_list_behave(self):
+        node = self._node()
+        if node is None:
+            self.skipTest("node is not installed")
+
+        from core.supported_games import SUPPORTED_GAME_KEYS
+
+        source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        start = source.index("function matchResourceByName(list, label) {")
+        end = source.index("\n}", source.index(
+            "function supportedGameOptions() {")) + 2
+        spec = source[start:end]
+
+        catalog = json.loads(
+            (ROOT / "locales" / "en.json").read_text(encoding="utf-8")
+        )["dashboard"]["game_names"]
+
+        driver = "\n".join([
+            f"const supportedGames = {json.dumps(list(SUPPORTED_GAME_KEYS))};",
+            f"const GAME_NAMES = {json.dumps(catalog)};",
+            "function tr(key) { return GAME_NAMES[key.split('.').pop()]; }",
+            spec,
+            (ROOT / "tests" / "js" / "supported_game_quick_pick.js")
+                .read_text(encoding="utf-8"),
+        ])
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                         encoding="utf-8") as handle:
+            handle.write(driver)
+            path = handle.name
+        try:
+            result = subprocess.run([node, path], capture_output=True, text=True)
+        finally:
+            os.unlink(path)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
 
 class StartupWiringTests(unittest.TestCase):

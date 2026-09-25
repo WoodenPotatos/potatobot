@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 from core.clock import local_date, local_time, parse_stored, utc_now
 from cogs.utils import (
     BoundedCooldownMap, apply_database_result, currency_emoji, currency_plain,
-    is_channel, is_premium, item_mechanic_value, t,
+    guild_setting_sync, is_channel, is_premium, item_mechanic_value, t,
 )
 from core.feature_access import require_interaction_feature
 
@@ -45,6 +45,20 @@ async def _send_ephemeral(ctx_or_int, message: str):
     if isinstance(ctx_or_int, discord.Interaction):
         return await ctx_or_int.response.send_message(message, ephemeral=True)
     return await ctx_or_int.send(message, ephemeral=True)
+
+
+async def _refused_over_ladder_cap(ctx_or_int, bet: int) -> bool:
+    """Crash, Mines and Hilo let a player choose the ladder's depth, so a
+    growing balance can otherwise be re-staked without limit round after
+    round. MAX_STAKE alone never catches this — it is sized as an overflow
+    guard, not a gameplay bound — so this is a second, tighter,
+    guild-configurable ceiling on those three launchers only.
+    """
+    cap = guild_setting_sync(ctx_or_int.guild.id, "casino_ladder_max_bet")
+    if bet <= cap:
+        return False
+    await _send_ephemeral(ctx_or_int, t("casino.err_ladder_bet_cap", limit=cap))
+    return True
 
 CASINO_LAUNCHER_FEATURES = {
     "start_bj_game": "casino_blackjack",
@@ -864,6 +878,8 @@ async def start_hilo_game(ctx_or_int, bet):
     if bet > MAX_STAKE:
         return await _send_ephemeral(
             ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
+    if await _refused_over_ladder_cap(ctx_or_int, bet):
+        return
     wager_id = secrets.token_urlsafe(24)
     reservation = await database.run_write(
         database.begin_interactive_wager, wager_id, ctx_or_int.guild.id,
@@ -1072,6 +1088,8 @@ async def start_crash_game(ctx_or_int, bet):
     if bet > MAX_STAKE:
         return await _send_ephemeral(
             ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
+    if await _refused_over_ladder_cap(ctx_or_int, bet):
+        return
     wager_id = secrets.token_urlsafe(24)
     reservation = await database.run_write(
         database.begin_interactive_wager, wager_id, ctx_or_int.guild.id,
@@ -1563,6 +1581,8 @@ async def start_mines_game(ctx_or_int, bet):
     if bet > MAX_STAKE:
         return await _send_ephemeral(
             ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
+    if await _refused_over_ladder_cap(ctx_or_int, bet):
+        return
     wager_id = secrets.token_urlsafe(24)
     reservation = await database.run_write(
         database.begin_interactive_wager,

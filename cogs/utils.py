@@ -6,8 +6,6 @@ import hashlib
 import json
 import os
 import sys
-import tempfile
-import threading
 import logging
 import time
 
@@ -30,61 +28,6 @@ utility_logger = logging.getLogger("PotatoBot.Utils")
 TOP_RANKER_DEBOUNCE_SECONDS = 30
 _top_ranker_dirty = {}
 _top_ranker_tasks = {}
-
-# Keep this dictionary object stable because cogs import it by reference.
-config = {}
-CONFIG_PATH = os.path.join(ROOT_DIR, "config.json")
-CONFIG_LOCK = threading.RLock()
-
-def reload_config():
-    """Reload configuration while preserving the shared dictionary identity."""
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            loaded_config = json.load(f)
-        with CONFIG_LOCK:
-            config.clear()
-            config.update(loaded_config)
-        utility_logger.info("Configuration loaded successfully")
-    else:
-        utility_logger.critical("Configuration file not found: %s", CONFIG_PATH)
-        sys.exit()
-
-
-def snapshot_config():
-    """Return an isolated deep copy of the live configuration.
-
-    Callers that read, mutate and then save must hold CONFIG_LOCK across the
-    whole sequence; taking the snapshot under the lock alone is not enough to
-    prevent a concurrent writer from losing the other's keys.
-    """
-    with CONFIG_LOCK:
-        return copy.deepcopy(config)
-
-
-def save_config(new_config):
-    """Atomically persists a validated in-memory configuration object."""
-    if not isinstance(new_config, dict):
-        raise ValueError("config root must be an object")
-    temp_path = None
-    with CONFIG_LOCK:
-        try:
-            with tempfile.NamedTemporaryFile(
-                "w", encoding="utf-8", dir=ROOT_DIR, delete=False
-            ) as temp_file:
-                json.dump(new_config, temp_file, indent=4, ensure_ascii=False)
-                temp_file.write("\n")
-                temp_file.flush()
-                os.fsync(temp_file.fileno())
-                temp_path = temp_file.name
-            os.replace(temp_path, CONFIG_PATH)
-            config.clear()
-            config.update(new_config)
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                os.unlink(temp_path)
-
-# Configuration must exist before decorators and persistent views are constructed.
-reload_config()
 
 # Load locale catalogs once; deployment reloads currently affect configuration only.
 LOCALES_DIR = os.path.join(ROOT_DIR, "locales")
@@ -331,9 +274,8 @@ def guild_setting_sync(guild_id: int, key: str):
 
     This is the accessor a synchronous read site uses — a command decorator, a
     permission check, anything that cannot await. `settings_cache` owns the
-    fallback chain (stored row, then `config.json`, then the registry default),
-    so a cold cache resolves exactly the way the bot resolved before the cache
-    existed rather than resolving to nothing.
+    fallback chain (stored row, else the registry default), so a cold cache
+    resolves to a safe typed value rather than to nothing.
     """
     from core import settings_cache
     return settings_cache.setting(guild_id, key)
@@ -411,8 +353,8 @@ async def update_top_ranker_role(guild):
     )
     if not top_user_id: return
 
-    # Prefer the guild's typed setting, then the mirrored config id, and retain
-    # the historical name lookup for an installation that set neither.
+    # Prefer the guild's typed setting, and retain the historical name lookup
+    # for an installation that never saved one.
     top_role_id = await guild_setting(guild.id, "top_ranker_role")
     if top_role_id:
         role = guild.get_role(int(top_role_id))
@@ -753,7 +695,7 @@ def is_channel(allowed_ids, fallback=None):
     invocation of every command carrying it, which makes it the most-executed
     configuration read in the project — it must not touch SQLite, and it must
     not stop working while the cache is cold, which is why the cache falls back
-    to the file rather than to nothing.
+    to the registry default rather than to nothing.
 
     A bare int or list is still accepted, for a gate that is fixed rather than
     configurable.

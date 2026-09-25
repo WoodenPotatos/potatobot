@@ -618,6 +618,45 @@ class CreatorRoundTripTests(unittest.TestCase):
             os.unlink(path)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
+    def test_the_preview_resolves_known_mentions_and_leaves_others_literal(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+
+        source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        element_start = source.index("function element(tag, className, text) {")
+        element_fn = source[element_start:source.index("\n}", element_start) + 2]
+        # One contiguous slice rather than stitching each function together:
+        # `formatPreviewTimestamp`, `appendInlineMarkdown`,
+        # `appendMarkdownLines`, `renderMarkdownBodyUnsafe` and
+        # `renderMarkdownBody` all sit between these two markers, and the
+        # `const MARKDOWN_TOKEN_SOURCE = …` declaration they share does not
+        # end in a bare `\n}` the way a function body does.
+        markdown_start = source.index("const MARKDOWN_TOKEN_SOURCE =")
+        markdown_end = source.index("\nfunction messagePreview(spec, values) {")
+        markdown_fns = source[markdown_start:markdown_end]
+
+        resources = {
+            "channels": [{"id": "1420070400000000010", "name": "general"}],
+            "roles": [{"id": "1420070400000000011", "name": "Mods"}],
+        }
+        driver = "\n".join([
+            element_fn,
+            markdown_fns,
+            f"const resources = {json.dumps(resources)};",
+            (ROOT / "tests" / "js" / "message_preview_mentions.js")
+                .read_text(encoding="utf-8"),
+        ])
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                         encoding="utf-8") as handle:
+            handle.write(driver)
+            path = handle.name
+        try:
+            result = subprocess.run([node, path], capture_output=True, text=True)
+        finally:
+            os.unlink(path)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
 
 class CreatorAcceptedByTheApiTests(ManagedMessageRouteTests):
     """What the creator submits, submitted for real.

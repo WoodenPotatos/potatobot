@@ -121,7 +121,7 @@ Configuration has four ownership classes:
 - Guild: channels, roles, factions, role menus, rewards, shop prices, social destinations, feature flags, and moderation behavior.
 - Runtime/user data: economy, cooldowns, warnings, tickets, rentals, voice settings, and daily-game state.
 
-`cogs.utils.config` is one shared in-memory dictionary loaded from `config.json`. `save_config()` atomically replaces the file and mutates the dictionary in place. Most lookups therefore change immediately, but command prefix, intents, task intervals, import-time persistent labels, Everydle language selection, and OAuth environment settings require reload or restart. Every new setting must declare `live`, `subsystem_reload`, or `restart` behavior.
+Every guild and instance setting lives in SQLite and is resolved through `core/settings_cache.py`: stored row, else the registry default. `config.json` is gone (deleted 2026-09-21; see `docs/config_retirement_plan.md`), and a same-process dashboard save updates the cache immediately. Most lookups therefore change immediately, but command prefix, intents, task intervals, import-time persistent labels, Everydle language selection, and OAuth environment settings require reload or restart. Every new setting must declare `live`, `subsystem_reload`, or `restart` behavior.
 
 Hungarian is the complete source language. Every user-visible string belongs in a locale file. When adding a key to `locales/hu.json`, add the same structure to every other catalog but leave new non-Hungarian text empty for a human translator. The same policy applies to `data/*/locales/`.
 
@@ -319,14 +319,17 @@ Three things make the split work:
   dashboard process needs `DISCORD_TOKEN` as well as the OAuth values. Without a
   bot member object the role hierarchy is unknown, so `manageable` falls back to
   Discord's `managed` flag and the real check happens again when a role is used.
-- **The `config.json` mirror.** `CONFIG_LOCK` is a thread lock and does not span
-  processes. While the legacy mirror still exists, only the dashboard writes it,
-  and the bot reloads through `?reloadconfig`. Removing the mirror entirely is
-  the outstanding backlog item that closes this properly.
+- **No file in between.** `config.json` and its mirror were retired in stages
+  and the file itself was deleted 2026-09-21 (`docs/config_retirement_plan.md`).
+  The two processes converge purely through SQLite now: a revision poll notices
+  a save the other process made within a couple of seconds, and `?reloadconfig`
+  is the manual "now, please" path for a repair written directly through
+  `database.set_guild_settings`.
 
 `deploy/potatobot.service` and `deploy/potatobot-dashboard.service` are ready to
-install; `Containerfile` and `compose.yaml` package the same split in containers,
-with the database on a shared volume rather than inside the image.
+install; `container/Containerfile` and `container/compose.yaml` package the same
+split in containers, with the database on a shared volume rather than inside
+the image.
 
 
 
@@ -351,19 +354,19 @@ and no server. It copies `economy.db` to `.local-dev/economy.dev.db` with its WA
 sidecars, fingerprints the copy, runs `database.initialize_database()` against it
 and prints the before/after comparison — so pointing it at a stale copy is also a
 migration rehearsal. It then builds a stand-in guild whose channels and roles are
-named after the ids `config.json` and `guild_settings` already reference, which is
-what makes `_resources_from_bot_cache` and `permission_audit.build_report` work
-unmodified, and injects a host session ahead of every other request hook so OAuth
-is bypassed.
+named after the ids `guild_settings` and the role-menu entries already reference,
+which is what makes `_resources_from_bot_cache` and `permission_audit.build_report`
+work unmodified, and injects a host session ahead of every other request hook so
+OAuth is bypassed.
 
-Two guards matter. It refuses to start when `POTATOBOT_DASHBOARD_EXTERNAL_URL` is
-set or the profile is `managed`, and it always binds `127.0.0.1`. And it must not
-write the tracked `config.json`, which it would by default: `_legacy_guild_id()`
-infers the mirror target from "private profile with exactly one active guild", and
-a copy of the server database has exactly one. It therefore sets
-`POTATOBOT_LEGACY_GUILD_ID=0` to disable the mirror and repoints
-`cogs.utils.CONFIG_PATH` at a throwaway copy. `tests/test_configuration_security.py`
-asserts both, and that no development branch exists inside `dashboard_api.py`.
+The one load-bearing guard: it refuses to start when
+`POTATOBOT_DASHBOARD_EXTERNAL_URL` is set or the profile is `managed`, and it
+always binds `127.0.0.1`. It also sets `POTATOBOT_LEGACY_GUILD_ID=0`, which does
+nothing today — the script never starts a bot — but the script working on a
+private-profile, single-active-guild copy is exactly the shape
+`adopt_legacy_database` looks for, so the guard costs nothing and survives the
+script growing a path that does. `tests/test_configuration_security.py` asserts
+it, and that no development branch exists inside `dashboard_api.py`.
 
 What is not real: channel and role names are labels, channel overwrites are
 permissive so overwrite findings cannot appear, and queued Discord publishes stay
@@ -392,7 +395,19 @@ Run the complete test and syntax checks before committing:
 ```bash
 python -m unittest discover -s tests -v
 python -m compileall -q . -x './\.git|./venv|./\.venv'
+python -m mypy
 ```
+
+`mypy` is scoped to `core/` only (`[tool.mypy]` in `pyproject.toml`), not the
+whole repository. Checking `cogs/` was tried and produces mostly noise from
+discord.py's own broad object-union stubs (`interaction.channel`, `member.guild`,
+...) rather than real findings — confirmed by actually running it, not assumed.
+`core/` is this project's own data and settings layer, where a wrong type has
+already reached production before (the clock and snowflake-wire-format rules in
+`CLAUDE.md` both trace back to exactly this class of bug), so that is where the
+signal-to-noise ratio makes the check worth running as a gate. Extending it to a
+cog is possible later, file by file, once that file's discord.py object handling
+is narrowed enough to check cleanly.
 
 Before deploying a schema change, rehearse it on a copy of the deployed database
 and prove no data was lost:
@@ -427,10 +442,10 @@ python scripts/local_dashboard.py --fresh  # re-copy the database first
 
 It copies `economy.db` into `.local-dev/`, migrates and fingerprints the copy so
 a stale database is also a migration rehearsal, builds a stand-in Discord guild
-from the ids in `config.json` so the selectors resolve, and signs you in as the
-host without OAuth. It refuses to start against a proxied or managed environment,
-always binds loopback, and never writes the tracked `config.json`. Everything it
-fakes is printed at startup.
+from the stored settings and role-menu entries so the selectors resolve, and
+signs you in as the host without OAuth. It refuses to start against a proxied
+or managed environment and always binds loopback. Everything it fakes is
+printed at startup.
 
 
 The standard local gate is:
@@ -438,6 +453,7 @@ The standard local gate is:
 ```bash
 python -m unittest discover -s tests -v
 python -m compileall -q . -x './\.git|./venv|./\.venv'
+python -m mypy
 ```
 
 Tests must mock Discord and HTTP boundaries. A command addition is incomplete unless cogs load, help coverage remains exact, the command policy registry is complete, and localization structure passes.
@@ -458,7 +474,7 @@ Normal-operation targets are acknowledgement under one second, no-database ackno
 
 ## 12. Security and release boundary
 
-Never commit `.env`, session secrets, databases, backups, logs, tokens, OAuth secrets, or live deployment exports. Review `config.json` because it contains installation-specific IDs and is hot-reloadable.
+Never commit `.env`, session secrets, databases, backups, logs, tokens, OAuth secrets, or live deployment exports. Every guild and instance setting lives in SQLite and is hot-reloadable through the settings cache; there is no configuration file to review any more.
 
 The private repository history contains a historical token-shaped value. Do not make this repository public or mirror its refs. Export a sanitized working tree into a separate clean-history repository, scan it and all exported refs, remove private deployment data, then add licensing, locked dependencies, packaging, operator documentation, release notes, and stable version tags.
 
@@ -468,7 +484,7 @@ After a successful change, update documentation when the work creates durable kn
 
 - `CLAUDE.md` for contributor invariants, architecture decisions, deployment lessons, and safety rules;
 - `docs/everydle_data_updates.md` for how the minigame datasets drift from the games they describe and what can be automated;
-- `docs/config_retirement_plan.md` for the plan to reduce `config.json` to `bot_settings` and move the rest into the database;
+- `docs/config_retirement_plan.md` for the plan that retired `config.json` entirely, done and closed 2026-09-21;
 - `docs/localization_status.md` for the localization rules, the measured state of every surface, and what selecting a language actually does;
 - `docs/development.md` for developer and operator behavior;
 - `README.md` for GitHub-facing capabilities and setup;

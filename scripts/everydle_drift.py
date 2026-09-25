@@ -24,7 +24,10 @@ Usage:
 
 Exits non-zero when there is drift, so it can gate a scheduled check. An
 unreachable source is reported and exits 2, distinct from "found drift", because
-a source being down is not a data problem.
+a source being down is not a data problem. Each game in `MANAGED_DATASETS` is
+checked independently: one game's source being unreachable is reported for
+that game alone and does not stop the rest from being compared, so a flaky
+source never hides drift in every game listed after it.
 """
 
 import argparse
@@ -214,10 +217,13 @@ def has_drift(report: dict) -> bool:
     return any(report[key] for key in FINDING_KEYS)
 
 
-def print_report(reports: list[dict]) -> None:
+def print_report(reports: list[dict], unreachable: list[dict] = ()) -> None:
     print("=" * 74)
     print("EVERYDLE DATA DRIFT")
     print("=" * 74)
+    for entry in unreachable:
+        print(f"\n{entry['game']}.{entry['dataset']}: source unavailable")
+        print(f"  {entry['error']}")
     for report in reports:
         print(f"\n{report['game']}.{report['dataset']}: "
               f"{report['local_count']} local / {report['upstream_count']} upstream")
@@ -285,8 +291,33 @@ def print_report(reports: list[dict]) -> None:
 
     total = sum(len(report[key]) for report in reports for key in FINDING_KEYS)
     print("\n" + "=" * 74)
-    print(f"{'DRIFT' if total else 'OK'}: {total} finding(s)")
+    label = "DRIFT" if total else "OK"
+    suffix = (f", {len(unreachable)} source(s) unreachable"
+              if unreachable else "")
+    print(f"{label}: {total} finding(s){suffix}")
     print("=" * 74)
+
+
+def run_checks(opener=None) -> tuple[list[dict], list[dict]]:
+    """Compare every managed dataset, isolating one game's outage from the rest.
+
+    Caught per game, not around the whole loop: one flaky source used to abort
+    every game listed after it in `MANAGED_DATASETS`, so a check meant to catch
+    a new character same-week silently skipped every game past the failure
+    instead. A source being unreachable is still not a data finding, so it is
+    kept separate from `reports` rather than folded into "the roster changed".
+    """
+    reports = []
+    unreachable = []
+    for game, dataset in MANAGED_DATASETS:
+        try:
+            reports.append(compare(game, dataset, opener))
+        except SourceError as error:
+            print(f"source unavailable: {game}.{dataset}: {error}",
+                  file=sys.stderr)
+            unreachable.append({"game": game, "dataset": dataset,
+                                 "error": str(error)})
+    return reports, unreachable
 
 
 def main() -> int:
@@ -300,22 +331,17 @@ def main() -> int:
     arguments = parser.parse_args()
 
     opener = load_fixtures(arguments.fixtures) if arguments.fixtures else None
-    reports = []
-    try:
-        for game, dataset in MANAGED_DATASETS:
-            reports.append(compare(game, dataset, opener))
-    except SourceError as error:
-        # A source being unreachable is not a data finding, so it gets its own
-        # exit code: a scheduled check can log it and move on rather than
-        # reporting that the roster changed.
-        print(f"source unavailable: {error}", file=sys.stderr)
-        return 2
+    reports, unreachable = run_checks(opener)
 
     if arguments.json:
-        json.dump(reports, sys.stdout, indent=2, sort_keys=True)
+        json.dump({"reports": reports, "unreachable": unreachable},
+                   sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
     else:
-        print_report(reports)
+        print_report(reports, unreachable)
+
+    if unreachable:
+        return 2
     return 1 if any(has_drift(report) for report in reports) else 0
 
 

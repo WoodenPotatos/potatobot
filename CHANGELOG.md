@@ -1,5 +1,65 @@
 # Changelog
 
+## 2.15.0-beta.1
+
+- **The bot now posts patch and update notes for eleven games**, one
+  channel per game per guild: League of Legends, Valorant, Minecraft,
+  Phasmophobia, Dead by Daylight, Genshin Impact, Counter-Strike 2, Rainbow
+  Six Siege, Honkai: Star Rail, Wuthering Waves and Zenless Zone Zero. A
+  master toggle turns the whole feature on or off, and each game has its
+  own toggle and channel underneath it. Every source is checked once per
+  tick regardless of how many guilds are watching, and one game's source
+  being unreachable never stops the other ten from being checked.
+- **A wedged music extraction no longer needs a manual restart to clear.**
+  `/play` could leave a worker permanently stuck if the source it was
+  fetching from hung, and every stuck worker after that made the queue
+  slower until nothing was left. A watchdog now recycles the whole
+  extraction pool once a job has run far longer than any real one should.
+- **The weekly Everydle drift check no longer goes blind after the first
+  unreachable game.** One game timing out used to abort the whole run
+  before it reached the games after it in the list, which is how two new
+  Genshin Impact characters went unnoticed for a week. Every game is now
+  checked independently, and the report says exactly which ones it could
+  not reach that week.
+- **A few Genshin Impact characters answer to their given name.** Raiden,
+  Heizou, Shinobu, Ayaka, Ayato, Kazuha, Itto, Sara, Kokomi and Mizuki can
+  now be guessed by their short name as well as their full one.
+- **Word-chain can take a custom word list.** A server can now allow extra
+  words the built-in dictionary does not have, on top of it rather than
+  instead of it, behind its own toggle in the dashboard.
+- **`/leaderboard` has a fourth board: luck.** Ranked by the fewest average
+  pulls it takes a member to land a 5★, not by how many they have pulled
+  overall — a member needs at least three 5★ pulls on a banner before they
+  are ranked.
+- **The wheel segment editor shows whether the table still pays out
+  correctly.** Editing `/wheel`'s weights in the dashboard now shows the
+  actual expected return live, instead of only finding out it does not add
+  up to exactly 98% after trying to save.
+- **The dashboard's message preview now renders real formatting**, not
+  just channel and role mentions: bold, italic, underline, strikethrough,
+  spoilers, code, code blocks, quotes, headings, lists, links and
+  timestamps all show roughly the way Discord will actually render them.
+- **A disabled feature's autocomplete now fails safely instead of failing
+  silently.** Typing into an autocomplete field for a command whose
+  feature was off, or while maintenance mode was on, made Discord reject
+  the bot's own refusal with an internal error — nothing reached the
+  member, and nothing said why. It now answers with no suggestions, the
+  same as any other disabled entry point.
+- **The container deployment path is finished.** Logs and Everydle's daily
+  state can now move off the image the way the database already could, an
+  ad-hoc backup or inspection works the same way it does on a bare-metal
+  host, and the image is now built in CI on every push so it cannot go
+  stale unnoticed again. `docs/installation.md` documents the container
+  path end to end.
+- **`config.json` is gone.** Every guild and instance setting has lived in the
+  database since 2026-08-25; the file survived only as a read-only fallback for
+  a value an installation had never saved through the dashboard. A read-only
+  check of the live deployment confirmed the one-time import had already run
+  everywhere, so the file, `scripts/import_config.py`, and every remaining
+  reader of the fallback (`settings_registry.legacy_config_value` and the
+  `legacy_path` declared on each setting) are deleted. Nothing for an operator
+  to do: every value that mattered already has a row.
+
 ## 2.14.0-beta.1
 
 - **A word chain now knows Hungarian letters.** `sz`, `gy`, `ny`, `cs`, `ly`,

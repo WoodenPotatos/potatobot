@@ -36,7 +36,7 @@ HTTPS proxy, and run the service as an unprivileged dedicated account.
 
 ## Residual risks
 
-SQLite and `config.json` are local single-host state and are not protected from an
+SQLite is local single-host state and is not protected from an
 attacker who controls the service account. The dashboard still has legacy raw
 configuration routes pending its typed rewrite. Runtime economy callers are not
 all routed through scoped accounts yet, so managed multi-guild operation must stay

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "potatobot"
-version = "2.14.0b3"
+version = "2.15.0b1"
 description = "A Hungarian-first Discord community bot and control plane"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
@@ -31,3 +31,24 @@ packages = ["core"]
 [tool.bandit]
 exclude_dirs = ["tests", "venv", ".venv"]
 skips = ["B101"]
+
+[tool.mypy]
+# Scoped to core/ only, deliberately: cogs/ trades in discord.py's own
+# object-union types (`interaction.channel`, `member.guild`, ...), whose
+# stubs are broad enough that checking it produces noise dominated by
+# discord.py's own typing model rather than real findings -- confirmed by
+# actually running it there before scoping this down, not assumed. core/ is
+# this project's own data layer and is where a wrong type has actually
+# reached production before (docs/lessons.md; the clock and snowflake-wire
+# rules in CLAUDE.md both trace back to exactly this class of bug).
+files = ["core"]
+python_version = "3.12"
+ignore_missing_imports = true
+# core/ imports cogs.utils for one late import (see settings_cache.py); this
+# keeps that follow-through from reporting on the discord.py-heavy side of
+# the import graph this config does not scope to.
+follow_imports = "silent"
+# This codebase's existing style is `x: str = None` throughout; PEP 484's
+# stricter default would report every one of them as a new class of error
+# this pass was never meant to catch.
+implicit_optional = true

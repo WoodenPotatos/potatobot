@@ -31,9 +31,7 @@ def get_help_data():
             "commands": {
                 t("general.usage_profile"): t("general.cmd_profile"),
                 t("general.usage_bal"): t("general.cmd_bal"),
-                t("general.usage_ranks"): t("general.cmd_ranks"),
-                t("general.usage_lvls"): t("general.cmd_lvls"),
-                t("general.usage_topstreak"): t("general.cmd_topstreak"),
+                t("general.usage_leaderboard"): t("general.cmd_leaderboard"),
                 t("general.usage_search"): t("general.cmd_search"),
                 t("general.usage_version"): t("general.cmd_version"),
                 t("general.usage_help"): t("general.cmd_help"),
@@ -140,6 +138,7 @@ def get_help_data():
                 t("general.usage_givexp"): t("general.cmd_givexp"),
                 t("general.usage_rent_start"): t("general.cmd_rent_start"),
                 t("general.usage_maintenance"): t("general.cmd_maintenance"),
+                t("general.usage_shop_hide"): t("general.cmd_shop_hide"),
                 t("general.usage_testreset"): t("general.cmd_testreset"),
                 t("general.usage_sync_autoroles"): t("general.cmd_sync_autoroles"),
                 t("general.usage_embedsend"): t("general.cmd_embedsend"),

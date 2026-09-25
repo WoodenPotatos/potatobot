@@ -30,7 +30,8 @@
         "arataki_itto": {
           "name": "Arataki Itto",
           "aliases": [
-            "Arataki Itto"
+            "Arataki Itto",
+            "Itto"
           ]
         },
         "arlecchino": {
@@ -282,7 +283,8 @@
         "kaedehara_kazuha": {
           "name": "Kaedehara Kazuha",
           "aliases": [
-            "Kaedehara Kazuha"
+            "Kaedehara Kazuha",
+            "Kazuha"
           ]
         },
         "kaeya": {
@@ -294,13 +296,15 @@
         "kamisato_ayaka": {
           "name": "Kamisato Ayaka",
           "aliases": [
-            "Kamisato Ayaka"
+            "Kamisato Ayaka",
+            "Ayaka"
           ]
         },
         "kamisato_ayato": {
           "name": "Kamisato Ayato",
           "aliases": [
-            "Kamisato Ayato"
+            "Kamisato Ayato",
+            "Ayato"
           ]
         },
         "kaveh": {
@@ -336,13 +340,15 @@
         "kujou_sara": {
           "name": "Kujou Sara",
           "aliases": [
-            "Kujou Sara"
+            "Kujou Sara",
+            "Sara"
           ]
         },
         "kuki_shinobu": {
           "name": "Kuki Shinobu",
           "aliases": [
-            "Kuki Shinobu"
+            "Kuki Shinobu",
+            "Shinobu"
           ]
         },
         "lan_yan": {
@@ -480,7 +486,8 @@
         "raiden_shogun": {
           "name": "Raiden Shogun",
           "aliases": [
-            "Raiden Shogun"
+            "Raiden Shogun",
+            "Raiden"
           ]
         },
         "razor": {
@@ -498,7 +505,8 @@
         "sangonomiya_kokomi": {
           "name": "Sangonomiya Kokomi",
           "aliases": [
-            "Sangonomiya Kokomi"
+            "Sangonomiya Kokomi",
+            "Kokomi"
           ]
         },
         "sayu": {
@@ -522,7 +530,8 @@
         "shikanoin_heizou": {
           "name": "Shikanoin Heizou",
           "aliases": [
-            "Shikanoin Heizou"
+            "Shikanoin Heizou",
+            "Heizou"
           ]
         },
         "sigewinne": {
@@ -654,7 +663,8 @@
         "yumemizuki_mizuki": {
           "name": "Yumemizuki Mizuki",
           "aliases": [
-            "Yumemizuki Mizuki"
+            "Yumemizuki Mizuki",
+            "Mizuki"
           ]
         },
         "yun_jin": {
@@ -721,6 +731,18 @@
           "name": "Alyosha",
           "aliases": [
             "Alyosha"
+          ]
+        },
+        "vesna": {
+          "name": "Vesna",
+          "aliases": [
+            "Vesna"
+          ]
+        },
+        "vodyanitsa": {
+          "name": "Vodyanitsa",
+          "aliases": [
+            "Vodyanitsa"
           ]
         }
       },
@@ -803,7 +825,8 @@
           "weekly_boss_8f910030aa": "All",
           "weekly_boss_e05e6ca829": "Counterfeit Resin",
           "weekly_boss_01f7ebe672": "Twisted Withered Branch",
-          "weekly_boss_f28e443da3": "Madman's Restraint"
+          "weekly_boss_f28e443da3": "Madman's Restraint",
+          "weekly_boss_f3713c6b96": "Profaned Sprout"
         }
       }
     }

@@ -30,7 +30,8 @@ import discord
 from discord.ext import commands
 
 from core import database
-from cogs.utils import guild_setting_sync, t
+from core import wordchain_dictionary
+from cogs.utils import guild_setting_sync, guild_settings_sync, t
 from core.feature_access import is_enabled, maintenance_blocks
 
 minigame_logger = logging.getLogger("PotatoBot.Minigames")
@@ -136,13 +137,20 @@ class Minigames(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    def game_for(self, message) -> str | None:
-        """Which game this channel is, if any. Cheap enough for every message."""
+    def game_for_channel(self, guild_id: int, channel_id: int) -> str | None:
+        """Which game this channel is, if any. Cheap enough for every message.
+
+        Shared by `on_message` and `on_raw_message_edit`: an edit has only a
+        channel id, never a cached `discord.Message`.
+        """
         for game_key, spec in GAMES.items():
-            channel_id = guild_setting_sync(message.guild.id, spec["channel"])
-            if channel_id and int(channel_id) == message.channel.id:
+            setting_channel_id = guild_setting_sync(guild_id, spec["channel"])
+            if setting_channel_id and int(setting_channel_id) == channel_id:
                 return game_key
         return None
+
+    def game_for(self, message) -> str | None:
+        return self.game_for_channel(message.guild.id, message.channel.id)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -157,6 +165,50 @@ class Minigames(commands.Cog):
                 "Minigame check failed (guild_id=%s, channel_id=%s)",
                 message.guild.id, message.channel.id,
             )
+
+    @commands.Cog.listener()
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
+        # Discord omits "content" from the edit payload when only an embed
+        # hydrated (a link unfurling) rather than the author retyping
+        # anything -- that must not be treated as an edit, or every posted
+        # link would be policed off its own embed a moment after acceptance.
+        if "content" not in payload.data or payload.guild_id is None:
+            return
+        try:
+            await self.police_edit(payload)
+        except Exception:
+            minigame_logger.exception(
+                "Minigame edit check failed (guild_id=%s, channel_id=%s)",
+                payload.guild_id, payload.channel_id,
+            )
+
+    async def police_edit(self, payload: discord.RawMessageUpdateEvent):
+        game_key = self.game_for_channel(payload.guild_id, payload.channel_id)
+        if game_key is None:
+            return
+        spec = GAMES[game_key]
+        if not is_enabled(payload.guild_id, spec["feature"]):
+            return
+        author_data = payload.data.get("author")
+        if not author_data:
+            return
+        author_id = int(author_data["id"])
+        if self.bot.user is not None and author_id == self.bot.user.id:
+            return
+        guild = self.bot.get_guild(payload.guild_id)
+        member = guild.get_member(author_id) if guild else None
+        if maintenance_blocks(guild, member):
+            return
+        channel = self.bot.get_channel(payload.channel_id)
+        if channel is None:
+            return
+        # The DB row a turn wrote is untouched by an edit, so the channel is
+        # the only thing that can now disagree with it -- deleted rather than
+        # re-judged, since re-validating the new content would still leave a
+        # window where the channel showed something the bot never accepted.
+        await self._delete_and_notify(
+            channel.get_partial_message(payload.message_id), channel,
+            author_id, t("minigames.err_edited"))
 
     async def police(self, message: discord.Message):
         game_key = self.game_for(message)
@@ -236,24 +288,55 @@ class Minigames(commands.Cog):
                 # mid-chain has its current word in `minigame_state` and not
                 # yet in `minigame_used_words`.
                 return False, None, t("minigames.err_same_word")
-        return True, posted, None
+        language = guild_setting_sync(None, "language")
+        folded_posted = fold(posted)
+        if wordchain_dictionary.is_known_word(language, folded_posted):
+            return True, posted, None
+        if self._is_custom_word(message.guild.id, folded_posted):
+            return True, posted, None
+        return False, None, t("minigames.err_not_a_word")
+
+    def _is_custom_word(self, guild_id: int, folded_word: str) -> bool:
+        """A guild-authored top-up on the built-in dictionary, gated by its
+        own tickbox so a guild that never configured one behaves exactly as
+        before. Folded with the same `fold()` the built-in check already
+        applies, so a Hungarian multi-character letter compares the same way
+        on both sides."""
+        settings = guild_settings_sync(guild_id, (
+            "wordchain_custom_words_enabled", "wordchain_custom_words",
+        ))
+        if not settings.get("wordchain_custom_words_enabled"):
+            return False
+        return any(fold(word) == folded_word
+                   for word in settings.get("wordchain_custom_words") or ())
 
     async def refuse(self, message: discord.Message, reason: str):
         """Remove the message and tell only its author why.
 
         The note goes to the author's own view of the channel, so the channel
-        reads as the chain and nobody is corrected in public. If the bot cannot
-        delete — no Manage Messages — it says nothing at all rather than leaving
-        a correction beside a message that is still there, which would read as
-        the bot being broken.
+        reads as the chain and nobody is corrected in public.
+        """
+        await self._delete_and_notify(message, message.channel,
+                                      message.author.id, reason)
+
+    async def _delete_and_notify(self, deletable, channel, author_id: int,
+                                 reason: str):
+        """Delete a message (or a `PartialMessage` standing in for one an
+        edit invalidated) and tell only its author why.
+
+        If the bot cannot delete — no Manage Messages — it says nothing at
+        all rather than leaving a correction beside a message that is still
+        there, which would read as the bot being broken. The author is
+        addressed by id rather than a resolved member, since an edit's raw
+        payload does not guarantee one is cached.
         """
         try:
-            await message.delete()
+            await deletable.delete()
         except discord.Forbidden:
             minigame_logger.warning(
                 "Cannot police a minigame channel without Manage Messages "
                 "(guild_id=%s, channel_id=%s)",
-                message.guild.id, message.channel.id,
+                channel.guild.id, channel.id,
             )
             return
         except discord.HTTPException:
@@ -262,12 +345,12 @@ class Minigames(commands.Cog):
         # this is a DM-less short-lived channel message addressed to the author
         # and removed again.
         try:
-            await message.channel.send(
-                t("minigames.refused", user=message.author.mention,
-                  reason=reason),
+            await channel.send(
+                t("minigames.refused", user=f"<@{author_id}>", reason=reason),
                 delete_after=8,
                 allowed_mentions=discord.AllowedMentions(
-                    everyone=False, roles=False, users=[message.author]),
+                    everyone=False, roles=False,
+                    users=[discord.Object(id=author_id)]),
             )
         except discord.HTTPException:
             pass

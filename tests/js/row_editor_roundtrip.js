@@ -83,5 +83,49 @@ if (packed.includes('"0"')) {
     console.log(`  FAIL a shape still packs the id "0": ${packed}`);
 }
 
+// `wheel_segments.summary()` is the only shape with a live-validation
+// readout. It calls the dashboard's real `tr`/`format`, which this reduced
+// extraction never defines -- stand-ins with real placeholder tokens, good
+// enough to prove the numeric logic and the substitution actually runs, not
+// to prove the real Hungarian/English text (the locale audit and
+// test_locale_coverage.py own that).
+const STUB_TEMPLATES = {
+    'dashboard.wheel_return_readout': 'return {value} needs {needed}',
+    'dashboard.wheel_return_unknown': 'no segments',
+};
+function tr(path) { return STUB_TEMPLATES[path] ?? `[${path}]`; }
+function format(path, values) {
+    let text = tr(path);
+    Object.entries(values || {}).forEach(([key, value]) => {
+        text = text.split(`{${key}}`).join(String(value));
+    });
+    return text;
+}
+
+function checkSummary(label, rows, wantValid, wantText) {
+    const shape = JSON_ROW_SHAPES.wheel_segments;
+    const {text, valid} = shape.summary(rows);
+    if (valid !== wantValid || text !== wantText) {
+        failures++;
+        console.log(`  FAIL ${label}`);
+        console.log(`     want: valid=${wantValid} text=${JSON.stringify(wantText)}`);
+        console.log(`     got : valid=${valid} text=${JSON.stringify(text)}`);
+    }
+}
+
+// The shipped default (core/database.py's wheel segment default): weights
+// sum to 100 and average exactly a 98% return.
+checkSummary('the shipped default reports valid',
+    {0: 54, 100: 19, 150: 12, 200: 7, 300: 4, 500: 3, 2000: 1},
+    true, 'return 98.00 needs 98');
+// One weight nudged away from the shipped table breaks the identity, exactly
+// as the server would refuse it on save.
+checkSummary('a nudged weight reports invalid',
+    {0: 54, 100: 20, 150: 12, 200: 7, 300: 4, 500: 3, 2000: 1},
+    false, 'return 98.02 needs 98');
+// No rows at all: nothing to divide by, so this must read as unresolved
+// rather than crash on a division by zero.
+checkSummary('no segments at all reports unknown, not a crash', {}, false, 'no segments');
+
 console.log(failures ? `  ${failures} failure(s)` : '  all row-editor shapes report clean');
 process.exit(failures ? 1 : 0);

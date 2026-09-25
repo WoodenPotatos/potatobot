@@ -255,11 +255,16 @@ async def purchase_item(guild, member, key, item) -> PurchaseResult:
             True, t("shop.purchase_success", item_name=item_name) + suffix)
 
     if item_type == "ticket":
-        # The feature gate lives here rather than at the call site, so both
-        # callers get it from one place. `is_enabled` is synchronous and
-        # cache-backed and needs no interaction; maintenance is already covered
-        # by the view's own check and by the command tree's.
-        if not is_enabled(guild.id, "rentals"):
+        # `shop` is already guaranteed on here — both callers require it
+        # before `purchase_item` is reachable at all (`ShopView.interaction_check`
+        # and `/buy`'s own `COMMAND_POLICIES` entry). This item type additionally
+        # opens a ticket, so it is the one purchase branch that genuinely needs
+        # `tickets` configured; checked directly rather than through a feature
+        # dependency, so the rest of the shop is never coupled to it.
+        # `is_enabled` is synchronous and cache-backed and needs no interaction;
+        # maintenance is already covered by the view's own check and by the
+        # command tree's.
+        if not is_enabled(guild.id, "tickets"):
             return PurchaseResult(False, t("utils.feature_disabled"))
         if item["limit_check"] == "static":
             if len([e for e in guild.emojis if not e.animated]) >= guild.emoji_limit:

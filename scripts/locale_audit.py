@@ -503,6 +503,10 @@ COMPOSED_PREFIXES = (
     "moderation.escalation_blocked_",
     # Minigame attribute labels are addressed by dataset field and value id.
     "loldle.", "valdle.", "dbdle.", "everydle.",
+    # Addressed by the SUPPORTED_GAMES key, not named literally in the cog;
+    # shared with the dashboard client, which is why it lives under
+    # "dashboard." rather than "patchbot." -- see core/supported_games.py.
+    "dashboard.game_names.",
 )
 
 

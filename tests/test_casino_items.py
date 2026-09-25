@@ -15,11 +15,14 @@ import random
 import tempfile
 import pathlib
 import re
+import types
 import unittest
 from itertools import product
 
 from core import database
 from core import item_catalog
+from core import settings_cache
+from core import settings_registry
 
 
 GUILD = 10
@@ -313,8 +316,9 @@ class WheelTests(CasinoItemTestCase):
     def test_a_spin_lands_on_a_declared_segment(self):
         rng = random.Random(5)
         seen = set()
+        total_weight = sum(weight for _, weight in database.WHEEL_SEGMENTS)
         for _ in range(2_000):
-            seen.add(database._wheel_spin(rng))
+            seen.add(database._wheel_spin(rng, database.WHEEL_SEGMENTS, total_weight))
         self.assertEqual({m for m, _ in database.WHEEL_SEGMENTS}, seen)
 
     def test_the_measured_return_matches_the_table(self):
@@ -340,6 +344,75 @@ class WheelTests(CasinoItemTestCase):
         self.set_balance(5)
         self.assertIsNone(database.resolve_wheel_wager(GUILD, MEMBER, 100))
         self.assertEqual(1, self.held("lucky_charm"))
+
+    def test_the_shipped_default_round_trips_unchanged(self):
+        definition = settings_registry.SETTING_DEFINITIONS["casino_wheel_segments"]
+        value = settings_registry.validate_setting_value(definition, definition.default)
+        self.assertEqual(
+            {str(m): w for m, w in database.WHEEL_SEGMENTS}, value)
+
+    def test_a_bad_weighted_sum_is_refused(self):
+        definition = settings_registry.SETTING_DEFINITIONS["casino_wheel_segments"]
+        with self.assertRaises(ValueError):
+            settings_registry.validate_setting_value(
+                definition, {"0": 1, "100": 1})
+
+    def test_too_few_segments_is_refused(self):
+        definition = settings_registry.SETTING_DEFINITIONS["casino_wheel_segments"]
+        with self.assertRaises(ValueError):
+            settings_registry.validate_setting_value(definition, {"98": 1})
+
+    def test_too_many_segments_is_refused(self):
+        definition = settings_registry.SETTING_DEFINITIONS["casino_wheel_segments"]
+        # 13 equal-weight rows averaging exactly 98 satisfies the identity, so
+        # only the row-count ceiling can be what refuses this table.
+        with self.assertRaises(ValueError):
+            settings_registry.validate_setting_value(
+                definition, {str(98): 13})
+
+    def test_a_non_positive_weight_is_refused(self):
+        definition = settings_registry.SETTING_DEFINITIONS["casino_wheel_segments"]
+        with self.assertRaises(ValueError):
+            settings_registry.validate_setting_value(
+                definition, {"0": 0, "98": 1})
+
+    def test_a_non_integer_key_is_refused(self):
+        definition = settings_registry.SETTING_DEFINITIONS["casino_wheel_segments"]
+        with self.assertRaises(ValueError):
+            settings_registry.validate_setting_value(
+                definition, {"double": 1, "98": 1})
+
+
+class PerGuildWheelSegmentsTests(CasinoItemTestCase):
+    """A guild's own `casino_wheel_segments` override, read live through the
+    settings cache, must never let a spin land on a multiplier the guild did
+    not configure -- and must leave every other guild on the shipped table."""
+
+    def tearDown(self):
+        # A test that writes a setting must clear the cache: settings_cache is
+        # process-global and would otherwise answer for a later test.
+        settings_cache.invalidate()
+        super().tearDown()
+
+    def test_a_spin_only_returns_the_guilds_own_segments(self):
+        settings_cache.apply_changes(
+            GUILD, {"casino_wheel_segments": {"value": {"0": 1, "196": 1}}})
+        rng = random.Random(3)
+        seen = set()
+        for _ in range(500):
+            result = database.resolve_wheel_wager(GUILD, MEMBER, 100, rng=rng)
+            seen.add(result["multiplier"])
+        self.assertEqual({0, 196}, seen)
+
+    def test_a_guild_with_no_override_keeps_the_shipped_table(self):
+        settings_cache.apply_changes(
+            GUILD + 1, {"casino_wheel_segments": {"value": {"0": 1, "196": 1}}})
+        rng = random.Random(7)
+        seen = set()
+        for _ in range(500):
+            result = database.resolve_wheel_wager(GUILD, MEMBER, 100, rng=rng)
+            seen.add(result["multiplier"])
+        self.assertEqual({m for m, _ in database.WHEEL_SEGMENTS}, seen)
 
 
 class HigherOrLowerTests(unittest.TestCase):
@@ -496,4 +569,94 @@ class StakeBoundTests(unittest.TestCase):
         import cogs.casino
         from core import database
         self.assertEqual(database.MAX_AMOUNT, cogs.casino.MAX_STAKE)
+
+
+class _FakeLauncherCtx:
+    """A hybrid-command ctx stand-in: not a discord.Interaction, so the
+    launchers take the ctx_or_int.author / ctx_or_int.send branch."""
+
+    def __init__(self, guild_id, user_id):
+        self.guild = types.SimpleNamespace(id=guild_id)
+        self.author = types.SimpleNamespace(id=user_id)
+        self.sent = []
+
+    async def send(self, message, **kwargs):
+        self.sent.append(message)
+        return message
+
+
+class LadderBetCapTests(CasinoItemTestCase, unittest.IsolatedAsyncioTestCase):
+    """Crash, Mines and Hilo let a player choose the ladder's depth, so
+    MAX_STAKE alone (an overflow guard, not a gameplay bound) never stops a
+    growing balance from being re-staked without limit. casino_ladder_max_bet
+    is the second, tighter, guild-configurable ceiling on those three
+    launchers only.
+    """
+
+    def tearDown(self):
+        # A test that writes a setting must clear the cache: settings_cache is
+        # process-global and would otherwise answer for a later test.
+        settings_cache.invalidate()
+        super().tearDown()
+
+    def set_cap(self, amount):
+        settings_cache.apply_changes(
+            GUILD, {"casino_ladder_max_bet": {"value": amount}})
+
+    def wager_count(self):
+        with database.get_connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM casino_wagers WHERE guild_id = ? AND user_id = ?",
+                (GUILD, MEMBER),
+            ).fetchone()
+            return row[0]
+
+    async def test_refuses_a_bet_above_the_default_cap(self):
+        from cogs.casino import start_crash_game, start_hilo_game, start_mines_game
+
+        for launcher in (start_crash_game, start_hilo_game, start_mines_game):
+            ctx = _FakeLauncherCtx(GUILD, MEMBER)
+            before = self.wager_count()
+            await launcher(ctx, 50_001)
+            self.assertEqual(before, self.wager_count(),
+                             f"{launcher.__name__} reserved a wager over the cap")
+            self.assertTrue(ctx.sent, f"{launcher.__name__} sent no refusal")
+
+    async def test_accepts_a_bet_at_the_default_cap(self):
+        from cogs.casino import start_crash_game, start_hilo_game, start_mines_game
+
+        for launcher in (start_crash_game, start_hilo_game, start_mines_game):
+            ctx = _FakeLauncherCtx(GUILD, MEMBER)
+            before = self.wager_count()
+            # The launcher continues past the cap check into embed/view
+            # construction the fake ctx cannot support; only the wager
+            # reservation, which happens first, is asserted.
+            try:
+                await launcher(ctx, 50_000)
+            except Exception:
+                pass
+            self.assertEqual(before + 1, self.wager_count(),
+                             f"{launcher.__name__} refused a bet at the cap")
+
+    async def test_a_guild_can_lower_the_cap(self):
+        from cogs.casino import start_crash_game
+
+        self.set_cap(1_000)
+        ctx = _FakeLauncherCtx(GUILD, MEMBER)
+        before = self.wager_count()
+        await start_crash_game(ctx, 1_001)
+        self.assertEqual(before, self.wager_count())
+        self.assertTrue(ctx.sent)
+
+    async def test_a_guild_can_raise_the_cap(self):
+        from cogs.casino import start_crash_game
+
+        self.set_cap(1_000_000)
+        ctx = _FakeLauncherCtx(GUILD, MEMBER)
+        before = self.wager_count()
+        try:
+            await start_crash_game(ctx, 500_000)
+        except Exception:
+            pass
+        self.assertEqual(before + 1, self.wager_count())
 

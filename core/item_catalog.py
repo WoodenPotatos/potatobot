@@ -29,7 +29,7 @@ class ItemEffect(str, Enum):
     INVENTORY = "inventory"
     # A fixed protected reserve on ``users.protected_reserve``.
     VAULT = "vault"
-    # A permanent Discord role named by a ``config.json`` roles key.
+    # A permanent Discord role named by a guild-configured role setting.
     ROLE = "role"
     # Timed robbery defence on ``users.rob_defense``/``bodyguard_until``.
     BODYGUARD = "bodyguard"
@@ -318,7 +318,10 @@ def resolve_custom_category(template_type: str, config: dict,
             return category.value
     default = SHOP_TEMPLATE_CATEGORIES.get(template_type, ItemCategory.PERKS)
     if default is None:
-        wrapped = ITEM_DEFINITIONS.get((config or {}).get("item_key"))
+        # dict.get(None) is a plain miss, never a raise, whatever the
+        # declared key type -- a config with no "item_key" is meant to fall
+        # through to `wrapped is None` below, not to be rejected first.
+        wrapped = ITEM_DEFINITIONS.get((config or {}).get("item_key"))  # type: ignore[arg-type]
         return (wrapped.category if wrapped else ItemCategory.CASINO).value
     return default.value
 
@@ -359,8 +362,15 @@ def custom_item_capacity(category: str, hidden=()) -> int:
 
 
 def shop_default_prices() -> dict[str, int]:
-    """Installation-default price per built-in shop item."""
-    return {key: definition.shop_price for key, definition in SHOP_ITEMS.items()}
+    """Installation-default price per built-in shop item.
+
+    Safe only because `SHOP_ITEMS` is already filtered to `sold_in_shop`
+    entries; guarded here too rather than trusted, since `shop_price` is
+    `None`-able on the underlying `ItemDefinition` and this function's own
+    return type promises every value is a real price.
+    """
+    return {key: definition.shop_price for key, definition in SHOP_ITEMS.items()
+            if definition.shop_price is not None}
 
 
 def catalog_payload() -> list[dict]:

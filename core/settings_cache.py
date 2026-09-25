@@ -7,25 +7,19 @@ this is the whole point — `is_channel` resolves a channel list on every comman
 invocation, and `maintenance_blocks` runs on every interaction including every
 component and modal.
 
-**The fallback is the file, never nothing.** This is the one place where copying
-`feature_access` verbatim would be a defect. `is_enabled` fails *closed* because
-running a paid command under unknown policy is worse than refusing it. A setting
-has no such safe refusal: an empty `economy_channels` does not "refuse", it
-changes where every economy command is allowed. So when the cache does not know,
-this resolves the way the bot resolved before the cache existed — the stored row
-if there is one, then `config.json` through
-`settings_registry.legacy_config_value`, then the registry default.
+**The fallback is the registry default, never nothing.** This is the one place
+where copying `feature_access` verbatim would be a defect. `is_enabled` fails
+*closed* because running a paid command under unknown policy is worse than
+refusing it. A setting has no such safe refusal: an empty `economy_channels`
+does not "refuse", it changes where every economy command is allowed. So when
+the cache does not know, this resolves the way the bot resolved before the
+cache existed and `config.json` was retired — the stored row if there is one,
+else the registry default.
 
-`config.json` is now **read-only and nothing writes it**. It survives as the
-source for a setting an installation has never saved, which is what makes
-`scripts/import_config.py` a migration an operator can take at their own pace
-rather than a prerequisite for upgrading: pull this and the file still answers,
-run the import and the rows answer instead.
-
-That also gives `maintenance` the fail-*open* it requires: its legacy path and
-its registry default are both "not in maintenance", so an unreadable cache
-cannot take the bot down. `feature_access.maintenance_blocks` depends on that,
-and `tests/test_settings_cache.py` pins both directions, because the two are one
+That also gives `maintenance` the fail-*open* it requires: its registry default
+is "not in maintenance", so an unreadable cache cannot take the bot down.
+`feature_access.maintenance_blocks` depends on that, and
+`tests/test_settings_cache.py` pins both directions, because the two are one
 line apart and opposite.
 """
 
@@ -36,7 +30,6 @@ from core import database
 from core.settings_registry import (
     SETTING_DEFINITIONS,
     SettingScope,
-    legacy_config_value,
 )
 
 logger = logging.getLogger("PotatoBot.SettingsCache")
@@ -52,12 +45,6 @@ _INSTANCE_VALUES: dict = {}
 # was changed *from*, so a per-guild revision would let another guild miss it.
 _REVISION = None
 _LOCK = threading.RLock()
-
-
-def _config() -> dict:
-    """The live config dictionary, imported late to avoid an import cycle."""
-    from cogs.utils import config
-    return config
 
 
 def setting(guild_id: int | None, key: str):
@@ -76,7 +63,7 @@ def setting(guild_id: int | None, key: str):
             values = _GUILD_VALUES.get(int(guild_id))
             if values is not None and key in values:
                 return values[key]
-    return legacy_config_value(definition, _config())
+    return definition.default
 
 
 def settings(guild_id: int | None, keys) -> dict:
@@ -105,7 +92,10 @@ def store(guild_id: int, stored: dict[str, dict]) -> None:
     about an installation-wide value.
     """
     guild_id = int(guild_id)
-    guild_values, instance_values = {}, {}
+    # One guild's own {setting_key: value} slice of `_GUILD_VALUES`, not the
+    # outer per-guild map itself.
+    guild_values: dict = {}
+    instance_values: dict = {}
     for key, row in stored.items():
         definition = SETTING_DEFINITIONS.get(key)
         if definition is None:

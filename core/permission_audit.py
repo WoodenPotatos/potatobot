@@ -23,7 +23,6 @@ from core.settings_registry import (
     FEATURE_DEFINITIONS,
     SETTING_DEFINITIONS,
     SettingValueType,
-    legacy_config_value,
 )
 
 # A finding's weight. `blocking` means an enabled feature cannot work at all;
@@ -67,6 +66,10 @@ class Finding:
     permissions: tuple[str, ...] = ()
     feature: str = ""
     identifier: str = ""
+    # The channel a `channel_*` finding is about, so a repair action can
+    # target it precisely -- `identifier` stays the display name and is never
+    # parsed for this. 0 for a finding that names no channel.
+    channel_id: int = 0
 
     def as_dict(self) -> dict:
         return {
@@ -76,6 +79,7 @@ class Finding:
             "permissions": list(self.permissions),
             "feature": self.feature,
             "identifier": self.identifier,
+            "channel_id": str(self.channel_id) if self.channel_id else None,
         }
 
 
@@ -273,6 +277,7 @@ def _audit_channels(guild, feature_states, settings, report: PermissionReport) -
                         feature=owner or "",
                         identifier=channel.name,
                         permissions=missing,
+                        channel_id=channel.id,
                     ))
 
             member_missing = _missing_for_members(
@@ -286,6 +291,7 @@ def _audit_channels(guild, feature_states, settings, report: PermissionReport) -
                     feature=owner or "",
                     identifier=channel.name,
                     permissions=member_missing,
+                    channel_id=channel.id,
                 ))
 
 
@@ -361,19 +367,16 @@ def build_report(guild, feature_states: dict, settings: dict) -> PermissionRepor
     return report
 
 
-def resolved_settings(stored: dict, config: dict | None = None) -> dict:
+def resolved_settings(stored: dict) -> dict:
     """Flatten stored settings rows to the values the bot actually uses.
 
-    `config` is the legacy `config.json` mirror, and passing it is not optional
-    in practice: `guild_settings` is sparse — empty on the private deployment —
-    so defaulting to the registry meant every channel and role resolved to
-    nothing and the audit reported clean while checking no configured channel at
-    all. The fallback order matches `cogs.utils.guild_setting`: stored row,
-    then the legacy path, then the registry default.
+    The fallback order matches `cogs.utils.guild_setting`/`settings_cache.setting`:
+    stored row, else the registry default. A row is missing exactly when a
+    guild has never saved that setting, and the default is what the bot already
+    reads for it — so leaving it out here would report the audit clean while
+    checking no configured channel at all.
     """
-    config = config or {}
     return {
-        key: (stored[key]["value"] if key in stored
-              else legacy_config_value(definition, config))
+        key: (stored[key]["value"] if key in stored else definition.default)
         for key, definition in SETTING_DEFINITIONS.items()
     }

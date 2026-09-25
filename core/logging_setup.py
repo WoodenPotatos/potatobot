@@ -17,9 +17,12 @@ import signal
 import sys
 
 # Two levels up: this module lives in `core/` and the log directory belongs
-# beside the entry points at the repository root.
+# beside the entry points at the repository root -- unless a deployment
+# overrides it, the way `POTATOBOT_DB_PATH` already lets the database move.
+# A container's root filesystem should hold nothing mutable, so the override
+# points this at the same `/data` volume the database already lives on.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOG_DIR = os.path.join(BASE_DIR, "logs")
+LOG_DIR = os.getenv("POTATOBOT_LOG_DIR", os.path.join(BASE_DIR, "logs"))
 
 LOG_FORMAT = logging.Formatter(
     "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",

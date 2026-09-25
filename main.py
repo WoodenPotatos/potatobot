@@ -31,7 +31,7 @@ if deployment_settings.dashboard_enabled:
 
 from core import logging_setup
 from core.bounded import BoundedCooldownMap
-from cogs.utils import config, reload_config, t
+from cogs.utils import t
 from discord.ext import commands
 
 # Configure logging before the bot starts so startup and migration failures are
@@ -474,15 +474,14 @@ async def reload(ctx, cog_name: str):
 @bot.command(name="reloadconfig")
 @commands.is_owner()
 async def reload_config_cmd(ctx):
-    """Re-read the legacy fallback file and the stored settings.
+    """Force an immediate settings-cache refresh.
 
-    Settings converge on their own now — the poll notices a dashboard save
-    within a couple of seconds — so this is the manual "now, please" path and
-    the way to pick up a hand-edited `config.json`, which is still the fallback
-    for anything an installation has never saved.
+    Settings converge on their own — the poll notices a dashboard save within
+    a couple of seconds — so this is only the manual "now, please" path for
+    when a change was made outside this process, such as a repair written
+    through `database.set_guild_settings` directly.
     """
     try:
-        await asyncio.to_thread(reload_config)
         settings_cache.invalidate()
         await settings_cache.refresh([guild.id for guild in bot.guilds], force=True)
         await ctx.send(t("system.config_reloaded"))

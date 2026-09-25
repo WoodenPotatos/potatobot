@@ -5,13 +5,16 @@ from unittest.mock import patch
 
 from cogs.serverevents import ServerEvents
 from core import settings_cache
-from cogs.utils import config, is_premium, voice_reward_block
+from cogs.utils import is_premium, voice_reward_block
 
 
 class MemberAnnouncementTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        # These read channel settings, which resolve through the process-global
-        # cache before falling back to the patched `config`.
+        # These read channel settings through the process-global cache, seeded
+        # per test below rather than left to the registry default.
+        settings_cache.invalidate()
+
+    def tearDown(self):
         settings_cache.invalidate()
 
     def make_member(self, channel):
@@ -44,8 +47,8 @@ class MemberAnnouncementTests(unittest.IsolatedAsyncioTestCase):
         member = self.make_member(Channel())
         cog = ServerEvents(SimpleNamespace())
         globals_ = cog.on_member_join.__func__.__globals__
+        settings_cache.apply_changes(123, {"join_channel": {"value": 10}})
         with (
-            patch.dict(config, {"channels": {"join": 10}, "roles": {}}, clear=True),
             patch.dict(globals_, {"is_enabled": lambda *args: True}),
             patch.object(globals_["database"], "run", side_effect=database_run),
         ):
@@ -64,10 +67,8 @@ class MemberAnnouncementTests(unittest.IsolatedAsyncioTestCase):
         member = self.make_member(Channel())
         cog = ServerEvents(SimpleNamespace(get_channel=lambda channel_id: None))
         globals_ = cog.on_member_remove.__func__.__globals__
-        with (
-            patch.dict(config, {"channels": {"leave": 11}}, clear=True),
-            patch.dict(globals_, {"is_enabled": lambda *args: True}),
-        ):
+        settings_cache.apply_changes(123, {"leave_channel": {"value": 11}})
+        with patch.dict(globals_, {"is_enabled": lambda *args: True}):
             await cog.on_member_remove(member)
         self.assertEqual(len(sent), 1)
 

@@ -75,11 +75,11 @@ def render_install() -> str:
         "```",
         "",
         "Runs on a headless Linux server under systemd. Requires Python"
-        " 3.12–3.14. `config.json` is optional: it is only a fallback for a"
-        " setting an installation has never saved, and"
-        " `python scripts/import_config.py` retires it. The full walkthrough —"
-        " Discord application, intents, OAuth, HTTPS, systemd and the guild setup"
-        " check — is in [docs/installation.md](docs/installation.md).",
+        " 3.12–3.14. Every setting lives in SQLite from the start and is"
+        " editable from the dashboard once it is running. The full"
+        " walkthrough — Discord application, intents, OAuth, HTTPS, systemd"
+        " and the guild setup check — is in"
+        " [docs/installation.md](docs/installation.md).",
     ])
 
 

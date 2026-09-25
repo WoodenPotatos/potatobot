@@ -171,6 +171,11 @@
                         <svg class="ic" aria-hidden="true"><use href="#ic-games"></use></svg>
                         <span data-i18n="dashboard.nav_minigames"></span>
                     </button>
+                    <button type="button" class="nav-item" data-feature="patchbot"
+                            data-page="patchbot" data-category="patchbot">
+                        <svg class="ic" aria-hidden="true"><use href="#ic-ch-news"></use></svg>
+                        <span data-i18n="dashboard.nav_patchbot"></span>
+                    </button>
                 </div>
 
                 <div class="nav-group" data-group="moderation">
@@ -412,6 +417,15 @@
                         </div>
                         <div class="table-wrap" id="shop-items"></div>
                     </div>
+                    <div class="card" id="shop-preview-card">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.shop_preview_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.shop_preview_hint"></p>
+                            </div>
+                        </div>
+                        <div id="shop-preview"></div>
+                    </div>
                     <!-- The creator renders in place of the list, the way the
                          content builders do. -->
                     <div class="card accented hidden" id="shop-item-editor"></div>
@@ -426,6 +440,45 @@
                             </div>
                         </div>
                         <div class="table-wrap" id="fulfillment-list"></div>
+                    </div>
+                    <div class="card accented">
+                        <div class="card-head">
+                            <div>
+                                <h2 class="display" data-i18n="dashboard.manual_grant_heading"></h2>
+                                <p class="card-hint" data-i18n="dashboard.manual_grant_hint"></p>
+                            </div>
+                        </div>
+                        <form id="manual-grant-form">
+                            <div class="form-grid">
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.manual_grant_user_id"></span>
+                                    <input name="user_id" type="text" required
+                                           inputmode="numeric" pattern="[0-9]+" maxlength="24">
+                                </label>
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.column_asset"></span>
+                                    <select name="asset_type">
+                                        <option value="emoji" data-i18n="dashboard.item_asset_types.emoji"></option>
+                                        <option value="sticker" data-i18n="dashboard.item_asset_types.sticker"></option>
+                                        <option value="sound" data-i18n="dashboard.item_asset_types.sound"></option>
+                                    </select>
+                                </label>
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.discord_item_id"></span>
+                                    <input name="discord_item_id" type="text" required
+                                           inputmode="numeric" pattern="[0-9]+" maxlength="24">
+                                </label>
+                                <label class="input-group">
+                                    <span class="field-label" data-i18n="dashboard.manual_grant_days"></span>
+                                    <input name="duration_days" type="number" min="1" max="3650"
+                                           value="30" required>
+                                </label>
+                            </div>
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-primary"
+                                        data-i18n="dashboard.manual_grant_submit"></button>
+                            </div>
+                        </form>
                     </div>
                     <div class="card">
                         <div class="card-head">

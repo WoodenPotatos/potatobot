@@ -566,6 +566,116 @@ class GachaBannerTests(unittest.TestCase):
         self.assertEqual("legacy", banner["display_name"])
 
 
+class GachaBannerScheduleTests(unittest.TestCase):
+    """`starts_at`/`ends_at` narrow `enabled` rather than replacing it."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "banners.db")
+        database.initialize_database()
+        database.register_guild(10, "Gacha Guild")
+        with database.get_connection() as conn:
+            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 1000000)")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _create(self, starts_at=None, ends_at=None, enabled=True):
+        return database.create_gacha_banner(
+            10, 99, "summer", "Summer",
+            json.loads(json.dumps(database.DEFAULT_GACHA_CONFIG)),
+            enabled=enabled, starts_at=starts_at, ends_at=ends_at,
+        )
+
+    def test_a_schedule_less_banner_behaves_exactly_as_before(self):
+        self._create()
+        banner = database.get_gacha_banner(10, "summer")
+        self.assertEqual("live", banner["status"])
+        self.assertTrue(banner["pullable"])
+        result = database.perform_gacha_pulls(10, 1, 1, "summer")
+        self.assertTrue(result["purchased"])
+
+    def test_a_banner_not_yet_started_is_not_pullable(self):
+        self._create(starts_at="2099-01-01T00:00:00+00:00")
+        banner = database.get_gacha_banner(10, "summer")
+        self.assertEqual("scheduled", banner["status"])
+        self.assertFalse(banner["pullable"])
+        result = database.perform_gacha_pulls(10, 1, 1, "summer")
+        self.assertFalse(result["purchased"])
+        self.assertEqual("banner_not_started", result["reason"])
+
+    def test_a_banner_past_its_end_is_not_pullable(self):
+        self._create(ends_at="2000-01-01T00:00:00+00:00")
+        banner = database.get_gacha_banner(10, "summer")
+        self.assertEqual("expired", banner["status"])
+        self.assertFalse(banner["pullable"])
+        result = database.perform_gacha_pulls(10, 1, 1, "summer")
+        self.assertFalse(result["purchased"])
+        self.assertEqual("banner_expired", result["reason"])
+
+    def test_disabled_overrides_an_otherwise_active_window(self):
+        """The manual switch still wins -- a schedule narrows `enabled`, it does
+        not replace it."""
+        self._create(starts_at="2000-01-01T00:00:00+00:00",
+                     ends_at="2099-01-01T00:00:00+00:00", enabled=False)
+        banner = database.get_gacha_banner(10, "summer")
+        self.assertEqual("disabled", banner["status"])
+        self.assertFalse(banner["pullable"])
+        result = database.perform_gacha_pulls(10, 1, 1, "summer")
+        self.assertFalse(result["purchased"])
+        self.assertEqual("banner_disabled", result["reason"])
+
+    def test_an_active_window_is_pullable(self):
+        self._create(starts_at="2000-01-01T00:00:00+00:00",
+                     ends_at="2099-01-01T00:00:00+00:00")
+        banner = database.get_gacha_banner(10, "summer")
+        self.assertEqual("live", banner["status"])
+        result = database.perform_gacha_pulls(10, 1, 1, "summer")
+        self.assertTrue(result["purchased"])
+
+    def test_a_reversed_schedule_is_refused_by_both_writers(self):
+        with self.assertRaises(database.ValidationError) as created:
+            self._create(starts_at="2099-01-01T00:00:00+00:00",
+                         ends_at="2000-01-01T00:00:00+00:00")
+        self.assertEqual("gacha_banner_schedule_order", created.exception.reason)
+
+        self._create()
+        with self.assertRaises(database.ValidationError) as saved:
+            database.set_gacha_banner(
+                10, 99, True, json.loads(json.dumps(database.DEFAULT_GACHA_CONFIG)),
+                1, banner_key="summer",
+                starts_at="2099-01-01T00:00:00+00:00",
+                ends_at="2000-01-01T00:00:00+00:00",
+            )
+        self.assertEqual("gacha_banner_schedule_order", saved.exception.reason)
+
+    def test_an_unparsable_bound_is_refused(self):
+        with self.assertRaises(database.ValidationError) as error:
+            self._create(starts_at="not a timestamp")
+        self.assertEqual("gacha_banner_schedule_invalid", error.exception.reason)
+
+    def test_a_standard_banner_outside_its_own_schedule_does_not_split(self):
+        """The standard banner's own window has to hold too, not just
+        `enabled`, or a featured banner would draw against a pool that is not
+        currently live."""
+        featured_config = json.loads(json.dumps(database.DEFAULT_GACHA_CONFIG))
+        featured_config["rewards"]["5"][0]["featured"] = True
+        database.set_gacha_banner(
+            10, 99, True, json.loads(json.dumps(database.DEFAULT_GACHA_CONFIG)), 0,
+            starts_at="2099-01-01T00:00:00+00:00",
+        )
+        database.create_gacha_banner(
+            10, 99, "event", "Event", featured_config, enabled=True,
+        )
+        # The standard banner is enabled but not yet in its window, so this
+        # must not raise even though a featured entry exists -- no split,
+        # only the event banner's own table.
+        result = database.perform_gacha_pulls(10, 1, 10, "event")
+        self.assertTrue(result["purchased"])
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -1202,13 +1312,14 @@ class PityHistoryTests(unittest.TestCase):
         self.assertEqual(1, len(database.get_five_star_history(20, 1)))
 
 
-class GachaAssetsSurviveRentalsBeingOffTests(unittest.TestCase):
-    """A won emoji must still be made and still expire with `rentals` off.
+class GachaAssetsSurviveShopBeingOffTests(unittest.TestCase):
+    """A won emoji must still be made and still expire with `shop` off.
 
-    Disabling `shop` cascades to `rentals`, which is what a gacha-only guild
-    does — sell nothing, hand everything out through the gacha. A `emoji_30d`,
-    `sticker_180d` or `sound_30d` reaches a member through machinery that only
-    *looks* like the shop's:
+    There is no separate `rentals` flag any more — it gated nothing a reader
+    could reach independently of `shop`, so it was folded in. A gacha-only
+    guild sells nothing and hands everything out through the gacha instead. A
+    `emoji_30d`, `sticker_180d` or `sound_30d` reaches a member through
+    machinery that only *looks* like the shop's:
 
         gacha voucher  -> /redeem -> fulfillment_requests
                        -> Redeems page (no data-feature, the route checks only
@@ -1216,14 +1327,14 @@ class GachaAssetsSurviveRentalsBeingOffTests(unittest.TestCase):
                        -> timed_entitlements
                        -> cogs/gacha.py entitlement_cleanup, no flag
 
-        shop rental    -> /shop (rentals) -> /rent_start (rentals)
+        shop rental    -> /shop (shop) -> /rent_start (shop)
                        -> rented_items
                        -> cogs/shop.py rental_cleanup, no flag
 
     Two systems producing the same kind of Discord asset, which is why
     `CLAUDE.md` says never to infer ownership from the reward type. Nothing
     pinned it: `OBLIGATION_PAGES` protects the Redeems *nav entry*, not the
-    route, so a `rentals` check added to `complete_guild_fulfillment` — "it is
+    route, so a `shop` check added to `complete_guild_fulfillment` — "it is
     a rental after all" — would silently strand every asset voucher a member
     had already spent a pull on. Nothing raises; the request just stays open.
     """
@@ -1252,13 +1363,12 @@ class GachaAssetsSurviveRentalsBeingOffTests(unittest.TestCase):
             conn.commit()
         return voucher_id
 
-    def test_the_whole_path_works_with_shop_and_rentals_disabled(self):
-        """The behavioural one. Every flag a shop rental needs is off."""
+    def test_the_whole_path_works_with_shop_disabled(self):
+        """The behavioural one. The flag a shop rental needs is off."""
         from core import feature_access
 
         feature_access.seed_cached_feature(self.GUILD, "shop", False)
-        feature_access.seed_cached_feature(self.GUILD, "rentals", False)
-        self.assertFalse(feature_access.is_enabled(self.GUILD, "rentals"))
+        self.assertFalse(feature_access.is_enabled(self.GUILD, "shop"))
 
         voucher = self.grant_asset_voucher()
         redeemed = database.redeem_voucher(self.GUILD, self.MEMBER, voucher)
@@ -1308,36 +1418,110 @@ class GachaAssetsSurviveRentalsBeingOffTests(unittest.TestCase):
         end = source.index("\ndef ", start + 1)
         body = "\n".join(line for line in source[start:end].splitlines()
                          if not line.strip().startswith("#"))
-        for flag in ("rentals", "shop"):
+        for flag in ("shop",):
             with self.subTest(flag=flag):
                 self.assertNotIn(
                     f'"{flag}"', body,
                     f"a {flag!r} gate here strands every asset voucher a member "
                     "has already paid a pull for")
 
-    def test_the_rentals_flag_has_exactly_one_reader(self):
-        """The premise the reasoning above rests on. If a second reader
-        appears, whoever added it has to decide whether the gacha is affected
-        rather than discovering it from a member's missing emoji."""
-        import re
 
-        # An actual gate, not a `COMMAND_POLICIES` entry naming the same
-        # feature — `feature_access.py` declares `rent_start` under `rentals`
-        # and is not gating anything.
-        gate = re.compile(r'(?:is_enabled|require_interaction_feature)'
-                          r'\([^)]*["\']rentals["\']')
-        readers = []
-        for path in (sorted(ROOT.glob("cogs/*.py")) + sorted(ROOT.glob("core/*.py"))
-                     + sorted(ROOT.glob("*.py"))):
-            body = "\n".join(line for line in
-                             path.read_text(encoding="utf-8").splitlines()
-                             if not line.strip().startswith("#"))
-            if gate.search(body):
-                readers.append(path.name)
+class ManualEntitlementGrantTests(unittest.TestCase):
+    """The Redeems page's "grant manually" path: no voucher, no pull, staff
+    already made the Discord asset and just wants the timer to start.
+
+    The hazard this exists to guard: `get_active_entitlements` and
+    `get_expired_entitlements` derive `source_type` from a `LEFT JOIN` onto
+    `reward_vouchers`, which a voucherless row joins to NULL. Without writing
+    `source_type` directly onto the row, `entitlement_cleanup`'s
+    `source_type != "gacha"` skip (now `not in {"gacha", "manual"}`) would
+    silently skip a manual grant forever -- the exact outlives-its-record
+    failure this table exists to prevent.
+    """
+
+    GUILD = 5151
+    MEMBER = 88
+    STAFF = 1
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "manual_grants.db")
+        database.initialize_database()
+        database.register_guild(self.GUILD, "Guild")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def test_it_writes_a_row_with_no_voucher(self):
+        result = database.grant_manual_entitlement(
+            self.GUILD, self.MEMBER, "sticker", "999", 30, self.STAFF)
+        self.assertTrue(result["granted"], result)
+        with database.get_connection() as conn:
+            row = conn.execute(
+                "SELECT entitlement_key, discord_item_id, source_voucher_id, "
+                "source_type, granted_by, status FROM timed_entitlements "
+                "WHERE entitlement_id = ?", (result["entitlement_id"],)
+            ).fetchone()
         self.assertEqual(
-            ["shop.py"], readers,
-            "the rentals flag should gate only cogs/shop.py's purchase check; "
-            f"found {readers}")
+            ("sticker", "999", None, "manual", self.STAFF, "active"), row)
+
+    def test_a_second_active_grant_of_the_same_asset_is_refused(self):
+        first = database.grant_manual_entitlement(
+            self.GUILD, self.MEMBER, "emoji", "111", 30, self.STAFF)
+        self.assertTrue(first["granted"])
+        second = database.grant_manual_entitlement(
+            self.GUILD, 999999, "emoji", "111", 7, self.STAFF)
+        self.assertEqual(
+            {"granted": False, "reason": "duplicate_active"}, second,
+            "two live entitlements guarding the same Discord asset means the "
+            "first expiry to run deletes it out from under the second")
+
+    def test_a_re_grant_is_allowed_once_the_first_has_expired(self):
+        database.grant_manual_entitlement(
+            self.GUILD, self.MEMBER, "emoji", "222", 30, self.STAFF)
+        with database.get_connection() as conn:
+            conn.execute("UPDATE timed_entitlements SET status = 'expired'")
+            conn.commit()
+        second = database.grant_manual_entitlement(
+            self.GUILD, self.MEMBER, "emoji", "222", 30, self.STAFF)
+        self.assertTrue(second["granted"], second)
+
+    def test_it_reports_as_manual_in_the_active_list(self):
+        database.grant_manual_entitlement(
+            self.GUILD, self.MEMBER, "sound", "333", 30, self.STAFF)
+        rows = database.get_active_entitlements(self.GUILD, "2000-01-01T00:00:00+00:00")
+        self.assertEqual(1, len(rows))
+        self.assertEqual("manual", rows[0]["source_type"])
+        self.assertEqual(self.STAFF, rows[0]["granted_by"])
+
+    def test_it_is_found_once_expired_with_the_right_source(self):
+        """The COALESCE this depends on: a voucherless row's `source_type`
+        must come from the row itself, not from the NULL a LEFT JOIN onto
+        `reward_vouchers` would otherwise produce."""
+        database.grant_manual_entitlement(
+            self.GUILD, self.MEMBER, "emoji", "444", 30, self.STAFF)
+        with database.get_connection() as conn:
+            conn.execute("UPDATE timed_entitlements SET expires_at = '2020-01-01'")
+            conn.commit()
+        expired = database.get_expired_entitlements("2026-12-31T00:00:00+00:00")
+        self.assertEqual(1, len(expired))
+        self.assertEqual("manual", expired[0]["source_type"])
+        self.assertEqual("emoji", expired[0]["entitlement_key"])
+
+    def test_the_cleanup_loop_does_not_skip_manual_sourced_rows(self):
+        """Structural, against comment-stripped source: this is the line that
+        would silently strand every manual grant if it regressed to
+        `!= "gacha"`, since a voucherless row would then never be revoked."""
+        import inspect
+
+        from cogs.gacha import Gacha
+
+        source = inspect.getsource(Gacha.entitlement_cleanup.coro)
+        body = "\n".join(line for line in source.splitlines()
+                         if not line.strip().startswith("#"))
+        self.assertIn('{"gacha", "manual"}', body)
 
 
 class RewardLabelResolutionTests(unittest.TestCase):
@@ -1436,3 +1620,63 @@ class InventoryEmbedFieldChunkingTests(unittest.TestCase):
         self.assertIsNotNone(
             match, "the last field must say how many lines were hidden")
         self.assertEqual(len(lines), shown + int(match.group(1)))
+
+
+class PityHistoryFieldTests(unittest.TestCase):
+    """`/pity` shows ten 5-stars now instead of five, and a custom reward's
+    name plus a banner's display name are both free text up to 64 characters
+    -- ten worst-case lines can run past Discord's 1024-character field limit,
+    which would fail the whole command rather than merely looking wrong."""
+
+    def _entry(self, reward_key="big_vault", banner_key="standard",
+               pity=1, hard_pity=False, featured=False):
+        return {"banner_key": banner_key, "reward_key": reward_key,
+               "pity": pity, "hard_pity": hard_pity, "featured": featured,
+               "featured_guaranteed": False, "created_at": "2026-01-01T00:00:00+00:00"}
+
+    def test_empty_history_reads_as_the_empty_placeholder(self):
+        from cogs.gacha import _pity_history_field
+
+        self.assertTrue(_pity_history_field([], {}))
+
+    def test_a_normal_history_shows_every_line(self):
+        from cogs.gacha import _pity_history_field
+
+        history = [self._entry(pity=n) for n in range(1, 6)]
+        value = _pity_history_field(history, {})
+        self.assertEqual(5, value.count("\n") + 1)
+        self.assertLessEqual(len(value), 1024)
+
+    def test_ten_worst_case_lines_stay_under_the_discord_limit(self):
+        """A custom item's name and a banner's display name are each bounded
+        at 64 characters, not at whatever fits comfortably on one line."""
+        from cogs.gacha import PITY_HISTORY_LIMIT, _pity_history_field
+
+        long_name = "x" * 64
+        custom_items = {"long_custom_item": long_name}
+        history = [
+            self._entry(reward_key="long_custom_item", banner_key=long_name,
+                       pity=n)
+            for n in range(1, PITY_HISTORY_LIMIT + 1)
+        ]
+        value = _pity_history_field(history, custom_items)
+        self.assertLessEqual(len(value), 1024)
+
+    def test_hidden_lines_are_reported_rather_than_dropped(self):
+        import re
+
+        from cogs.gacha import PITY_HISTORY_LIMIT, _pity_history_field
+
+        long_name = "x" * 64
+        custom_items = {"long_custom_item": long_name}
+        history = [
+            self._entry(reward_key="long_custom_item", banner_key=long_name,
+                       pity=n)
+            for n in range(1, PITY_HISTORY_LIMIT + 1)
+        ]
+        value = _pity_history_field(history, custom_items)
+        match = re.search(r"\+(\d+)", value.rsplit("\n", 1)[-1])
+        self.assertIsNotNone(
+            match, "a truncated field must say how many lines were hidden")
+        shown = value.count("\n") + 1 - 1  # minus the truncation note itself
+        self.assertEqual(PITY_HISTORY_LIMIT, shown + int(match.group(1)))

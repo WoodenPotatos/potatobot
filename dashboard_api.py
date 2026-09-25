@@ -5,6 +5,7 @@ Rules that bind changes here: docs/subsystems/dashboard.md
 
 import logging
 import asyncio
+import base64
 import concurrent.futures
 import copy
 import hashlib
@@ -24,11 +25,6 @@ import requests
 import discord
 from cogs.utils import (
     available_languages,
-    # Read-only. Nothing in this process writes the legacy file any more, so the
-    # lock and the atomic-replace helpers are no longer imported: the lock
-    # existed to stop two writers dropping each other's keys, and there is one
-    # fewer writer than that.
-    config,
     get_dashboard_locale_catalog,
     t,
 )
@@ -47,6 +43,7 @@ from core.managed_messages import (
     render_managed_message,
 )
 from core import item_catalog
+from core.supported_games import SUPPORTED_GAME_KEYS
 from core import permission_audit
 from core import settings_cache
 from core.deployment import settings as deployment_settings
@@ -55,7 +52,6 @@ from core.feature_access import is_enabled, update_cached_features
 # `settings_registry` and would shadow it.
 from core.settings_registry import (FEATURE_GROUP_ORDER, SETTING_DEFINITIONS,
                                SettingScope, SettingValueType, wire_json_shape)
-from core.settings_registry import legacy_config_value as settings_registry_legacy_config_value
 from core.version import version_display
 
 from core import logging_setup
@@ -297,7 +293,12 @@ def _server_access_token(session_id: str) -> str | None:
             f"{DISCORD_API_ENDPOINT}/oauth2/token",
             data={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
                   "grant_type": "refresh_token", "refresh_token": refresh_token},
-            headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=20,
+            # This refresh runs on nearly every guild-scoped request via
+            # `recheck_mutation_guild_permissions`, not just at login, so its
+            # timeout is capped tighter than the one-time login exchange's --
+            # a hung Discord call here can otherwise starve the whole thread
+            # pool one request at a time.
+            headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=15,
         )
         response.raise_for_status()
         refreshed = response.json()
@@ -339,7 +340,7 @@ def _within_rate_limit(bucket: str, limit: int, window: int) -> bool:
 
 
 BRAND_AVATAR_DIR = os.path.dirname(os.path.abspath(__file__))
-BRAND_AVATAR_FILE = "potatobotpfp.png"
+BRAND_AVATAR_FILE = "potatobotpfp-icon.png"
 
 
 @app.route("/brand-avatar.png")
@@ -352,6 +353,12 @@ def brand_avatar():
     other people's artwork and are excluded from the published snapshot — the
     avatar is ours and ships with it. Cached hard because it changes about as
     often as the bot's identity does.
+
+    Served from a 128x128 pre-scaled sibling of `potatobotpfp.png` rather than
+    the 1081x1080 original, which is 756KB for a 34px mark and the favicon.
+    The original stays untouched at the root -- it is the README's front image
+    and may be the asset actually uploaded to Discord by hand, and resizing it
+    in place would have no way back from that.
     """
     path = os.path.join(BRAND_AVATAR_DIR, BRAND_AVATAR_FILE)
     if not os.path.isfile(path):
@@ -448,6 +455,15 @@ def login():
         return t("dashboard.oauth_not_configured"), 503
     state = secrets.token_urlsafe(32)
     session["oauth_state"] = state
+    # PKCE closes the authorization-code-interception class: `state` alone
+    # proves the callback matches the request that started it, not that the
+    # code was ever ours. The verifier is stored the same way `state` is and
+    # never leaves this server; only its hash reaches Discord.
+    code_verifier = secrets.token_urlsafe(64)
+    session["oauth_code_verifier"] = code_verifier
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode()).digest()
+    ).decode().rstrip("=")
     parameters = urlencode(
         {
             "client_id": CLIENT_ID,
@@ -455,6 +471,8 @@ def login():
             "response_type": "code",
             "scope": "identify guilds",
             "state": state,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
         }
     )
     url = f"https://discord.com/oauth2/authorize?{parameters}"
@@ -465,6 +483,7 @@ def login():
 def callback():
     """Exchange the OAuth code and allow only the configured administrator."""
     expected_state = session.pop("oauth_state", None)
+    code_verifier = session.pop("oauth_code_verifier", None)
     supplied_state = request.args.get("state", "")
     if not expected_state or not hmac.compare_digest(expected_state, supplied_state):
         # A logged-in session is left alone. `SameSite=Lax` still sends the
@@ -472,6 +491,13 @@ def callback():
         # made-up state was enough to log an administrator out. Refusing the
         # exchange is all a bad state needs; an anonymous session is cleared as
         # before, so a half-finished login leaves nothing behind.
+        if session.get("logged_in") is not True:
+            session.clear()
+        return t("dashboard.oauth_invalid_state"), 400
+    if not code_verifier:
+        # A callback carrying a code but no matching verifier is exactly as
+        # suspect as one carrying a bad state -- the two are checked together
+        # and refused the same way, never separately reported.
         if session.get("logged_in") is not True:
             session.clear()
         return t("dashboard.oauth_invalid_state"), 400
@@ -488,9 +514,10 @@ def callback():
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": REDIRECT_URI,
+                "code_verifier": code_verifier,
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=20,
+            timeout=15,
         )
     except requests.RequestException:
         dashboard_logger.exception("Discord OAuth token request failed.")
@@ -509,7 +536,7 @@ def callback():
         user_response = requests.get(
             f"{DISCORD_API_ENDPOINT}/users/@me",
             headers={"Authorization": f"Bearer {access_token}"},
-            timeout=20,
+            timeout=15,
         )
     except requests.RequestException:
         dashboard_logger.exception("Discord user identity request failed.")
@@ -534,7 +561,7 @@ def callback():
             guild_response = requests.get(
                 f"{DISCORD_API_ENDPOINT}/users/@me/guilds",
                 headers={"Authorization": f"Bearer {access_token}"},
-                timeout=20,
+                timeout=15,
             )
         except requests.RequestException:
             dashboard_logger.exception("Discord user guild request failed.")
@@ -729,9 +756,12 @@ def _refresh_authorized_guilds(session_id: str) -> list[str] | None:
     token = _server_access_token(session_id)
     if not token:
         return None
+    # Same hot-path reasoning as the refresh above: a plain Discord GET
+    # normally answers in well under a second, so 5s is still generous while
+    # halving the worst case a slow Discord can hold this thread for.
     response = requests.get(
         f"{DISCORD_API_ENDPOINT}/users/@me/guilds",
-        headers={"Authorization": f"Bearer {token}"}, timeout=10,
+        headers={"Authorization": f"Bearer {token}"}, timeout=5,
     )
     response.raise_for_status()
     guilds = response.json()
@@ -1085,13 +1115,16 @@ def _resources_from_discord_rest(guild_id: int) -> dict | None:
         return None
     headers = {"Authorization": f"Bot {token}"}
     try:
+        # Sequential and each a plain Discord GET, so the same 5s bound as
+        # `_refresh_authorized_guilds` applies -- these two together are the
+        # worst case a slow Discord can hold one Waitress thread for.
         channels = requests.get(
             f"{DISCORD_API_ENDPOINT}/guilds/{guild_id}/channels",
-            headers=headers, timeout=10,
+            headers=headers, timeout=5,
         )
         roles = requests.get(
             f"{DISCORD_API_ENDPOINT}/guilds/{guild_id}/roles",
-            headers=headers, timeout=10,
+            headers=headers, timeout=5,
         )
         channels.raise_for_status()
         roles.raise_for_status()
@@ -1145,6 +1178,31 @@ CHANGELOG_PATH = os.path.join(
 )
 # The file changes only on deployment, but it is read on every page view.
 _changelog_cache = TtlCache(300, 4)
+# `beta` is the public repository's published line; see CLAUDE.md's
+# "Versioning and Release Channels" section.
+_REMOTE_CHANGELOG_URL = (
+    version.REPOSITORY_URL.replace("github.com", "raw.githubusercontent.com")
+    + "/beta/CHANGELOG.md"
+)
+
+
+def _fetch_remote_changelog() -> str | None:
+    """The public repository's own CHANGELOG.md, or `None` on any failure.
+
+    A public repository needs no credential, and this runs server-side, so
+    neither reason the local file used to be the only source still applies --
+    see `changelog()`'s own docstring. `None` covers a network failure, a
+    timeout, and a non-2xx response (`raise_for_status` folds the last of
+    those into `requests.RequestException` too), and the caller falls back to
+    the local file for all three rather than distinguishing them.
+    """
+    try:
+        response = requests.get(_REMOTE_CHANGELOG_URL, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException:
+        dashboard_logger.warning("Remote changelog fetch failed; using the local file.")
+        return None
+    return response.text
 
 
 def _parse_changelog(text: str) -> list[dict]:
@@ -1176,25 +1234,31 @@ def _parse_changelog(text: str) -> list[dict]:
 
 @app.route("/api/changelog")
 def changelog():
-    """Serve the deployed release notes.
+    """Serve the public repository's release notes, with a local fallback.
 
-    This is the changelog of the code that is actually running, read from the
-    checkout rather than fetched from a repository host: the dashboard has no
-    outbound allowance in its content policy, a private repository would need a
-    credential, and a remote copy could describe a version this installation is
-    not on.
+    Fetched from GitHub now that the public repository exists: it needs no
+    credential because it is public, and this fetch runs server-side, so the
+    front end's own outbound-allowance restriction (no markup sink, no host it
+    can reach directly) never applies to it -- that restriction is what kept
+    this route local-only before. The local `CHANGELOG.md` remains the
+    fallback for the two things a remote fetch cannot cover: GitHub being
+    unreachable, and a private or not-yet-promoted checkout whose own changes
+    have not reached the public `beta` branch yet.
     """
     if session.get("logged_in") is not True:
         return unauthorized_response()
     cached = _changelog_cache.get("releases")
     if cached is None:
-        try:
-            with open(CHANGELOG_PATH, encoding="utf-8") as handle:
-                cached = _parse_changelog(handle.read())
-        except OSError:
-            dashboard_logger.warning("Changelog file could not be read.")
-            return jsonify({"status": "error",
-                            "message": t("dashboard.changelog_unavailable")}), 503
+        text = _fetch_remote_changelog()
+        if text is None:
+            try:
+                with open(CHANGELOG_PATH, encoding="utf-8") as handle:
+                    text = handle.read()
+            except OSError:
+                dashboard_logger.warning("Changelog file could not be read.")
+                return jsonify({"status": "error",
+                                "message": t("dashboard.changelog_unavailable")}), 503
+        cached = _parse_changelog(text)
         _changelog_cache.put("releases", cached)
     return jsonify({"status": "success", "data": cached})
 
@@ -1446,7 +1510,14 @@ def require_bool(value):
     return value
 
 
-def _legacy_config_value(definition, guild_id: int):
+def _unsaved_setting_value(definition, guild_id: int):
+    """What a setting resolves to before a `guild_settings` row exists for it.
+
+    An `edited_elsewhere` setting's real value lives in its own per-guild
+    table (`shop_prices`, `rewards`), never in a row here, so those two are
+    read directly. Everything else is the registry default, matching
+    `settings_cache.setting` and `cogs.utils.guild_setting`.
+    """
     if definition.key.startswith("shop_price_"):
         item_key = definition.key.removeprefix("shop_price_")
         return database.run_read_sync(
@@ -1460,10 +1531,7 @@ def _legacy_config_value(definition, guild_id: int):
             definition.default, definition.default,
         )
         return coin if reward_type == "coin" else xp
-    # `config.json` is a read-only fallback now: nothing writes it, and it only
-    # answers for a setting an installation has never saved. One copy of that
-    # walk, shared with the runtime resolver and the permission audit.
-    return settings_registry_legacy_config_value(definition, config)
+    return definition.default
 
 
 def _mirror_price_and_reward_tables(guild_id: int, changed: dict):
@@ -1522,6 +1590,11 @@ def settings_registry():
         # render order has to come from the registry too rather than being a
         # second list kept in step by hand in JavaScript.
         "feature_group_order": list(FEATURE_GROUP_ORDER),
+        # Keys only, in display order -- the client already has the full
+        # `dashboard` locale catalog from /api/locale and resolves
+        # `dashboard.game_names.<key>` itself, exactly like feature_group_order
+        # hands over keys rather than resolved labels.
+        "supported_games": list(SUPPORTED_GAME_KEYS),
     })
 
 
@@ -1809,7 +1882,7 @@ def _wire_value(definition, value):
     channel and the selector shows it as unavailable, and saving writes the
     rounded value back. Discord's own API sends every snowflake as a string for
     this reason; so does this one. Storage is unaffected: the values stay
-    integers in `guild_settings` and in `config.json`.
+    integers in `guild_settings`.
     """
     # A JSON setting can carry ids inside it, and they round exactly the same
     # way — the bug does not care how deep the snowflake sits. Where each shape
@@ -1837,7 +1910,7 @@ def guild_settings(guild_id):
                     continue
                 row = stored.get(key)
                 row = row or {
-                    "value": _legacy_config_value(definition, guild_id),
+                    "value": _unsaved_setting_value(definition, guild_id),
                     "revision": 0,
                 }
                 data[key] = {**row,
@@ -1878,7 +1951,6 @@ def guild_settings(guild_id):
         settings_cache.apply_changes(guild_id, result)
         # The price and reward tables are separate per-guild rows that the shop
         # and the reward paths read directly, so they still have to be written.
-        # `config.json` no longer is: nothing writes it any more.
         if not app.config.get("TESTING"):
             _mirror_price_and_reward_tables(
                 guild_id, {key: row["value"] for key, row in result.items()}
@@ -1918,10 +1990,67 @@ def guild_permission_report(guild_id):
         database.run_read_sync(database.get_feature_states, guild_id),
         permission_audit.resolved_settings(
             database.run_read_sync(database.get_guild_settings, guild_id),
-            config,
         ),
     )
     return jsonify({"status": "success", "data": report.as_dict()})
+
+
+@app.route("/api/guilds/<int:guild_id>/permissions/repair", methods=["POST"])
+def repair_guild_channel_permission(guild_id):
+    """Queue a bot-side fix for one `channel_missing_permission` finding.
+
+    Only the bot's own capability gap is ever repaired this way -- a
+    member-facing finding names someone else's grant, and this route has no
+    path that can reach one, since it only ever queues the exact permission
+    tuple a live `channel_missing_permission` finding carries. The finding is
+    re-checked live rather than trusted from what the client last saw, so a
+    channel already fixed by hand (or one that changed shape) cannot be
+    "repaired" again on stale data.
+    """
+    if not is_guild_authorized(guild_id):
+        return unauthorized_response()
+    try:
+        payload = require_json_object()
+        require_exact_keys(payload, {"channel_id", "subject", "confirm"})
+        if require_bool(payload["confirm"]) is not True:
+            raise RequestValidationError("dashboard.errors.confirmation_required")
+        channel_id = _snowflake_arg(payload["channel_id"])
+        subject = payload["subject"]
+        if not isinstance(subject, str) or not subject:
+            raise RequestValidationError("dashboard.errors.permission_subject_invalid")
+
+        guild = _dashboard_bot.get_guild(guild_id) if _dashboard_bot else None
+        if guild is None or guild.me is None:
+            return jsonify({"status": "error",
+                            "message": t("dashboard.resources_unavailable")}), 503
+        report = permission_audit.build_report(
+            guild,
+            database.run_read_sync(database.get_feature_states, guild_id),
+            permission_audit.resolved_settings(
+                database.run_read_sync(database.get_guild_settings, guild_id),
+            ),
+        )
+        finding = next(
+            (item for item in report.findings
+             if item.code == "channel_missing_permission"
+             and item.channel_id == channel_id and item.subject == subject),
+            None,
+        )
+        if finding is None:
+            raise RequestValidationError("dashboard.errors.permission_finding_stale")
+
+        action_id = database.queue_control_action(
+            guild_id, actor_id(), "repair_channel_permission",
+            {"channel_id": channel_id, "permissions": list(finding.permissions),
+             "setting_key": subject},
+        )
+        return jsonify({"status": "success",
+                        "message": t("dashboard.permission_repair_queued"),
+                        "data": {"action_id": action_id}})
+    except ValueError as error:
+        return invalid_request_response(error)
+    except database.DatabaseOperationError:
+        return internal_error_response("permission repair")
 
 
 @app.route("/api/guilds/<int:guild_id>/audit")
@@ -2109,7 +2238,7 @@ def guild_gacha(guild_id):
     try:
         payload = require_json_object()
         require_exact_keys(
-            payload, {"enabled", "config", "revision"},
+            payload, {"enabled", "config", "revision", "starts_at", "ends_at"},
             optional={"banner_key", "display_name"},
         )
         require_bool(payload["enabled"])
@@ -2122,10 +2251,15 @@ def guild_gacha(guild_id):
         display_name = payload.get("display_name")
         if display_name is not None and not isinstance(display_name, str):
             raise RequestValidationError("dashboard.errors.banner_name_invalid")
+        # `validate_gacha_banner_schedule` (inside `set_gacha_banner`) type-checks
+        # and parses both bounds, raising the typed `ValidationError` the
+        # `except ValueError` below already maps to a 4xx -- no separate check
+        # needed here.
         result = database.set_gacha_banner(
             guild_id, actor_id(), payload["enabled"],
             payload["config"], payload["revision"],
             banner_key=banner_key, display_name=display_name,
+            starts_at=payload["starts_at"], ends_at=payload["ends_at"],
         )
         return jsonify({"status": "success", "message": t("dashboard.gacha_saved"),
                         "data": result})
@@ -2961,10 +3095,55 @@ def guild_entitlements(guild_id):
             "source_type": row["source_type"],
             "discord_item_id": (str(row["discord_item_id"])
                                 if row["discord_item_id"] else None),
+            "granted_by": (str(row["granted_by"]) if row["granted_by"] else None),
             "expires_at": row["expires_at"],
             "remaining_seconds": remaining,
         })
     return jsonify({"status": "success", "data": data})
+
+
+@app.route("/api/guilds/<int:guild_id>/entitlements", methods=["POST"])
+def grant_guild_entitlement(guild_id):
+    """Staff-side "award it outright" path for an asset with no voucher.
+
+    Same auth level as the rest of the Redeems page -- no feature flag, because
+    this page is one of `OBLIGATION_PAGES` and clearing or creating a grant here
+    is a staff action, not a togglable feature surface.
+    """
+    if not is_guild_authorized(guild_id):
+        return unauthorized_response()
+    try:
+        payload = require_json_object()
+        require_exact_keys(
+            payload, {"user_id", "asset_type", "discord_item_id", "duration_days"})
+        try:
+            user_id = _snowflake_arg(payload["user_id"])
+        except ValueError:
+            raise RequestValidationError("dashboard.errors.manual_grant_user_id_invalid") from None
+        asset_type = payload["asset_type"]
+        if asset_type not in {"emoji", "sticker", "sound"}:
+            raise RequestValidationError("dashboard.errors.manual_grant_asset_type_invalid")
+        discord_item_id = str(payload["discord_item_id"])
+        if not discord_item_id.isdigit():
+            raise RequestValidationError("dashboard.errors.discord_item_id_invalid")
+        if len(discord_item_id) > DISCORD_ID_MAX_LENGTH:
+            raise RequestValidationError("dashboard.errors.discord_item_id_too_long")
+        duration_days = payload["duration_days"]
+        if (
+            isinstance(duration_days, bool)
+            or not isinstance(duration_days, int)
+            or not 1 <= duration_days <= 3650
+        ):
+            raise RequestValidationError("dashboard.errors.manual_grant_duration_invalid")
+        result = database.grant_manual_entitlement(
+            guild_id, user_id, asset_type, discord_item_id, duration_days, actor_id())
+        if not result["granted"]:
+            return jsonify({"status": "error",
+                            "message": t("dashboard.errors.manual_grant_duplicate")}), 409
+        return jsonify({"status": "success", "message": t("dashboard.manual_grant_success"),
+                        "data": result})
+    except ValueError as error:
+        return invalid_request_response(error)
 
 
 @app.route("/api/guilds/<int:guild_id>/fulfillment/<int:request_id>", methods=["POST"])
@@ -3132,6 +3311,34 @@ async def execute_managed_delete(channel, action):
     return None
 
 
+async def execute_channel_permission_repair(channel, action):
+    """Grant the bot's own missing permission(s) on one channel.
+
+    `permissions` in the payload is the audit's own tuple, captured the
+    moment the repair was queued and re-validated against `VALID_FLAGS`
+    here -- never operator free text, and never trusted blindly even so.
+    `set_permissions`'s keyword form merges into the bot's existing
+    overwrite, leaving every other entry on the channel, and everyone else's
+    permissions, untouched.
+    """
+    payload = action["payload"]
+    names = payload.get("permissions") or []
+    valid = discord.Permissions.VALID_FLAGS
+    if not names or any(name not in valid for name in names):
+        return "internal_error"
+    await channel.set_permissions(
+        channel.guild.me,
+        reason=f"Dashboard permission repair (actor={action['actor_id']})",
+        **{name: True for name in names},
+    )
+    await database.run_write(
+        database.record_settings_audit, channel.guild.id, action["actor_id"],
+        "permission.repair", payload.get("setting_key") or "",
+        None, {"channel_id": channel.id, "permissions": names},
+    )
+    return None
+
+
 async def control_action_worker(bot):
     """Execute queued Discord publishes after live permission and feature checks."""
     next_prune = 0.0
@@ -3168,6 +3375,24 @@ async def control_action_worker(bot):
             guild = bot.get_guild(action["guild_id"])
             actor = guild.get_member(action["actor_id"]) if guild else None
             channel = guild.get_channel(action["payload"].get("channel_id")) if guild else None
+            if action["action_type"] == "repair_channel_permission":
+                # Editing a channel's own overwrites needs `manage_roles`
+                # there, not `send_messages`, and applies to any guild
+                # channel kind -- not only a `TextChannel` -- so this cannot
+                # share the preamble below.
+                if not guild or not actor or not actor.guild_permissions.manage_guild:
+                    error_code = "permission_denied"
+                elif channel is None:
+                    error_code = "channel_unavailable"
+                elif not channel.permissions_for(guild.me).manage_roles:
+                    error_code = "bot_permission_denied"
+                else:
+                    error_code = await execute_channel_permission_repair(channel, action)
+                await database.run_write(
+                    database.finish_control_action, action["action_id"],
+                    error_code is None, error_code,
+                )
+                continue
             if not guild or not actor or not actor.guild_permissions.manage_guild:
                 error_code = "permission_denied"
             elif not isinstance(channel, discord.TextChannel):

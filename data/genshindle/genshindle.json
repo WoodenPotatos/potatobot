@@ -1081,6 +1081,24 @@
       "version": 700,
       "weapon": "weapon_c7318d9d27",
       "weekly_boss": "weekly_boss_d486a0ba89"
+    },
+    "vesna": {
+      "element": "element_580ad862fd",
+      "gender": "gender_476d159014",
+      "rarity": "rarity_dc34a696fd",
+      "region": "region_8248ad9e4f",
+      "version": 701,
+      "weapon": "weapon_574ad23629",
+      "weekly_boss": "weekly_boss_f3713c6b96"
+    },
+    "vodyanitsa": {
+      "element": "element_7ff7149bc8",
+      "gender": "gender_476d159014",
+      "rarity": "rarity_dc34a696fd",
+      "region": "region_8248ad9e4f",
+      "version": 701,
+      "weapon": "weapon_71fe451911",
+      "weekly_boss": "weekly_boss_f28e443da3"
     }
   }
 }

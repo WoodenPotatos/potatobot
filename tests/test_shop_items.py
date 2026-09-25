@@ -637,3 +637,84 @@ class ShopMenuSectionTests(unittest.TestCase):
         after = view.category_select, view.item_select, view.buy_btn, view.back_btn
         for first, second in zip(before, after):
             self.assertIs(first, second)
+
+
+class ShopHideCommandTests(unittest.IsolatedAsyncioTestCase):
+    """`/shop_hide`, the break-glass path for `shop_hidden_items`.
+
+    Calls the command's own callback directly rather than going through
+    discord.py's dispatch, so `@is_staff()` never runs -- this pins the write
+    logic, not the permission gate, exactly as `apply_admin_level_change` is
+    tested in isolation from `/setlevel` in `tests/test_level_admin.py`.
+    """
+
+    def setUp(self):
+        from unittest.mock import AsyncMock
+        from types import SimpleNamespace
+        from core import settings_cache
+
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        settings_cache.invalidate()
+
+        self.settings_cache = settings_cache
+        self.ctx = SimpleNamespace(
+            guild=SimpleNamespace(id=1), author=SimpleNamespace(id=7),
+            send=AsyncMock())
+
+    def tearDown(self):
+        self.settings_cache.invalidate()
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    async def _hide(self, item, hidden):
+        from types import SimpleNamespace
+        from cogs.admin import Admin
+
+        # __init__ registers persistent views on the bot, which this test has
+        # no use for -- only a no-op stub is needed to construct the cog.
+        cog = Admin(bot=SimpleNamespace(add_view=lambda view: None))
+        await Admin.shop_hide.callback(cog, self.ctx, item, hidden)
+
+    async def test_hiding_and_unhiding_round_trip(self):
+        await self._hide("loaded_die", True)
+        self.assertIn("loaded_die",
+                       self.settings_cache.setting(1, "shop_hidden_items"))
+        await self._hide("loaded_die", False)
+        self.assertNotIn("loaded_die",
+                          self.settings_cache.setting(1, "shop_hidden_items"))
+
+    async def test_an_unknown_item_key_is_refused_without_writing(self):
+        await self._hide("not_a_real_item", True)
+        self.ctx.send.assert_awaited_once()
+        message = self.ctx.send.await_args.args[0]
+        self.assertIn("not_a_real_item", message)
+        self.assertEqual([], self.settings_cache.setting(1, "shop_hidden_items"))
+
+    async def test_unhiding_without_room_is_reported_not_raised(self):
+        """Mirrors `test_un_hiding_a_builtin_with_no_room_is_refused` in
+        `tests/test_database_migrations.py`, through the command instead of
+        the model call it wraps."""
+        database.set_guild_settings(1, 7, [
+            {"key": "shop_hidden_items", "value": ["rent_sound"], "revision": 0}])
+        self.settings_cache.invalidate()
+        capacity = item_catalog.custom_item_capacity("rentals", ["rent_sound"])
+        for index in range(capacity):
+            database.create_shop_item_definition(1, 7, {
+                "item_key": f"rentals_{index}", "template_type": "coin_bundle",
+                "enabled": True, "price": 500,
+                "config": {"amount": 10, "repeatable": False},
+                "text": {"name": f"rentals_{index}", "description": "d"},
+                "category": "rentals",
+            })
+
+        await self._hide("rent_sound", False)
+        self.ctx.send.assert_awaited_once()
+        message = self.ctx.send.await_args.args[0]
+        self.assertIn("rentals", message)
+        # Refused, not silently dropped: the item is still on the hidden list.
+        self.assertIn("rent_sound",
+                       database.get_guild_settings(1)["shop_hidden_items"]["value"])

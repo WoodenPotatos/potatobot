@@ -60,7 +60,12 @@ DBDLE_DATA = {"killer": DBDLE_KILLERS}
 DBDLE_LOWER = {"killer": DBDLE_KILLER_ALIASES}
 
 # Persist shuffled decks so all users receive the same target without immediate repeats.
-STATE_FILE = os.path.join(DATA_DIR, "everydle_state.json")
+# Overridable so this one mutable file can move off a container's read-only
+# root, the way POTATOBOT_DB_PATH already lets the database move -- narrower
+# than overriding DATA_DIR itself, which is the read-only dataset directory
+# and must stay shipped in the image.
+STATE_FILE = os.getenv("POTATOBOT_EVERYDLE_STATE_PATH",
+                       os.path.join(DATA_DIR, "everydle_state.json"))
 STATE_LOCK = threading.Lock()
 
 

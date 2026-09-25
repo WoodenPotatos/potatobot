@@ -99,7 +99,6 @@ class SettingDefinition:
     required_discord_permissions: tuple[str, ...] = ("manage_guild",)
     minimum: int | None = None
     maximum: int | None = None
-    legacy_path: tuple[str, ...] | None = None
     # Allowed values for a STRING setting. Empty means free text. A setting with
     # For a STRING this renders as a dropdown; for a STRING_LIST every member
     # must be one of these and the stored order is this order.
@@ -170,7 +169,6 @@ class SettingDefinition:
         data["value_type"] = self.value_type.value
         data["scope"] = self.scope.value
         data["apply_behavior"] = self.apply_behavior.value
-        data["legacy_path"] = list(self.legacy_path) if self.legacy_path else None
         data["channel_types"] = list(self.channel_types)
         data["choices"] = list(self.choices)
         data["bot_channel_permissions"] = list(self.bot_channel_permissions)
@@ -217,6 +215,12 @@ ROLE_MENU_ENTRY_LIMIT = 25
 #: this shape has no list of its own to drift.
 JSON_SHAPE_ITEM_VALUES = "item_values"
 
+#: `{multiplier_in_hundredths: weight}` — `/wheel`'s segments. The house edge
+#: is checked as one identity across the whole table (98 * total weight ==
+#: total return), never per row, so a single segment carries no bound of its
+#: own the way `MECHANIC_PARAMETERS` gives each item one.
+JSON_SHAPE_WHEEL_SEGMENTS = "wheel_segments"
+
 # Where a snowflake sits inside each shape, so the browser gets it as a string.
 # One declaration, read by the wire transform and by the tests: an id nested one
 # level down rounds exactly as readily as one at the top, and the bug does not
@@ -237,13 +241,13 @@ JSON_SHAPE_SNOWFLAKE_FIELDS = {
 # differ from what the editor renders the moment the form opened — and the form
 # would report itself unsaved with nothing touched. Filling the gap here means
 # both sides of that comparison describe the same entry.
-JSON_SHAPE_ENTRY_FIELDS = {
+JSON_SHAPE_ENTRY_FIELDS: dict[str, dict[str, object]] = {
     JSON_SHAPE_ROLE_MENU: {"id": None, "emoji": ""},
     JSON_SHAPE_FACTIONS: {"leader_role_id": None, "manageable_ids": []},
 }
 
 
-def wire_json_shape(shape: str, value):
+def wire_json_shape(shape: str, value: dict):
     """Stringify every snowflake inside a shaped JSON value.
 
     `None` in the table above means the entry *is* the id; a tuple names the
@@ -253,7 +257,11 @@ def wire_json_shape(shape: str, value):
         return value
     fields = JSON_SHAPE_SNOWFLAKE_FIELDS[shape]
     defaults = JSON_SHAPE_ENTRY_FIELDS.get(shape, {})
-    wired = {}
+    # Holds `str | None` for a bare-id shape (fields is None) and a full
+    # {field: value} dict for every other shape -- both legitimate, so the
+    # value type has to be spelled out rather than inferred from whichever
+    # branch runs first.
+    wired: dict[str, object] = {}
     for key, entry in value.items():
         if fields is None:
             wired[key] = None if entry is None else str(entry)
@@ -291,7 +299,7 @@ WARN_ACTIONS = ("none", "timeout", "kick", "ban")
 
 FEATURE_GROUP_ORDER = (
     "core", "community", "onboarding", "economy", "games", "rewards",
-    "moderation", "factions", "media", "socials", "other",
+    "moderation", "factions", "media", "socials", "patchbot", "other",
 )
 
 
@@ -310,8 +318,16 @@ FEATURE_DEFINITIONS = {
         _feature("economy", "economy",
                  permissions=("send_messages", "embed_links",
                               "external_emojis")),
+        # `manage_expressions` used to sit on a separate `rentals` feature.
+        # `rentals` gated nothing a reader could reach independently of `shop`
+        # — `ShopView.interaction_check` and `/buy`'s own `COMMAND_POLICIES`
+        # entry already require `shop` before `purchase_item` is reachable at
+        # all — so it was a toggle with no independent effect, and disabling
+        # `shop` cascaded to disable it too, which read as "disabling shop
+        # also disables rentals" even for a guild whose rentals come from the
+        # gacha and never check either flag. Folded in.
         _feature("shop", "economy", dependencies=("economy",),
-                 permissions=("manage_roles",)),
+                 permissions=("manage_roles", "manage_expressions")),
         # `economy` only: a pull spends coins. It does **not** depend on `shop`
         # — nothing in `cogs/gacha.py` reads that flag, it calls no shop
         # function, reads shop *data* through `database`, and borrows a few
@@ -321,9 +337,6 @@ FEATURE_DEFINITIONS = {
         _feature("shop_gacha", "economy", dependencies=("economy",),
                  default=False,
                  permissions=("manage_roles", "manage_expressions")),
-        _feature("rentals", "economy",
-                 dependencies=("economy", "shop", "tickets"),
-                 permissions=("manage_expressions",)),
         _feature("casino", "games", dependencies=("economy",),
                  permissions=("embed_links",)),
         _feature("casino_blackjack", "games", parent="casino",
@@ -428,6 +441,56 @@ FEATURE_DEFINITIONS = {
         _feature("social_youtube", "socials",
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
+        # One master toggle with the watched titles as sub-toggles, for the same
+        # reason casino and Everydle collapsed to one: eleven near-identical
+        # per-game rows would otherwise fill the Features page. This is a pure
+        # notification feature with no economy interaction, so it depends on
+        # nothing.
+        _feature("patchbot", "patchbot"),
+        _feature("patchbot_lol", "patchbot", parent="patchbot",
+                 dependencies=("patchbot",),
+                 permissions=("send_messages", "embed_links",
+                              "mention_everyone")),
+        _feature("patchbot_valorant", "patchbot", parent="patchbot",
+                 dependencies=("patchbot",),
+                 permissions=("send_messages", "embed_links",
+                              "mention_everyone")),
+        _feature("patchbot_minecraft", "patchbot", parent="patchbot",
+                 dependencies=("patchbot",),
+                 permissions=("send_messages", "embed_links",
+                              "mention_everyone")),
+        _feature("patchbot_phasmophobia", "patchbot", parent="patchbot",
+                 dependencies=("patchbot",),
+                 permissions=("send_messages", "embed_links",
+                              "mention_everyone")),
+        _feature("patchbot_dbd", "patchbot", parent="patchbot",
+                 dependencies=("patchbot",),
+                 permissions=("send_messages", "embed_links",
+                              "mention_everyone")),
+        _feature("patchbot_genshin", "patchbot", parent="patchbot",
+                 dependencies=("patchbot",),
+                 permissions=("send_messages", "embed_links",
+                              "mention_everyone")),
+        _feature("patchbot_cs2", "patchbot", parent="patchbot",
+                 dependencies=("patchbot",),
+                 permissions=("send_messages", "embed_links",
+                              "mention_everyone")),
+        _feature("patchbot_r6", "patchbot", parent="patchbot",
+                 dependencies=("patchbot",),
+                 permissions=("send_messages", "embed_links",
+                              "mention_everyone")),
+        _feature("patchbot_hsr", "patchbot", parent="patchbot",
+                 dependencies=("patchbot",),
+                 permissions=("send_messages", "embed_links",
+                              "mention_everyone")),
+        _feature("patchbot_wuwa", "patchbot", parent="patchbot",
+                 dependencies=("patchbot",),
+                 permissions=("send_messages", "embed_links",
+                              "mention_everyone")),
+        _feature("patchbot_zzz", "patchbot", parent="patchbot",
+                 dependencies=("patchbot",),
+                 permissions=("send_messages", "embed_links",
+                              "mention_everyone")),
     )
 }
 
@@ -445,7 +508,7 @@ CATEGORY_CHANNEL_TYPES = ("category",)
 
 
 def _setting(key: str, category: str, page: str, value_type: SettingValueType,
-             default, *, feature: str | None = None, legacy_path=None,
+             default, *, feature: str | None = None,
              minimum=None, maximum=None, apply=ApplyBehavior.LIVE,
              channel_types: tuple[str, ...] = (), choices: tuple[str, ...] = (),
              choice_prefix: str | None = None,
@@ -466,7 +529,6 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
         default=default,
         scope=scope,
         owner_feature=feature,
-        legacy_path=tuple(legacy_path) if legacy_path else None,
         minimum=minimum,
         maximum=maximum,
         apply_behavior=apply,
@@ -496,8 +558,7 @@ SETTING_DEFINITIONS = {
         # than a partly translated one. `tests/test_locale_coverage.py` fails if
         # a language listed here is not complete enough to select.
         _setting("language", "administration", "instance", SettingValueType.STRING,
-                 "hu", legacy_path=("bot_settings", "language"),
-                 scope=SettingScope.INSTANCE,
+                 "hu", scope=SettingScope.INSTANCE,
                  apply=ApplyBehavior.SUBSYSTEM_RELOAD,
                  choices=SUPPORTED_LANGUAGES,
                  choice_prefix="dashboard.languages"),
@@ -510,29 +571,25 @@ SETTING_DEFINITIONS = {
         _setting("currency_emoji", "administration", "instance",
                  SettingValueType.STRING, "🥔",
                  scope=SettingScope.INSTANCE,
-                 legacy_path=("bot_settings", "currency_emoji"),
                  max_length=64),
         _setting("maintenance", "administration", "instance", SettingValueType.BOOLEAN,
-                 False, scope=SettingScope.INSTANCE,
-                 legacy_path=("bot_settings", "maintenance")),
+                 False, scope=SettingScope.INSTANCE),
         # discord.py binds the prefix when the bot object is constructed, so this
         # takes effect on restart. Every prefix-only operator command moves with
         # it, which is why it is declared rather than left hard-coded.
         _setting("command_prefix", "administration", "instance",
                  SettingValueType.STRING, "?",
                  scope=SettingScope.INSTANCE,
-                 legacy_path=("bot_settings", "prefix"),
                  apply=ApplyBehavior.RESTART,
                  max_length=8),
         # Days of inactivity after which a departed member's data is erased.
         # 0 retains indefinitely, so upgrading changes nothing until an operator
-        # opts in. No legacy_path: retention has never lived in config.json.
+        # opts in.
         _setting("data_retention_days", "administration", "instance",
                  SettingValueType.INTEGER, 0, minimum=0, maximum=3650,
                  scope=SettingScope.INSTANCE),
         _setting("economy_channels", "economy", "rewards", SettingValueType.CHANNEL_LIST,
-                 [], feature="economy", legacy_path=("channels", "economy"),
-                 channel_types=TEXT_CHANNEL_TYPES,
+                 [], feature="economy", channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
         # Left empty, the casino lives wherever the economy does. That fallback
         # is the whole point: an empty channel gate admits nobody but an
@@ -550,6 +607,15 @@ SETTING_DEFINITIONS = {
                  channel_types=TEXT_CHANNEL_TYPES,
                  bot_permissions=("manage_messages", "read_message_history"),
                  member_permissions=("view_channel", "send_messages")),
+        # A guild-authored top-up on the built-in word-chain dictionary. Off by
+        # default: the list only matters once `wordchain_custom_words_enabled`
+        # is on, and both are owned by `minigame_word_chain` since that is the
+        # only reader either has.
+        _setting("wordchain_custom_words_enabled", "minigames", "minigames",
+                 SettingValueType.BOOLEAN, False, feature="minigame_word_chain"),
+        _setting("wordchain_custom_words", "minigames", "minigames",
+                 SettingValueType.STRING_LIST, [], feature="minigame_word_chain",
+                 max_length=40, max_items=300),
         # Whether the same person may take two turns in a row. Off is the usual
         # rule and the one that makes a channel a group activity rather than one
         # person counting to a thousand.
@@ -558,54 +624,66 @@ SETTING_DEFINITIONS = {
         _setting("casino_channels", "casino", "casino", SettingValueType.CHANNEL_LIST,
                  [], feature="casino", channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
+        # Crash, Mines and Hilo let a player choose how many steps of a
+        # fixed-multiplier ladder to risk, so nothing else bounds how far a
+        # single round pays out beyond the generic MAX_STAKE overflow guard.
+        # This is the gameplay-tuned ceiling that stops a growing balance from
+        # being re-staked without limit; it is additional to, not a
+        # replacement for, MAX_STAKE.
+        _setting("casino_ladder_max_bet", "casino", "casino",
+                 SettingValueType.INTEGER, 50000, feature="casino",
+                 minimum=1, maximum=1000000000),
+        # `/wheel`'s segments. `feature="casino_wheel"`, not the broader
+        # `"casino"` the ladder cap above uses, because this has exactly one
+        # reader -- `resolve_wheel_wager` alone -- and a setting's owner must
+        # be a feature every reader requires. The default below must match
+        # `core.database.WHEEL_SEGMENTS` (`tests/test_casino_items.py` pins
+        # the two together); it is a literal here rather than an import to
+        # avoid a settings_registry-imports-database cycle, the same reason
+        # `item_catalog.MECHANIC_PARAMETERS` is imported the other way.
+        _setting("casino_wheel_segments", "casino", "casino",
+                 SettingValueType.JSON,
+                 {"0": 54, "100": 19, "150": 12, "200": 7, "300": 4,
+                  "500": 3, "2000": 1},
+                 feature="casino_wheel", json_shape=JSON_SHAPE_WHEEL_SEGMENTS),
         _setting("levels_channels", "community", "levels", SettingValueType.CHANNEL_LIST,
-                 [], feature="levels", legacy_path=("channels", "levels"),
-                 channel_types=TEXT_CHANNEL_TYPES,
+                 [], feature="levels", channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
         # The per-guild `No. 1` role. It resolved only through a config.json key
         # that nothing could write, so it was the one role a dashboard operator
         # could not set at all.
         _setting("top_ranker_role", "community", "levels", SettingValueType.ROLE,
-                 None, feature="levels", legacy_path=("roles", "top_ranker"), assignable_role=True),
+                 None, feature="levels", assignable_role=True),
         _setting("join_channel", "community", "announcements", SettingValueType.CHANNEL,
-                 None, feature="member_announcements", legacy_path=("channels", "join"),
-                 channel_types=TEXT_CHANNEL_TYPES,
+                 None, feature="member_announcements", channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
         _setting("leave_channel", "community", "announcements", SettingValueType.CHANNEL,
-                 None, feature="member_announcements", legacy_path=("channels", "leave"),
-                 channel_types=TEXT_CHANNEL_TYPES,
+                 None, feature="member_announcements", channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
         _setting("booster_channel", "community", "announcements", SettingValueType.CHANNEL,
-                 None, feature="member_announcements", legacy_path=("channels", "booster"),
-                 channel_types=TEXT_CHANNEL_TYPES,
+                 None, feature="member_announcements", channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
         _setting("everydle_channel", "everydle", "everydle", SettingValueType.CHANNEL,
-                 None, legacy_path=("channels", "everydle"),
-                 channel_types=TEXT_CHANNEL_TYPES,
+                 None, channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
 
         _setting("ticket_category", "community", "tickets", SettingValueType.CHANNEL,
-                 None, feature="tickets", legacy_path=("channels", "ticket_category"),
-                 channel_types=CATEGORY_CHANNEL_TYPES,
+                 None, feature="tickets", channel_types=CATEGORY_CHANNEL_TYPES,
                  bot_permissions=('view_channel', 'manage_channels', 'manage_roles', 'attach_files', 'read_message_history')),
         _setting("ticket_logs", "community", "tickets", SettingValueType.CHANNEL,
-                 None, feature="tickets", legacy_path=("channels", "ticket_logs"),
-                 channel_types=TEXT_CHANNEL_TYPES,
+                 None, feature="tickets", channel_types=TEXT_CHANNEL_TYPES,
                  bot_permissions=('view_channel', 'send_messages', 'embed_links', 'attach_files')),
         _setting("admin_category", "administration", "logging", SettingValueType.CHANNEL,
-                 None, legacy_path=("channels", "admin_category"),
-                 channel_types=CATEGORY_CHANNEL_TYPES),
+                 None, channel_types=CATEGORY_CHANNEL_TYPES),
         _setting("bot_log_channel", "administration", "logging", SettingValueType.CHANNEL,
-                 None, legacy_path=("channels", "bot_log"),
-                 channel_types=TEXT_CHANNEL_TYPES),
+                 None, channel_types=TEXT_CHANNEL_TYPES),
         _setting("temporary_voice_lobbies", "community", "voice", SettingValueType.CHANNEL_LIST,
-                 [], feature="temporary_voice", legacy_path=("channels", "join_to_create"),
-                 channel_types=VOICE_CHANNEL_TYPES,
+                 [], feature="temporary_voice", channel_types=VOICE_CHANNEL_TYPES,
                  bot_permissions=('view_channel', 'connect', 'manage_channels', 'manage_roles', 'move_members')),
         _setting("admin_roles", "administration", "permissions", SettingValueType.ROLE_LIST,
-                 [], legacy_path=("roles", "admin")),
+                 []),
         _setting("premium_roles", "economy", "premium", SettingValueType.ROLE_LIST,
-                 [], feature="economy", legacy_path=("roles", "premium")),
+                 [], feature="economy"),
         # `economy`, not `shop`: this is the role a **gacha** premium voucher
         # grants, read by `cogs/gacha.py` and `item_catalog.py`. Owned by the
         # shop it vanished from the dashboard whenever the shop was switched
@@ -613,17 +691,15 @@ SETTING_DEFINITIONS = {
         # also reunites it with `premium_roles`, already economy-owned and on
         # this same page.
         _setting("premium_role", "economy", "premium", SettingValueType.ROLE,
-                 None, feature="economy", legacy_path=("roles", "premium_role"),
-                 assignable_role=True),
+                 None, feature="economy", assignable_role=True),
         _setting("member_role", "community", "onboarding", SettingValueType.ROLE,
-                 None, feature="onboarding", legacy_path=("roles", "member"), assignable_role=True),
+                 None, feature="onboarding", assignable_role=True),
         _setting("onboarding_role", "community", "onboarding", SettingValueType.ROLE,
-                 None, feature="onboarding", legacy_path=("roles", "onboarding"), assignable_role=True),
+                 None, feature="onboarding", assignable_role=True),
         _setting("autoroles", "community", "onboarding", SettingValueType.ROLE_LIST,
-                 [], feature="onboarding", legacy_path=("roles", "autoroles"), assignable_role=True),
+                 [], feature="onboarding", assignable_role=True),
         _setting("ignored_users", "moderation", "inactivity", SettingValueType.STRING_LIST,
-                 [], feature="inactivity", legacy_path=("roles", "ignored_users"),
-                 max_length=24, max_items=1000),
+                 [], feature="inactivity", max_length=24, max_items=1000),
         # Where a crossed threshold is reported. Separate from bot_log_channel,
         # which is operational logging an operator reads, not moderation record.
         _setting("moderation_log_channel", "moderation", "warnings",
@@ -678,8 +754,7 @@ SETTING_DEFINITIONS = {
         # had. A role id cannot be guessed for somebody else's guild, so there is
         # no honest default; `docs/level_setup.md` documents the ladder instead.
         _setting("level_roles", "community", "levels", SettingValueType.JSON,
-                 {}, feature="levels", legacy_path=("level_roles",),
-                 json_shape=JSON_SHAPE_LEVEL_ROLES),
+                 {}, feature="levels", json_shape=JSON_SHAPE_LEVEL_ROLES),
         # The three role menus were settings here until schema 12. A guild may
         # have any number of menus now, each one a `managed_messages` row with a
         # posted message the dashboard can edit, so a fixed trio of settings
@@ -688,43 +763,97 @@ SETTING_DEFINITIONS = {
         # the same rule the settings save used, so the two cannot disagree about
         # what a malformed menu is.
         _setting("factions", "factions", "factions", SettingValueType.JSON,
-                 {}, feature="factions", legacy_path=("factions",),
-                 json_shape=JSON_SHAPE_FACTIONS),
+                 {}, feature="factions", json_shape=JSON_SHAPE_FACTIONS),
         # LFG owns a category of its own. It used to be one page inside
         # Community while its second channel sat in a "Games and prices"
         # category that priced nothing and owned nothing else — the prices are
         # all shop item prices under Economy, and the casino category owns no
         # settings at all.
         _setting("lfg_channels", "lfg", "lfg", SettingValueType.JSON,
-                 {}, feature="lfg", legacy_path=("lfg_channels",),
-                 json_shape=JSON_SHAPE_LFG_CHANNELS),
+                 {}, feature="lfg", json_shape=JSON_SHAPE_LFG_CHANNELS),
         # The LFG channel with no role attached: `/search` has always had this
         # second branch, and this only names it for what it is. It also picks up
         # `feature="lfg"`, which it lacked while `lfg_channels` had it — an
         # asymmetry that left it configurable while LFG was switched off.
         _setting("lfg_default_channel", "lfg", "lfg", SettingValueType.CHANNEL,
                  None, feature="lfg",
-                 legacy_path=("channels", "other_games_channel"),
                  channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
         _setting("social_notification_channel", "community", "socials", SettingValueType.CHANNEL,
-                 None, legacy_path=("socials", "notification_channel"),
-                 channel_types=TEXT_CHANNEL_TYPES,
+                 None, channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
         _setting("twitch_role", "community", "socials", SettingValueType.ROLE,
-                 None, feature="social_twitch", legacy_path=("socials", "twitch_role_id")),
+                 None, feature="social_twitch"),
         _setting("youtube_role", "community", "socials", SettingValueType.ROLE,
-                 None, feature="social_youtube", legacy_path=("socials", "youtube_role_id")),
+                 None, feature="social_youtube"),
         _setting("twitch_streamers", "community", "socials", SettingValueType.STRING_LIST,
-                 [], feature="social_twitch", legacy_path=("socials", "twitch_streamers"),
-                 max_length=25, max_items=100),
+                 [], feature="social_twitch", max_length=25, max_items=100),
         # Read by the YouTube RSS loop and registered nowhere, so it was a key
         # the code looked for and no operator could set — not in the dashboard
         # and not in the file. Registering it is what makes the feature reachable.
         _setting("youtube_channels", "community", "socials",
                  SettingValueType.STRING_LIST, [], feature="social_youtube",
-                 legacy_path=("socials", "youtube_channels"),
                  max_length=64, max_items=100),
+        # One channel and one optional role per watched game. A channel is
+        # required for that game's announcements to have anywhere to go; the
+        # role is recognition-only (pinged, never granted), which is exactly
+        # what lets an operator point it at a role a game role-menu already
+        # created — no code coupling, just the same role id in two settings.
+        _setting("patchbot_lol_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
+                 None, feature="patchbot_lol", channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel',)),
+        _setting("patchbot_lol_role", "patchbot", "patchbot", SettingValueType.ROLE,
+                 None, feature="patchbot_lol"),
+        _setting("patchbot_valorant_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
+                 None, feature="patchbot_valorant", channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel',)),
+        _setting("patchbot_valorant_role", "patchbot", "patchbot", SettingValueType.ROLE,
+                 None, feature="patchbot_valorant"),
+        _setting("patchbot_minecraft_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
+                 None, feature="patchbot_minecraft", channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel',)),
+        _setting("patchbot_minecraft_role", "patchbot", "patchbot", SettingValueType.ROLE,
+                 None, feature="patchbot_minecraft"),
+        _setting("patchbot_phasmophobia_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
+                 None, feature="patchbot_phasmophobia", channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel',)),
+        _setting("patchbot_phasmophobia_role", "patchbot", "patchbot", SettingValueType.ROLE,
+                 None, feature="patchbot_phasmophobia"),
+        _setting("patchbot_dbd_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
+                 None, feature="patchbot_dbd", channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel',)),
+        _setting("patchbot_dbd_role", "patchbot", "patchbot", SettingValueType.ROLE,
+                 None, feature="patchbot_dbd"),
+        _setting("patchbot_genshin_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
+                 None, feature="patchbot_genshin", channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel',)),
+        _setting("patchbot_genshin_role", "patchbot", "patchbot", SettingValueType.ROLE,
+                 None, feature="patchbot_genshin"),
+        _setting("patchbot_cs2_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
+                 None, feature="patchbot_cs2", channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel',)),
+        _setting("patchbot_cs2_role", "patchbot", "patchbot", SettingValueType.ROLE,
+                 None, feature="patchbot_cs2"),
+        _setting("patchbot_r6_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
+                 None, feature="patchbot_r6", channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel',)),
+        _setting("patchbot_r6_role", "patchbot", "patchbot", SettingValueType.ROLE,
+                 None, feature="patchbot_r6"),
+        _setting("patchbot_hsr_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
+                 None, feature="patchbot_hsr", channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel',)),
+        _setting("patchbot_hsr_role", "patchbot", "patchbot", SettingValueType.ROLE,
+                 None, feature="patchbot_hsr"),
+        _setting("patchbot_wuwa_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
+                 None, feature="patchbot_wuwa", channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel',)),
+        _setting("patchbot_wuwa_role", "patchbot", "patchbot", SettingValueType.ROLE,
+                 None, feature="patchbot_wuwa"),
+        _setting("patchbot_zzz_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
+                 None, feature="patchbot_zzz", channel_types=TEXT_CHANNEL_TYPES,
+                 member_permissions=('view_channel',)),
+        _setting("patchbot_zzz_role", "patchbot", "patchbot", SettingValueType.ROLE,
+                 None, feature="patchbot_zzz"),
         # `/work` outcome rarity and payouts. The three tier weights are drawn
         # against each other, so the shipped 998/1/1 reproduces the previous
         # hard-coded one-in-a-thousand chances exactly.
@@ -865,25 +994,6 @@ def _snowflake(value) -> int:
     return value
 
 
-def legacy_config_value(definition: SettingDefinition, config: dict):
-    """What `config.json` holds for a setting, else the registry default.
-
-    The walk lived in three places — the runtime resolver, the dashboard's
-    settings read, and nowhere at all in the permission audit, which is why the
-    audit silently checked no channels: it fell back to the registry default,
-    and the default for a channel is empty. One copy, so a fourth caller cannot
-    disagree with the other three about where a value comes from.
-    """
-    if not definition.legacy_path:
-        return definition.default
-    node = config
-    for part in definition.legacy_path:
-        if not isinstance(node, dict) or part not in node:
-            return definition.default
-        node = node[part]
-    return node
-
-
 def validate_setting_value(definition: SettingDefinition, value):
     kind = definition.value_type
     if kind is SettingValueType.BOOLEAN and not isinstance(value, bool):
@@ -932,7 +1042,9 @@ def validate_setting_value(definition: SettingDefinition, value):
             value = [item for item in definition.choices if item in set(value)]
     if kind is SettingValueType.JSON and not isinstance(value, (dict, list)):
         raise ValueError("setting must be JSON object or list")
-    validator = _JSON_SHAPE_VALIDATORS.get(definition.json_shape)
+    # dict.get(None) is a plain miss, never a raise: a setting with no
+    # declared json_shape correctly gets no validator.
+    validator = _JSON_SHAPE_VALIDATORS.get(definition.json_shape)  # type: ignore[arg-type]
     return validator(value) if validator else value
 
 
@@ -966,6 +1078,55 @@ def _validated_level_roles(value):
         elif not isinstance(role, str) or len(role) > 100:
             raise ValueError("a level role must be an id or a role name")
         normalised[str(milestone)] = role
+    return normalised
+
+
+# `/wheel` has to keep paying out 98 coins per 100 wagered on average, so the
+# table as a whole is bounded, not any one segment -- these just keep a
+# single row sane before the whole-table identity below even runs.
+WHEEL_SEGMENT_MIN_ROWS = 2
+WHEEL_SEGMENT_MAX_ROWS = 12
+WHEEL_MULTIPLIER_MAX = 100000
+WHEEL_WEIGHT_MAX = 100000
+WHEEL_HOUSE_RETURN = 98
+
+
+def _validated_wheel_segments(value):
+    """{multiplier_in_hundredths: weight}. `/wheel`'s segments.
+
+    Refused, never clamped, the same discipline every mechanic on a 2%-edge
+    game gets: `98 * total_weight == sum(multiplier * weight)` is checked as
+    one identity across the whole table, because halving an operator's
+    weights to "fix" the average is how a game quietly starts paying more
+    than it takes. A dict's keys are already unique, so two rows landing on
+    the same multiplier cannot happen here -- there is no separate rule for
+    it to enforce.
+    """
+    normalised = {}
+    for multiplier, weight in _shaped_map(value, "the wheel segments").items():
+        try:
+            m = int(multiplier)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("a wheel multiplier must be a number") from exc
+        if not 0 <= m <= WHEEL_MULTIPLIER_MAX:
+            raise ValueError(
+                f"a wheel multiplier must be between 0 and {WHEEL_MULTIPLIER_MAX}")
+        if (isinstance(weight, bool) or not isinstance(weight, int)
+                or not 1 <= weight <= WHEEL_WEIGHT_MAX):
+            raise ValueError(
+                f"a wheel segment's weight must be a whole number between 1 "
+                f"and {WHEEL_WEIGHT_MAX}")
+        normalised[str(m)] = weight
+    if not WHEEL_SEGMENT_MIN_ROWS <= len(normalised) <= WHEEL_SEGMENT_MAX_ROWS:
+        raise ValueError(
+            f"the wheel needs between {WHEEL_SEGMENT_MIN_ROWS} and "
+            f"{WHEEL_SEGMENT_MAX_ROWS} segments")
+    total_weight = sum(normalised.values())
+    total_return = sum(int(m) * w for m, w in normalised.items())
+    if WHEEL_HOUSE_RETURN * total_weight != total_return:
+        raise ValueError(
+            f"the wheel's segments must average exactly a "
+            f"{WHEEL_HOUSE_RETURN}% return")
     return normalised
 
 
@@ -1080,6 +1241,7 @@ _JSON_SHAPE_VALIDATORS = {
     JSON_SHAPE_LFG_CHANNELS: _validated_lfg_channels,
     JSON_SHAPE_FACTIONS: _validated_factions,
     JSON_SHAPE_ITEM_VALUES: _validated_item_values,
+    JSON_SHAPE_WHEEL_SEGMENTS: _validated_wheel_segments,
 }
 
 

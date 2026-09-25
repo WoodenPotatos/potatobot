@@ -1,4 +1,5 @@
 import discord
+import itertools
 import logging
 import random
 import asyncio
@@ -17,9 +18,9 @@ if ROOT_DIR not in sys.path:
 
 from core import database
 
-from discord.ext import commands
+from discord.ext import commands, tasks
 from datetime import timedelta
-from cogs.utils import BoundedCooldownMap, t
+from cogs.utils import BoundedCooldownMap, handle_loop_error, t
 from core.feature_access import require_interaction_feature
 
 music_logger = logging.getLogger("PotatoBot.Music")
@@ -43,6 +44,21 @@ music_extract_executor = ThreadPoolExecutor(
     max_workers=4, thread_name_prefix="music-extract"
 )
 music_extract_slots = asyncio.Semaphore(2)
+
+# A thread that has actually started `_extract_music_info` cannot be stopped
+# from outside: `wait_for` timing out only stops *awaiting* it, and
+# `yt_dlp`'s own `socket_timeout` does not cover `socket.getaddrinfo` — a
+# hanging DNS resolver, the same failure family as the two DNS incidents in
+# `docs/lessons.md`, can wedge a call indefinitely regardless of that option.
+# So this does not kill the stuck thread; it notices one has run far past any
+# real extraction's length and replaces the whole pool, abandoning the wedged
+# thread(s) rather than waiting on them forever. `music_extract_job_started`
+# tracks in-flight jobs (monotonic start time per job id) for exactly that
+# check; both the write in `extract_music_info` and the read in
+# `reap_wedged_extraction_workers` run on the event loop thread.
+MUSIC_EXTRACT_WEDGE_SECONDS = 300
+music_extract_job_started = BoundedCooldownMap(max_age=3600, max_entries=64)
+_extract_job_ids = itertools.count()
 
 
 def can_control_music(member, guild):
@@ -113,13 +129,46 @@ def _extract_music_info(source: str):
 
 async def extract_music_info(source: str):
     loop = asyncio.get_running_loop()
+    job_id = next(_extract_job_ids)
     async with music_extract_slots:
-        return await asyncio.wait_for(
-            loop.run_in_executor(
-                music_extract_executor, _extract_music_info, source
-            ),
-            timeout=MUSIC_EXTRACT_TIMEOUT,
-        )
+        music_extract_job_started[job_id] = time.monotonic()
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(
+                    music_extract_executor, _extract_music_info, source
+                ),
+                timeout=MUSIC_EXTRACT_TIMEOUT,
+            )
+        finally:
+            music_extract_job_started.pop(job_id, None)
+
+
+def reap_wedged_extraction_pool() -> int:
+    """Replace the extraction pool if a job has run far past the timeout.
+
+    Returns the number of jobs abandoned with the old pool, so the caller can
+    decide whether to log. A job still tracked here has already made
+    `wait_for` give up once (`MUSIC_EXTRACT_TIMEOUT`), so reaching
+    `MUSIC_EXTRACT_WEDGE_SECONDS` means it was never going to finish rather
+    than merely being slow.
+    """
+    global music_extract_executor
+    if not music_extract_job_started:
+        return 0
+    oldest = min(music_extract_job_started.values())
+    if time.monotonic() - oldest < MUSIC_EXTRACT_WEDGE_SECONDS:
+        return 0
+    stuck = len(music_extract_job_started)
+    old_executor = music_extract_executor
+    music_extract_executor = ThreadPoolExecutor(
+        max_workers=4, thread_name_prefix="music-extract"
+    )
+    # The stuck thread(s) cannot be stopped, only abandoned; shutting down
+    # without waiting lets this call return immediately instead of blocking
+    # on the very thread that will not finish.
+    old_executor.shutdown(wait=False, cancel_futures=True)
+    music_extract_job_started.clear()
+    return stuck
 
 
 def song_from_entry(entry, requester):
@@ -420,10 +469,37 @@ class MusicPanelView(discord.ui.View):
         await interaction.response.send_modal(MusicRemoveModal())
 
 # Guild-scoped queue orchestration and slash/prefix command handlers.
-class Music(commands.Cog): 
+class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.bot.add_view(MusicPanelView()) 
+        self.bot.add_view(MusicPanelView())
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        if not self.extraction_watchdog.is_running():
+            self.extraction_watchdog.start()
+
+    def cog_unload(self):
+        if self.extraction_watchdog.is_running():
+            self.extraction_watchdog.cancel()
+
+    @tasks.loop(seconds=60)
+    async def extraction_watchdog(self):
+        stuck = reap_wedged_extraction_pool()
+        if stuck:
+            music_logger.warning(
+                "Recycled the music extraction pool: %d job(s) had run past "
+                "%ds (wedge ceiling %ds) and were abandoned rather than "
+                "stopped.",
+                stuck, MUSIC_EXTRACT_TIMEOUT, MUSIC_EXTRACT_WEDGE_SECONDS,
+            )
+
+    @extraction_watchdog.error
+    async def extraction_watchdog_error(self, error):
+        await handle_loop_error(
+            self.bot, self.extraction_watchdog, "extraction_watchdog", error,
+            music_logger,
+        )
 
     async def require_same_voice(self, ctx):
         if can_control_music(ctx.author, ctx.guild):
@@ -449,6 +525,16 @@ class Music(commands.Cog):
             def handle_next(error):
                 if error:
                     music_logger.error("Audio playback failed: %s", error)
+                    # Runs off the event loop thread, same as the reschedule
+                    # below, so a coroutine needs run_coroutine_threadsafe
+                    # rather than an ordinary await. The message stays generic
+                    # -- the deleted `music.playback_error` key interpolated the
+                    # raw exception into what members saw, which is why it was
+                    # removed rather than kept.
+                    asyncio.run_coroutine_threadsafe(
+                        text_channel.send(t("music.playback_failed")),
+                        self.bot.loop,
+                    )
                 self.bot.loop.call_soon_threadsafe(self.play_next, guild, text_channel)
 
             vc.play(

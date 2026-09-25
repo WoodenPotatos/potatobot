@@ -22,17 +22,82 @@ from core.feature_access import is_enabled, require_interaction_feature
 # timeout is what lets discord.py drop them from its message view store.
 PROFILE_VIEW_TIMEOUT = 15 * 60
 
-class LvlsView(discord.ui.View):
-    def __init__(self, guild):
+LEADERBOARD_CHOICES = [
+    discord.app_commands.Choice(name=t("profiles.leaderboard_choice_wealth"), value="wealth"),
+    discord.app_commands.Choice(name=t("profiles.leaderboard_choice_levels"), value="levels"),
+    discord.app_commands.Choice(name=t("profiles.leaderboard_choice_streaks"), value="streaks"),
+    discord.app_commands.Choice(name=t("profiles.leaderboard_choice_pity"), value="pity"),
+]
+
+# A member needs this many 5-star pulls on the banner before the luck board
+# will rank them -- one early lucky pull would otherwise top it on no
+# evidence. Luck is the average pulls spent per 5-star, not the live pity
+# counter `/pity` shows.
+PITY_LEADERBOARD_MINIMUM_FIVE_STARS = 3
+
+
+class LeaderboardView(discord.ui.View):
+    """One view behind /leaderboard's three types.
+
+    Replaces the former LvlsView, RanksView and /topstreak's ad hoc static
+    embed. Each type keeps its own query, row format, color and empty-state
+    message exactly as before -- this consolidates the refresh-button and
+    command plumbing, not what any of the three leaderboards look like.
+    """
+
+    def empty_message(self) -> str:
+        # Three literal t() calls, not a dict keyed by locale-key name, so
+        # scripts/locale_audit.py's AST scan -- which only recognises a
+        # literal string passed straight to t() -- can still see all three
+        # keys as referenced.
+        if self.leaderboard_type == "wealth":
+            return t("profiles.leaderboard_empty")
+        if self.leaderboard_type == "levels":
+            return t("profiles.no_levels_stored")
+        if self.leaderboard_type == "streaks":
+            return t("profiles.no_streaks_yet")
+        return t("profiles.no_pity_data")
+
+    def __init__(self, guild, leaderboard_type: str):
         super().__init__(timeout=PROFILE_VIEW_TIMEOUT)
         self.guild = guild
-        
+        self.leaderboard_type = leaderboard_type
+
         # Construct the button at runtime so its label uses the active locale.
         btn_refresh = discord.ui.Button(label=t("profiles.refresh_btn"), style=discord.ButtonStyle.success, emoji="🔄")
         btn_refresh.callback = self.refresh_btn
         self.add_item(btn_refresh)
 
     async def generate_embed(self):
+        if self.leaderboard_type == "wealth":
+            return await self._wealth_embed()
+        if self.leaderboard_type == "levels":
+            return await self._levels_embed()
+        if self.leaderboard_type == "streaks":
+            return await self._streaks_embed()
+        return await self._pity_embed()
+
+    async def _wealth_embed(self):
+        results = await database.run(
+            database.get_top_balances, guild_member_ids(self.guild), 10
+        )
+
+        if not results:
+            return None
+
+        leaderboard_str = ""
+        for index, (user_id, balance, level) in enumerate(results, start=1):
+            member = self.guild.get_member(user_id)
+
+            booster_tag = " 💎" if (member and member.premium_since) else ""
+            name = display_member_name(self.guild, user_id)
+
+            medal = "🥇" if index == 1 else "🥈" if index == 2 else "🥉" if index == 3 else f"#{index}"
+            leaderboard_str += t("profiles.rank_row", medal=medal, name=name, booster_tag=booster_tag, balance=balance, level=level)
+
+        return discord.Embed(title=t("profiles.ranks_title"), description=leaderboard_str, color=discord.Color.gold())
+
+    async def _levels_embed(self):
         results = await database.run(
             database.get_top_levels, guild_member_ids(self.guild), 10
         )
@@ -47,44 +112,68 @@ class LvlsView(discord.ui.View):
 
         return discord.Embed(title=t("profiles.lvls_title"), description=description, color=discord.Color.purple())
 
-    async def refresh_btn(self, interaction: discord.Interaction):
-        if not await require_interaction_feature(interaction, "profiles"):
-            return
-        await interaction.response.defer()
-        fresh_embed = await self.generate_embed()
-        if fresh_embed:
-            await interaction.edit_original_response(embed=fresh_embed, view=self)
-        else:
-            await interaction.followup.send(t("profiles.no_levels_stored"), ephemeral=True)
-
-class RanksView(discord.ui.View):
-    def __init__(self, guild):
-        super().__init__(timeout=PROFILE_VIEW_TIMEOUT)
-        self.guild = guild
-
-        btn_refresh = discord.ui.Button(label=t("profiles.refresh_btn"), style=discord.ButtonStyle.success, emoji="🔄")
-        btn_refresh.callback = self.refresh_btn
-        self.add_item(btn_refresh)
-
-    async def generate_embed(self):
+    async def _streaks_embed(self):
         results = await database.run(
-            database.get_top_balances, guild_member_ids(self.guild), 10
+            database.get_top_streaks, guild_member_ids(self.guild), 10
         )
 
         if not results:
             return None
 
-        leaderboard_str = ""
-        for index, (user_id, balance, level) in enumerate(results, start=1):
-            member = self.guild.get_member(user_id)
-            
-            booster_tag = " 💎" if (member and member.premium_since) else ""
-            name = display_member_name(self.guild, user_id)
-            
-            medal = "🥇" if index == 1 else "🥈" if index == 2 else "🥉" if index == 3 else f"#{index}"
-            leaderboard_str += t("profiles.rank_row", medal=medal, name=name, booster_tag=booster_tag, balance=balance, level=level)
+        embed = discord.Embed(
+            title=t("profiles.topstreak_title"),
+            description=t("profiles.topstreak_desc"),
+            color=discord.Color.orange()
+        )
+        embed.set_thumbnail(url=self.guild.icon.url if self.guild.icon else None)
 
-        return discord.Embed(title=t("profiles.ranks_title"), description=leaderboard_str, color=discord.Color.gold())
+        board_text = ""
+        for index, (user_id, streak) in enumerate(results, start=1):
+            name = display_member_name(self.guild, user_id)
+
+            if index == 1: medal = "🥇"
+            elif index == 2: medal = "🥈"
+            elif index == 3: medal = "🥉"
+            else: medal = f"**{index}.**"
+
+            board_text += t("profiles.streak_leaderboard_row", medal=medal, name=name, streak=streak)
+
+        embed.description += board_text
+        return embed
+
+    async def _pity_embed(self):
+        # The guild-wide board, so it stays on the default banner -- `/pity`
+        # itself takes an optional `banner` for a member's own per-banner
+        # view, which this is not.
+        results = await database.run(
+            database.get_top_gacha_luck, self.guild.id,
+            guild_member_ids(self.guild), database.DEFAULT_GACHA_BANNER_KEY,
+            10, PITY_LEADERBOARD_MINIMUM_FIVE_STARS,
+        )
+
+        if not results:
+            return None
+
+        embed = discord.Embed(
+            title=t("profiles.pity_leaderboard_title"),
+            description=t("profiles.pity_leaderboard_desc"),
+            color=discord.Color.blue()
+        )
+
+        board_text = ""
+        for index, (user_id, avg_pity, five_stars) in enumerate(results, start=1):
+            name = display_member_name(self.guild, user_id)
+
+            if index == 1: medal = "🥇"
+            elif index == 2: medal = "🥈"
+            elif index == 3: medal = "🥉"
+            else: medal = f"**{index}.**"
+
+            board_text += t("profiles.pity_leaderboard_row", medal=medal, name=name,
+                            avg_pity=f"{avg_pity:.1f}", five_stars=five_stars)
+
+        embed.description += board_text
+        return embed
 
     async def refresh_btn(self, interaction: discord.Interaction):
         if not await require_interaction_feature(interaction, "profiles"):
@@ -94,7 +183,7 @@ class RanksView(discord.ui.View):
         if fresh_embed:
             await interaction.edit_original_response(embed=fresh_embed, view=self)
         else:
-            await interaction.followup.send(t("profiles.leaderboard_empty"), ephemeral=True)
+            await interaction.followup.send(self.empty_message(), ephemeral=True)
 
 class ProfileView(discord.ui.View):
     def __init__(self, member):
@@ -204,58 +293,17 @@ class Profiles(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="lvls", description=t("general.cmd_lvls"))
+    @commands.hybrid_command(name="leaderboard", description=t("general.cmd_leaderboard"))
     @is_channel("levels_channels")
-    async def toplvl(self, ctx):
-        view = LvlsView(ctx.guild)
+    @discord.app_commands.choices(type=LEADERBOARD_CHOICES)
+    async def leaderboard(self, ctx, type: str):
+        view = LeaderboardView(ctx.guild, type)
         embed = await view.generate_embed()
-    
+
         if embed:
             await ctx.send(embed=embed, view=view)
         else:
-            await ctx.send(t("profiles.no_levels_stored"))
-
-    @commands.hybrid_command(name="ranks", description=t("general.cmd_ranks"))
-    @is_channel("levels_channels")
-    async def top(self, ctx):
-        view = RanksView(ctx.guild)
-        embed = await view.generate_embed()
-    
-        if embed:
-            await ctx.send(embed=embed, view=view)
-        else:
-            await ctx.send(t("profiles.leaderboard_empty"))
-
-    @commands.hybrid_command(name="topstreak", description=t("general.cmd_topstreak"))
-    @is_channel("everydle_channel")
-    async def topstreak(self, ctx):
-        top_streakers = await database.run(
-            database.get_top_streaks, guild_member_ids(ctx.guild), 10
-        )
-
-        if not top_streakers:
-            return await ctx.send(t("profiles.no_streaks_yet"))
-        
-        embed = discord.Embed(
-            title=t("profiles.topstreak_title"),
-            description=t("profiles.topstreak_desc"),
-            color=discord.Color.orange()
-        )
-        embed.set_thumbnail(url=ctx.guild.icon.url if ctx.guild.icon else None)
-
-        board_text = ""
-        for index, (user_id, streak) in enumerate(top_streakers, start=1):
-            name = display_member_name(ctx.guild, user_id)
-            
-            if index == 1: medal = "🥇"
-            elif index == 2: medal = "🥈"
-            elif index == 3: medal = "🥉"
-            else: medal = f"**{index}.**"
-
-            board_text += t("profiles.streak_leaderboard_row", medal=medal, name=name, streak=streak)
-
-        embed.description += board_text
-        await ctx.send(embed=embed)
+            await ctx.send(view.empty_message())
 
     @commands.hybrid_command(name="profile", description=t("general.cmd_profile"))
     @is_channel("levels_channels")
