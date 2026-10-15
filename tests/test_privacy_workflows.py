@@ -439,7 +439,8 @@ class ErasureColumnCoverageTests(unittest.TestCase):
     # both sets is a finding.
     NOT_MEMBERS = {
         "guild_id": "a guild", "origin_guild_id": "a guild",
-        "channel_id": "a channel", "message_id": "a message",
+        "channel_id": "a channel", "ticket_channel_id": "a channel",
+        "message_id": "a message",
         "role_id": "a role", "game_role_id": "a role",
         "realm_id": "a realm", "scope_id": "a guild or 0 for the instance",
         # Surrogate primary keys.

@@ -3952,6 +3952,27 @@
         "region_333bc54927"
       ],
       "year": 2003
+    },
+    "locke": {
+      "gender": [
+        "gender_5767625f95"
+      ],
+      "role": [
+        "role_788b3badc0"
+      ],
+      "species": [
+        "species_7b36953446"
+      ],
+      "resource": [
+        "resource_ea8c99f7d1"
+      ],
+      "range": [
+        "range_cd8df7b3e4"
+      ],
+      "region": [
+        "region_24613a7c5c"
+      ],
+      "year": 2026
     }
   }
 }

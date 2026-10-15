@@ -40,10 +40,12 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
 from everydle_sources import (  # noqa: E402
+    LOLDLE_VERSIONS_URL,
     MANAGED_DATASETS,
     PIVOT_LANGUAGE,
     SOURCE_AUTHORITATIVE,
     SourceError,
+    _loldle_champion_url,
     fetch,
     fixture_opener,
     is_accepted,
@@ -63,6 +65,7 @@ FIXTURE_FILES = {
     "https://genshin-db-api.vercel.app/api/v5/talents"
     "?query=names&matchCategories=true&verboseCategories=true":
         "genshin_talents.json",
+    LOLDLE_VERSIONS_URL: "loldle_versions.json",
 }
 
 
@@ -72,6 +75,16 @@ def load_fixtures(directory: Path):
         path = directory / name
         if path.exists():
             responses[url] = json.loads(path.read_text(encoding="utf-8"))
+    # The champion payload's URL is version-templated, so it cannot be a
+    # static FIXTURE_FILES entry — derive the same URL the adapter would from
+    # the recorded version list, exactly as `record_fixtures` did when it
+    # named the file.
+    champion_path = directory / "loldle_champions.json"
+    if LOLDLE_VERSIONS_URL in responses and champion_path.exists():
+        version = responses[LOLDLE_VERSIONS_URL][0]
+        responses[_loldle_champion_url(version)] = json.loads(
+            champion_path.read_text(encoding="utf-8")
+        )
     return fixture_opener(responses)
 
 
@@ -104,11 +117,22 @@ def compare(game: str, dataset: str, opener=None) -> dict:
             "needs_a_person": list(entity.unknown_fields),
         })
 
-    missing_upstream = [
-        {"entity_id": entity_id,
-         "display_name": (catalog.get(entity_id) or {}).get("name", entity_id)}
-        for entity_id in sorted(local_ids - upstream_ids)
-    ]
+    # `is_excluded` was written for the new-upstream direction (an entity
+    # upstream has that the puzzle deliberately omits), but the same recorded
+    # reason applies just as well here: an entity with no upstream record at
+    # all — a local-only easter egg — is never going to stop being "missing",
+    # so without this it would report as a finding on every single run.
+    missing_upstream = []
+    for entity_id in sorted(local_ids - upstream_ids):
+        reason = is_excluded(game, dataset, entity_id)
+        display_name = (catalog.get(entity_id) or {}).get("name", entity_id)
+        if reason:
+            excluded_entities.append({"entity_id": entity_id,
+                                      "display_name": display_name,
+                                      "reason": reason})
+            continue
+        missing_upstream.append({"entity_id": entity_id,
+                                 "display_name": display_name})
 
     authoritative = SOURCE_AUTHORITATIVE.get((game, dataset), ())
     disagreements = []
@@ -127,6 +151,13 @@ def compare(game: str, dataset: str, opener=None) -> dict:
             # prefix match is agreement on the part upstream actually knows.
             if (isinstance(local_value, str) and isinstance(upstream_value, str)
                     and local_value.startswith(upstream_value)):
+                continue
+            # A genuinely multi-valued local field (a champion who plays both
+            # melee and ranged across two forms) can only ever be confirmed,
+            # never contradicted, by a source that reports one derived value —
+            # upstream naming one of the values the local data already lists
+            # is agreement on the part it can see, not a change to apply.
+            if isinstance(local_value, list) and upstream_value in local_value:
                 continue
             finding = {
                 "entity_id": entity_id,

@@ -18,11 +18,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Minigame datasets deliberately left incomplete, by language. `data/loldle/` is
-# maintained by a named administrator who asked that it not be edited
-# automatically, so LoLdle is unavailable in English until its owner fills the
-# catalog in. Anything added here needs the same kind of stated reason.
-KNOWN_INCOMPLETE_MINIGAMES = {"en": ("loldle",)}
+# Minigame datasets deliberately left incomplete, by language. Empty since
+# 2026-09-27: LoLdle's own exception was lifted once its external maintainer
+# left and its English `champions` catalog was filled in the same change that
+# unlocked it from the automated tooling (see
+# `test_the_loldle_exception_is_lifted` below). Anything added here needs the
+# same kind of stated reason that entry had.
+KNOWN_INCOMPLETE_MINIGAMES = {}
 
 
 def load_audit_module():
@@ -188,23 +190,18 @@ class EnglishCatalogTests(unittest.TestCase):
                         f"{game} would be disabled in {language}",
                     )
 
-    def test_the_loldle_exception_is_deliberate_and_recorded(self):
-        """`data/loldle/` is maintained by a named administrator who asked that
-        it not be edited automatically, so its English catalog stays empty and
-        LoLdle is unavailable in English. This asserts that is still the only
-        exception, and that it is written down where an operator would look."""
-        self.assertEqual({"en": ("loldle",)}, KNOWN_INCOMPLETE_MINIGAMES)
+    def test_the_loldle_exception_is_lifted(self):
+        """`data/loldle/`'s ownership exception applied only while an external
+        administrator maintained it; it ended 2026-09-27 along with that
+        maintainer's involvement, and LoLdle's `champions` catalog was filled
+        for English in the same change. This asserts the lift held: no
+        exception is recorded any more, and the game genuinely loads in every
+        supported language rather than merely being un-excepted by mistake."""
+        self.assertEqual({}, KNOWN_INCOMPLETE_MINIGAMES)
         games = self.audit.game_catalog_report()
-        self.assertFalse(games["loldle"]["en"]["loads"])
-        for name in ("CLAUDE.md", "docs/localization_status.md"):
-            with self.subTest(document=name):
-                document = ROOT / name
-                if not document.exists():
-                    # A published tree does not carry the contributor
-                    # instructions; the rule they record still holds, and
-                    # docs/localization_status.md does ship.
-                    continue
-                self.assertIn("data/loldle/", document.read_text(encoding="utf-8"))
+        for language in games["loldle"]:
+            with self.subTest(language=language):
+                self.assertTrue(games["loldle"][language]["loads"])
 
     def test_an_unsupported_language_is_rejected_on_save(self):
         from core.settings_registry import SETTING_DEFINITIONS, validate_setting_value

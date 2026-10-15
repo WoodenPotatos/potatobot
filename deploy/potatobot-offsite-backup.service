@@ -1,0 +1,82 @@
+# Daily offsite copy of the live database, via rclone to a remote configured
+# by hand (`rclone config`) — this unit only invokes rclone, it does not set
+# a remote up.
+#
+# Install:
+#   sudo cp deploy/potatobot-offsite-backup.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now potatobot-offsite-backup.timer
+#
+# This runs `scripts/offsite_backup.py`, which copies exactly one file — a
+# consistent snapshot of the database, taken through SQLite's own online
+# backup API — never the project tree. A prior attempt (`backup.sh`, deleted
+# 2026-05-20) copied the whole tree and would have swept `.env` into the
+# destination; this unit is deliberately given no access to `.env` at all,
+# since the backup script needs no Discord/OAuth secret to do its job.
+#
+# `ProtectHome=read-only` rather than `true`: rclone reads its remote
+# configuration from the service user's `~/.config/rclone/rclone.conf` by
+# default, so home has to stay readable. It still cannot be written to.
+#
+# `User=woody`, not a dedicated `potatobot` system account: none exists on
+# the deployed host -- `potatobot.service` itself runs as `woody` (confirmed
+# via `systemctl show potatobot.service -p User`), matching the other unit
+# in this directory (see `potatobot-everydle-drift.service`'s own note).
+#
+# `ReadWritePaths=/opt/potatobot`, even though this script never writes to
+# `economy.db` itself: any connection to a WAL-mode database, including one
+# opened `mode=ro`, still needs OS-level write access to the `-shm`/`-wal`
+# sidecar files beside it, purely to register itself as a reader -- a real
+# SQLite/WAL requirement, confirmed 2026-09-25 when `ProtectSystem=strict`
+# alone made even a read-only backup fail with "unable to open database
+# file". `mode=ro` in `scripts/offsite_backup.py` still fully prevents this
+# process from writing actual data -- SQLite enforces that at the SQL level
+# regardless of what the OS permits -- so this widens *filesystem* access to
+# the one directory, not what the script can actually do to it. Same pattern
+# `potatobot-dashboard.service` already uses, for the same underlying reason.
+#
+# `ReadWritePaths=/home/woody/.config/rclone`: rclone periodically tries to
+# rewrite its own config file (observed 2026-09-27, most likely persisting a
+# refreshed OAuth token) using a write-temp-file-then-rename pattern, which
+# needs write access to the *directory*, not just the file -- a path scoped
+# to `rclone.conf` itself would not be enough for the temp file's own
+# creation. Under plain `ProtectHome=read-only` this failed every night with
+# "read-only file system"; the backup itself kept succeeding regardless,
+# since it only ever reads the config, but a token that genuinely needs
+# refreshing (rather than routine housekeeping) would eventually have failed
+# silently until backups stopped working with no earlier warning. Scoped to
+# this one directory rather than loosening `ProtectHome` itself, for the same
+# reason the database access above is scoped to one directory rather than
+# all of `/opt`.
+#
+# Read the result with:
+#   journalctl -u potatobot-offsite-backup --since '1 week ago'
+
+[Unit]
+Description=PotatoBot offsite database backup
+Documentation=https://github.com/WoodenPotatos/potatobotbeta
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=woody
+Group=woody
+WorkingDirectory=/opt/potatobot
+ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py /opt/potatobot/economy.db gdrivebot:PotatoBotBackups
+SyslogIdentifier=potatobot-offsite-backup
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/potatobot
+ReadWritePaths=/home/woody/.config/rclone
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

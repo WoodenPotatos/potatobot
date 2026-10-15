@@ -58,6 +58,8 @@ class FixtureTests(unittest.TestCase):
         "valorant_agents.json": ("data", 20),
         "dbd_characters.json": (None, 80),
         "dbd_dlc.json": (None, 40),
+        "loldle_versions.json": (None, 1),
+        "loldle_champions.json": ("data", 100),
     }
 
     def test_the_fixtures_are_present_and_plausible(self):
@@ -107,14 +109,21 @@ class MintTests(unittest.TestCase):
 
 
 class LockedGameTests(unittest.TestCase):
-    def test_loldle_is_refused_by_name_from_every_entry_point(self):
-        self.assertIn("loldle", sources.LOCKED_GAMES)
-        for game, dataset in (("loldle", "champions"), ("loldle", "hard_mode")):
-            with self.subTest(dataset=dataset):
+    def test_loldle_champions_is_managed_but_hard_mode_is_not(self):
+        """`champions` joined the managed set 2026-09-27, once LoLdle's
+        external maintainer left. `hard_mode` deliberately did not: it is
+        entirely hand-authored lore with no plausible upstream source, the
+        same category as Valdle's own `gender`/`species`/`origin` fields, so
+        it stays refused — by omission from `MANAGED_DATASETS`, not by a
+        hard-coded name check, since nothing else needs one any more."""
+        self.assertIn(("loldle", "champions"), sources.MANAGED_DATASETS)
+        self.assertNotIn(("loldle", "hard_mode"), sources.MANAGED_DATASETS)
+        sources.fetch("loldle", "champions", fixture_opener())
+        sources.load_local("loldle", "champions")
+        for method in (sources.fetch, sources.load_local):
+            with self.subTest(method=method.__name__):
                 with self.assertRaises(sources.SourceError):
-                    sources.fetch(game, dataset)
-                with self.assertRaises(sources.SourceError):
-                    sources.load_local(game, dataset)
+                    method("loldle", "hard_mode")
 
     def test_no_adapter_is_registered_for_a_locked_game(self):
         for game, _ in sources.ADAPTERS:
@@ -216,7 +225,7 @@ class OutageTests(unittest.TestCase):
 
     def test_one_games_outage_does_not_hide_drift_in_the_others(self):
         """`dbdle` sits between `valdle` and `genshindle` in `MANAGED_DATASETS`;
-        it going unreachable must not blind the check to the game after it."""
+        it going unreachable must not blind the check to the games after it."""
         responses = {}
         for url, name in drift.FIXTURE_FILES.items():
             if url in (sources.DBD_CHARACTERS_URL, sources.DBD_DLC_URL):
@@ -224,6 +233,13 @@ class OutageTests(unittest.TestCase):
             responses[url] = json.loads(
                 (FIXTURES / name).read_text(encoding="utf-8")
             )
+        # The champion payload's URL is version-templated (see
+        # `drift.load_fixtures`), so it is derived the same way here rather
+        # than being a static FIXTURE_FILES entry.
+        version = responses[sources.LOLDLE_VERSIONS_URL][0]
+        responses[sources._loldle_champion_url(version)] = json.loads(
+            (FIXTURES / "loldle_champions.json").read_text(encoding="utf-8")
+        )
         opener = sources.fixture_opener(responses)
 
         reports, unreachable = drift.run_checks(opener)
@@ -231,6 +247,7 @@ class OutageTests(unittest.TestCase):
         checked = {(report["game"], report["dataset"]) for report in reports}
         self.assertIn(("valdle", "agents"), checked)
         self.assertIn(("genshindle", "characters"), checked)
+        self.assertIn(("loldle", "champions"), checked)
         self.assertNotIn(("dbdle", "killers"), checked)
         self.assertEqual(
             [{"game": "dbdle", "dataset": "killers"}],
@@ -295,13 +312,23 @@ class DriftReportTests(unittest.TestCase):
                          local.resolved("the_pig")["movement_speed"])
 
     def test_no_attribute_label_is_left_referenced_by_nobody(self):
-        """A label no entity points at is dead weight that misleads an editor."""
+        """A label no entity points at is dead weight that misleads an editor.
+
+        LoLdle is the first managed dataset where a field's raw value can be a
+        list rather than a bare id (a champion can have two species), so a
+        referenced value id has to be collected out of either shape.
+        """
         for game, dataset in sources.MANAGED_DATASETS:
             local = sources.load_local(game, dataset)
             for field_name in local.fields():
-                referenced = {mechanics[field_name]
-                              for mechanics in local.entities.values()
-                              if isinstance(mechanics.get(field_name), str)}
+                referenced = set()
+                for mechanics in local.entities.values():
+                    raw = mechanics.get(field_name)
+                    if isinstance(raw, str):
+                        referenced.add(raw)
+                    elif isinstance(raw, list):
+                        referenced.update(item for item in raw
+                                          if isinstance(item, str))
                 for language, catalog in local.catalogs.items():
                     labels = set((catalog["datasets"][dataset].get("attributes")
                                   or {}).get(field_name, {}))

@@ -18,6 +18,14 @@
 #   journalctl -u potatobot-everydle-drift --since '2 weeks ago'
 #
 # Exit codes: 0 in step with upstream, 1 drift found, 2 a source was unreachable.
+#
+# `User=woody`, not a dedicated `potatobot` system account: none exists on
+# the deployed host -- `potatobot.service` itself runs as `woody` (confirmed
+# via `systemctl show potatobot.service -p User`). The installed copy of
+# this unit was hand-patched from `potatobot` to `woody` at some point and
+# that fix never made it back into this file, which was still wrong until
+# 2026-09-25 -- caught only because a new unit copied the stale pattern and
+# failed with "Failed to determine user credentials: No such process".
 
 [Unit]
 Description=PotatoBot Everydle data drift check
@@ -27,8 +35,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=potatobot
-Group=potatobot
+User=woody
+Group=woody
 WorkingDirectory=/opt/potatobot
 ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/scripts/everydle_drift.py
 # Drift is the expected finding, not a failure, so neither 1 nor 2 should mark

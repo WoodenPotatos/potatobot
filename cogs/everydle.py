@@ -142,7 +142,8 @@ def get_daily_target(game_type: str, full_list: list, legacy_aliases=None) -> st
 
         return daily_answer
 
-# Hard-mode classes remain dormant; the unfinished mode is not exposed by commands.
+# Hard-mode LoLdle: guess the champion from a redacted lore snippet, with the
+# release year as a higher/lower hint. Exposed via /loldle difficulty:hard.
 class LoldleHardModal(discord.ui.Modal):
     def __init__(self, view_instance):
         super().__init__(title=t("everydle.modal_lore_title"))
@@ -657,27 +658,48 @@ class Everydle(commands.Cog):
     @commands.hybrid_command(name="loldle", description=t("general.cmd_loldle"))
     @discord.app_commands.choices(difficulty=[
         discord.app_commands.Choice(name=t("everydle.diff_choice_easy"), value="easy"),
-        discord.app_commands.Choice(name=t("everydle.diff_choice_medium"), value="medium")
+        discord.app_commands.Choice(name=t("everydle.diff_choice_medium"), value="medium"),
+        discord.app_commands.Choice(name=t("everydle.diff_choice_hard"), value="hard")
     ])
     @is_channel("everydle_channel")
-    async def loldle(self, ctx, difficulty: str = "medium"): 
-        if not CHAMPIONS:
-            return await ctx.send(t("everydle.err_champions_json"), ephemeral=True)
-        
-        user_id = ctx.author.id
-        now = utc_now()
-    
-        if difficulty not in ["easy", "medium"]:
+    async def loldle(self, ctx, difficulty: str = "medium"):
+        if difficulty not in ["easy", "medium", "hard"]:
             return await ctx.send(t("everydle.err_invalid_diff"), ephemeral=True)
 
+        if difficulty == "hard":
+            if not LORE_CHAMPS:
+                return await ctx.send(t("everydle.err_loldlehardmode_json"), ephemeral=True)
+        elif not CHAMPIONS:
+            return await ctx.send(t("everydle.err_champions_json"), ephemeral=True)
+
+        user_id = ctx.author.id
+        now = utc_now()
+
         col_name = f"last_loldle_{difficulty}"
-        
+
         last_play_str = await database.run(database.get_cooldown, user_id, col_name)
         if last_play_str:
             last_play = parse_stored(last_play_str)
             if local_date(last_play) == local_date(now):
-                diff_text = t("everydle.diff_easy") if difficulty == "easy" else t("everydle.diff_medium")
+                if difficulty == "easy": diff_text = t("everydle.diff_easy")
+                elif difficulty == "medium": diff_text = t("everydle.diff_medium")
+                else: diff_text = t("everydle.diff_hard")
                 return await ctx.send(t("everydle.err_loldle_played", diff_text=diff_text), ephemeral=True)
+
+        if difficulty == "hard":
+            daily_champ = await asyncio.to_thread(
+                get_daily_target, "loldle_hard", list(LORE_CHAMPS.keys()),
+                LORE_CHAMPS_LOWER,
+            )
+            view = LoldleHardView(target_champ=daily_champ)
+            target_data = LORE_CHAMPS[daily_champ]
+            initial_content = t(
+                "everydle.lore_board",
+                quote=target_data["quote"],
+                header=t("everydle.lore_header"),
+                history="",
+            )
+            return await ctx.send(content=initial_content, view=view, ephemeral=True)
 
         daily_champ = await asyncio.to_thread(
             get_daily_target, f"loldle_{difficulty}", list(CHAMPIONS.keys()),
@@ -685,7 +707,7 @@ class Everydle(commands.Cog):
         )
         view = LoldleView(target_champ=daily_champ, difficulty=difficulty)
         header_text = t("everydle.loldle_header")
-        
+
         if difficulty == "easy":
             t_data = CHAMPIONS[daily_champ]
             def j(val): return ", ".join(str(x) for x in val) if isinstance(val, list) else val
@@ -693,7 +715,7 @@ class Everydle(commands.Cog):
             initial_content = t("everydle.loldle_easy_init", header=header_text, target_row=target_row)
         else:
             initial_content = t("everydle.loldle_med_init", header=header_text)
-    
+
         await ctx.send(content=initial_content, view=view, ephemeral=True)
 
     @commands.hybrid_command(name="valdle", description=t("general.cmd_valdle"))

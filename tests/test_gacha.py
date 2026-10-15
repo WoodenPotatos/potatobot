@@ -1524,6 +1524,194 @@ class ManualEntitlementGrantTests(unittest.TestCase):
         self.assertIn('{"gacha", "manual"}', body)
 
 
+class AssetPresenceVerificationTests(unittest.IsolatedAsyncioTestCase):
+    """`entitlement_cleanup`'s second, read-only pass: an asset can be deleted
+    from Discord by hand years before the entitlement granting it expires on
+    its own, and before this nothing ever looked at a still-active grant to
+    notice. This is the live incident that motivated it: a glitched sticker,
+    manually deleted from Discord, whose entitlement stayed `active` with no
+    visible sign of the mismatch anywhere until it happened to expire.
+    """
+
+    GUILD = 6161
+    MEMBER = 99
+    STAFF = 1
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "asset_presence.db")
+        database.initialize_database()
+        database.register_guild(self.GUILD, "Guild")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _grant(self, kind="sticker", item_id="555", days=365):
+        result = database.grant_manual_entitlement(
+            self.GUILD, self.MEMBER, kind, item_id, days, self.STAFF)
+        self.assertTrue(result["granted"], result)
+        return result["entitlement_id"]
+
+    # ---------------------------------------------------- database layer
+
+    def test_get_active_asset_entitlements_finds_the_grant(self):
+        entitlement_id = self._grant()
+        rows = database.get_active_asset_entitlements()
+        self.assertEqual([entitlement_id], [row["entitlement_id"] for row in rows])
+
+    def test_a_premium_or_role_entitlement_is_not_an_asset(self):
+        database.grant_manual_entitlement(
+            self.GUILD, self.MEMBER, "emoji", "1", 30, self.STAFF)
+        with database.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO timed_entitlements (guild_id, user_id, "
+                "entitlement_key, starts_at, expires_at, source_type) "
+                "VALUES (?, ?, 'premium', '2026-01-01', '2099-01-01', 'manual')",
+                (self.GUILD, self.MEMBER))
+            conn.commit()
+        rows = database.get_active_asset_entitlements()
+        self.assertEqual(["emoji"], [row["entitlement_key"] for row in rows])
+
+    def test_setting_missing_writes_a_timestamp_and_clearing_removes_it(self):
+        entitlement_id = self._grant()
+        database.set_entitlement_discord_presence(entitlement_id, True)
+        rows = database.get_active_entitlements(self.GUILD, "2000-01-01T00:00:00+00:00")
+        self.assertIsNotNone(rows[0]["discord_missing_since"])
+
+        database.set_entitlement_discord_presence(entitlement_id, False)
+        rows = database.get_active_entitlements(self.GUILD, "2000-01-01T00:00:00+00:00")
+        self.assertIsNone(rows[0]["discord_missing_since"])
+
+    def test_a_non_active_row_is_not_touched(self):
+        entitlement_id = self._grant()
+        with database.get_connection() as conn:
+            conn.execute(
+                "UPDATE timed_entitlements SET status = 'expired' "
+                "WHERE entitlement_id = ?", (entitlement_id,))
+            conn.commit()
+        database.set_entitlement_discord_presence(entitlement_id, True)
+        with database.get_connection() as conn:
+            value = conn.execute(
+                "SELECT discord_missing_since FROM timed_entitlements "
+                "WHERE entitlement_id = ?", (entitlement_id,)).fetchone()[0]
+        self.assertIsNone(value, "an expired row must not be flagged missing")
+
+    # --------------------------------------------------------- cog layer
+
+    async def test_check_asset_presence_reports_a_definite_404_as_missing(self):
+        import discord as discord_module
+        from cogs.gacha import check_asset_presence
+        from unittest.mock import AsyncMock, MagicMock
+
+        guild = MagicMock()
+        guild.fetch_sticker = AsyncMock(
+            side_effect=discord_module.NotFound(MagicMock(status=404), "Unknown sticker"))
+        entitlement = {"entitlement_id": 1, "entitlement_key": "sticker",
+                       "discord_item_id": "555"}
+        self.assertFalse(await check_asset_presence(guild, entitlement))
+
+    async def test_check_asset_presence_reports_success_as_present(self):
+        from cogs.gacha import check_asset_presence
+        from unittest.mock import AsyncMock, MagicMock
+
+        guild = MagicMock()
+        guild.fetch_sticker = AsyncMock(return_value=MagicMock())
+        entitlement = {"entitlement_id": 1, "entitlement_key": "sticker",
+                       "discord_item_id": "555"}
+        self.assertTrue(await check_asset_presence(guild, entitlement))
+
+    async def test_check_asset_presence_is_none_on_an_ambiguous_failure(self):
+        """A rate limit or outage must never be read as 'confirmed gone'."""
+        import discord as discord_module
+        from cogs.gacha import check_asset_presence
+        from unittest.mock import AsyncMock, MagicMock
+
+        guild = MagicMock()
+        guild.fetch_sticker = AsyncMock(
+            side_effect=discord_module.HTTPException(MagicMock(status=429), "rate limited"))
+        entitlement = {"entitlement_id": 1, "entitlement_key": "sticker",
+                       "discord_item_id": "555"}
+        self.assertIsNone(await check_asset_presence(guild, entitlement))
+
+    async def test_an_emoji_absent_from_cache_is_missing(self):
+        from cogs.gacha import check_asset_presence
+        from unittest.mock import MagicMock
+
+        guild = MagicMock()
+        guild.get_emoji.return_value = None
+        entitlement = {"entitlement_id": 1, "entitlement_key": "emoji",
+                       "discord_item_id": "555"}
+        self.assertFalse(await check_asset_presence(guild, entitlement))
+
+    # -------------------------------------------------------- the full loop
+
+    async def test_the_cleanup_loop_flags_a_missing_asset(self):
+        import discord as discord_module
+        from unittest.mock import AsyncMock, MagicMock
+        from cogs.gacha import Gacha
+
+        entitlement_id = self._grant()
+        guild = MagicMock()
+        guild.id = self.GUILD
+        guild.fetch_sticker = AsyncMock(
+            side_effect=discord_module.NotFound(MagicMock(status=404), "gone"))
+        cog = MagicMock()
+        cog.bot.get_guild.return_value = guild
+
+        await Gacha.entitlement_cleanup.coro(cog)
+
+        rows = database.get_active_entitlements(self.GUILD, "2000-01-01T00:00:00+00:00")
+        self.assertIsNotNone(rows[0]["discord_missing_since"])
+
+    async def test_the_cleanup_loop_clears_a_previously_flagged_asset(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from cogs.gacha import Gacha
+
+        entitlement_id = self._grant()
+        database.set_entitlement_discord_presence(entitlement_id, True)
+        guild = MagicMock()
+        guild.id = self.GUILD
+        guild.fetch_sticker = AsyncMock(return_value=MagicMock())
+        cog = MagicMock()
+        cog.bot.get_guild.return_value = guild
+
+        await Gacha.entitlement_cleanup.coro(cog)
+
+        rows = database.get_active_entitlements(self.GUILD, "2000-01-01T00:00:00+00:00")
+        self.assertIsNone(rows[0]["discord_missing_since"])
+
+    async def test_the_cleanup_loop_leaves_an_unresolved_guild_untouched(self):
+        from unittest.mock import MagicMock
+        from cogs.gacha import Gacha
+
+        self._grant()
+        cog = MagicMock()
+        cog.bot.get_guild.return_value = None
+
+        await Gacha.entitlement_cleanup.coro(cog)
+
+        rows = database.get_active_entitlements(self.GUILD, "2000-01-01T00:00:00+00:00")
+        self.assertIsNone(rows[0]["discord_missing_since"])
+
+    async def test_the_loop_does_not_write_when_the_state_has_not_changed(self):
+        """A healthy guild costs one write total, not one a day forever."""
+        from unittest.mock import AsyncMock, MagicMock
+        from cogs.gacha import Gacha
+
+        self._grant()
+        guild = MagicMock()
+        guild.id = self.GUILD
+        guild.fetch_sticker = AsyncMock(return_value=MagicMock())
+        cog = MagicMock()
+        cog.bot.get_guild.return_value = guild
+
+        with patch.object(database, "set_entitlement_discord_presence") as mocked:
+            await Gacha.entitlement_cleanup.coro(cog)
+        mocked.assert_not_called()
+
+
 class RewardLabelResolutionTests(unittest.TestCase):
     """`gacha_reward_label` must not perform its own database I/O.
 
@@ -1577,6 +1765,42 @@ class RewardLabelResolutionTests(unittest.TestCase):
                    side_effect=database.DatabaseOperationError("boom")):
             labels = asyncio.run(resolve_custom_item_labels(1))
         self.assertEqual({}, labels)
+
+    def test_a_known_custom_item_never_reaches_the_shipped_locale_lookup(self):
+        """`t()` logs an ERROR on every miss as a side effect, and a custom
+        item has no shipped entry by definition -- so calling it anyway for a
+        key `custom_items` already resolves logged one real-looking failure
+        per resolution for something that was never actually broken (the
+        rehearsal that found this: six identical error lines for one
+        `/inventory` call naming a single custom voucher)."""
+        from cogs.gacha import gacha_reward_label
+
+        with patch("cogs.gacha.t") as mocked_t:
+            label = gacha_reward_label(
+                "vault_extra", custom_items={"vault_extra": "Extra vault"})
+        mocked_t.assert_not_called()
+        self.assertEqual("Extra vault", label)
+
+    def test_an_orphaned_custom_key_still_falls_back_to_the_bare_key(self):
+        """A banner can still name a key from an item that has since been
+        deleted. `custom_items` will not have it, so the stored key itself is
+        shown rather than a bracketed placeholder -- unchanged from before
+        the lookup order was fixed."""
+        from cogs.gacha import gacha_reward_label
+
+        label = gacha_reward_label(
+            "deleted_item", custom_items={"vault_extra": "Extra vault"})
+        self.assertEqual("deleted_item", label)
+
+    def test_a_genuinely_unresolvable_key_still_logs_and_brackets(self):
+        """No `custom_items` map at all (a caller that omitted it) must
+        behave exactly as it always has: the bracketed placeholder, so a
+        truly missing shipped reward's locale key is still visible as a real
+        problem rather than silently swallowed by this fix."""
+        from cogs.gacha import gacha_reward_label
+
+        label = gacha_reward_label("totally_unknown_key")
+        self.assertEqual("[gacha.rewards.totally_unknown_key]", label)
 
 
 class InventoryEmbedFieldChunkingTests(unittest.TestCase):

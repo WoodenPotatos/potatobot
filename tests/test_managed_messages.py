@@ -17,7 +17,7 @@ import tempfile
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -977,4 +977,88 @@ class PublishEditsThePostedMessageWhereItIsTests(unittest.IsolatedAsyncioTestCas
         target.send.assert_awaited_once()
         stored = database.get_managed_message(111, "ticket", "help")
         self.assertEqual(("2", "6001"), (stored["channel_id"], stored["message_id"]))
+
+
+class TicketTranscriptLineTests(unittest.TestCase):
+    """`transcript_line_body` is what closes the gap a rehearsal found: a
+    transcript wrote raw `<:name:id>` emoji markup through unresolved and
+    dropped attachments -- filename and URL both -- with nothing left in
+    their place."""
+
+    def setUp(self):
+        from cogs.tickets import transcript_line_body
+        self.transcript_line_body = transcript_line_body
+
+    def _message(self, content="", attachments=()):
+        return SimpleNamespace(content=content, attachments=list(attachments))
+
+    def test_a_custom_emoji_degrades_to_a_readable_name(self):
+        message = self._message("thanks <:potatocoins:123456789012345678>!")
+        self.assertEqual(
+            "thanks :potatocoins:!", self.transcript_line_body(message))
+
+    def test_an_animated_custom_emoji_also_degrades(self):
+        # A Discord-epoch synthetic id, not a real guild's -- see
+        # scripts/publish_public.py's SYNTHETIC_IDS for why this matters.
+        message = self._message("<a:party:1420070400000000002> nice")
+        self.assertEqual(":party: nice", self.transcript_line_body(message))
+
+    def test_unicode_emoji_passes_through_unchanged(self):
+        message = self._message("looks great \U0001F44D")
+        self.assertEqual(
+            "looks great \U0001F44D", self.transcript_line_body(message))
+
+    def test_an_attachment_is_named_and_linked_not_silently_dropped(self):
+        attachment = SimpleNamespace(
+            filename="screenshot.png", url="https://cdn.example/screenshot.png")
+        message = self._message(content="", attachments=[attachment])
+        self.assertEqual(
+            "[screenshot.png](https://cdn.example/screenshot.png)",
+            self.transcript_line_body(message))
+
+    def test_text_and_an_attachment_both_survive_on_one_line(self):
+        attachment = SimpleNamespace(
+            filename="log.txt", url="https://cdn.example/log.txt")
+        message = self._message(content="see attached", attachments=[attachment])
+        self.assertEqual(
+            "see attached [log.txt](https://cdn.example/log.txt)",
+            self.transcript_line_body(message))
+
+
+class TicketLauncherNamingTests(unittest.IsolatedAsyncioTestCase):
+    """The generic `/ticket` launcher named its channel after the opener's raw
+    snowflake, unlike the redeem (`{asset_type}-{username}`) and shop rental
+    (`{item_prefix}-{username}`) ticket flows, which already use a name.
+    `cogs.tickets` is resolved fresh here rather than imported at module
+    scope, since tests.test_cog_loading unloads every cog and a stale
+    module-level import would make `patch.object` target a different object
+    than the one this view actually calls into.
+    """
+
+    async def test_the_channel_name_uses_the_members_name_not_their_id(self):
+        import cogs.tickets
+
+        view = cogs.tickets.TicketLauncher()
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=42, name="Woody"),
+            guild=SimpleNamespace(id=1),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        # `ticket_open_times.get(id, 0)` defaults to 0, so on a host whose
+        # monotonic clock has not yet been running for a full cooldown
+        # window -- true on some freshly provisioned CI runners -- *every*
+        # first-time user looks mid-cooldown. Seed a value far enough in the
+        # past to be independent of the clock's absolute baseline, rather
+        # than depending on how long this particular machine has been up.
+        cogs.tickets.ticket_open_times[42] = time.monotonic() - 10_000
+        with patch.object(cogs.tickets, "require_interaction_feature",
+                         AsyncMock(return_value=True)), \
+             patch.object(cogs.tickets.database, "run", AsyncMock(return_value=None)), \
+             patch.object(cogs.tickets, "open_ticket",
+                         AsyncMock(return_value=None)) as mocked_open:
+            await view.ticket(interaction)
+
+        mocked_open.assert_awaited_once_with(
+            interaction.guild, interaction.user, "ticket-woody", "support")
 

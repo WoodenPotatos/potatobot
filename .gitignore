@@ -49,6 +49,11 @@ todo*
 # fresh each time and meant to be copied out and posted, not diffed or kept.
 docs/guild_message.md
 
+# Session handoff notes (the `handoff` skill). Local-only scratch for picking
+# up a session cold; not a project artifact and never meant to be diffed,
+# reviewed or published.
+handoff/
+
 # Dashboard design reference: local screenshots, several megabytes each.
 dashboard-reference/
 node_modules/
@@ -56,3 +61,6 @@ node_modules/
 # Screenshots dropped in the tree to point at a defect. They are
 # working notes, and one of them is a picture of the live dashboard.
 Screenshot*.png
+
+
+graphify-out/

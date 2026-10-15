@@ -7,10 +7,24 @@ what deliberately did not.
 The reasoning is kept as written, because it is the part that explains why the
 tooling reports rather than edits.
 
-**League of Legends is out of scope.** `data/loldle/` is maintained by a named
-administrator who has asked that it not be edited automatically. Nothing in this
-plan touches it, and any tool built from this plan must refuse `loldle` by name
-rather than by configuration, so it cannot be enabled by mistake.
+**League of Legends joined the managed set 2026-09-27**, once the administrator
+who held that request left the project. `champions` now has an adapter
+(`fetch_loldle` in `scripts/everydle_sources.py`); `hard_mode` (redacted-lore
+hard mode) stays unmanaged on its own merits — it is entirely hand-authored
+lore with no plausible upstream source, the same category as Valdle's own
+`gender`/`species`/`origin` fields, not an ownership restriction.
+
+**Data Dragon's automatable surface is thin.** Verified live 2026-09-27
+against `https://ddragon.leagueoflegends.com/cdn/<version>/data/en_US/champion.json`
+(173 champions): only `range` (melee/ranged, derived from `stats.attackrange`
+at a 350-unit threshold — one recorded exception, Gnar, see
+`ACCEPTED_DIVERGENCES`) is trustworthy. Its `partype` field looked like a
+second candidate (`resource`) but is coarser than the local catalog — it
+reports "Fury" for both Renekton and Briar, who have distinct named resources
+locally, and "None" for both truly resourceless champions and health-cost
+casters — so mapping it directly would silently blur a distinction a person
+already made correctly; `resource` stays a lore field, like `gender`,
+`role` (lane, not in Data Dragon at all), `species`, `region` and `year`.
 
 ---
 
@@ -243,10 +257,11 @@ Phase 1 is worth doing regardless of whether any of the rest happens.
 - **Upstream can be wrong.** It disagrees with the local data on six fields right
   now, and the local data may well be the correct one in some of them. This is
   precisely why nothing auto-applies.
-- **Scope creep into LoLdle.** The most likely way this plan causes harm is
-  someone generalising the tool and pointing it at `data/loldle/`. The adapter
-  registry should hard-code the two supported games and have no mechanism for
-  adding a third without a code change and a conversation.
+- **Scope creep beyond what's managed.** This risk predated LoLdle joining
+  `champions` 2026-09-27 (a deliberate code change and conversation, exactly as
+  this note asked for) — it now reads as: the adapter registry should still
+  have no mechanism for adding a *fourth* game, or for pulling `hard_mode` in
+  alongside `champions`, without the same kind of deliberate step.
 - **A new attribute value needs both catalogs.** Adding, say, a nationality that
   does not exist yet means a new value id plus Hungarian and English text. The
   proposal generator has to produce all three or the minigame will not load.
@@ -390,7 +405,7 @@ release it was checked against, and deleting the line is all it takes to add the
 
 ## The rules these scripts enforce
 
-`python scripts/everydle_drift.py` compares the Valdle, DbDle and Genshindle datasets with upstream and reports what changed; `scripts/everydle_propose.py` drafts and applies a reviewed patch. Four invariants govern anything touching `data/`. **Never rename an entity id** — `get_daily_target` filters the persisted deck to ids that still exist, so a rename re-draws today's answer under anyone mid-game; add an alias. **Never re-derive an attribute value id** — they are opaque and dataset-scoped, so an existing id must be looked up and reused or the mechanics file's references are orphaned. **Apply attribute changes at a day boundary**, because the colour feedback a player already received was computed against the old value. And **datasets load at import**, so a change needs `?reload everydle` or a restart. `data/loldle/` is refused by name in the tooling at its maintainer's request — a hard-coded set, not configuration.
+`python scripts/everydle_drift.py` compares the Valdle, DbDle and Genshindle datasets with upstream and reports what changed; `scripts/everydle_propose.py` drafts and applies a reviewed patch. Four invariants govern anything touching `data/`. **Never rename an entity id** — `get_daily_target` filters the persisted deck to ids that still exist, so a rename re-draws today's answer under anyone mid-game; add an alias. **Never re-derive an attribute value id** — they are opaque and dataset-scoped, so an existing id must be looked up and reused or the mechanics file's references are orphaned. **Apply attribute changes at a day boundary**, because the colour feedback a player already received was computed against the old value. And **datasets load at import**, so a change needs `?reload everydle` or a restart. `loldle` joined `champions` (not `hard_mode`) in the managed set 2026-09-27, once the tooling's ownership-based refusal of it ended with the maintainer who held it.
 
 **A missing attribute is not a gap, it is an outage.** `_resolve_value` raises on an unresolvable id and `load_or_disable` turns that into the whole minigame vanishing for that language, so an entity may only enter a dataset with every field filled, and `everydle_propose.py` refuses a patch with any null. A `users` cooldown column, by contrast, needs no schema-version bump: `USER_COLUMNS` is applied idempotently by `PRAGMA table_info` on every start.
 

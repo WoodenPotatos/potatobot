@@ -9,10 +9,12 @@ report downstream can tell an operator what still needs a human.
 
 Nothing here writes to `data/`. See `docs/everydle_data_updates.md`.
 
-**League of Legends is out of scope.** `data/loldle/` is maintained by a named
-administrator who asked that it not be edited automatically, so `loldle` is
-refused by name rather than merely left unconfigured — there is no switch that
-turns it on.
+**League of Legends joined the managed set 2026-09-27**, once LoLdle's
+external maintainer left the project — see `fetch_loldle` for what Data
+Dragon can and cannot supply for it. `hard_mode` (the redacted-lore guessing
+mode) stays unmanaged: it has no plausible upstream source, being entirely
+hand-authored lore, the same category as Valdle's own `gender`/`species`/
+`origin` fields.
 """
 
 import hashlib
@@ -32,14 +34,16 @@ DATA_DIR = ROOT / "data"
 # attribute value id.
 PIVOT_LANGUAGE = "en"
 
-# Datasets an adapter may touch, as (game, dataset). Only these two are live in
-# `cogs/everydle.py`; `dbdle`'s survivors, perks and roster datasets are
-# unfinished scaffolding that no command loads.
+# Datasets an adapter may touch, as (game, dataset). `dbdle`'s survivors, perks
+# and roster datasets are unfinished scaffolding that no command loads.
+# `loldle`'s `hard_mode` is deliberately absent too — see the module docstring.
 MANAGED_DATASETS = (("valdle", "agents"), ("dbdle", "killers"),
-                    ("genshindle", "characters"))
-# Refused by name, not by omission. Generalising this tool and pointing it at
-# LoLdle is the single most likely way it could cause harm.
-LOCKED_GAMES = frozenset({"loldle"})
+                    ("genshindle", "characters"), ("loldle", "champions"))
+# No longer refuses any game by name. `loldle` was locked here until
+# 2026-09-27, at its then-external maintainer's request; nothing takes this
+# set's place, so a future hand-maintained dataset would need its own,
+# separately-decided entry rather than reusing this one.
+LOCKED_GAMES = frozenset()
 
 # Fields the game itself publishes and changes with a balance patch. A killer
 # buffed or nerfed has to move with the game, so upstream is the authority here
@@ -61,6 +65,15 @@ SOURCE_AUTHORITATIVE = {
         "element", "weapon", "region", "rarity", "gender",
         "weekly_boss", "version",
     ),
+    # `range` alone. Verified live 2026-09-27 against every champion Data
+    # Dragon returns: `partype` (the resource-bar name) is coarser than the
+    # local catalog and cannot be trusted — it reports "Fury" for both
+    # Renekton and Briar, who have distinct named resources locally, and
+    # "None" for both truly resourceless champions and health-cost casters —
+    # so a direct mapping would silently blur a distinction a person already
+    # made correctly. Lane role, species, region, gender and release year are
+    # not in Data Dragon's `champion.json` at all.
+    ("loldle", "champions"): ("range",),
 }
 
 # Entities upstream carries that this puzzle deliberately does not, with a
@@ -82,6 +95,9 @@ EXCLUDED_ENTITIES = {
         "No talent record upstream, so not a playable character.",
     ("genshindle", "characters", "manekina"):
         "No talent record upstream, so not a playable character.",
+    ("loldle", "champions", "romeo"):
+        "Not a League of Legends champion — a local easter-egg entity with no "
+        "upstream record.",
 }
 
 
@@ -102,6 +118,10 @@ ACCEPTED_DIVERGENCES = {
         "only Charlotte.",
     ("dbdle", "killers", "the_unknown", "gender"):
         "Deliberately unknowable in the game's own lore.",
+    ("loldle", "champions", "gnar", "range"):
+        "Data Dragon's base attack-range figure (175) reads as melee, but "
+        "Gnar's default Mini form plays at range; the derivation cannot see "
+        "his two-form kit. Verified live 2026-09-27.",
 }
 
 
@@ -226,10 +246,23 @@ class LocalDataset:
         return tuple(seen)
 
     def resolved(self, entity_id: str) -> dict:
-        """One entity's attributes as English text, or a number when numeric."""
+        """One entity's attributes as English text, or a number when numeric.
+
+        LoLdle is the first managed dataset where a field can hold more than
+        one value (a champion can have two species) — every mechanics value
+        there is a list even when there is only one, unlike Valdle/DbDle/
+        Genshindle's bare scalars. A single-item list resolves to that one
+        value, matching the bare-scalar shape upstream supplies for a
+        single-valued field; a genuine multi-item list resolves to a list of
+        text, since nothing here compares that shape against upstream today.
+        """
         resolved = {}
         for name, value in self.entities.get(entity_id, {}).items():
-            if isinstance(value, str):
+            if isinstance(value, list):
+                texts = [self.attribute_text(PIVOT_LANGUAGE, name, item)
+                        for item in value]
+                resolved[name] = texts[0] if len(texts) == 1 else texts
+            elif isinstance(value, str):
                 resolved[name] = self.attribute_text(PIVOT_LANGUAGE, name, value)
             else:
                 resolved[name] = value
@@ -238,7 +271,8 @@ class LocalDataset:
 
 MECHANICS_FILE = {("genshindle", "characters"): "genshindle.json",
                   ("valdle", "agents"): "valdle.json",
-                  ("dbdle", "killers"): "killers.json"}
+                  ("dbdle", "killers"): "killers.json",
+                  ("loldle", "champions"): "champions.json"}
 
 
 def load_local(game: str, dataset: str) -> LocalDataset:
@@ -573,9 +607,68 @@ def fetch_genshindle(opener=None) -> dict[str, UpstreamEntity]:
     return entities
 
 
+# ----------------------------------------------------------------------- loldle
+
+LOLDLE_VERSIONS_URL = "https://ddragon.leagueoflegends.com/api/versions.json"
+# Community-standard threshold: a champion whose base attack range is at least
+# this many units plays as ranged. Verified live 2026-09-27 against every one
+# of 173 champions Data Dragon returned: exactly one exception, Gnar, recorded
+# in `ACCEPTED_DIVERGENCES` rather than special-cased here.
+LOLDLE_RANGED_THRESHOLD = 350
+
+
+def _loldle_champion_url(version: str) -> str:
+    return f"https://ddragon.leagueoflegends.com/cdn/{version}/data/en_US/champion.json"
+
+
+def fetch_loldle(opener=None) -> dict[str, UpstreamEntity]:
+    """League of Legends champions.
+
+    Data Dragon supplies the roster and a base attack range, from which melee
+    vs. ranged is derived (see `LOLDLE_RANGED_THRESHOLD`). Everything else the
+    puzzle uses is either lore or structurally coarser upstream than the local
+    catalog: lane role, species, region and gender are not in Data Dragon at
+    all; release year is not in `champion.json` either; and the resource-bar
+    type (`partype`) is too coarse to trust — see `SOURCE_AUTHORITATIVE`'s
+    comment for the specific champions that showed this live. All five are
+    reported as unknown rather than guessed.
+    """
+    versions = _require_rows(
+        fetch_json(LOLDLE_VERSIONS_URL, opener) or [], LOLDLE_VERSIONS_URL, 1
+    )
+    version = versions[0]
+    champion_url = _loldle_champion_url(version)
+    payload = fetch_json(champion_url, opener)
+    rows = _require_rows((payload or {}).get("data") or {}, champion_url, 100)
+
+    entities = {}
+    for row in rows.values():
+        name = (row.get("name") or "").strip()
+        attack_range = (row.get("stats") or {}).get("attackrange")
+        if not name or attack_range is None:
+            raise SourceError(
+                "a League of Legends champion row has no name or no attack range"
+            )
+        supplied = {
+            "range": "Ranged" if attack_range >= LOLDLE_RANGED_THRESHOLD
+            else "Melee",
+        }
+        entities[slugify(name)] = UpstreamEntity(
+            entity_id=slugify(name),
+            display_name=name,
+            aliases=(name,),
+            fields=supplied,
+            unknown_fields=(
+                "gender", "role", "species", "resource", "region", "year",
+            ),
+        )
+    return entities
+
+
 ADAPTERS = {("valdle", "agents"): fetch_valdle,
             ("dbdle", "killers"): fetch_dbdle,
-            ("genshindle", "characters"): fetch_genshindle}
+            ("genshindle", "characters"): fetch_genshindle,
+            ("loldle", "champions"): fetch_loldle}
 
 
 def fetch(game: str, dataset: str, opener=None) -> dict[str, UpstreamEntity]:
@@ -614,6 +707,25 @@ def record_fixtures(destination: Path) -> list[Path]:
             encoding="utf-8",
         )
         written.append(path)
+
+    # The champion payload's URL is version-templated, so its own recorded
+    # file name carries the version rather than a fixed constant — the test
+    # re-derives the same URL from the recorded `loldle_versions.json`.
+    versions = fetch_json(LOLDLE_VERSIONS_URL)
+    versions_path = destination / "loldle_versions.json"
+    versions_path.write_text(
+        json.dumps(versions, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+    )
+    written.append(versions_path)
+    champion_path = destination / "loldle_champions.json"
+    champion_path.write_text(
+        json.dumps(
+            fetch_json(_loldle_champion_url(versions[0])),
+            ensure_ascii=False, sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    written.append(champion_path)
     return written
 
 

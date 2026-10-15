@@ -168,7 +168,7 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_survivor", "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 22
+LATEST_SCHEMA_VERSION = 24
 
 # The largest amount any single balance change, stake or transfer may carry.
 # Far above any real balance, and far below 2**63: an amount past that reaches
@@ -487,6 +487,17 @@ def _create_current_schema(conn):
         f"CREATE TABLE IF NOT EXISTS voice_permissions ({_VOICE_PERMISSIONS_DDL})"
     )
     conn.execute(f"CREATE TABLE IF NOT EXISTS active_channels ({_ACTIVE_CHANNELS_DDL})")
+    # Instance-wide, like the wallet it watches: a rolling per-user casino
+    # earnings window feeding `casino_rate_limit`. Purely additive and gated on
+    # table absence, never on a version check, so an interrupted upgrade is a
+    # no-op to repeat.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS casino_earnings_window (
+            user_id INTEGER PRIMARY KEY,
+            window_started_at TEXT NOT NULL,
+            window_total INTEGER NOT NULL DEFAULT 0
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS warnings (
             id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
@@ -1165,6 +1176,37 @@ def _create_control_plane_v5_schema(conn):
         # Schema 22. The staff Discord id behind a manual grant -- NULL for
         # every voucher-derived row, mirroring fulfillment_requests.completed_by.
         conn.execute("ALTER TABLE timed_entitlements ADD COLUMN granted_by INTEGER")
+    if "revoked_at" not in entitlement_columns:
+        # Schema 23. Set only by an operator revoking an active entitlement
+        # from the Redeems page. NULL for every row that expired, was
+        # cancelled by the erasure path, or simply ran its course -- the
+        # original `expires_at` stays untouched either way, so the grant's
+        # own history is never rewritten, only the moment it was cut short.
+        conn.execute("ALTER TABLE timed_entitlements ADD COLUMN revoked_at TEXT")
+    if "discord_missing_since" not in entitlement_columns:
+        # Schema 24. Set by `entitlement_cleanup`'s verification pass the
+        # first time it confirms (via a real 404, not any other failure) that
+        # a still-active asset's Discord side is already gone -- surfaced on
+        # the Redeems page so staff learn about a dead grant without waiting
+        # for it to expire on its own, which can be up to a year away. NULL
+        # means "last known to exist" or "never checked since being cleared."
+        conn.execute(
+            "ALTER TABLE timed_entitlements ADD COLUMN discord_missing_since TEXT"
+        )
+
+    fulfillment_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(fulfillment_requests)")
+    }
+    if "ticket_channel_id" not in fulfillment_columns:
+        # Schema 23, purely additive. Before this, the only link between a
+        # redeem ticket and its fulfillment request was a human-readable
+        # "#request_id" printed into the ticket's opening embed -- staff had
+        # to read it and cross-reference it by eye against the Redeems page.
+        # NULL for a request with no ticket (tickets disabled at redemption
+        # time) or one that predates this column.
+        conn.execute(
+            "ALTER TABLE fulfillment_requests ADD COLUMN ticket_channel_id INTEGER"
+        )
 
 
 # The three role menus that shipped as typed settings, and the key each becomes.
@@ -1588,7 +1630,15 @@ def xp_for_level(level: int) -> int:
 
 def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
                         xp_change: int = 0, win_inc: int = 0,
-                        loss_inc: int = 0, clamp_balance: bool = True):
+                        loss_inc: int = 0, clamp_balance: bool = True,
+                        casino_rate_limit: tuple[int, int] | None = None):
+    """`casino_rate_limit`, when given, is `(window_seconds, max_coins)`,
+    already resolved by the caller from that guild's settings -- only the six
+    casino payout resolvers pass it, and only for their net-positive credit.
+    A credit that would push the user's rolling window total past max_coins is
+    clamped to whatever budget remains (never refused outright, never negative,
+    never clawing back a smaller win already shown in Discord); the result
+    reports whether this call was throttled so the caller can alert staff."""
     if abs(balance_change) > MAX_AMOUNT or abs(xp_change) > MAX_AMOUNT:
         raise ValidationError("amount_out_of_range",
                               "balance or xp change exceeds MAX_AMOUNT")
@@ -1598,6 +1648,42 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
         (user_id,),
     ).fetchone()
     old_balance, old_xp, old_level, old_wins, old_losses = row
+
+    casino_rate_limited = False
+    if casino_rate_limit is not None and balance_change > 0:
+        window_seconds, max_coins = casino_rate_limit
+        now = utc_now()
+        window_row = conn.execute(
+            "SELECT window_started_at, window_total FROM casino_earnings_window "
+            "WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if window_row is None:
+            window_total, window_start = 0, now
+        else:
+            window_started_at = parse_stored(window_row[0])
+            window_total = window_row[1]
+            if (now - window_started_at).total_seconds() > window_seconds:
+                # Expired: start a fresh window rather than sliding it forward
+                # on every call, or the window would never actually elapse.
+                window_total, window_start = 0, now
+            else:
+                window_start = window_started_at
+        remaining = max(0, max_coins - window_total)
+        if balance_change > remaining:
+            casino_rate_limited = True
+            balance_change = remaining
+        conn.execute(
+            """
+            INSERT INTO casino_earnings_window (user_id, window_started_at, window_total)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                window_started_at = excluded.window_started_at,
+                window_total = excluded.window_total
+            """,
+            (user_id, window_start.isoformat(), window_total + balance_change),
+        )
+
     new_balance = old_balance + balance_change
     if clamp_balance:
         new_balance = max(0, new_balance)
@@ -1624,6 +1710,12 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
         # when a negative change hit the floor.
         "old_xp": old_xp,
         "xp_changed": new_xp != old_xp,
+        "casino_rate_limited": casino_rate_limited,
+        # The actual, possibly-clamped amount this call credited -- a caller
+        # that also reports its own locally-computed payout figure must use
+        # this instead once a clamp happened, or the embed and the balance
+        # tell two different stories about the same spin.
+        "applied_credit": balance_change,
     }
 
 
@@ -1807,7 +1899,8 @@ def increase_interactive_wager(wager_id: str, user_id: int, amount: int):
 
 def resolve_interactive_wager(wager_id: str, user_id: int, credit: int = 0,
                               win_inc: int = 0, loss_inc: int = 0,
-                              outcome: str = "settled"):
+                              outcome: str = "settled",
+                              casino_rate_limit: tuple[int, int] | None = None):
     """Settle a pending wager once and apply its payout in the same transaction."""
     if credit < 0:
         raise ValueError("wager credit cannot be negative")
@@ -1831,7 +1924,7 @@ def resolve_interactive_wager(wager_id: str, user_id: int, credit: int = 0,
                 return None
             result = _apply_stats_locked(
                 conn, user_id, credit, 0, win_inc, loss_inc,
-                clamp_balance=False,
+                clamp_balance=False, casino_rate_limit=casino_rate_limit,
             )
             conn.commit()
             return result
@@ -1934,7 +2027,8 @@ def claim_periodic_reward(guild_id: int, user_id: int, reward_key: str,
 
 
 def resolve_instant_wager(user_id: int, stake: int, credit: int = 0,
-                          win_inc: int = 0, loss_inc: int = 0):
+                          win_inc: int = 0, loss_inc: int = 0,
+                          casino_rate_limit: tuple[int, int] | None = None):
     """Reserves and settles a non-interactive wager in one transaction."""
     if stake <= 0 or stake > MAX_AMOUNT or credit < 0:
         return None
@@ -1951,7 +2045,7 @@ def resolve_instant_wager(user_id: int, stake: int, credit: int = 0,
                 return None
             result = _apply_stats_locked(
                 conn, user_id, credit, 0, win_inc, loss_inc,
-                clamp_balance=False,
+                clamp_balance=False, casino_rate_limit=casino_rate_limit,
             )
             conn.commit()
             return result
@@ -1961,7 +2055,8 @@ def resolve_instant_wager(user_id: int, stake: int, credit: int = 0,
 
 
 def resolve_dice_wager(guild_id: int, user_id: int, stake: int,
-                       first_roll: int, second_roll: int, bot_roll: int):
+                       first_roll: int, second_roll: int, bot_roll: int,
+                       casino_rate_limit: tuple[int, int] | None = None):
     """Settle dice and consume a loaded die only after a valid paid wager."""
     if stake <= 0 or stake > MAX_AMOUNT or any(roll not in range(1, 7)
                          for roll in (first_roll, second_roll, bot_roll)):
@@ -1995,12 +2090,18 @@ def resolve_dice_wager(guild_id: int, user_id: int, stake: int,
             else:
                 credit, win_inc, loss_inc, outcome = stake, 0, 0, "tie"
             result = _apply_stats_locked(
-                conn, user_id, credit, 0, win_inc, loss_inc, clamp_balance=False
+                conn, user_id, credit, 0, win_inc, loss_inc, clamp_balance=False,
+                casino_rate_limit=casino_rate_limit,
             )
             conn.commit()
+            # The amount actually credited above the stake, not the
+            # theoretically-computed one: a rate-limit clamp must change what
+            # the embed reports, or it tells the player a number their balance
+            # never received.
             result.update({"outcome": outcome, "player_roll": player_roll,
                            "bot_roll": bot_roll, "loaded_die": loaded,
-                           "first_roll": first_roll, "second_roll": second_roll})
+                           "first_roll": first_roll, "second_roll": second_roll,
+                           "net_winnings": result["applied_credit"] - stake})
             return result
     except sqlite3.Error as exc:
         db_logger.exception("Dice wager failed (guild=%s, user=%s)", guild_id, user_id)
@@ -2044,7 +2145,8 @@ def _slots_payout(stake: int, reels: tuple[str, str, str]) -> int:
 
 def resolve_roulette_wager(guild_id: int, user_id: int, stake: int,
                            selected_colour: str | None,
-                           selected_number: int | None, rng=None):
+                           selected_number: int | None, rng=None,
+                           casino_rate_limit: tuple[int, int] | None = None):
     """Spin, settle, and consume a loaded die only after a valid paid wager.
 
     The spin happens *inside* the transaction that debits the stake, which is
@@ -2092,10 +2194,15 @@ def resolve_roulette_wager(guild_id: int, user_id: int, stake: int,
             result = _apply_stats_locked(
                 conn, user_id, stake + payout if won else 0, 0,
                 1 if won else 0, 0 if won else 1, clamp_balance=False,
+                casino_rate_limit=casino_rate_limit,
             )
             conn.commit()
+            # Reported payout is the amount actually credited above the stake,
+            # not the theoretical one: a rate-limit clamp must change what the
+            # embed says, or it names a number the balance never received.
             result.update({"outcome": "win" if won else "loss", "number": number,
-                           "colour": colour, "payout": payout,
+                           "colour": colour,
+                           "payout": result["applied_credit"] - stake if won else 0,
                            "loaded_die": loaded,
                            "second_number": second_number,
                            "second_colour": second_colour})
@@ -2153,7 +2260,8 @@ def _wheel_spin(rng, segments, total_weight) -> int:
     return segments[-1][0]
 
 
-def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None):
+def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None,
+                        casino_rate_limit: tuple[int, int] | None = None):
     """Spin the wheel, settle, and consume a lucky charm if one is held.
 
     Same shape as `resolve_slots_wager`, and for the same reason: the spin has to
@@ -2185,11 +2293,15 @@ def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None):
             won = payout > 0
             result = _apply_stats_locked(
                 conn, user_id, payout, 0, 1 if won else 0, 0 if won else 1,
-                clamp_balance=False,
+                clamp_balance=False, casino_rate_limit=casino_rate_limit,
             )
             conn.commit()
+            # `payout` here already is the full credited amount (a 100
+            # multiplier is break-even, not profit), so a rate-limit clamp
+            # replaces it outright rather than being subtracted from it.
             result.update({"outcome": "win" if won else "loss",
-                           "multiplier": multiplier, "payout": payout,
+                           "multiplier": multiplier,
+                           "payout": result["applied_credit"],
                            "lucky_charm": charm, "second_multiplier": second})
             return result
     except sqlite3.Error as exc:
@@ -2198,7 +2310,8 @@ def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None):
         raise DatabaseOperationError("wheel wager failed") from exc
 
 
-def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None):
+def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None,
+                        casino_rate_limit: tuple[int, int] | None = None):
     """Spin, settle, and consume a lucky charm only after a valid paid wager.
 
     Same reasoning as roulette. A lucky charm spins a second set of reels and
@@ -2229,10 +2342,14 @@ def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None):
             result = _apply_stats_locked(
                 conn, user_id, stake + payout if won else 0, 0,
                 1 if won else 0, 0 if won else 1, clamp_balance=False,
+                casino_rate_limit=casino_rate_limit,
             )
             conn.commit()
+            # Reported payout is the amount actually credited above the stake,
+            # not the theoretical one, the same correction roulette needs.
             result.update({"outcome": "win" if won else "loss",
-                           "reels": list(reels), "payout": payout,
+                           "reels": list(reels),
+                           "payout": result["applied_credit"] - stake if won else 0,
                            "lucky_charm": charm,
                            "second_reels": list(second_reels) if second_reels else None})
             return result
@@ -6201,7 +6318,8 @@ def fulfill_voucher_request(guild_id: int, request_id: int, actor_id: int,
     with get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            "SELECT f.voucher_id, f.asset_type, f.status, v.user_id, v.duration_days "
+            "SELECT f.voucher_id, f.asset_type, f.status, v.user_id, v.duration_days, "
+            "f.ticket_channel_id "
             "FROM fulfillment_requests f JOIN reward_vouchers v ON v.voucher_id = f.voucher_id "
             "WHERE f.request_id = ? AND f.guild_id = ?",
             (int(request_id), int(guild_id)),
@@ -6209,7 +6327,7 @@ def fulfill_voucher_request(guild_id: int, request_id: int, actor_id: int,
         if not row or row[2] != "open":
             conn.rollback()
             return {"fulfilled": False, "reason": "unavailable"}
-        voucher_id, asset_type, _, user_id, days = row
+        voucher_id, asset_type, _, user_id, days, ticket_channel_id = row
         expires = now + timedelta(days=days)
         conn.execute(
             "UPDATE fulfillment_requests SET status = 'fulfilled', completed_at = ?, "
@@ -6229,7 +6347,107 @@ def fulfill_voucher_request(guild_id: int, request_id: int, actor_id: int,
              voucher_id, str(discord_item_id)),
         )
         conn.commit()
-        return {"fulfilled": True, "expires_at": expires.isoformat()}
+        return {"fulfilled": True, "expires_at": expires.isoformat(),
+                "ticket_channel_id": ticket_channel_id}
+
+
+def link_fulfillment_ticket(guild_id: int, request_id: int, channel_id: int):
+    """Store the redeem ticket a fulfillment request opened, so the two can
+    find each other -- before this, the only connection was a human-readable
+    "#request_id" printed into the ticket's embed. Best-effort: the ticket
+    must still stand even if this write fails, because the voucher is already
+    spent (same reasoning `support_tickets.open_ticket` itself documents)."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE fulfillment_requests SET ticket_channel_id = ? "
+            "WHERE request_id = ? AND guild_id = ?",
+            (int(channel_id), int(request_id), int(guild_id)),
+        )
+
+
+def get_open_fulfillment_by_channel(channel_id: int) -> dict | None:
+    """The open request a redeem ticket's in-channel button settles.
+
+    Looked up by channel at click time rather than baked into the persistent
+    view's own state: one registered instance answers every redeem ticket's
+    button, so it must hold no per-message state at all.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT request_id, guild_id, asset_type FROM fulfillment_requests "
+            "WHERE ticket_channel_id = ? AND status = 'open'",
+            (int(channel_id),),
+        ).fetchone()
+    if row is None:
+        return None
+    return {"request_id": row[0], "guild_id": row[1], "asset_type": row[2]}
+
+
+def cancel_fulfillment_request(guild_id: int, request_id: int, actor_id: int) -> dict:
+    """Cancel an open fulfillment request and its paired voucher.
+
+    Ends in 'cancelled' rather than deleting either row, the same "nothing is
+    migrated, a row is frozen at the day it was saved" principle a retired
+    gacha reward follows -- staff may need to see why a redemption never
+    completed. Reports the linked ticket, if any, so the caller can notify it.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT voucher_id, status, ticket_channel_id FROM fulfillment_requests "
+            "WHERE request_id = ? AND guild_id = ?",
+            (int(request_id), int(guild_id)),
+        ).fetchone()
+        if not row or row[1] != "open":
+            conn.rollback()
+            return {"cancelled": False, "reason": "unavailable"}
+        voucher_id, _, ticket_channel_id = row
+        conn.execute(
+            "UPDATE fulfillment_requests SET status = 'cancelled', completed_at = ?, "
+            "completed_by = ? WHERE request_id = ?",
+            (now, int(actor_id), int(request_id)),
+        )
+        conn.execute(
+            "UPDATE reward_vouchers SET status = 'cancelled' WHERE voucher_id = ?",
+            (voucher_id,),
+        )
+        conn.commit()
+        return {"cancelled": True, "ticket_channel_id": ticket_channel_id}
+
+
+def revoke_timed_entitlement(guild_id: int, entitlement_id: int, actor_id: int) -> dict:
+    """Mark an active entitlement cancelled from the Redeems page.
+
+    The row is never deleted: `status` moves to 'cancelled' and `revoked_at`
+    records when, while `starts_at`/`expires_at` stay exactly what was
+    granted, preserving the grant's own history. The Discord-side teardown
+    (removing a role, or deleting an emoji/sticker/sound) is a separate,
+    best-effort step the caller queues through `control_actions` -- this
+    function never makes a Discord call, matching every other mutation here.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT user_id, entitlement_key, discord_item_id FROM timed_entitlements "
+            "WHERE entitlement_id = ? AND guild_id = ? AND status = 'active'",
+            (int(entitlement_id), int(guild_id)),
+        ).fetchone()
+        if row is None:
+            conn.rollback()
+            return {"revoked": False, "reason": "unavailable"}
+        user_id, entitlement_key, discord_item_id = row
+        conn.execute(
+            "UPDATE timed_entitlements SET status = 'cancelled', revoked_at = ? "
+            "WHERE entitlement_id = ?",
+            (now, int(entitlement_id)),
+        )
+        conn.commit()
+        return {
+            "revoked": True, "user_id": user_id,
+            "entitlement_key": entitlement_key, "discord_item_id": discord_item_id,
+        }
 
 
 def grant_manual_entitlement(guild_id: int, user_id: int, asset_type: str,
@@ -6291,7 +6509,7 @@ def get_active_entitlements(guild_id: int, timestamp: str) -> list[dict]:
         rows = conn.execute(
             "SELECT e.entitlement_id, e.user_id, e.entitlement_key, e.starts_at, "
             "e.expires_at, e.discord_item_id, COALESCE(e.source_type, v.source_type), "
-            "v.reward_key, e.granted_by "
+            "v.reward_key, e.granted_by, e.discord_missing_since "
             "FROM timed_entitlements e "
             "LEFT JOIN reward_vouchers v ON v.voucher_id = e.source_voucher_id "
             "WHERE e.guild_id = ? AND e.status = 'active' AND e.expires_at > ? "
@@ -6300,8 +6518,43 @@ def get_active_entitlements(guild_id: int, timestamp: str) -> list[dict]:
         ).fetchall()
     keys = ("entitlement_id", "user_id", "entitlement_key", "starts_at",
             "expires_at", "discord_item_id", "source_type", "reward_key",
-            "granted_by")
+            "granted_by", "discord_missing_since")
     return [dict(zip(keys, row)) for row in rows]
+
+
+def get_active_asset_entitlements() -> list[dict]:
+    """Every still-active emoji/sticker/sound grant, across every guild, for
+    `entitlement_cleanup`'s verification pass -- not the expiry pass.
+
+    Unlike `get_expired_entitlements`, this has no `expires_at` filter: an
+    asset can vanish from Discord years before its own entitlement expires
+    (an operator deleting it by hand, as in the incident this exists for),
+    and nothing before this ever looked at an active grant to notice.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT entitlement_id, guild_id, entitlement_key, discord_item_id, "
+            "discord_missing_since FROM timed_entitlements "
+            "WHERE status = 'active' AND entitlement_key IN ('emoji', 'sticker', 'sound') "
+            "AND discord_item_id IS NOT NULL"
+        ).fetchall()
+    keys = ("entitlement_id", "guild_id", "entitlement_key", "discord_item_id",
+            "discord_missing_since")
+    return [dict(zip(keys, row)) for row in rows]
+
+
+def set_entitlement_discord_presence(entitlement_id: int, missing: bool):
+    """Record whether `entitlement_cleanup`'s verification pass could find the
+    asset on Discord. Only ever called with a definite answer -- a transient
+    or ambiguous check result must leave the row untouched rather than
+    guessing, the same way a refused debit is never discarded as a success."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE timed_entitlements SET discord_missing_since = ? "
+            "WHERE entitlement_id = ? AND status = 'active'",
+            (datetime.now(timezone.utc).isoformat() if missing else None,
+             int(entitlement_id)),
+        )
 
 
 def get_expired_entitlements(timestamp: str) -> list[dict]:
@@ -7080,7 +7333,8 @@ def queue_control_action(guild_id: int, actor_id: int, action_type: str,
     # A row of a retired type left in an older queue settles as unsupported
     # rather than being retried forever.
     if action_type not in {"publish_managed", "delete_managed", "erase_member",
-                          "repair_channel_permission"}:
+                          "repair_channel_permission", "notify_redeem_fulfilled",
+                          "revoke_entitlement"}:
         raise ValueError("unsupported control action")
     with get_connection() as conn:
         action_id = conn.execute(
@@ -7243,6 +7497,9 @@ ERASE_DELETE_ORDER = (
     ("active_channels", "owner_id = ?", 1),
     ("user_sharing_preferences", "user_id = ?", 1),
     ("user_identities", "user_id = ?", 1),
+    # A transient anti-abuse counter, not a record worth keeping once the
+    # member it watches is gone.
+    ("casino_earnings_window", "user_id = ?", 1),
     # A party post whose host is erased has no host; the row goes. Members who
     # *joined* somebody else's post are inside `joined_json` and are scrubbed
     # out of it below rather than deleting the host's post over them.

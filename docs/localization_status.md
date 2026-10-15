@@ -1,8 +1,10 @@
 # Localization: state and rules
 
 Re-generate every figure here with `python scripts/locale_audit.py`. Last
-measured 2026-08-22, after the English embargo was lifted and English was filled
-in.
+measured 2026-09-27, after LoLdle's ownership exemption ended, `champions`
+was filled for English, and — same day, a follow-up pass — `hard_mode`
+gained its last two champions (Yunara, Zaahen) and was filled for English
+too. LoLdle is now fully bilingual across both datasets.
 
 ---
 
@@ -26,11 +28,11 @@ in.
    what keeps them that way. It adds new keys, removes deleted ones, and now
    *reports* the English keys it left blank, so unfinished English work is
    visible immediately rather than at the next red build.
-7. **`data/loldle/` is off limits.** It is maintained by a named administrator
-   who asked that it not be edited automatically. Its English catalog stays
-   empty, which means LoLdle is unavailable when the language is English. That is
-   a recorded consequence of an ownership decision, not a defect to fix by
-   editing the file.
+7. **`data/loldle/`'s ownership exemption ended 2026-09-27.** Its external
+   maintainer left, and `champions` was filled for English in the same change
+   — no dataset is owner-exempt any more. `hard_mode` (new, redacted-lore hard
+   mode) is separately incomplete in English: newly-authored content, Hungarian
+   only so far, same as any other unfinished-for-one-language dataset.
 
 ### What enforces them
 
@@ -45,7 +47,7 @@ in.
 | **No English value carries Hungarian text** | `test_locale_coverage` |
 | **An identical value is a name or template, never a sentence** | `test_locale_coverage` |
 | **Every selectable language is actually complete** | `test_locale_coverage` |
-| **The LoLdle exception stays the only one** | `test_locale_coverage` |
+| **The LoLdle exception is lifted, and stays lifted** | `test_locale_coverage` |
 | No user-visible literal outside a catalog | `test_locale_coverage` |
 | Minigame catalogs align | `test_minigame_localization` |
 | Help covers every command | `test_cog_loading` |
@@ -66,7 +68,8 @@ Translation *quality* is still the one thing no test can judge. Read the diff.
 | Runtime-composed key families (26) | 100% | 100% |
 | Valdle data (63 strings) | 100% | **100%** |
 | DbDle data (137 strings) | 100% | **100%** |
-| LoLdle data (331 strings) | 100% | **0% — owner-maintained** |
+| LoLdle `champions` (331 strings) | 100% | **100% — ownership exemption ended 2026-09-27** |
+| LoLdle `hard_mode` (346 strings) | 100% | **100% — translated 2026-09-27, same day as the rest** |
 
 ### 2.2 Selecting a language
 
@@ -81,12 +84,7 @@ What `language = "en"` does today:
 - Every bot message, command description, button label and error → English.
 - The dashboard → English (its display language is a separate per-browser
   preference and works independently).
-- Valdle and DbDle → English.
-- **LoLdle → unavailable.** `load_or_disable` treats a blank entity name as a
-  fatal dataset error, so an empty English catalog removes the game rather than
-  falling back. `/loldle` answers with `everydle.err_champions_json`, which is a
-  clear message rather than a broken command. The fix is for the dataset's owner
-  to fill `data/loldle/locales/en.json`; nothing in the code needs to change.
+- Valdle, DbDle and every `/loldle` difficulty, `hard` included → English.
 
 ### 2.3 How resolution works
 
@@ -110,10 +108,11 @@ string — `t("system.ping")` with no `latency` returned `''`.
 This is the best-organised part of the project and it did not need changing.
 Stable English entity ids and numeric mechanics live in `data/<game>/*.json`;
 display names, aliases and attribute labels live in
-`data/<game>/locales/<lang>.json`. The English catalogs generated for Valdle and
-DbDle copy the entity names — they are already English proper nouns — and
-translate only the attribute labels, which is exactly the split the format is
-for. LoLdle hard mode remains deliberately unfinished and must stay unexposed.
+`data/<game>/locales/<lang>.json`. The English catalogs generated for Valdle,
+DbDle and both LoLdle datasets copy the entity names — they are already
+English proper nouns — and translate the attribute labels (`hard_mode`'s
+"attribute" is a full lore quote per champion rather than an enum, but the
+same opaque-id mechanism carries it without any loader change).
 
 ---
 
@@ -156,13 +155,6 @@ Add it to `locales/hu.json` **and** `locales/en.json` in the same change, then r
 Keep every `{placeholder}`, emoji and custom emoji id byte-identical between the
 two — three tests check that, and a dropped placeholder breaks `.format()` at
 runtime.
-
-### LoLdle in English
-`data/loldle/locales/en.json` needs its 173 entity names, their aliases, and the
-attribute labels for champion class, species, resource, range and region. It is
-the dataset owner's call. Once filled, `test_locale_coverage` will require it to
-stay filled and the `KNOWN_INCOMPLETE_MINIGAMES` exception in that test should be
-removed.
 
 ### A per-guild language
 One `language` setting still decides what the bot says everywhere, while the

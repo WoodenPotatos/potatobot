@@ -10,6 +10,7 @@ Rules that bind changes here: docs/subsystems/managed_messages.md
 import discord
 import asyncio
 import os
+import re
 import sys
 import io
 import time
@@ -35,6 +36,27 @@ TRANSCRIPT_PART_LIMIT = 5
 TRANSCRIPT_PART_BYTES = 8 * 1024 * 1024 - 64 * 1024
 ticket_open_times = BoundedCooldownMap()
 ticket_control_times = BoundedCooldownMap()
+
+#: `<:name:id>` / `<a:name:id>`, Discord's raw custom-emoji markup in message
+#: content. A transcript has no Discord client to resolve it against, so it
+#: would otherwise sit in the file as an unreadable numeric id forever.
+CUSTOM_EMOJI_PATTERN = re.compile(r"<a?:(\w+):\d+>")
+
+
+def transcript_line_body(message):
+    """One message's transcript text: readable emoji, plus what it shared.
+
+    A custom emoji degrades to `:name:` rather than staying `<:name:id>`.
+    Attachments are named and linked, never downloaded into the transcript --
+    the filename and URL are what let a reader later work out what a
+    message carried, where before an attachment-only message transcribed as
+    the author's name and nothing after it.
+    """
+    body = CUSTOM_EMOJI_PATTERN.sub(r":\1:", message.content)
+    for attachment in message.attachments:
+        link = f"[{attachment.filename}]({attachment.url})"
+        body = f"{body} {link}" if body else link
+    return body
 
 
 def is_ticket_staff(member):
@@ -121,7 +143,7 @@ class TicketLauncher(discord.ui.View):
                 )
             await database.run(database.remove_ticket, existing_id)
 
-        ticket_name = f"ticket-{interaction.user.id}"
+        ticket_name = f"ticket-{interaction.user.name.lower()}"
 
         ticket_open_times[interaction.user.id] = now
         await interaction.response.defer(ephemeral=True)
@@ -181,7 +203,7 @@ class TicketCloseModal(discord.ui.Modal):
                 break
             line = (
                 f"[{m.created_at.strftime('%Y-%m-%d %H:%M')}] "
-                f"{m.author.display_name}: {m.content}\n"
+                f"{m.author.display_name}: {transcript_line_body(m)}\n"
             ).encode("utf-8", errors="replace")
             if len(line) > TRANSCRIPT_PART_BYTES:
                 line = line[:TRANSCRIPT_PART_BYTES] + b"\n"

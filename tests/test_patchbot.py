@@ -109,5 +109,83 @@ class MinecraftAdapterTests(unittest.IsolatedAsyncioTestCase):
             await patchbot.minecraft_adapter(session)
 
 
+NEWS_URL = patchbot.HOYOLAB_NEWS_URL
+
+
+def _news_list(*subjects):
+    return {"data": {"list": [
+        {"post": {"subject": subject, "post_id": str(1000 + index)}}
+        for index, subject in enumerate(subjects)
+    ]}}
+
+
+class HoyolabAdapterTests(unittest.IsolatedAsyncioTestCase):
+    """The title heuristic HSR's `Version 4.6 "Nameless Honor" Update` slipped
+    through for over a day of ticks: the old exact three-suffix list
+    (`update details`, `what's new`, `update notice`) never matched a bare
+    `"... Update"`, even though every one of those suffixes already contains
+    `"update"` as a substring. Confirmed live against HoYoLAB on 2026-09-25 --
+    see docs/patchbot_data_sources.md."""
+
+    async def test_update_details_still_matches(self):
+        session = FakeSession({NEWS_URL: (200, _news_list(
+            'Version 4.5 "To Roll the Stars in Astropolis" Update Details'))})
+
+        adapter = patchbot.make_hoyolab_adapter(6)
+        post_id, url, title = await adapter(session)
+
+        self.assertEqual("1000", post_id)
+        self.assertEqual("https://www.hoyolab.com/article/1000", url)
+
+    async def test_whats_new_still_matches(self):
+        session = FakeSession({NEWS_URL: (200, _news_list(
+            'Version "Luna VIII" Version Details - What\'s New'))})
+
+        adapter = patchbot.make_hoyolab_adapter(2)
+        post_id, _, _ = await adapter(session)
+
+        self.assertEqual("1000", post_id)
+
+    async def test_a_bare_update_now_matches(self):
+        """The regression: HSR's real 4.6 post, which the old suffix list
+        missed on every tick since it was posted."""
+        session = FakeSession({NEWS_URL: (200, _news_list(
+            'Version 4.6 "Nameless Honor" Update'))})
+
+        adapter = patchbot.make_hoyolab_adapter(6)
+        post_id, _, title = await adapter(session)
+
+        self.assertEqual("1000", post_id)
+        self.assertEqual('Version 4.6 "Nameless Honor" Update', title)
+
+    async def test_an_unrelated_post_is_skipped_in_favour_of_a_later_match(self):
+        """A feed item that matches neither substring must not stop the scan
+        -- the adapter keeps looking rather than raising or guessing."""
+        session = FakeSession({NEWS_URL: (200, _news_list(
+            "Nameless Honor Event Guide",
+            'Version 4.6 "Nameless Honor" Update',
+        ))})
+
+        adapter = patchbot.make_hoyolab_adapter(6)
+        post_id, _, _ = await adapter(session)
+
+        self.assertEqual("1001", post_id)
+
+    async def test_no_matching_post_raises(self):
+        session = FakeSession({NEWS_URL: (200, _news_list(
+            "Nameless Honor Event Guide", "Fan Art Contest Winners"))})
+
+        adapter = patchbot.make_hoyolab_adapter(6)
+        with self.assertRaises(patchbot.PatchSourceError):
+            await adapter(session)
+
+    async def test_an_unexpected_response_shape_still_raises(self):
+        session = FakeSession({NEWS_URL: (200, {"unexpected": True})})
+
+        adapter = patchbot.make_hoyolab_adapter(6)
+        with self.assertRaises(patchbot.PatchSourceError):
+            await adapter(session)
+
+
 if __name__ == "__main__":
     unittest.main()

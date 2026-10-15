@@ -21,8 +21,9 @@ if ROOT_DIR not in sys.path:
 from core import database
 from cogs.utils import (can_self_assign_role, guild_setting_sync,
                         handle_loop_error, is_channel, t)
-from core.feature_access import is_enabled, maintenance_blocks
+from core.feature_access import is_enabled, maintenance_blocks, require_interaction_feature
 from core.support_tickets import open_ticket
+from cogs.tickets import is_ticket_staff
 
 gacha_logger = logging.getLogger("PotatoBot.Gacha")
 
@@ -47,6 +48,16 @@ def gacha_reward_label(key, duration_days=None, custom_items=None):
     call — a blocking event-loop call, repeated once per distinct key, for
     every `/inventory` or `/gacha` result. A caller with no custom items to
     resolve may omit the map entirely.
+
+    `custom_items` is checked *before* the shipped catalog is ever queried,
+    not after: `t()` logs an ERROR on every miss as a side effect, and a
+    custom item has no shipped entry by definition, so checking the shipped
+    catalog first logged one real-looking failure per resolution for every
+    custom gacha item ever pulled or held — noise indistinguishable from six
+    genuine failures, for something that always resolved correctly a moment
+    later. A shipped reward still wins where one exists, since built-in keys
+    are reserved and a guild cannot create a custom item that collides with
+    one.
     """
     if duration_days is not None and key.split("_", 1)[0] in {"emoji", "sticker", "sound"}:
         known = {
@@ -59,13 +70,14 @@ def gacha_reward_label(key, duration_days=None, custom_items=None):
                 asset=t(f"gacha.asset_types.{key.split('_', 1)[0]}"),
                 days=duration_days,
             )
+    if custom_items and key in custom_items:
+        return custom_items[key]
     label = t(f"gacha.rewards.{key}")
     if not label.startswith("[") or not custom_items:
         return label
-    # No shipped entry: this is one of the guild's own items, or a key from a
-    # banner saved before the item was deleted. A stored name beats a bracketed
-    # key, and the key itself beats a bracketed one.
-    return custom_items.get(key, key)
+    # A key from a banner saved before the item was deleted: not resolvable by
+    # name any more, but the key itself still beats a bracketed placeholder.
+    return key
 
 
 async def resolve_custom_item_labels(guild_id) -> dict:
@@ -233,9 +245,119 @@ async def revoke_entitlement(guild, entitlement) -> bool:
     return True
 
 
+async def check_asset_presence(guild, entitlement) -> bool | None:
+    """Whether a still-active asset entitlement's Discord side still exists.
+
+    The read-only counterpart to `revoke_entitlement`'s asset branch, for
+    `entitlement_cleanup`'s verification pass over entitlements nowhere near
+    their own expiry -- an asset can be deleted from Discord by hand years
+    before the entitlement that grants it runs out, and nothing before this
+    ever looked. Returns True/False only for a definite answer; any other
+    failure returns None so the caller leaves the record alone rather than
+    flagging it missing from a transient blip.
+    """
+    kind = entitlement["entitlement_key"]
+    item_id = entitlement.get("discord_item_id")
+    if item_id is None:
+        return None
+    try:
+        if kind == "emoji":
+            return guild.get_emoji(int(item_id)) is not None
+        elif kind == "sticker":
+            await guild.fetch_sticker(int(item_id))
+        elif kind == "sound":
+            await guild.fetch_soundboard_sound(int(item_id))
+        else:
+            return None
+    except discord.NotFound:
+        return False
+    except (discord.HTTPException, TypeError, ValueError):
+        gacha_logger.exception(
+            "Could not verify an asset entitlement's Discord presence "
+            "(entitlement_id=%s, kind=%s).",
+            entitlement["entitlement_id"], kind,
+        )
+        return None
+    return True
+
+
+class RedeemFulfillModal(discord.ui.Modal):
+    """The Discord asset id, entered without leaving the ticket."""
+
+    def __init__(self):
+        super().__init__(title=t("gacha.redeem_fulfill_modal_title"))
+        self.discord_item_id = discord.ui.TextInput(
+            label=t("gacha.redeem_fulfill_item_id_label"),
+            placeholder=t("gacha.redeem_fulfill_item_id_placeholder"),
+            min_length=1, max_length=32,
+        )
+        self.add_item(self.discord_item_id)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await require_interaction_feature(interaction, "tickets"):
+            return
+        if not is_ticket_staff(interaction.user):
+            return await interaction.response.send_message(
+                t("tickets.staff_only"), ephemeral=True)
+        request = await database.run(
+            database.get_open_fulfillment_by_channel, interaction.channel_id)
+        if request is None:
+            return await interaction.response.send_message(
+                t("gacha.redeem_fulfill_already_settled"), ephemeral=True)
+        item_id = self.discord_item_id.value.strip()
+        result = await database.run_write(
+            database.fulfill_voucher_request, request["guild_id"],
+            request["request_id"], interaction.user.id, item_id,
+        )
+        if not result["fulfilled"]:
+            return await interaction.response.send_message(
+                t("gacha.redeem_fulfill_already_settled"), ephemeral=True)
+        # Editing the message the button that opened this modal lives on, so
+        # the ticket shows the outcome in place rather than a second message.
+        await interaction.response.edit_message(
+            content=t("gacha.redeem_fulfill_done", staff=interaction.user.mention,
+                      item_id=item_id),
+            view=None,
+        )
+
+
+class RedeemFulfillView(discord.ui.View):
+    """A "Mark Fulfilled" button on a redeem ticket's opening embed.
+
+    Persistent and shared by every redeem ticket, so it holds no per-message
+    state: the open request is resolved from the channel the click happened
+    in, via `get_open_fulfillment_by_channel`, exactly as `TicketControl`
+    resolves its claimer from the ticket row rather than from itself.
+    """
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        btn = discord.ui.Button(
+            label=t("gacha.redeem_fulfill_btn"), style=discord.ButtonStyle.success,
+            emoji="✅", custom_id="redeem_fulfill",
+        )
+        btn.callback = self.fulfill
+        self.add_item(btn)
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        return await require_interaction_feature(interaction, "tickets")
+
+    async def fulfill(self, interaction: discord.Interaction):
+        if not is_ticket_staff(interaction.user):
+            return await interaction.response.send_message(
+                t("tickets.staff_only"), ephemeral=True)
+        request = await database.run(
+            database.get_open_fulfillment_by_channel, interaction.channel_id)
+        if request is None:
+            return await interaction.response.send_message(
+                t("gacha.redeem_fulfill_already_settled"), ephemeral=True)
+        await interaction.response.send_modal(RedeemFulfillModal())
+
+
 class Gacha(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.bot.add_view(RedeemFulfillView())
         self.entitlement_cleanup.start()
 
     def cog_unload(self):
@@ -527,6 +649,20 @@ class Gacha(commands.Cog):
         if channel is None:
             return t("gacha.redeem_fulfillment_success", request_id=request_id)
 
+        # Best-effort: the ticket must still stand even if this write fails,
+        # because the voucher is already spent -- the fallback is staff
+        # reading "#request_id" off the embed below, exactly as before this
+        # link existed at all.
+        try:
+            await database.run_write(
+                database.link_fulfillment_ticket,
+                ctx.guild.id, request_id, channel.id,
+            )
+        except database.DatabaseOperationError:
+            gacha_logger.exception(
+                "Could not link a redemption ticket to its request "
+                "(request_id=%s, channel_id=%s)", request_id, channel.id)
+
         embed = discord.Embed(
             title=t("gacha.redeem_ticket_title"),
             description=t("gacha.redeem_ticket_desc",
@@ -538,7 +674,7 @@ class Gacha(commands.Cog):
         embed.add_field(name=t("gacha.redeem_ticket_member"),
                         value=ctx.author.mention, inline=True)
         try:
-            await channel.send(embed=embed)
+            await channel.send(embed=embed, view=RedeemFulfillView())
         except discord.HTTPException:
             # The channel exists and is recorded, so the request is reachable;
             # only the opening message is missing.
@@ -583,6 +719,26 @@ class Gacha(commands.Cog):
                 await database.run_write(
                     database.delete_rental_for_item,
                     entitlement["guild_id"], kind, entitlement["discord_item_id"],
+                )
+
+        # A second, read-only pass over grants nowhere near expiry: an asset
+        # can vanish from Discord (an operator deleting a mis-made sticker by
+        # hand, say) long before the year-long entitlement that grants it
+        # runs out, and nothing before this ever looked at an active grant to
+        # notice. Only writes when the known state actually changes, so a
+        # guild that stays healthy costs one write total, not one a day.
+        for entitlement in await database.run_read(database.get_active_asset_entitlements):
+            guild = self.bot.get_guild(entitlement["guild_id"])
+            if not guild:
+                continue
+            present = await check_asset_presence(guild, entitlement)
+            if present is None:
+                continue
+            flagged = entitlement["discord_missing_since"] is not None
+            if present == flagged:
+                await database.run_write(
+                    database.set_entitlement_discord_presence,
+                    entitlement["entitlement_id"], not present,
                 )
 
     @entitlement_cleanup.before_loop

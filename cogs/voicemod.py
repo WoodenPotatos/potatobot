@@ -169,7 +169,10 @@ class UserActionView(discord.ui.View):
             return await interaction.response.send_message(
                 t("voicemod.not_your_room"), ephemeral=True
             )
-        await self.channel.set_permissions(self.target, connect=True)
+        # connect alone leaves the channel unlisted in the target's client if
+        # the lobby's own default denies view_channel, which also blocks
+        # Go Live visibility; grant both so "permit" actually means visible.
+        await self.channel.set_permissions(self.target, connect=True, view_channel=True)
         await database.run(
             database.set_voice_permission, interaction.guild_id,
             self.owner_id, self.target.id, 1,
@@ -185,6 +188,11 @@ class UserActionView(discord.ui.View):
             return await interaction.response.send_message(
                 t("voicemod.not_your_room"), ephemeral=True
             )
+        # set_permissions(target, **kwargs) replaces the whole overwrite for
+        # that target rather than merging, so passing only connect=False also
+        # resets view_channel to unset/inherited as a side effect -- this is
+        # the intended "fall back to the lobby's default visibility" behavior,
+        # not an oversight. Do not add a view_channel kwarg here.
         await self.channel.set_permissions(self.target, connect=False)
         if self.target in self.channel.members:
             await self.target.move_to(None)
@@ -577,8 +585,13 @@ class VoiceMods(commands.Cog):
             for target_id, is_allowed in user_perms:
                 target_member = guild.get_member(target_id)
                 if target_member:
+                    # Mirror permit()/block(): an allowed target must also be
+                    # able to see the recreated room, not just connect to it.
                     tgt_ow = overwrites.get(target_member, discord.PermissionOverwrite())
-                    tgt_ow.update(connect=bool(is_allowed))
+                    tgt_ow.update(
+                        connect=bool(is_allowed),
+                        view_channel=True if is_allowed else None,
+                    )
                     overwrites[target_member] = tgt_ow
 
             new_channel = await guild.create_voice_channel(

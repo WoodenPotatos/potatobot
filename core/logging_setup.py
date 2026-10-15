@@ -13,8 +13,15 @@ import faulthandler
 import logging
 import logging.handlers
 import os
+import queue
 import signal
+import smtplib
 import sys
+import threading
+import time
+from email.message import EmailMessage
+
+from core.bounded import BoundedTimestampMap
 
 # Two levels up: this module lives in `core/` and the log directory belongs
 # beside the entry points at the repository root -- unless a deployment
@@ -28,6 +35,106 @@ LOG_FORMAT = logging.Formatter(
     "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+
+class AlertEmailHandler(logging.Handler):
+    """Email the maintainer on a recurring ERROR/CRITICAL, independent of
+    Discord's own availability.
+
+    A Discord-delivered alert (a webhook) cannot reach anyone during the
+    exact failure mode most worth alerting on -- Discord itself being
+    unreachable, which this project has already hit twice (a 14-hour silent
+    gateway loss and two DNS outages; see docs/lessons.md). SMTP email is a
+    genuinely separate channel.
+
+    `emit()` never opens the SMTP connection itself: the same "no blocking
+    network call in the hot path" rule this codebase already applies to
+    database transactions applies here to logging. A record is only
+    formatted and queued; one background daemon thread drains the queue and
+    sends. An identical `(logger name, message)` within `dedup_window`
+    seconds collapses into one email -- aimed squarely at the failure mode
+    that motivated this: six identical lines for one command becoming six
+    emails.
+    """
+
+    def __init__(self, *, host, port, username, password, sender, recipient,
+                 dedup_window=600.0, queue_maxsize=200):
+        super().__init__(level=logging.ERROR)
+        self._host = host
+        self._port = port
+        self._username = username
+        self._password = password
+        self._sender = sender
+        self._recipient = recipient
+        self._dedup_window = dedup_window
+        self._seen = BoundedTimestampMap(max_age=dedup_window, max_entries=512)
+        self._queue = queue.Queue(maxsize=queue_maxsize)
+        self._thread = threading.Thread(
+            target=self._drain, name="alert-email", daemon=True)
+        self._thread.start()
+
+    def emit(self, record):
+        try:
+            key = (record.name, record.getMessage())
+            now = time.monotonic()
+            last = self._seen.get(key)
+            if last is not None and (now - last) < self._dedup_window:
+                return
+            self._seen.start(key, now)
+            subject = f"[PotatoBot] {record.levelname} in {record.name}"
+            body = self.format(record)
+            self._queue.put_nowait((subject, body))
+        except queue.Full:
+            pass
+        except Exception:
+            self.handleError(record)
+
+    def _drain(self):
+        while True:
+            subject, body = self._queue.get()
+            try:
+                self._send(subject, body)
+            except Exception as exc:
+                # Never through a "PotatoBot"-named logger: that would route
+                # straight back into this same handler's own emit().
+                print(f"[alert-email] send failed: {exc}", file=sys.stderr)
+            finally:
+                self._queue.task_done()
+
+    def _send(self, subject, body):
+        message = EmailMessage()
+        message["Subject"] = subject
+        message["From"] = self._sender
+        message["To"] = self._recipient
+        message.set_content(body)
+        with smtplib.SMTP(self._host, self._port, timeout=10) as smtp:
+            smtp.starttls()
+            if self._username:
+                smtp.login(self._username, self._password)
+            smtp.send_message(message)
+
+
+def _alert_email_handler():
+    """None unless every required setting is present -- opt-in through the
+    environment, like everything else this deployment configures that way.
+    A blank `POTATOBOT_ALERT_EMAIL_TO` or `_SMTP_HOST` disables it entirely.
+    """
+    recipient = os.getenv("POTATOBOT_ALERT_EMAIL_TO")
+    host = os.getenv("POTATOBOT_ALERT_SMTP_HOST")
+    if not recipient or not host:
+        return None
+    username = os.getenv("POTATOBOT_ALERT_SMTP_USER", "")
+    handler = AlertEmailHandler(
+        host=host,
+        port=int(os.getenv("POTATOBOT_ALERT_SMTP_PORT", "587")),
+        username=username,
+        password=os.getenv("POTATOBOT_ALERT_SMTP_PASSWORD", ""),
+        sender=os.getenv("POTATOBOT_ALERT_SMTP_FROM") or username or recipient,
+        recipient=recipient,
+    )
+    handler.setFormatter(LOG_FORMAT)
+    return handler
+
 
 _handlers = None
 
@@ -48,7 +155,11 @@ def _shared_handlers():
     file_handler.setFormatter(LOG_FORMAT)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(LOG_FORMAT)
-    _handlers = (file_handler, console_handler)
+    handlers = [file_handler, console_handler]
+    alert_handler = _alert_email_handler()
+    if alert_handler is not None:
+        handlers.append(alert_handler)
+    _handlers = tuple(handlers)
     return _handlers
 
 

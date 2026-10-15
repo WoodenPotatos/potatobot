@@ -330,7 +330,7 @@ class ConfigurationSecurityTests(unittest.TestCase):
         # the three that is.
         verdicts = ("ROTATED 20", "NOTHING TO ROTATE", "ROTATION REQUIRED")
         blocks = [block for block in ignore.split("\n# ---")[1:]]
-        self.assertEqual(len(blocks), 3, "one block per historical finding")
+        self.assertEqual(len(blocks), 5, "one block per historical finding")
         for block in blocks:
             self.assertIn("# Status:", block, block[:80])
             self.assertTrue(any(v in block for v in verdicts), block[:80])
@@ -354,7 +354,18 @@ class ConfigurationSecurityTests(unittest.TestCase):
 
     def test_split_deployment_keeps_one_schema_owner(self):
         """Only the bot may create the schema, so the packaged dashboard must
-        never also start an in-process one."""
+        never also start an in-process one.
+
+        `User=woody`, not a dedicated `potatobot` system account: this test
+        used to assert `User=potatobot`, matching what both unit files
+        claimed -- but no such account exists on the deployed host, and the
+        live units had been hand-patched to `woody` without either the repo
+        files or this assertion ever being updated to match. Caught
+        2026-09-25 when a new unit copied the same stale pattern and failed
+        outright ("Failed to determine user credentials: No such process").
+        A container's own `USER potatobot` (`test_container_runs_unprivileged...`
+        below) is unrelated -- that account is created fresh at image build
+        time, not assumed to already exist on some host."""
         compose = (ROOT / "container" / "compose.yaml").read_text(encoding="utf-8")
         self.assertIn('POTATOBOT_DASHBOARD_ENABLED: "false"', compose)
         # Exec form, so the process is PID 1 and receives signals directly.
@@ -365,7 +376,7 @@ class ConfigurationSecurityTests(unittest.TestCase):
         for unit in ("potatobot.service", "potatobot-dashboard.service"):
             text = (ROOT / "deploy" / unit).read_text(encoding="utf-8")
             with self.subTest(unit=unit):
-                for directive in ("User=potatobot", "Restart=on-failure",
+                for directive in ("User=woody", "Restart=on-failure",
                                   "NoNewPrivileges=true", "ProtectSystem=strict",
                                   "ReadWritePaths=/opt/potatobot",
                                   # The audit's additions. `UMask=0027` is the one

@@ -27,7 +27,7 @@ from cogs.utils import (
     BoundedCooldownMap, apply_database_result, currency_emoji, currency_plain,
     guild_setting_sync, is_channel, is_premium, item_mechanic_value, t,
 )
-from core.feature_access import require_interaction_feature
+from core.feature_access import is_enabled, require_interaction_feature
 
 slots_cooldowns = BoundedCooldownMap()
 casino_logger = logging.getLogger("PotatoBot.Casino")
@@ -38,6 +38,68 @@ RNG = secrets.SystemRandom()
 # Past 2**63 an int cannot even be bound by sqlite3 and the command died with
 # an `OverflowError` nobody caught; this refuses long before that with words.
 MAX_STAKE = database.MAX_AMOUNT
+
+# One alert per user per window, not one per throttled spin.
+rate_limit_alert_times = BoundedCooldownMap()
+
+
+def _casino_rate_limit_config(guild_id: int):
+    """(window_seconds, max_coins) for this guild, or None if the feature is
+    off or either threshold is still at its shipped-inert 0 -- both must be
+    set from the dashboard before this ever throttles anything."""
+    if not is_enabled(guild_id, "casino_rate_limit"):
+        return None
+    window = guild_setting_sync(guild_id, "casino_rate_limit_window_seconds")
+    max_coins = guild_setting_sync(guild_id, "casino_rate_limit_max_coins")
+    if not window or not max_coins:
+        return None
+    return (window, max_coins)
+
+
+async def _alert_casino_rate_limit(member, window: int, max_coins: int):
+    """Posts the throttled member's guild's rate-limit alert, debounced to
+    once per window per user -- the window itself is one shared wallet's, so
+    the debounce key is the member alone, not (guild, member). Called from
+    `apply_database_result`, which already sees every casino payout's
+    `casino_rate_limited` flag, so one hook covers every game rather than
+    repeating this at each resolver call site."""
+    now = time.monotonic()
+    if now - rate_limit_alert_times.get(member.id, 0) < window:
+        return
+    rate_limit_alert_times[member.id] = now
+
+    guild = member.guild
+    channel_id = guild_setting_sync(guild.id, "casino_rate_limit_alert_channel")
+    channel = guild.get_channel(channel_id) if channel_id else None
+    if channel is None:
+        return
+    try:
+        await channel.send(embed=discord.Embed(
+            title=t("casino.rate_limit_alert_title"),
+            description=t(
+                "casino.rate_limit_alert_description",
+                user=member.mention, window=window, max=max_coins,
+            ),
+            color=discord.Color.orange(),
+        ))
+    except discord.HTTPException:
+        casino_logger.warning(
+            "Failed to post casino rate-limit alert (guild=%s, channel=%s)",
+            guild.id, channel_id)
+
+
+async def _finish_casino_payout(member, result):
+    """The one place every casino payout call site routes through instead of
+    `apply_database_result` directly, so the rate-limit alert needs wiring
+    only here rather than at each of the games' settlement call sites.
+    `apply_database_result` itself stays generic -- every non-casino caller
+    also goes through it, so a casino-specific alert does not belong there."""
+    stats = await apply_database_result(member, result)
+    if result.get("casino_rate_limited"):
+        config = _casino_rate_limit_config(member.guild.id)
+        window, max_coins = config if config else (0, 0)
+        await _alert_casino_rate_limit(member, window, max_coins)
+    return stats
 
 
 async def _send_ephemeral(ctx_or_int, message: str):
@@ -286,8 +348,9 @@ async def start_bj_game(ctx_or_int, bet):
             database.resolve_interactive_wager,
             wager_id, user.id, credit=bet + winnings, win_inc=1,
             outcome="natural_blackjack",
+            casino_rate_limit=_casino_rate_limit_config(guild.id),
         )
-        new_bal, _, _, _, _ = await apply_database_result(user, result)
+        new_bal, _, _, _, _ = await _finish_casino_payout(user, result)
         
         embed = view.build_embed(game_over=True, result_msg=t("casino.bj_natural_win", winnings=winnings, new_bal=new_bal), color=discord.Color.gold())
         
@@ -406,6 +469,7 @@ class BlackjackView(discord.ui.View):
                     database.resolve_interactive_wager,
                     self.wager_id, self.user.id, credit=credit,
                     win_inc=win_inc, loss_inc=loss_inc, outcome=win_status,
+                    casino_rate_limit=_casino_rate_limit_config(self.user.guild.id),
                 )
             except Exception:
                 self.settled = False
@@ -416,7 +480,7 @@ class BlackjackView(discord.ui.View):
             return await interaction.response.send_message(
                 t("casino.err_round_already_settled"), ephemeral=True
             )
-        new_bal, _, _, _, _ = await apply_database_result(self.user, result)
+        new_bal, _, _, _, _ = await _finish_casino_payout(self.user, result)
         result_msg += t("casino.bj_new_bal_suffix", new_bal=new_bal)
         embed = self.build_embed(game_over=True, result_msg=result_msg, color=color)
         
@@ -526,6 +590,7 @@ async def start_dice_game(ctx_or_int, bet_input):
     result = await database.run_write(
         database.resolve_dice_wager, guild.id, user.id, amount,
         first_roll, second_roll, bot_roll,
+        casino_rate_limit=_casino_rate_limit_config(guild.id),
     )
     if result is None:
         bal = await database.run(database.get_user_balance, user.id)
@@ -534,12 +599,12 @@ async def start_dice_game(ctx_or_int, bet_input):
     player_roll, bot_roll = result["player_roll"], result["bot_roll"]
 
     if result["outcome"] == "win":
-        title, desc, color = t("casino.dice_win_title"), t("casino.dice_win_desc", p_roll=player_roll, b_roll=bot_roll, amount=amount), discord.Color.green()
+        title, desc, color = t("casino.dice_win_title"), t("casino.dice_win_desc", p_roll=player_roll, b_roll=bot_roll, amount=result["net_winnings"]), discord.Color.green()
     elif result["outcome"] == "loss":
         title, desc, color = t("casino.dice_loss_title"), t("casino.dice_loss_desc", p_roll=player_roll, b_roll=bot_roll, amount=amount), discord.Color.red()
     else:
         title, desc, color = t("casino.dice_tie_title"), t("casino.dice_tie_desc", p_roll=player_roll), discord.Color.gold()
-    new_bal, _, _, _, _ = await apply_database_result(user, result)
+    new_bal, _, _, _, _ = await _finish_casino_payout(user, result)
 
     embed = discord.Embed(title=title, description=desc, color=color)
     if result["loaded_die"]:
@@ -580,6 +645,7 @@ async def start_roulette_game(ctx_or_int, bet, choice):
     result = await database.run_write(
         database.resolve_roulette_wager, ctx_or_int.guild.id, user.id, bet,
         selected_color, int(choice) if selected_color is None else None,
+        casino_rate_limit=_casino_rate_limit_config(ctx_or_int.guild.id),
     )
     if result is None:
         bal = await database.run(database.get_user_balance, user.id)
@@ -593,7 +659,7 @@ async def start_roulette_game(ctx_or_int, bet, choice):
         title, desc, color = t("casino.roulette_win_title"), t("casino.roulette_win_desc", emoji=emoji, num=result_num, color=t(f"casino.roulette_color_{result_color}").upper(), payout=payout), discord.Color.green()
     else:
         title, desc, color = t("casino.roulette_loss_title"), t("casino.roulette_loss_desc", emoji=emoji, num=result_num, color=t(f"casino.roulette_color_{result_color}").upper(), bet=bet), discord.Color.red()
-    new_bal, _, _, _, _ = await apply_database_result(user, result)
+    new_bal, _, _, _, _ = await _finish_casino_payout(user, result)
 
     embed = discord.Embed(title=title, description=desc, color=color)
     if result["loaded_die"]:
@@ -628,7 +694,9 @@ async def start_slots_game(ctx_or_int, bet):
     # Reels are spun inside the settlement transaction so a lucky charm is
     # consumed by the same write that debits the stake.
     result = await database.run_write(
-        database.resolve_slots_wager, ctx_or_int.guild.id, user.id, bet)
+        database.resolve_slots_wager, ctx_or_int.guild.id, user.id, bet,
+        casino_rate_limit=_casino_rate_limit_config(ctx_or_int.guild.id),
+    )
     if result is None:
         bal = await database.run(database.get_user_balance, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
@@ -641,7 +709,7 @@ async def start_slots_game(ctx_or_int, bet):
         title, desc, color = t("casino.slots_win_title"), t("casino.slots_win_desc", s1=s1, s2=s2, s3=s3, winnings=winnings), discord.Color.green()
     else:
         title, desc, color = t("casino.slots_loss_title"), t("casino.slots_loss_desc", s1=s1, s2=s2, s3=s3, bet=bet), discord.Color.dark_gray()
-    new_bal, _, _, _, _ = await apply_database_result(user, result)
+    new_bal, _, _, _, _ = await _finish_casino_payout(user, result)
 
     embed = discord.Embed(title=title, description=desc, color=color)
     if result["lucky_charm"]:
@@ -842,11 +910,12 @@ class HiloView(discord.ui.View):
                     self.user.id, credit=credit, win_inc=1 if win else 0,
                     loss_inc=0 if win else 1,
                     outcome="banked" if win else "busted",
+                    casino_rate_limit=_casino_rate_limit_config(self.user.guild.id),
                 )
             except database.DatabaseOperationError:
                 self.settled = False
                 raise
-        new_bal, _, _, _, _ = await apply_database_result(self.user, result)
+        new_bal, _, _, _, _ = await _finish_casino_payout(self.user, result)
         for child in self.children:
             child.disabled = True
         embed = self.build_embed(result_msg=message, colour=colour)
@@ -1054,11 +1123,12 @@ class CrashView(discord.ui.View):
                     self.user.id, credit=credit, win_inc=1 if win else 0,
                     loss_inc=0 if win else 1,
                     outcome="cashed_out" if win else "busted",
+                    casino_rate_limit=_casino_rate_limit_config(self.user.guild.id),
                 )
             except database.DatabaseOperationError:
                 self.settled = False
                 raise
-        new_bal, _, _, _, _ = await apply_database_result(self.user, result)
+        new_bal, _, _, _, _ = await _finish_casino_payout(self.user, result)
         for child in self.children:
             child.disabled = True
         embed = self.build_embed(result_msg=message, colour=colour)
@@ -1254,9 +1324,10 @@ class RussianRouletteView(discord.ui.View):
                     credit=0 if lost else share,
                     win_inc=0 if lost else 1, loss_inc=1 if lost else 0,
                     outcome="shot" if lost else "survived",
+                    casino_rate_limit=_casino_rate_limit_config(member.guild.id),
                 )
                 if result is not None:
-                    await apply_database_result(member, result)
+                    await _finish_casino_payout(member, result)
 
         for child in self.children:
             child.disabled = True
@@ -1339,7 +1410,9 @@ async def start_wheel_game(ctx_or_int, bet):
         return await _send_ephemeral(
             ctx_or_int, t("casino.err_amount_range", limit=MAX_STAKE))
     result = await database.run_write(
-        database.resolve_wheel_wager, ctx_or_int.guild.id, user.id, bet)
+        database.resolve_wheel_wager, ctx_or_int.guild.id, user.id, bet,
+        casino_rate_limit=_casino_rate_limit_config(ctx_or_int.guild.id),
+    )
     if result is None:
         bal = await database.run(database.get_user_balance, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
@@ -1356,7 +1429,7 @@ async def start_wheel_game(ctx_or_int, bet):
     else:
         title, colour = t("casino.wheel_loss_title"), discord.Color.red()
         desc = t("casino.wheel_loss_desc", bet=bet)
-    new_bal, _, _, _, _ = await apply_database_result(user, result)
+    new_bal, _, _, _, _ = await _finish_casino_payout(user, result)
 
     embed = discord.Embed(title=title, description=desc, colour=colour)
     if result["lucky_charm"]:
@@ -1502,6 +1575,7 @@ class MinesweeperView(discord.ui.View):
                         database.resolve_interactive_wager,
                         self.wager_id, self.user.id, credit=winnings, win_inc=1,
                         outcome="cashout",
+                        casino_rate_limit=_casino_rate_limit_config(self.user.guild.id),
                     )
                     color = discord.Color.green()
                     title = t("casino.mines_win_cashout") if self.clicks < 17 else t("casino.mines_win_clear")
@@ -1525,7 +1599,7 @@ class MinesweeperView(discord.ui.View):
                 t("casino.err_round_already_settled"), ephemeral=True
             )
 
-        new_bal, _, _, _, _ = await apply_database_result(self.user, result)
+        new_bal, _, _, _, _ = await _finish_casino_payout(self.user, result)
 
         embed = discord.Embed(title=title, description=desc, color=color)
         embed.set_footer(text=t("casino.mines_footer", bal=new_bal))

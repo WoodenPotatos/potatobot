@@ -357,11 +357,14 @@ class DashboardSecurityTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400)
 
     def _authenticate_guild_admin(self):
-        """A non-host with live authority over guild 123.
+        """A non-host with live authority over guild 123, but not a full
+        Administrator there (Manage Server only) -- the ordinary case, and
+        the stricter one to default a shared fixture to.
 
         The permission cache is seeded so `recheck_mutation_guild_permissions`
         answers from it rather than calling Discord — the same shape the logout
-        and recheck tests use.
+        and recheck tests use. `_permission_cache` holds `(authorized,
+        full_admin)` pairs.
         """
         self.authenticate(user_id="999")
         with self.client.session_transaction() as session:
@@ -369,7 +372,22 @@ class DashboardSecurityTests(unittest.TestCase):
         dashboard_api._oauth_tokens["server-session"] = {
             "access_token": "a", "refresh_token": "r", "expires_at": 2 ** 31,
         }
-        dashboard_api._permission_cache.put("server-session", ["123"])
+        dashboard_api._permission_cache.put("server-session", (["123"], []))
+
+    def _authenticate_guild_full_admin(self):
+        """A non-host who is guild 123's owner or a true Administrator there.
+
+        Same shape as `_authenticate_guild_admin`, except guild 123 is also in
+        the cached tuple's `full_admin` half.
+        """
+        self.authenticate(user_id="999")
+        with self.client.session_transaction() as session:
+            session["authorized_guild_ids"] = ["123"]
+            session["full_admin_guild_ids"] = ["123"]
+        dashboard_api._oauth_tokens["server-session"] = {
+            "access_token": "a", "refresh_token": "r", "expires_at": 2 ** 31,
+        }
+        dashboard_api._permission_cache.put("server-session", (["123"], ["123"]))
 
     def test_an_instance_setting_is_refused_for_a_non_host(self):
         """An instance setting has no guild dimension, so a guild admin saving
@@ -420,6 +438,48 @@ class DashboardSecurityTests(unittest.TestCase):
         self.assertNotIn("join_channel", stored,
                          "the guild-scoped half must not have been applied")
 
+    def test_ticket_logs_is_refused_for_a_guild_admin_without_full_admin(self):
+        """`ticket_logs` is deliberately visible to nobody but the owner, so
+        "Manage Server" alone -- otherwise enough to change any other guild
+        setting -- must not be able to repoint it."""
+        self._authenticate_guild_admin()
+        response = self.client.patch(
+            "/api/guilds/123/settings",
+            json={"changes": [{"key": "ticket_logs",
+                               "value": "1420070400000000001",
+                               "revision": 0}]},
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
+        self.assertEqual(400, response.status_code, response.get_data(as_text=True))
+        self.assertNotIn("ticket_logs", database.get_guild_settings(123))
+
+    def test_a_full_admin_may_change_ticket_logs(self):
+        """Guards the premise: a gate that refuses everyone is not a gate."""
+        self._authenticate_guild_full_admin()
+        response = self.client.patch(
+            "/api/guilds/123/settings",
+            json={"changes": [{"key": "ticket_logs",
+                               "value": "1420070400000000001",
+                               "revision": 0}]},
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+        self.assertEqual(1420070400000000001,
+                         database.get_guild_settings(123)["ticket_logs"]["value"])
+
+    def test_a_guild_setting_without_the_flag_ignores_full_admin_status(self):
+        """`requires_full_admin` is per setting, not a blanket downgrade of
+        every other guild-scoped write once one setting has it."""
+        self._authenticate_guild_admin()
+        response = self.client.patch(
+            "/api/guilds/123/settings",
+            json={"changes": [{"key": "ticket_category",
+                               "value": "1420070400000000001",
+                               "revision": 0}]},
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+
     def test_a_guild_setting_is_still_allowed_for_a_non_host(self):
         self._authenticate_guild_admin()
         response = self.client.patch(
@@ -439,7 +499,7 @@ class DashboardSecurityTests(unittest.TestCase):
 
         def revoked(session_id):
             calls.append(session_id)
-            return []            # Discord says: no guilds you may manage.
+            return [], []        # Discord says: no guilds you may manage.
 
         original = dashboard_api._refresh_authorized_guilds
         dashboard_api._refresh_authorized_guilds = revoked
@@ -671,6 +731,108 @@ class DashboardSecurityTests(unittest.TestCase):
                    "discord_item_id": "998877", "duration_days": 30}
         payload.update(overrides)
         return payload
+
+    def _open_fulfillment_request(self, guild_id=123, user_id=7):
+        with database.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO reward_vouchers (voucher_id, guild_id, user_id, "
+                "reward_key, duration_days, status, acquired_at) VALUES "
+                "('v-test', ?, ?, 'emoji_30d', 30, 'available', '2026-01-01')",
+                (guild_id, user_id),
+            )
+            conn.commit()
+        database.redeem_voucher(guild_id, user_id, "v-test")
+        return database.get_fulfillment_requests(guild_id)[0]
+
+    def _queued_action_types(self, guild_id=123):
+        with database.get_connection() as conn:
+            return [row[0] for row in conn.execute(
+                "SELECT action_type FROM control_actions WHERE guild_id = ?",
+                (guild_id,)).fetchall()]
+
+    def test_completing_a_linked_fulfillment_queues_a_ticket_notice(self):
+        request = self._open_fulfillment_request()
+        database.link_fulfillment_ticket(123, request["request_id"], 555)
+        headers = self._headers()
+        response = self.client.post(
+            f"/api/guilds/123/fulfillment/{request['request_id']}",
+            json={"discord_item_id": "999"}, headers=headers,
+        )
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(["notify_redeem_fulfilled"], self._queued_action_types())
+
+    def test_completing_an_unlinked_fulfillment_queues_nothing(self):
+        request = self._open_fulfillment_request()
+        headers = self._headers()
+        response = self.client.post(
+            f"/api/guilds/123/fulfillment/{request['request_id']}",
+            json={"discord_item_id": "999"}, headers=headers,
+        )
+        self.assertEqual(200, response.status_code)
+        self.assertEqual([], self._queued_action_types())
+
+    def test_cancelling_an_open_fulfillment_request(self):
+        request = self._open_fulfillment_request()
+        headers = self._headers()
+        response = self.client.delete(
+            f"/api/guilds/123/fulfillment/{request['request_id']}", headers=headers)
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+        rows = self.client.get(
+            "/api/guilds/123/fulfillment", headers=headers).get_json()["data"]
+        self.assertEqual("cancelled", rows[0]["status"])
+
+    def test_cancelling_notifies_a_linked_ticket_too(self):
+        request = self._open_fulfillment_request()
+        database.link_fulfillment_ticket(123, request["request_id"], 555)
+        headers = self._headers()
+        self.client.delete(
+            f"/api/guilds/123/fulfillment/{request['request_id']}", headers=headers)
+        self.assertEqual(["notify_redeem_fulfilled"], self._queued_action_types())
+
+    def test_cancelling_an_already_fulfilled_request_is_refused(self):
+        request = self._open_fulfillment_request()
+        headers = self._headers()
+        self.client.post(f"/api/guilds/123/fulfillment/{request['request_id']}",
+                         json={"discord_item_id": "1"}, headers=headers)
+        response = self.client.delete(
+            f"/api/guilds/123/fulfillment/{request['request_id']}", headers=headers)
+        self.assertEqual(409, response.status_code)
+
+    def test_revoking_an_active_entitlement(self):
+        headers = self._headers()
+        self.client.post("/api/guilds/123/entitlements",
+                         json=self._manual_grant_payload(), headers=headers)
+        entitlement = self.client.get(
+            "/api/guilds/123/entitlements", headers=headers).get_json()["data"][0]
+        response = self.client.delete(
+            f"/api/guilds/123/entitlements/{entitlement['entitlement_id']}",
+            headers=headers)
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+        remaining = self.client.get(
+            "/api/guilds/123/entitlements", headers=headers).get_json()["data"]
+        self.assertEqual([], remaining)
+        self.assertEqual(["revoke_entitlement"], self._queued_action_types())
+
+    def test_entitlements_report_whether_they_are_missing_on_discord(self):
+        headers = self._headers()
+        self.client.post("/api/guilds/123/entitlements",
+                         json=self._manual_grant_payload(), headers=headers)
+        entitlement = self.client.get(
+            "/api/guilds/123/entitlements", headers=headers).get_json()["data"][0]
+        self.assertFalse(entitlement["missing_on_discord"])
+
+        database.set_entitlement_discord_presence(
+            entitlement["entitlement_id"], True)
+        flagged = self.client.get(
+            "/api/guilds/123/entitlements", headers=headers).get_json()["data"][0]
+        self.assertTrue(flagged["missing_on_discord"])
+
+    def test_revoking_an_unknown_entitlement_is_refused(self):
+        headers = self._headers()
+        response = self.client.delete(
+            "/api/guilds/123/entitlements/999999", headers=headers)
+        self.assertEqual(409, response.status_code)
+
 
     def test_manual_grant_creates_an_active_entitlement(self):
         headers = self._headers()
@@ -1568,6 +1730,9 @@ class DashboardSecurityTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertEqual(403, self.client.post(path, json=body).status_code)
+        for path in ("/api/guilds/123/fulfillment/1", "/api/guilds/123/entitlements/1"):
+            with self.subTest(path=path):
+                self.assertEqual(403, self.client.delete(path).status_code)
         self.authenticate()
         # Authorized, but still without the session-bound token.
         self.assertEqual(403, self.client.post(
@@ -1716,7 +1881,8 @@ class AuditHardeningTests(unittest.TestCase):
         self.authenticate(user_id="7")  # a guild administrator, not the host
         # A non-host guild read goes through the live permission refresh; seed
         # the cache so it answers from there rather than calling Discord.
-        dashboard_api._permission_cache.put("server-session", ["123"])
+        # `_permission_cache` holds `(authorized, full_admin)` pairs.
+        dashboard_api._permission_cache.put("server-session", (["123"], []))
         headers = {"X-CSRF-Token": "csrf-token"}
         body = {"category": "profile", "scope_type": "instance",
                 "realm_id": None, "revision": 0}

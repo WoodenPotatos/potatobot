@@ -166,9 +166,6 @@ _HOYOLAB_HEADERS = {
     "Origin": "https://www.hoyolab.com",
     "Referer": "https://www.hoyolab.com/",
 }
-_VERSION_UPDATE_SUFFIXES = ("update details", "what's new", "update notice")
-
-
 def make_hoyolab_adapter(game_id):
     """The newest HoYoLAB notice whose title reads like a version-update post.
 
@@ -179,6 +176,16 @@ def make_hoyolab_adapter(game_id):
     scripts/everydle_sources.py. The title heuristic is not perfectly
     consistent across every historical post (older phrasing differs), so a
     non-matching item is skipped rather than treated as the answer.
+
+    A title only ever needs to contain "version" and either "update" or
+    "what's new" -- every recorded true positive already contains "update"
+    as a substring ("Update Details", "Update Notice", and a bare "Update",
+    confirmed live 2026-09-25 against HSR's "Version 4.6 \"Nameless Honor\"
+    Update", which the previous fixed three-suffix list missed for over a
+    day of ticks). Checking for the substring rather than an enumerated
+    suffix list is deliberately more permissive: HoYoLAB's own phrasing has
+    already drifted twice (see docs/patchbot_data_sources.md), and a stricter
+    list only means the next drift silently reaches the same dead end again.
     """
     async def adapter(session):
         data = await _fetch_json(
@@ -195,9 +202,7 @@ def make_hoyolab_adapter(game_id):
         for post in posts:
             subject = post.get("subject") or ""
             lowered = subject.lower()
-            if "version" in lowered and any(
-                suffix in lowered for suffix in _VERSION_UPDATE_SUFFIXES
-            ):
+            if "version" in lowered and ("update" in lowered or "what's new" in lowered):
                 post_id = post["post_id"]
                 return post_id, f"https://www.hoyolab.com/article/{post_id}", subject
         raise PatchSourceError(f"No version-update post found for gids={game_id}")

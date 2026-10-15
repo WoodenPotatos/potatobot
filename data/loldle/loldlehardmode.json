@@ -1,5 +1,698 @@
 {
   "schema_version": 1,
   "dataset": "hard_mode",
-  "entities": {}
+  "entities": {
+    "aatrox": {
+      "year": 2013,
+      "quote": "quote_d556d07b83"
+    },
+    "ahri": {
+      "year": 2011,
+      "quote": "quote_bbded0fb98"
+    },
+    "akali": {
+      "year": 2010,
+      "quote": "quote_634653bc86"
+    },
+    "akshan": {
+      "year": 2021,
+      "quote": "quote_40f845fea7"
+    },
+    "alistar": {
+      "year": 2009,
+      "quote": "quote_1a1bb82d3a"
+    },
+    "ambessa": {
+      "year": 2024,
+      "quote": "quote_98b45f7ed0"
+    },
+    "amumu": {
+      "year": 2009,
+      "quote": "quote_f56471d318"
+    },
+    "anivia": {
+      "year": 2009,
+      "quote": "quote_f05c4a4f08"
+    },
+    "annie": {
+      "year": 2009,
+      "quote": "quote_a2bf0c277b"
+    },
+    "aphelios": {
+      "year": 2019,
+      "quote": "quote_05d605256b"
+    },
+    "ashe": {
+      "year": 2009,
+      "quote": "quote_0b77e8838f"
+    },
+    "aurelion_sol": {
+      "year": 2016,
+      "quote": "quote_0d76b2232a"
+    },
+    "aurora": {
+      "year": 2024,
+      "quote": "quote_976faeb0fa"
+    },
+    "azir": {
+      "year": 2014,
+      "quote": "quote_72ede48e26"
+    },
+    "bard": {
+      "year": 2015,
+      "quote": "quote_2f0a4a2d8d"
+    },
+    "bel_veth": {
+      "year": 2022,
+      "quote": "quote_3beb46b32e"
+    },
+    "brand": {
+      "year": 2011,
+      "quote": "quote_9ef3499479"
+    },
+    "braum": {
+      "year": 2014,
+      "quote": "quote_7f61eb6510"
+    },
+    "briar": {
+      "year": 2023,
+      "quote": "quote_8c78c66b08"
+    },
+    "caitlyn": {
+      "year": 2011,
+      "quote": "quote_4b73547660"
+    },
+    "camille": {
+      "year": 2016,
+      "quote": "quote_fcbacf3366"
+    },
+    "cassiopeia": {
+      "year": 2010,
+      "quote": "quote_34eec21d27"
+    },
+    "cho_gath": {
+      "year": 2009,
+      "quote": "quote_141fb18cee"
+    },
+    "corki": {
+      "year": 2009,
+      "quote": "quote_69501e7347"
+    },
+    "darius": {
+      "year": 2012,
+      "quote": "quote_8409dfcc1e"
+    },
+    "diana": {
+      "year": 2012,
+      "quote": "quote_ab48fa8de1"
+    },
+    "dr_mundo": {
+      "year": 2009,
+      "quote": "quote_dec6b279b9"
+    },
+    "draven": {
+      "year": 2012,
+      "quote": "quote_18b95e682f"
+    },
+    "ekko": {
+      "year": 2015,
+      "quote": "quote_a829ac169f"
+    },
+    "elise": {
+      "year": 2012,
+      "quote": "quote_3dd94b3bec"
+    },
+    "evelynn": {
+      "year": 2009,
+      "quote": "quote_b8154ea513"
+    },
+    "ezreal": {
+      "year": 2010,
+      "quote": "quote_3ac9bbc76b"
+    },
+    "fiddlesticks": {
+      "year": 2009,
+      "quote": "quote_5cbbdff657"
+    },
+    "fiora": {
+      "year": 2012,
+      "quote": "quote_6d259e58de"
+    },
+    "fizz": {
+      "year": 2011,
+      "quote": "quote_a25c5771c3"
+    },
+    "galio": {
+      "year": 2010,
+      "quote": "quote_7330c9203c"
+    },
+    "gangplank": {
+      "year": 2009,
+      "quote": "quote_1f1e4c0620"
+    },
+    "garen": {
+      "year": 2010,
+      "quote": "quote_f93ea178e9"
+    },
+    "gnar": {
+      "year": 2014,
+      "quote": "quote_a10e19a7bb"
+    },
+    "gragas": {
+      "year": 2010,
+      "quote": "quote_550c265b2a"
+    },
+    "graves": {
+      "year": 2011,
+      "quote": "quote_d8d4681132"
+    },
+    "gwen": {
+      "year": 2021,
+      "quote": "quote_2f402f67b1"
+    },
+    "hecarim": {
+      "year": 2012,
+      "quote": "quote_4aa0bd6c9e"
+    },
+    "heimerdinger": {
+      "year": 2009,
+      "quote": "quote_f1dcaead05"
+    },
+    "hwei": {
+      "year": 2023,
+      "quote": "quote_d8571092ec"
+    },
+    "illaoi": {
+      "year": 2015,
+      "quote": "quote_c9cbb35445"
+    },
+    "irelia": {
+      "year": 2010,
+      "quote": "quote_c1ee2281b0"
+    },
+    "ivern": {
+      "year": 2016,
+      "quote": "quote_e173bddfab"
+    },
+    "janna": {
+      "year": 2009,
+      "quote": "quote_0c413a6481"
+    },
+    "jax": {
+      "year": 2009,
+      "quote": "quote_854fa7b82d"
+    },
+    "jayce": {
+      "year": 2012,
+      "quote": "quote_b2cc073527"
+    },
+    "jhin": {
+      "year": 2016,
+      "quote": "quote_fc50ef4ab4"
+    },
+    "jinx": {
+      "year": 2013,
+      "quote": "quote_c05e620ae8"
+    },
+    "kai_sa": {
+      "year": 2018,
+      "quote": "quote_9c59881c3b"
+    },
+    "kalista": {
+      "year": 2014,
+      "quote": "quote_31669fe995"
+    },
+    "karma": {
+      "year": 2011,
+      "quote": "quote_dce7e09f92"
+    },
+    "karthus": {
+      "year": 2009,
+      "quote": "quote_ccb748ce8c"
+    },
+    "kassadin": {
+      "year": 2009,
+      "quote": "quote_72403b22a8"
+    },
+    "katarina": {
+      "year": 2009,
+      "quote": "quote_30ce88af14"
+    },
+    "kayle": {
+      "year": 2009,
+      "quote": "quote_2492b82f62"
+    },
+    "kayn": {
+      "year": 2017,
+      "quote": "quote_cec1e6ccd6"
+    },
+    "kennen": {
+      "year": 2010,
+      "quote": "quote_67d98713ae"
+    },
+    "kha_zix": {
+      "year": 2012,
+      "quote": "quote_9060180d30"
+    },
+    "kindred": {
+      "year": 2015,
+      "quote": "quote_a20baed82d"
+    },
+    "kled": {
+      "year": 2016,
+      "quote": "quote_78e05b7de1"
+    },
+    "kog_maw": {
+      "year": 2010,
+      "quote": "quote_ec3529c3dd"
+    },
+    "k_sante": {
+      "year": 2022,
+      "quote": "quote_2aff683e1e"
+    },
+    "leblanc": {
+      "year": 2010,
+      "quote": "quote_e57057092e"
+    },
+    "lee_sin": {
+      "year": 2011,
+      "quote": "quote_8cc63d3c4f"
+    },
+    "leona": {
+      "year": 2011,
+      "quote": "quote_ac30959ec8"
+    },
+    "lillia": {
+      "year": 2020,
+      "quote": "quote_680245f13f"
+    },
+    "lissandra": {
+      "year": 2013,
+      "quote": "quote_06bc96bf3e"
+    },
+    "locke": {
+      "year": 2026,
+      "quote": "quote_4e8668ca6f"
+    },
+    "lucian": {
+      "year": 2013,
+      "quote": "quote_4f8f051c3d"
+    },
+    "lulu": {
+      "year": 2012,
+      "quote": "quote_615715bf66"
+    },
+    "lux": {
+      "year": 2010,
+      "quote": "quote_d088a5faa3"
+    },
+    "jarvan_iv": {
+      "year": 2011,
+      "quote": "quote_30eff980a2"
+    },
+    "blitzcrank": {
+      "year": 2009,
+      "quote": "quote_09a7ec3b7a"
+    },
+    "malphite": {
+      "year": 2009,
+      "quote": "quote_8e95295792"
+    },
+    "malzahar": {
+      "year": 2010,
+      "quote": "quote_5a66479763"
+    },
+    "maokai": {
+      "year": 2011,
+      "quote": "quote_abbf3bfa3a"
+    },
+    "master_yi": {
+      "year": 2009,
+      "quote": "quote_949c4bde0a"
+    },
+    "mel": {
+      "year": 2025,
+      "quote": "quote_5582029c23"
+    },
+    "milio": {
+      "year": 2023,
+      "quote": "quote_d6e7db7add"
+    },
+    "miss_fortune": {
+      "year": 2010,
+      "quote": "quote_6605ad57ee"
+    },
+    "mordekaiser": {
+      "year": 2010,
+      "quote": "quote_eeaeb5d822"
+    },
+    "morgana": {
+      "year": 2009,
+      "quote": "quote_ca5119bed5"
+    },
+    "naafiri": {
+      "year": 2023,
+      "quote": "quote_594183156b"
+    },
+    "nami": {
+      "year": 2012,
+      "quote": "quote_7aa309b234"
+    },
+    "nasus": {
+      "year": 2009,
+      "quote": "quote_3625bc2f15"
+    },
+    "nautilus": {
+      "year": 2012,
+      "quote": "quote_0679fd13c3"
+    },
+    "neeko": {
+      "year": 2018,
+      "quote": "quote_f4139ea680"
+    },
+    "nidalee": {
+      "year": 2009,
+      "quote": "quote_d6cf4e9b27"
+    },
+    "nilah": {
+      "year": 2022,
+      "quote": "quote_a07eb93eef"
+    },
+    "nocturne": {
+      "year": 2011,
+      "quote": "quote_caa8eb6d1f"
+    },
+    "nunu_willump": {
+      "year": 2009,
+      "quote": "quote_9349c8382e"
+    },
+    "olaf": {
+      "year": 2010,
+      "quote": "quote_3998225b75"
+    },
+    "orianna": {
+      "year": 2011,
+      "quote": "quote_868327eef6"
+    },
+    "ornn": {
+      "year": 2017,
+      "quote": "quote_341098066a"
+    },
+    "pantheon": {
+      "year": 2010,
+      "quote": "quote_ad1b753431"
+    },
+    "poppy": {
+      "year": 2010,
+      "quote": "quote_fa6825ccf8"
+    },
+    "pyke": {
+      "year": 2018,
+      "quote": "quote_065c7e11ee"
+    },
+    "qiyana": {
+      "year": 2019,
+      "quote": "quote_7cae306e63"
+    },
+    "quinn": {
+      "year": 2013,
+      "quote": "quote_4ec5df88a7"
+    },
+    "rakan": {
+      "year": 2017,
+      "quote": "quote_064bf9870a"
+    },
+    "rammus": {
+      "year": 2009,
+      "quote": "quote_0fef274bd3"
+    },
+    "rek_sai": {
+      "year": 2014,
+      "quote": "quote_3284306e4e"
+    },
+    "rell": {
+      "year": 2020,
+      "quote": "quote_835e92ed09"
+    },
+    "renata_glasc": {
+      "year": 2022,
+      "quote": "quote_a0feab0df4"
+    },
+    "renekton": {
+      "year": 2011,
+      "quote": "quote_8da80f07c2"
+    },
+    "rengar": {
+      "year": 2012,
+      "quote": "quote_a7e18a0bed"
+    },
+    "riven": {
+      "year": 2011,
+      "quote": "quote_6f00af4ab9"
+    },
+    "rumble": {
+      "year": 2011,
+      "quote": "quote_79064a4512"
+    },
+    "ryze": {
+      "year": 2009,
+      "quote": "quote_2e4a5967a4"
+    },
+    "samira": {
+      "year": 2020,
+      "quote": "quote_293d50e9c5"
+    },
+    "sejuani": {
+      "year": 2012,
+      "quote": "quote_9d04259871"
+    },
+    "senna": {
+      "year": 2019,
+      "quote": "quote_fefe6104b3"
+    },
+    "seraphine": {
+      "year": 2020,
+      "quote": "quote_9a0b57beea"
+    },
+    "sett": {
+      "year": 2020,
+      "quote": "quote_1daaac702b"
+    },
+    "shaco": {
+      "year": 2009,
+      "quote": "quote_3f15bca7ec"
+    },
+    "shen": {
+      "year": 2010,
+      "quote": "quote_0ebbe3b582"
+    },
+    "shyvana": {
+      "year": 2011,
+      "quote": "quote_9a461bb116"
+    },
+    "singed": {
+      "year": 2009,
+      "quote": "quote_5dbaa08046"
+    },
+    "sion": {
+      "year": 2009,
+      "quote": "quote_54b8688533"
+    },
+    "sivir": {
+      "year": 2009,
+      "quote": "quote_aff798380d"
+    },
+    "skarner": {
+      "year": 2011,
+      "quote": "quote_e0add4dbce"
+    },
+    "smolder": {
+      "year": 2024,
+      "quote": "quote_af09de493a"
+    },
+    "sona": {
+      "year": 2010,
+      "quote": "quote_d62cbcf265"
+    },
+    "soraka": {
+      "year": 2009,
+      "quote": "quote_2f654f075d"
+    },
+    "swain": {
+      "year": 2010,
+      "quote": "quote_67782576fa"
+    },
+    "sylas": {
+      "year": 2019,
+      "quote": "quote_f401cd6a4b"
+    },
+    "syndra": {
+      "year": 2012,
+      "quote": "quote_78c5891b39"
+    },
+    "tahm_kench": {
+      "year": 2015,
+      "quote": "quote_9d7aa767b2"
+    },
+    "taliyah": {
+      "year": 2016,
+      "quote": "quote_9cb572db28"
+    },
+    "talon": {
+      "year": 2011,
+      "quote": "quote_8c4b0c4d35"
+    },
+    "taric": {
+      "year": 2009,
+      "quote": "quote_5150dbf060"
+    },
+    "teemo": {
+      "year": 2009,
+      "quote": "quote_33f85263eb"
+    },
+    "thresh": {
+      "year": 2013,
+      "quote": "quote_6d9449e3d8"
+    },
+    "tristana": {
+      "year": 2009,
+      "quote": "quote_3f15868066"
+    },
+    "trundle": {
+      "year": 2010,
+      "quote": "quote_773de4268f"
+    },
+    "tryndamere": {
+      "year": 2009,
+      "quote": "quote_0ccac88f2e"
+    },
+    "twisted_fate": {
+      "year": 2009,
+      "quote": "quote_239345013a"
+    },
+    "twitch": {
+      "year": 2009,
+      "quote": "quote_c34170a7cd"
+    },
+    "udyr": {
+      "year": 2009,
+      "quote": "quote_0fc017c921"
+    },
+    "urgot": {
+      "year": 2010,
+      "quote": "quote_10fa778151"
+    },
+    "varus": {
+      "year": 2012,
+      "quote": "quote_81141a4a0a"
+    },
+    "vayne": {
+      "year": 2011,
+      "quote": "quote_4e67c03378"
+    },
+    "veigar": {
+      "year": 2009,
+      "quote": "quote_470b89e01b"
+    },
+    "vel_koz": {
+      "year": 2014,
+      "quote": "quote_64bcf23f65"
+    },
+    "vex": {
+      "year": 2021,
+      "quote": "quote_daa42e8ba6"
+    },
+    "vi": {
+      "year": 2012,
+      "quote": "quote_4d7a001faa"
+    },
+    "viego": {
+      "year": 2021,
+      "quote": "quote_bcc1a36949"
+    },
+    "viktor": {
+      "year": 2011,
+      "quote": "quote_948c7f12ec"
+    },
+    "vladimir": {
+      "year": 2010,
+      "quote": "quote_215458130b"
+    },
+    "volibear": {
+      "year": 2011,
+      "quote": "quote_65f393a9fd"
+    },
+    "warwick": {
+      "year": 2009,
+      "quote": "quote_93cb6863b6"
+    },
+    "wukong": {
+      "year": 2011,
+      "quote": "quote_c92c721702"
+    },
+    "xayah": {
+      "year": 2017,
+      "quote": "quote_7872851df3"
+    },
+    "xerath": {
+      "year": 2011,
+      "quote": "quote_b3c1044de7"
+    },
+    "xin_zhao": {
+      "year": 2010,
+      "quote": "quote_7e75ce1e5a"
+    },
+    "yasuo": {
+      "year": 2013,
+      "quote": "quote_3a25d71451"
+    },
+    "yone": {
+      "year": 2020,
+      "quote": "quote_8d288f798d"
+    },
+    "yorick": {
+      "year": 2011,
+      "quote": "quote_ae78def5c5"
+    },
+    "yuumi": {
+      "year": 2019,
+      "quote": "quote_efd30631df"
+    },
+    "zac": {
+      "year": 2013,
+      "quote": "quote_341176bbfc"
+    },
+    "zed": {
+      "year": 2012,
+      "quote": "quote_bea25ec9c9"
+    },
+    "zeri": {
+      "year": 2022,
+      "quote": "quote_0fd998746f"
+    },
+    "ziggs": {
+      "year": 2012,
+      "quote": "quote_e77811bbfd"
+    },
+    "zilean": {
+      "year": 2009,
+      "quote": "quote_0985f80482"
+    },
+    "zoe": {
+      "year": 2017,
+      "quote": "quote_851024124c"
+    },
+    "zyra": {
+      "year": 2012,
+      "quote": "quote_7d7a651d0f"
+    },
+    "yunara": {
+      "year": 2025,
+      "quote": "quote_bc58c60e1e"
+    },
+    "zaahen": {
+      "year": 2025,
+      "quote": "quote_15e45c2ad8"
+    }
+  }
 }

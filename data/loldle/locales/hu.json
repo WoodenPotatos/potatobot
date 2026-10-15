@@ -168,7 +168,8 @@
         "dr_mundo": {
           "name": "Dr.Mundo",
           "aliases": [
-            "Dr.Mundo"
+            "Dr.Mundo",
+            "Dr. Mundo"
           ]
         },
         "draven": {
@@ -1040,6 +1041,12 @@
           "aliases": [
             "Rómeó"
           ]
+        },
+        "locke": {
+          "name": "Locke",
+          "aliases": [
+            "Locke"
+          ]
         }
       },
       "attributes": {
@@ -1215,8 +1222,1224 @@
       }
     },
     "hard_mode": {
-      "entities": {},
-      "attributes": {}
+      "entities": {
+        "aatrox": {
+          "name": "Aatrox",
+          "aliases": [
+            "Aatrox"
+          ]
+        },
+        "ahri": {
+          "name": "Ahri",
+          "aliases": [
+            "Ahri"
+          ]
+        },
+        "akali": {
+          "name": "Akali",
+          "aliases": [
+            "Akali"
+          ]
+        },
+        "akshan": {
+          "name": "Akshan",
+          "aliases": [
+            "Akshan"
+          ]
+        },
+        "alistar": {
+          "name": "Alistar",
+          "aliases": [
+            "Alistar"
+          ]
+        },
+        "ambessa": {
+          "name": "Ambessa",
+          "aliases": [
+            "Ambessa"
+          ]
+        },
+        "amumu": {
+          "name": "Amumu",
+          "aliases": [
+            "Amumu"
+          ]
+        },
+        "anivia": {
+          "name": "Anivia",
+          "aliases": [
+            "Anivia"
+          ]
+        },
+        "annie": {
+          "name": "Annie",
+          "aliases": [
+            "Annie"
+          ]
+        },
+        "aphelios": {
+          "name": "Aphelios",
+          "aliases": [
+            "Aphelios"
+          ]
+        },
+        "ashe": {
+          "name": "Ashe",
+          "aliases": [
+            "Ashe"
+          ]
+        },
+        "aurelion_sol": {
+          "name": "Aurelion Sol",
+          "aliases": [
+            "Aurelion Sol"
+          ]
+        },
+        "aurora": {
+          "name": "Aurora",
+          "aliases": [
+            "Aurora"
+          ]
+        },
+        "azir": {
+          "name": "Azir",
+          "aliases": [
+            "Azir"
+          ]
+        },
+        "bard": {
+          "name": "Bard",
+          "aliases": [
+            "Bard"
+          ]
+        },
+        "bel_veth": {
+          "name": "Bel'Veth",
+          "aliases": [
+            "Bel'Veth"
+          ]
+        },
+        "brand": {
+          "name": "Brand",
+          "aliases": [
+            "Brand"
+          ]
+        },
+        "braum": {
+          "name": "Braum",
+          "aliases": [
+            "Braum"
+          ]
+        },
+        "briar": {
+          "name": "Briar",
+          "aliases": [
+            "Briar"
+          ]
+        },
+        "caitlyn": {
+          "name": "Caitlyn",
+          "aliases": [
+            "Caitlyn"
+          ]
+        },
+        "camille": {
+          "name": "Camille",
+          "aliases": [
+            "Camille"
+          ]
+        },
+        "cassiopeia": {
+          "name": "Cassiopeia",
+          "aliases": [
+            "Cassiopeia"
+          ]
+        },
+        "cho_gath": {
+          "name": "Cho'Gath",
+          "aliases": [
+            "Cho'Gath"
+          ]
+        },
+        "corki": {
+          "name": "Corki",
+          "aliases": [
+            "Corki"
+          ]
+        },
+        "darius": {
+          "name": "Darius",
+          "aliases": [
+            "Darius"
+          ]
+        },
+        "diana": {
+          "name": "Diana",
+          "aliases": [
+            "Diana"
+          ]
+        },
+        "dr_mundo": {
+          "name": "Dr.Mundo",
+          "aliases": [
+            "Dr.Mundo",
+            "Dr. Mundo"
+          ]
+        },
+        "draven": {
+          "name": "Draven",
+          "aliases": [
+            "Draven"
+          ]
+        },
+        "ekko": {
+          "name": "Ekko",
+          "aliases": [
+            "Ekko"
+          ]
+        },
+        "elise": {
+          "name": "Elise",
+          "aliases": [
+            "Elise"
+          ]
+        },
+        "evelynn": {
+          "name": "Evelynn",
+          "aliases": [
+            "Evelynn"
+          ]
+        },
+        "ezreal": {
+          "name": "Ezreal",
+          "aliases": [
+            "Ezreal"
+          ]
+        },
+        "fiddlesticks": {
+          "name": "Fiddlesticks",
+          "aliases": [
+            "Fiddlesticks"
+          ]
+        },
+        "fiora": {
+          "name": "Fiora",
+          "aliases": [
+            "Fiora"
+          ]
+        },
+        "fizz": {
+          "name": "Fizz",
+          "aliases": [
+            "Fizz"
+          ]
+        },
+        "galio": {
+          "name": "Galio",
+          "aliases": [
+            "Galio"
+          ]
+        },
+        "gangplank": {
+          "name": "Gangplank",
+          "aliases": [
+            "Gangplank"
+          ]
+        },
+        "garen": {
+          "name": "Garen",
+          "aliases": [
+            "Garen"
+          ]
+        },
+        "gnar": {
+          "name": "Gnar",
+          "aliases": [
+            "Gnar"
+          ]
+        },
+        "gragas": {
+          "name": "Gragas",
+          "aliases": [
+            "Gragas"
+          ]
+        },
+        "graves": {
+          "name": "Graves",
+          "aliases": [
+            "Graves"
+          ]
+        },
+        "gwen": {
+          "name": "Gwen",
+          "aliases": [
+            "Gwen"
+          ]
+        },
+        "hecarim": {
+          "name": "Hecarim",
+          "aliases": [
+            "Hecarim"
+          ]
+        },
+        "heimerdinger": {
+          "name": "Heimerdinger",
+          "aliases": [
+            "Heimerdinger"
+          ]
+        },
+        "hwei": {
+          "name": "Hwei",
+          "aliases": [
+            "Hwei"
+          ]
+        },
+        "illaoi": {
+          "name": "Illaoi",
+          "aliases": [
+            "Illaoi"
+          ]
+        },
+        "irelia": {
+          "name": "Irelia",
+          "aliases": [
+            "Irelia"
+          ]
+        },
+        "ivern": {
+          "name": "Ivern",
+          "aliases": [
+            "Ivern"
+          ]
+        },
+        "janna": {
+          "name": "Janna",
+          "aliases": [
+            "Janna"
+          ]
+        },
+        "jax": {
+          "name": "Jax",
+          "aliases": [
+            "Jax"
+          ]
+        },
+        "jayce": {
+          "name": "Jayce",
+          "aliases": [
+            "Jayce"
+          ]
+        },
+        "jhin": {
+          "name": "Jhin",
+          "aliases": [
+            "Jhin"
+          ]
+        },
+        "jinx": {
+          "name": "Jinx",
+          "aliases": [
+            "Jinx"
+          ]
+        },
+        "kai_sa": {
+          "name": "Kai'Sa",
+          "aliases": [
+            "Kai'Sa"
+          ]
+        },
+        "kalista": {
+          "name": "Kalista",
+          "aliases": [
+            "Kalista"
+          ]
+        },
+        "karma": {
+          "name": "Karma",
+          "aliases": [
+            "Karma"
+          ]
+        },
+        "karthus": {
+          "name": "Karthus",
+          "aliases": [
+            "Karthus"
+          ]
+        },
+        "kassadin": {
+          "name": "Kassadin",
+          "aliases": [
+            "Kassadin"
+          ]
+        },
+        "katarina": {
+          "name": "Katarina",
+          "aliases": [
+            "Katarina"
+          ]
+        },
+        "kayle": {
+          "name": "Kayle",
+          "aliases": [
+            "Kayle"
+          ]
+        },
+        "kayn": {
+          "name": "Kayn",
+          "aliases": [
+            "Kayn"
+          ]
+        },
+        "kennen": {
+          "name": "Kennen",
+          "aliases": [
+            "Kennen"
+          ]
+        },
+        "kha_zix": {
+          "name": "Kha'Zix",
+          "aliases": [
+            "Kha'Zix"
+          ]
+        },
+        "kindred": {
+          "name": "Kindred",
+          "aliases": [
+            "Kindred"
+          ]
+        },
+        "kled": {
+          "name": "Kled",
+          "aliases": [
+            "Kled"
+          ]
+        },
+        "kog_maw": {
+          "name": "Kog'Maw",
+          "aliases": [
+            "Kog'Maw"
+          ]
+        },
+        "k_sante": {
+          "name": "K'Sante",
+          "aliases": [
+            "K'Sante"
+          ]
+        },
+        "leblanc": {
+          "name": "LeBlanc",
+          "aliases": [
+            "LeBlanc"
+          ]
+        },
+        "lee_sin": {
+          "name": "Lee Sin",
+          "aliases": [
+            "Lee Sin"
+          ]
+        },
+        "leona": {
+          "name": "Leona",
+          "aliases": [
+            "Leona"
+          ]
+        },
+        "lillia": {
+          "name": "Lillia",
+          "aliases": [
+            "Lillia"
+          ]
+        },
+        "lissandra": {
+          "name": "Lissandra",
+          "aliases": [
+            "Lissandra"
+          ]
+        },
+        "locke": {
+          "name": "Locke",
+          "aliases": [
+            "Locke"
+          ]
+        },
+        "lucian": {
+          "name": "Lucian",
+          "aliases": [
+            "Lucian"
+          ]
+        },
+        "lulu": {
+          "name": "Lulu",
+          "aliases": [
+            "Lulu"
+          ]
+        },
+        "lux": {
+          "name": "Lux",
+          "aliases": [
+            "Lux"
+          ]
+        },
+        "jarvan_iv": {
+          "name": "Jarvan IV",
+          "aliases": [
+            "Jarvan IV"
+          ]
+        },
+        "blitzcrank": {
+          "name": "Blitzcrank",
+          "aliases": [
+            "Blitzcrank"
+          ]
+        },
+        "malphite": {
+          "name": "Malphite",
+          "aliases": [
+            "Malphite"
+          ]
+        },
+        "malzahar": {
+          "name": "Malzahar",
+          "aliases": [
+            "Malzahar"
+          ]
+        },
+        "maokai": {
+          "name": "Maokai",
+          "aliases": [
+            "Maokai"
+          ]
+        },
+        "master_yi": {
+          "name": "Master Yi",
+          "aliases": [
+            "Master Yi"
+          ]
+        },
+        "mel": {
+          "name": "Mel",
+          "aliases": [
+            "Mel"
+          ]
+        },
+        "milio": {
+          "name": "Milio",
+          "aliases": [
+            "Milio"
+          ]
+        },
+        "miss_fortune": {
+          "name": "Miss Fortune",
+          "aliases": [
+            "Miss Fortune"
+          ]
+        },
+        "mordekaiser": {
+          "name": "Mordekaiser",
+          "aliases": [
+            "Mordekaiser"
+          ]
+        },
+        "morgana": {
+          "name": "Morgana",
+          "aliases": [
+            "Morgana"
+          ]
+        },
+        "naafiri": {
+          "name": "Naafiri",
+          "aliases": [
+            "Naafiri"
+          ]
+        },
+        "nami": {
+          "name": "Nami",
+          "aliases": [
+            "Nami"
+          ]
+        },
+        "nasus": {
+          "name": "Nasus",
+          "aliases": [
+            "Nasus"
+          ]
+        },
+        "nautilus": {
+          "name": "Nautilus",
+          "aliases": [
+            "Nautilus"
+          ]
+        },
+        "neeko": {
+          "name": "Neeko",
+          "aliases": [
+            "Neeko"
+          ]
+        },
+        "nidalee": {
+          "name": "Nidalee",
+          "aliases": [
+            "Nidalee"
+          ]
+        },
+        "nilah": {
+          "name": "Nilah",
+          "aliases": [
+            "Nilah"
+          ]
+        },
+        "nocturne": {
+          "name": "Nocturne",
+          "aliases": [
+            "Nocturne"
+          ]
+        },
+        "nunu_willump": {
+          "name": "Nunu & Willump",
+          "aliases": [
+            "Nunu & Willump"
+          ]
+        },
+        "olaf": {
+          "name": "Olaf",
+          "aliases": [
+            "Olaf"
+          ]
+        },
+        "orianna": {
+          "name": "Orianna",
+          "aliases": [
+            "Orianna"
+          ]
+        },
+        "ornn": {
+          "name": "Ornn",
+          "aliases": [
+            "Ornn"
+          ]
+        },
+        "pantheon": {
+          "name": "Pantheon",
+          "aliases": [
+            "Pantheon"
+          ]
+        },
+        "poppy": {
+          "name": "Poppy",
+          "aliases": [
+            "Poppy"
+          ]
+        },
+        "pyke": {
+          "name": "Pyke",
+          "aliases": [
+            "Pyke"
+          ]
+        },
+        "qiyana": {
+          "name": "Qiyana",
+          "aliases": [
+            "Qiyana"
+          ]
+        },
+        "quinn": {
+          "name": "Quinn",
+          "aliases": [
+            "Quinn"
+          ]
+        },
+        "rakan": {
+          "name": "Rakan",
+          "aliases": [
+            "Rakan"
+          ]
+        },
+        "rammus": {
+          "name": "Rammus",
+          "aliases": [
+            "Rammus"
+          ]
+        },
+        "rek_sai": {
+          "name": "Rek'Sai",
+          "aliases": [
+            "Rek'Sai"
+          ]
+        },
+        "rell": {
+          "name": "Rell",
+          "aliases": [
+            "Rell"
+          ]
+        },
+        "renata_glasc": {
+          "name": "Renata Glasc",
+          "aliases": [
+            "Renata Glasc"
+          ]
+        },
+        "renekton": {
+          "name": "Renekton",
+          "aliases": [
+            "Renekton"
+          ]
+        },
+        "rengar": {
+          "name": "Rengar",
+          "aliases": [
+            "Rengar"
+          ]
+        },
+        "riven": {
+          "name": "Riven",
+          "aliases": [
+            "Riven"
+          ]
+        },
+        "rumble": {
+          "name": "Rumble",
+          "aliases": [
+            "Rumble"
+          ]
+        },
+        "ryze": {
+          "name": "Ryze",
+          "aliases": [
+            "Ryze"
+          ]
+        },
+        "samira": {
+          "name": "Samira",
+          "aliases": [
+            "Samira"
+          ]
+        },
+        "sejuani": {
+          "name": "Sejuani",
+          "aliases": [
+            "Sejuani"
+          ]
+        },
+        "senna": {
+          "name": "Senna",
+          "aliases": [
+            "Senna"
+          ]
+        },
+        "seraphine": {
+          "name": "Seraphine",
+          "aliases": [
+            "Seraphine"
+          ]
+        },
+        "sett": {
+          "name": "Sett",
+          "aliases": [
+            "Sett"
+          ]
+        },
+        "shaco": {
+          "name": "Shaco",
+          "aliases": [
+            "Shaco"
+          ]
+        },
+        "shen": {
+          "name": "Shen",
+          "aliases": [
+            "Shen"
+          ]
+        },
+        "shyvana": {
+          "name": "Shyvana",
+          "aliases": [
+            "Shyvana"
+          ]
+        },
+        "singed": {
+          "name": "Singed",
+          "aliases": [
+            "Singed"
+          ]
+        },
+        "sion": {
+          "name": "Sion",
+          "aliases": [
+            "Sion"
+          ]
+        },
+        "sivir": {
+          "name": "Sivir",
+          "aliases": [
+            "Sivir"
+          ]
+        },
+        "skarner": {
+          "name": "Skarner",
+          "aliases": [
+            "Skarner"
+          ]
+        },
+        "smolder": {
+          "name": "Smolder",
+          "aliases": [
+            "Smolder"
+          ]
+        },
+        "sona": {
+          "name": "Sona",
+          "aliases": [
+            "Sona"
+          ]
+        },
+        "soraka": {
+          "name": "Soraka",
+          "aliases": [
+            "Soraka"
+          ]
+        },
+        "swain": {
+          "name": "Swain",
+          "aliases": [
+            "Swain"
+          ]
+        },
+        "sylas": {
+          "name": "Sylas",
+          "aliases": [
+            "Sylas"
+          ]
+        },
+        "syndra": {
+          "name": "Syndra",
+          "aliases": [
+            "Syndra"
+          ]
+        },
+        "tahm_kench": {
+          "name": "Tahm Kench",
+          "aliases": [
+            "Tahm Kench"
+          ]
+        },
+        "taliyah": {
+          "name": "Taliyah",
+          "aliases": [
+            "Taliyah"
+          ]
+        },
+        "talon": {
+          "name": "Talon",
+          "aliases": [
+            "Talon"
+          ]
+        },
+        "taric": {
+          "name": "Taric",
+          "aliases": [
+            "Taric"
+          ]
+        },
+        "teemo": {
+          "name": "Teemo",
+          "aliases": [
+            "Teemo"
+          ]
+        },
+        "thresh": {
+          "name": "Thresh",
+          "aliases": [
+            "Thresh"
+          ]
+        },
+        "tristana": {
+          "name": "Tristana",
+          "aliases": [
+            "Tristana"
+          ]
+        },
+        "trundle": {
+          "name": "Trundle",
+          "aliases": [
+            "Trundle"
+          ]
+        },
+        "tryndamere": {
+          "name": "Tryndamere",
+          "aliases": [
+            "Tryndamere"
+          ]
+        },
+        "twisted_fate": {
+          "name": "Twisted Fate",
+          "aliases": [
+            "Twisted Fate"
+          ]
+        },
+        "twitch": {
+          "name": "Twitch",
+          "aliases": [
+            "Twitch"
+          ]
+        },
+        "udyr": {
+          "name": "Udyr",
+          "aliases": [
+            "Udyr"
+          ]
+        },
+        "urgot": {
+          "name": "Urgot",
+          "aliases": [
+            "Urgot"
+          ]
+        },
+        "varus": {
+          "name": "Varus",
+          "aliases": [
+            "Varus"
+          ]
+        },
+        "vayne": {
+          "name": "Vayne",
+          "aliases": [
+            "Vayne"
+          ]
+        },
+        "veigar": {
+          "name": "Veigar",
+          "aliases": [
+            "Veigar"
+          ]
+        },
+        "vel_koz": {
+          "name": "Vel'Koz",
+          "aliases": [
+            "Vel'Koz"
+          ]
+        },
+        "vex": {
+          "name": "Vex",
+          "aliases": [
+            "Vex"
+          ]
+        },
+        "vi": {
+          "name": "Vi",
+          "aliases": [
+            "Vi"
+          ]
+        },
+        "viego": {
+          "name": "Viego",
+          "aliases": [
+            "Viego"
+          ]
+        },
+        "viktor": {
+          "name": "Viktor",
+          "aliases": [
+            "Viktor"
+          ]
+        },
+        "vladimir": {
+          "name": "Vladimir",
+          "aliases": [
+            "Vladimir"
+          ]
+        },
+        "volibear": {
+          "name": "Volibear",
+          "aliases": [
+            "Volibear"
+          ]
+        },
+        "warwick": {
+          "name": "Warwick",
+          "aliases": [
+            "Warwick"
+          ]
+        },
+        "wukong": {
+          "name": "Wukong",
+          "aliases": [
+            "Wukong"
+          ]
+        },
+        "xayah": {
+          "name": "Xayah",
+          "aliases": [
+            "Xayah"
+          ]
+        },
+        "xerath": {
+          "name": "Xerath",
+          "aliases": [
+            "Xerath"
+          ]
+        },
+        "xin_zhao": {
+          "name": "Xin Zhao",
+          "aliases": [
+            "Xin Zhao"
+          ]
+        },
+        "yasuo": {
+          "name": "Yasuo",
+          "aliases": [
+            "Yasuo"
+          ]
+        },
+        "yone": {
+          "name": "Yone",
+          "aliases": [
+            "Yone"
+          ]
+        },
+        "yorick": {
+          "name": "Yorick",
+          "aliases": [
+            "Yorick"
+          ]
+        },
+        "yuumi": {
+          "name": "Yuumi",
+          "aliases": [
+            "Yuumi"
+          ]
+        },
+        "zac": {
+          "name": "Zac",
+          "aliases": [
+            "Zac"
+          ]
+        },
+        "zed": {
+          "name": "Zed",
+          "aliases": [
+            "Zed"
+          ]
+        },
+        "zeri": {
+          "name": "Zeri",
+          "aliases": [
+            "Zeri"
+          ]
+        },
+        "ziggs": {
+          "name": "Ziggs",
+          "aliases": [
+            "Ziggs"
+          ]
+        },
+        "zilean": {
+          "name": "Zilean",
+          "aliases": [
+            "Zilean"
+          ]
+        },
+        "zoe": {
+          "name": "Zoe",
+          "aliases": [
+            "Zoe"
+          ]
+        },
+        "zyra": {
+          "name": "Zyra",
+          "aliases": [
+            "Zyra"
+          ]
+        },
+        "yunara": {
+          "name": "Yunara",
+          "aliases": [
+            "Yunara"
+          ]
+        },
+        "zaahen": {
+          "name": "Zaahen",
+          "aliases": [
+            "Zaahen"
+          ]
+        }
+      },
+      "attributes": {
+        "quote": {
+          "quote_d556d07b83": "A kard börtön volt, amely tudatát végtelen, fojtogató sötétségbe zárta, és a megváltó halál lehetőségétől is megfosztotta",
+          "quote_bbded0fb98": "Megrészegült az ellopott emlékektől, és valósággal elbódította, hogy elveheti mások életét, még ha érezte is áldozatai gyászát és szomorúságát.",
+          "quote_634653bc86": "Az egész rend előtt nyíltan kijelentette, hogy a kinkou cselekvésképtelen, hiszen a szellemi egyensúlyról és a türelemről szóló prédikációik vajmi keveset érnek.",
+          "quote_40f845fea7": "Elmondta neki, hogy a fegyver neve Feloldozó, és különös, ősi bűbájjal ruházták fel: ha kioltja egy gyilkos életét, feltámasztja legutóbb megölt áldozatait.",
+          "quote_1a1bb82d3a": "... a puszta kezével zúzta össze a Tewain-ház úrnőjének koponyáját, de csakhamar láncra verve találta magát életben maradt társaival együtt. Ezután Noxus távoli fővárosába vitték őket lázadás szításának vádjával.",
+          "quote_98b45f7ed0": "A Medarda-ház büszke lánya volt, született harcos, aki rövid idő alatt tábornoki rangra emelkedett, és nagyapja, a családot irányító Menelik kedvencévé vált.",
+          "quote_f56471d318": "A lány halála után a nagymamája gonosz átokkal sújtotta a fiatal császárt. Az átok hatására ... a szenvedéssel teli pillanatának foglya lett, mint az édes borostyán-gyantába szorult rovar.",
+          "quote_f05c4a4f08": "Az egyik legrégibb és legnagyobb tiszteletben tartott hiedelem szerint ... legnagyobb ajándéka a Freljordnak az elemi jég megteremtése volt.",
+          "quote_a2bf0c277b": "Daisy még nem szokott hozzá a vad határvidék veszélyeihez, így egy nap a játszadozás tragédiába torkollt. Leanna természetesen ...-t hibáztatta lánya elvesztése miatt, ezért dühét és fájdalmát mostohalánya legféltettebb kincsén, ...en töltötte ki.",
+          "quote_05d605256b": "Csak ekkor értették meg, mi a valódi sorsuk. ... kiürítette magát az önmagának okozott fájdalommal, és így rajta keresztül testet ölthetett a hold ereje. ... sorsa az volt, hogy egyedül éljen az erődben, és vezesse bátyját, akinek a szemeivel látja a világot.",
+          "quote_0b77e8838f": "Hamarosan többen kezdtek hinni abban, hogy ... nemcsak Avarosa fegyverét viselte, hanem ő maga volt az újjászületett legenda, akinek az a végzete, hogy ismét egyesítse a Freljordot.",
+          "quote_0d76b2232a": "A halandók megmászták a legmagasabb hegyet, és egy lélegzetelállító koronát ajánlottak fel neki, amelyet óvatos és ravasz mágiával alkottak, és az égi birodalom kifürkészhetetlen jeleivel díszítették. Abban a pillanatban, ahogy a homlokához ért, ... azonnal rájött, hogy nem ajándéknak szánták.",
+          "quote_976faeb0fa": "... Freljordot járva több lélekvándorral is találkozott, és tanácsot kért tőlük, remélve, hogy a szellemekkel kapcsolatos tapasztalatuk talán segít kideríteni, mi történhetett újdonsült kísérőjével. Sajnos egyikük tudott válaszolni a kérdéseire, és az mondták neki, keresse meg ...t, a tundra legerősebb lélekvándorát.",
+          "quote_72ede48e26": "Az ifjú örökös kiemelte egyetlen bizalmasát, ...ot a rabszolgaságból, és jobbkezévé tette. Hogy a lehető legjobb tanácsos váljon belőle, ... azzal bízta meg ..., hogy minél nagyobb tudást halmozzon fel.",
+          "quote_2f0a4a2d8d": "A kezdet kezdetén ... céltalanul sodródott a néma kozmoszban, de szíve mélyén tudta, hogy előbb-utóbb valami csodálatos fogja megtölteni a mindenséget.",
+          "quote_3beb46b32e": "Egy félelmetes császárnő, aki egy teljes tengerparti kikötő és a környező óceán emlékeiből, élményeiből és érzelmeiből jött létre.",
+          "quote_9ef3499479": "Amikor végre ráleltek az egyik töredékre, Kegannek azzal a csábítással kellett szembenéznie, amely korábban sokakat kergetett őrületbe. A rúnák voltak a világban áramló mágia forrásai, és mestere figyelmeztetése ellenére meg akarta szerezni magának ezt az erőt.",
+          "quote_7f61eb6510": "Az egyik legújabb mese arról szólt, hogyan szerezte meg ... hatalmas kosfejes pajzsát. Eszerint a pajzs valójában egy kincseskamra megbűvölt ajtaja, amelyet az ősi időkben építettek be a hegyoldalba.",
+          "quote_8c78c66b08": "A teremtői egy orgyilkost akartak, ő viszont nem akart semmi mást, csak enni, enni, ENNI!",
+          "quote_4b73547660": "Gazdag és befolyásos kereskedőcsaládba született, és bár elsajátította Piltover társasági életének összes fontos elemét, szívesebben töltötte idejét a város körüli vadabb vidékeken.",
+          "quote_fcbacf3366": "Egy hextech implantátumot kért Hakimtól, hogy emberfeletti teljesítményre legyen képes. Hakim azonnal beleszeretett, a hosszas előkészületek és az estébe nyúló beszélgetések Shurimáról pedig egyre közelebb hozták őket egymáshoz.",
+          "quote_34eec21d27": "Mágikus méreg áramlott szét a vérében, miközben a zsoldosok kimenekítették őt a sivatagból. A teste szörnyű kínok között eltorzult, és új, iszonyatos alakot vett fel.",
+          "quote_141fb18cee": "a rosszindulat és az erőszak idegen teremtménye, aki előtt csak a legrátermettebbek nem hullnak térdre félelmükben. ... táplálkozik is a zsákmányából, addig növekszik és dagad, amíg jól nem lakik.",
+          "quote_69501e7347": "A vakmerő tüzér azzal tett szert erre a címre, hogy kipróbálta az egyik ilyen hozzájárulást, a felderítő műveletekre tervezett frontvonalbeli kopter eredeti példányát.",
+          "quote_8409dfcc1e": "Jutalmul saját sereget alapíthatott, és a birodalom minden szegletéből lelkes újoncok ezrei jelentkeztek nála szolgálatra. ... a többségüket elutasította – csak a legerősebb, legfegyelmezettebb és legerősebb akaratú katonákat választotta ki.",
+          "quote_ab48fa8de1": "A falakra vetülő holdfény egy, a Targon-hegy legmagasabb csúcsát ábrázoló festményt világított meg, amelyen a nap és aranyszínű vértet viselő harcosok, valamint a hold és annak ezüstös páncélba öltözött seregei látszottak. ... örömittasan igyekezett megosztani ... az üzenetet – a nap és a hold ezek szerint mégsem voltak ellenségek!",
+          "quote_dec6b279b9": "Ahogy teltek a hónapok, a végrehajtó kimondhatatlan szörnyűségeket szenvedett el az úgynevezett ápolói kezétől.  A végrehajtó elkezdett megváltozni, hatalmas testén napról napra több izom fejlődött ki.",
+          "quote_18b95e682f": "A gladiátor jellegű arénaharcosok fontos szerepet töltöttek be Noxusban: ők hajtották végre a bűnözőkre kiszabott ítéletet, és ők rendezték a nemesi házak közötti vitákat, ... pedig eltökélten végezte munkáját a megérdemelt gazdagság, hírnév és elismerés reményében.",
+          "quote_a829ac169f": "Azonnal kísérletezgetni kezdett a kristállyal. Az egyik nem éppen tudományos kísérlete során a drágakő ragyogó porforgataggá robbant szét, és időtorzulások örvényeit hívta elő.",
+          "quote_3dd94b3bec": "Létrejött egy megállapodás, amely szerint a Fekete Rózsa korlátlanul biztosítja a pókistennek felajánlható gyanútlan áldozatokat, cserébe pedig ... minden ereklyét elhoz arról a sötét, félelmetes partról, amit csak tud.",
+          "quote_b8154ea513": "Mohón itta Runaterra fájdalmát, amelyet ő határtalan gyönyörként élt meg. Az érzés táplálta a lényt, amely idővel átalakult. Démonná vált, telhetetlen lelki parazitává, amely a legalapvetőbb emberi érzésekkel táplálkozott.",
+          "quote_3ac9bbc76b": "Egy névtelen császár mauzóleuma alatt rátalált Ne’Zuk sírjára. A hatalmas szarkofág üres volt, csak egy csillogó bronzkesztyű volt benne, a közepén egy fényes kristálymátrixszal.",
+          "quote_5cbbdff657": "Réges-régen, egy tengerparti toronyban egy ostoba fiatal mágus valami olyat idézett meg a világunkba, amit nem tudott irányítani. A fiú előtt megjelenő lény a feljegyzett történelemnél is idősebb volt.",
+          "quote_6d259e58de": "Letérdelt elé, és felajánlotta a kardját... a király áldásával átveszi a Laurent nevet apjától, és igazságot szolgáltat. A párbaj szinte követhetetlen volt, a pengék villámgyorsan táncoltak.",
+          "quote_a25c5771c3": "A törvényen kívüliek körében hamar legendává vált ez a furcsa, sikamlós lény: az árapály trükkmesterének nevezték, és a tenger egyik szellemének hitték. Azt beszélik, hogy hatalmas tengeri szörnyek lesik a parancsait, képes meglékelni a hajók törzsét a kőszigonyával, és kedve szerint a vízben vagy a levegőn is tud lélegezni.",
+          "quote_7330c9203c": "Megbíztak egy Durand nevű szobrászt, hogy alkosson valamiféle kőpajzsot a sereg számára. A művész két évvel később bemutatta mesterművét. Bár a legtöbben nem pont erre az eredményre számítottak, ..... a nemzet egyik legfontosabb védelmezője lett, és Demacia erejének egyik szimbólumává vált Valoran lakói szemében.",
+          "quote_1f1e4c0620": "A trónjától megfosztott kalózkirálytól mindenütt rettegnek. Ahol csak megfordul, halál és pusztulás jár a nyomában. Olyannyira hírhedtté vált, hogy hajója fekete vitorláinak puszta látványa pánikot kelt még a legedzettebb matrózok körében is.",
+          "quote_f93ea178e9": "Fegyverhordozóként éjt nappallá téve gyakorolt, és a háború tudományát tanulmányozta, miközben testét és elméjét egyetlen fegyverré kovácsolta, amely épp olyan erős és igaz volt, akár a demaciai acél.",
+          "quote_a10e19a7bb": "Bár szinte ahhoz is túl kicsi volt, hogy nyomot hagyjon a hóban, dühe tízszer nagyobb állatokéval vetekedett, és heves átkozódásban tört ki, valahányszor valami gondja támadt.",
+          "quote_550c265b2a": "Az erős sör iránti olthatatlan szomjúságától vezérelve egyre hathatósabb és különlegesebb hozzávalók után kutat, hogy szeszfőző kazánjában lepárolhassa azokat.",
+          "quote_d8d4681132": "A zsiványbecsületet idővel felváltotta az őszinte bizalom. Közös erővel rabolták ki a gazdagokat és szedték rá az ostobákat, együtt válogatták össze a bandatagokat a munkákhoz, és ha alkalmuk adódott rá, boldogan elárulták a riválisaikat.",
+          "quote_2f402f67b1": "Végül egy éjjel kinyitotta a szemét. .... az otthonától távol, egy árnyas tengerparton ébredt fel először. Egy számára ismeretlen varázslat révén élő kislánnyá változott, aki mozgatni tudta a kezeit és a lábait.",
+          "quote_4aa0bd6c9e": "Egy lándzsával hátba szúrta .......-t, és arra utasította lovagjait, hogy fosszák ki a várost, és rabolják el minden mágikus ereklyéjüket. A káosz közepette egy alacsony rangú őrző megmutatta a királynak az élet vizét, de .......-ot túlságosan lekötötte a vérontás, ezért szinte teljesen váratlanul érte őt az Áldott-szigetekre lesújtó Romlás.",
+          "quote_f1dcaead05": "............ professzor egy briliáns, de roppant különc yordle tudós, az egyik legnagyobb újító Piltover feltalálói között. Bár elméletei gyakran homályosak és elvontak, ............ abban hisz, hogy a tudást meg kell osztani, és szívesen a tanítványának fogad bárkit, aki erre kéri őt.",
+          "quote_d8571092ec": "Gyakran megvitatták kreatív látásmódjukat, és ...., tiszteletben tartva eltérő véleményüket, nagyra tartotta .... virtuóz tehetségét és a vele töltött időt.",
+          "quote_c9cbb35445": "Az alacsonyabb rangú papnők feladata a templomok fenntartása, a szent kígyók hívása és Nagakabouros hitének oktatása. A vallás Igaz Hangjaként ...... közvetlenebbül szolgálja istenét azzal, hogy eltávolítja az akadályokat az univerzum útjából.",
+          "quote_c1ee2281b0": "A lázadó lány, aki ..... levágott karját emeli a feje fölé a magasba – ez a pillanat jelentette a háború fordulópontját.",
+          "quote_e173bddfab": "Hogy megtörje harci kedvüket, megmarkolta fejszéje nyelét, gyűlölettel teli hangon felbődült, majd újra és újra lesújtott a Fűzistenre. A hatalmas fa kidőlt. Leírhatatlanul sok életenergia szabadult fel, és Kegyetlen ..... azonnal megszűnt létezni.",
+          "quote_0c413a6481": "A hívek Jan’ahrem névre keresztelték ezt a szélszellemet, ami az ősi shurimai nyelven „őrzőt” jelent, mivel látszólag mindig a legnagyobb szükség idején jelent meg.",
+          "quote_854fa7b82d": "... apja szemtanúja volt a kegyetlen jelenetnek, és ahogy telt-múlt az idő, lassan fiára is átragadt a minden ikáthiai szívében fortyogó gyűlölet. Ennek ellenére ..., aki a fegyverek tanulmányozására tette fel az életét, klánjának öregjei mellett a shurimai fegyvermesterektől is rengeteget tanult.",
+          "quote_b2cc073527": "A Piltoverben született .....-t úgy nevelték, hogy aszerint éljen, ami a várost naggyá teszi: Találjon fel új dolgokat. Fedezzen fel új dolgokat. Ne menjen Zaunba, ha nem muszáj.",
+          "quote_fc50ef4ab4": "A Lélekvirág fesztivál estéjén Kusho egy híres kalligráfus álcájában érkezett a Jyom-szorosba, hogy elvegyüljön a többi művész között. Azután várt. .... és ... egy gondosan előkészített csapdát helyeztek el, és végül szembe találták magukat gyűlölt ellenfelükkel. Kushónak igaza volt: az „Aranydémon” Zhyun utazószínházaival és operaelőadásaival járta a vidéket egyszerű díszletezőként, és a Khada .... nevet használta.",
+          "quote_c05e620ae8": "Ezek a csínyek a közepesen idegesítőektől a veszélyes bűncselekményekig terjedtek. A Fejlődés napján eltorlaszolta az utakat egy csordányi egzotikus állattal, amelyeket Mei gróf állatkertjéből szabadított ki.",
+          "quote_9c59881c3b": "A lény látszólag halott volt, de természetellenes bőre a lány karjára tapadt. A sötét páncél bizsergett, de érintésre olyan kemény volt, mint az acél.",
+          "quote_31669fe995": "Lidérc lett belőle, ijesztő népmesei szereplő, akit általában a hasonló árulások áldozatai szólítanak magukhoz. Ezek az elkeseredett emberek hajlandók megfizetni a szörnyű árat, és egybeolvadni a Bosszú Lándzsájával.",
+          "quote_dce7e09f92": "Darhát azonban egyszer csak különös, szeszélyes látomások kezdték gyötörni. Furcsa képek voltak ezek – emlékeknek tűntek, bár a lány biztos volt abban, hogy ilyesmik nem történhettek meg vele. Kezdetben még könnyedén elrejtette a problémát, a látomások azonban egyre jobban felerősödtek, olyannyira, hogy Darha végül már saját épelméjűségében is kételkedni kezdett.",
+          "quote_ccb748ce8c": "Gyászdalai hamarosan ismertté tették szerte Noxusban, olyan szívhez szólóan énekelt a halál szépségéről, és arról, hogy el kell fogadni, amit azon túl vár. Őszinte elégiái sok gyászoló családnak hoztak némi megnyugvást és békét.",
+          "quote_72403b22a8": "Abban a pillanatban ........ esküt tett arra, hogy bosszút áll feleségéért és lányáért, és megsemmisíti az álnok Prófétát, valamint a mélységből fakadó hatalmának forrását.",
+          "quote_30ce88af14": "Mindenképpen Noxus hasznára akart válni. Bizonyítani akarta rejtett képességeit a birodalom és a császár szolgálatában. Első megbízását apjától kapta a hadi táborban, a számtalan nyugati invázió egyikének estéjén. Az ellenséges sereg egyik tisztjét, egy alacsony származású senkiházit, Demetriust kellett megölnie.",
+          "quote_2492b82f62": "Az ikrek már a kamaszkorba léptek, amikor egy tűzcsóva hasított végig az égen. Egy mennyei tűzzel égő kard zuhant ..... és testvére közé, ahol kettétört. Kilam döbbenten ismert rá Mihira fegyverére.",
+          "quote_cec1e6ccd6": "Meg kellett keresnie egy darkin fegyvert, amelyet nemrégiben ástak ki Noxusban, hogy megakadályozhassa annak bevetését Ionia kimerült védőivel szemben.",
+          "quote_67d98713ae": "Kinkou rendnek nevezték magukat. A távolságtartó Alkony szeme és a bosszúszomjas Árnyék ökle vezette rend felkeltette ...... érdeklődését. Rájött, hogy hiányzik egy harmadik nézőpont a Kinkou rend vezetéséből.",
+          "quote_9060180d30": "Az Ürességből származó ragadozó, aki azért lopózott át a saját világából, hogy eleméssze Valoran legígéretesebb teremtményeit. Minden gyilkossággal magába szívja áldozatainak erejét és ezáltal egyre hatalmasabbá válik. ....... leginkább ...... vérére szomjazik, őt tekinti egyetlen méltó vetélytársának.",
+          "quote_a20baed82d": "A pásztor és a mészáros, a költő és a primitív állat: ők ketten egy lényt alkotnak. Ha valaki az élete végéhez ért, akkor nem a végítélet harsonái, hanem a zakatoló szív hangja csalja oda a vadászatra.",
+          "quote_78e05b7de1": "Hihetetlen történetek, mint „A nagy huszár győzelme”, „A főtábornok-marsallhadnagy visszatérése” és „A hegyi admirális” szólnak arról, hogy a noxusi légiók valaha indított összes hadjáratában részt vett, az idők során minden létező katonai rendfokozatot megszerzett már, és soha nem hátrált meg egy csata elől sem.",
+          "quote_ec3529c3dd": "Megrészegült Runaterra lenyűgöző színeitől és illataitól, és a számára ismert egyetlen módon kezdte felfedezni ezt a különös világot: felfalt mindent, ami felkeltette az érdeklődését. Először csak a növény- és állatvilág képviselőit kóstolta végig. A kiszáradt Viharsíkságra érve azonban egy nomád törzsre bukkant.",
+          "quote_2aff683e1e": "Két évtizeden át képezte magát különböző harcművészetek tanítómestereivel. Azonban a szüleitől megtanult valamit, ami ennél is fontosabb volt: hogy tisztelje Nazumah ellenségeit, a kíméletlen ragadozókat és hódítókat, akik a városállam erőforrásaira áhítoztak.",
+          "quote_e57057092e": "Illúziói révén egyszerre több helyen is jelen lehet, hogy a rendet káosszá változtassa. Minden generáció születésével új pletykák kelnek szárnyra egy új úrnő érkezéséről... de vajon melyik az ő „igazi” arca?",
+          "quote_8cc63d3c4f": "Még kisfiúként érkezett a Shojin kolostorba, és azt állította, hogy a sárkány kiválasztotta őt erejének őrzőjévé.",
+          "quote_ac30959ec8": "A solarik hite számára oly természetes volt, mint a levegővétel, a merev szabályok között megnyugvást és biztonságot talált. Ennek következtében gyorsan kitűnt a társai közül, akik irigyelték rátermettsége, akaratereje és elszántsága miatt.",
+          "quote_680245f13f": "De létezik egy rejtett erdő, amelyet egy másik fajta mágia éltet. Egy kert, amelynek közepén egy fa áll, virágaiban az emberiség álmai virulnak.",
+          "quote_06bc96bf3e": "Serylda az eget akarta uralni, és az első alkonyat elvette a hangját. Avarosa a föld mélyén kavargó sötétséggel nézett szembe, de megsiketült a mindent elnyelni akaró ürességben. ......... a halandó világ vad mágiáját akarta megzabolázni. Ellenszegülése miatt az egyik ősi isten megvakította őt karmai egyetlen suhintásával.",
+          "quote_4e8668ca6f": "Varázsigét suttogott, behunyta a szemét, körülölelték a hamvak. Amikor egy pillanattal később kinyitotta a szemét, a földműves előtt termett, és épp az előtt emelte csapásra a karóját, hogy a nő felnyársalta volna a férfit a karmaival.",
+          "quote_4f8f051c3d": "...... felkapta a fegyvert, amiről úgy érezte, hogy neki szánta a sors. A lelkét elöntő gyász fénysugárként tört elő a pisztolyból, elterelve a lidérc figyelmét, amelyet ..... így könnyedén elpusztított.",
+          "quote_615715bf66": "Apró ujjainak egyetlen csettintésével Pix csavart pálcává változtatta az egyszerű vándorbotot, majd visszadobta Lulunak. A pálca leveleket hajtott, és kivirágzott, ....-nak pedig elakadt a lélegzete örömében. Így kezdődött az ő örök barátságuk, amely a csintalan mókázásból és a természet szeretetéből fakadt.",
+          "quote_d088a5faa3": "Egy félelemmel és kétségbeeséssel átitatott pillanatban a fiatal lány egy mágikus fénycsóvát engedett szabadjára lényének legmélyéről, amely megsemmisítette a farkasokat, a lányt azonban az eset nyomán rettegés fogta el.",
+          "quote_30eff980a2": "A nép öröme azonban hamarosan szertefoszlott, amikor Catherine belehalt a szülésbe. Az apja után elnevezett gyermek lett Demacia trónörököse.",
+          "quote_09a7ec3b7a": "... éppolyan jól végezte dolgát, mint bármelyik gőzhajtású társa, sőt, idővel egyre gyorsabb és hatékonyabb lett, és Viktor valódi csodát tapasztalt…Az alkotása tanulni kezdett.",
+          "quote_8e95295792": "Századokon át hevert mozdulatlanul a kőzet mélyén, mígnem egy robbanás fel nem riasztotta évszázados álmából, és rá nem kellett döbbennie, hogy védelmezendő otthona pusztulás szélén áll.",
+          "quote_5a66479763": "A sivatag mélyén egy névtelen hang szólalt meg a fejében, és attól kezdve nem kételkedett abban, hogy ... az egyetlen, aki valóban megértheti az Üresség szavát.",
+          "quote_abbf3bfa3a": "Az Áldott-szigetek egykori őrfája volt, s bár a Romlás fekete köde behálózta és eltorzította testét, ... a mai napig hűségesen védi az élőket a szigetek pusztító átkától.",
+          "quote_949c4bde0a": "Miután saját falujának harcművészeti rendjét kiirtották, ... egyedül maradt az utolsó mesterként, aki a Wuju stílus tudását őrzi, és méltó tanítványt keres, hogy tovább élhessen.",
+          "quote_5582029c23": "A Medarda-ház sarjaként nem kardot vagy puskát forgatott, hanem a szavak és az emberi elme fölötti hatalmát, amellyel képes volt rábírni másokat, hogy önként tegyék meg, amit kért.",
+          "quote_d6e7db7add": "Ixtal egyik falujából menekült el nagyanyjával együtt, miután tüzet gyújtó képessége felégette otthonukat, s azóta igyekszik megtanulni, hogyan élessze fel a lángot úgy, hogy az csak melegítsen, sose pusztítson.",
+          "quote_6605ad57ee": "Gyermekkorában végignézte, ahogy egy kalóz felgyújtja otthonát és megöli édesanyját, s ez az emlék hajtotta arra, hogy évekkel később maga is a Bilgewater-i vizek rettegett kapitányává váljon, csakhogy bosszút állhasson.",
+          "quote_eeaeb5d822": "Életében a Vas Rend zsarnoki ura volt, aki halálmágiával törte uralma alá seregeit, és a halál sem tudta megállítani: azóta is lelkeket ráncigál magával egy másik síkra, hogy örökké szolgálják.",
+          "quote_ca5119bed5": "Az égi Igazság Arca lett volna a nővérével együtt, de ... úgy döntött, a halandók között marad, mert úgy vélte, könyörület nélkül nincs igazi igazságosság, és azóta láncokba veri azokat, akiket bűnösnek ítél.",
+          "quote_594183156b": "Egy elárult, meggyilkolt nő akaratából és egy hextech ékkőből született, s azóta falkányi mágikus kutya testében éli tovább az életét, miközben végigüldözi mindazokat, akik elárulták.",
+          "quote_7aa309b234": "A Marai nép nagyköveteként hagyta el az óceán biztonságát, hogy a szárazföldi népekkel egyezkedjen, míg testvére inkább az emberek segítése helyett a tenger mélyén akart maradni.",
+          "quote_3625bc2f15": "A felemelkedett sakálfejű őrzőként Shurima történelmének és tudásának megtartására esküdött fel, míg testvére inkább a pusztítást választotta, és a homok végül kettejük sorsát is örökre elválasztotta.",
+          "quote_0679fd13c3": "Egykor egyszerű búvár és világítótorony-őr volt, mígnem saját legénysége árulta el és dobta a mélybe egy zsák aranyért, s azóta láncokkal felfegyverkezve tér vissza, hogy elszámoltassa a mohó gazdagokat.",
+          "quote_f4139ea680": "Törzse pusztulása óta idegen alakokat öltve vándorol Runeterrán, remélve, hogy egy nap talál egy közösséget, amely befogadja, még ha csak egy álarc mögött is.",
+          "quote_d6cf4e9b27": "Szülei halála után egy dzsungel mélyén, vadállatok között nevelkedett, s azóta éppúgy otthon van emberi alakban, mint egy prérifarkas bőrében.",
+          "quote_a07eb93eef": "Évszázadokig raboskodott egy elátkozott penge foglyaként, mígnem sikerült kiszabadulnia, és azóta a harc puszta örömét éli meg minden egyes csapásával, amit felszabadított kardjával mér ellenfeleire.",
+          "quote_caa8eb6d1f": "Runeterra népeinek közös, meg nem nevezett félelmeiből és rémálmaiból formálódott meg, és azóta minden éjjel ott leselkedik, valahányszor valaki lehunyja a szemét.",
+          "quote_9349c8382e": "Egy magányos kisfiú és egy jeti alkot elválaszthatatlan párost, miután a fiú édesanyja a fagyos hegyekben indult felfedezőútra, és soha nem tért vissza.",
+          "quote_3998225b75": "Egy jóslat szerint sosem eshet el dicső csatában, ezért attól a naptól kezdve mindent megtesz, hogy végre méltó halált találjon, ám ehelyett minden csatából győztesen, és így tovább élve tér vissza.",
+          "quote_868327eef6": "Testét egy végzetes betegség emésztette fel, ezért apja egy mechanikus szerkezetbe zárta a lelkét, hogy tovább élhessen, még ha érintése immár hideg fémmé is dermeszti azt, amihez hozzáér.",
+          "quote_341098066a": "A Frostbane-hegység mélyén kovácsol néma magányban, és ritkán mutatkozik a halandók előtt, pedig minden freljordi fegyver és páncél, amely valaha kiállta az idő próbáját, az ő kohójából származik.",
+          "quote_ad1b753431": "Egykor a Háború Arca lakozott benne, mígnem egy isteni gyilkosság véget vetett ennek az égi kapcsolatnak, ám ő ezután is halandóként folytatta a harcot, amelyre egykor kiválasztották.",
+          "quote_fa6825ccf8": "Generációkon át egy legendás hős eljövetelét várta, aki egyedül képes lenne méltóan forgatni a nála őrzött kalapácsot, mígnem rájött, hogy talán éppen neki kell azzá a hőssé válnia, akire mindenki várt.",
+          "quote_065c7e11ee": "Egy csapat bilgewateri vadász saját nyereségéért fojtotta a tengerbe, ám a mélység nem engedte el, és azóta visszatérve egyenként vadássza le mindazokat, akik részt vettek a meggyilkolásában.",
+          "quote_7cae306e63": "Ixtal egyik elemuralkodó családjának legfiatalabb és legarcátlanabb sarjaként nőtt fel, s már gyermekként is meg volt győződve arról, hogy egy nap ő fogja uralni mind a négy őselemet.",
+          "quote_4ec5df88a7": "Ikertestvérével együtt szolgálta Demaciát felderítőként, hűséges sasával az oldalán, mígnem egy bevetés során testvére nyomtalanul eltűnt, és azóta is a keresésére indul minden csatában.",
+          "quote_064bf9870a": "Egy vándorló vastaya előadóművészként járja Runeterrát hűséges társával, és sosem fél attól, hogy középpontba kerüljön, még akkor sem, ha népe egyre inkább visszavonul az emberek elől.",
+          "quote_0fef274bd3": "Senki sem tudja biztosan, honnan érkezett, vagy mi célból járja egyedül Shurima forró homokját páncélos golyóként gördülve, csak azt, hogy évszázadok óta bolyong ugyanazon az ismeretlen küldetésen.",
+          "quote_3284306e4e": "Az Üresség egyik legkegyetlenebb ragadozójaként Shurima homokja alatt vájja alagútjait, és semmi sem menekülhet előle, ha egyszer megérzi a rezgést a felszín fölött.",
+          "quote_835e92ed09": "Gyermekként vették el otthonról, hogy Noxus vasrendjében egy páncéllal olvasszák egybe testét és lelkét, ám amikor rájött, mivé akarják valójában formálni, fegyvert fordított egykori mesterei ellen.",
+          "quote_a0feab0df4": "Szülei kémiai formuláját felhasználva évekkel a haláluk után is tovább dolgozott, mígnem a saját kezébe vette Zaun ipari birodalmának irányítását, egyezségekbe kényszerítve mindenkit, aki az útjába állt.",
+          "quote_8da80f07c2": "Egykor testvérével együtt Shurima felemelkedett őrzője volt, mígnem birodalmuk bukása és évszázados homokba temetve várt fogsága tébollyá és pusztító dühvé érlelte azt, ami valaha büszkeség volt benne.",
+          "quote_a7e18a0bed": "Egyetlen célja immár, hogy megtalálja azt a ragadozót, amelyik egykor learatta az arcát, mert számára nincs nagyobb dicsőség, mint levadászni azt, ami képes volt őt magát prédává tenni.",
+          "quote_6f00af4ab9": "Miután parancsot teljesített, amelynek borzalmát képtelen volt magának megbocsátani, ketté törte saját kardját, és azóta Noxus árulójaként bujdosik, remélve, hogy egy nap feloldozást nyerhet.",
+          "quote_79064a4512": "Alacsony termete miatt egész életében lenézték és kigúnyolták, mígnem saját kezűleg épített egy hatalmas gépezetet, amellyel bárkinek bebizonyíthatja, hogy a mérete semmit sem számít.",
+          "quote_2e4a5967a4": "Évszázadok óta őrzi a világ elrejtett rúnáinak titkát, miközben minden egyes varázslattal, amit használ, egyre több emlékét veszíti el saját múltjából.",
+          "quote_293d50e9c5": "Gyermekkorában egy darkin pusztította el szülővárosát, s az azt túlélő menekülteket Noxusba menekítették, ahol felnőve az élet és halál határán táncoló izgalmakban találta meg új otthonát.",
+          "quote_9d04259871": "A Fagyos Karom törzsének vezetőjeként kegyetlen próbákon ment keresztül, mire kiérdemelte a jogot, hogy Freljord legkeményebb harcosait vezesse csatába.",
+          "quote_fefe6104b3": "Húsz éven át egy lélek volt bezárva egy lámpásba, míg férje őt keresve harcolt a fekete köd ellen, mígnem sikerült kiszabadulnia, és azóta a sötétségen át is képes látni, amit mások nem.",
+          "quote_9a0b57beea": "Zaun és Piltover határán nőtt fel azzal a különös képességgel, hogy érzi mások érzelmeit, és mindig arról álmodott, hogy egy nap dallal hidalja át a két város közti szakadékot.",
+          "quote_1daaac702b": "Egyetlen szülője, az édesanyja nevelte fel Ionia illegális ökölvívó arénáinak árnyékában, s mire felnőtt, senki sem merte kétségbe vonni, hogy övé a legerősebb ököl a küzdőtéren.",
+          "quote_3f15bca7ec": "Egy átkozott dobozból kelt életre, amelyet még csak nem is neki szántak, s azóta nincs nagyobb öröme annál, mint mások szenvedéséből és zavarodottságából tréfát űzni.",
+          "quote_0ebbe3b582": "A Kinkou rend Alkony Szemeként kellett feláldoznia saját apját az egyensúly nevében, mert az veszélybe sodorta mindazt, amit a rendnek védenie kell.",
+          "quote_9a461bb116": "Egy sárkánytojásból kelt ki félig emberi, félig sárkány alakban, s bár egy demaciai tábornok nevelte fel sajátjaként, sosem tagadta le azt a lángoló erőt, amely a bőre alatt lakozik.",
+          "quote_5dbaa08046": "Zaun egyik legelismertebb vegyészeként azt vallja, hogy minden borzalmas kísérlet megbocsátható, ha végül a nagyobb jót szolgálja, még akkor is, ha az az út mérgező gázfelhőkkel van kikövezve.",
+          "quote_54b8688533": "Noxus egyik legdicsőbb tábornokaként halt hősi halált csatában, ám birodalma nem hagyta nyugodni: valahányszor elpusztítják, egyre kevesebb emberi emlékkel térnek vissza a holttestébe.",
+          "quote_aff798380d": "Ősi shurimai ereklyéket vadászó zsoldosként híres arról, hogy sosem hisz a mendemondákban, csak abban, amiért aranyat fizetnek neki, még ha ereklyéi végül a régmúlt birodalom titkait rejtik is.",
+          "quote_e0add4dbce": "Egy ősi kristálylény népének utolsó őrzőjeként vigyáz Shurima és Ixtal határán elrejtett kincsekre, s nem tűri, hogy bárki megzavarja az évezredes nyugalmukat.",
+          "quote_af09de493a": "A legfiatalabb és legkisebb sárkányként még csak most tanulja, hogyan bánjon saját tüzével, miközben minden egyes repülés újabb izgalmas kalandot jelent számára.",
+          "quote_d62cbcf265": "Ionia egyik legtehetségesebb muzsikusaként sosem szólalt meg emberi hangon, mert varázslatos hangszerén keresztül sokkal többet tud kifejezni, mint bármilyen szó.",
+          "quote_2f654f075d": "Elsőként hagyta el csillagközi, halhatatlan otthonát, hogy örökre a halandók között éljen, mert úgy hitte, gyógyító ereje itt lent sokkal többet ér, mint az égi békében.",
+          "quote_67782576fa": "Egy elveszített szemért cserébe kötött egyezséget egy holló alakot öltő entitással, amely azóta minden lépésénél suttog a fülébe, miközben Noxus egyesítésén munkálkodik.",
+          "quote_f401cd6a4b": "Egyszerű falusi fiúként börtönözték be, amiért engedély nélkül használt varázserőt, mígnem sikerült megszöknie, hogy fellázítsa Demacia minden elnyomott mágusát.",
+          "quote_78c5891b39": "Kisgyermekként olyan hatalmas varázserő ébredt fel benne, hogy Ionia szerzetesei rettegve zárták el a világtól, mert attól tartottak, egy nap saját dühe pusztítja el mindazt, amit érint.",
+          "quote_9d7aa767b2": "A folyók és kikötők mélyén él, ahol csábító alkukat köt az arra tévedőkkel, ám aki egyszer aláír vele egy egyezséget, ritkán szabadul meg tőle könnyű szívvel.",
+          "quote_9cb572db28": "Egy vándorló sivatagi törzs lányaként fedezte fel, hogy képes formálni maga körül a köveket, s ez a képesség végül messzebbre repítette otthonától, mint amiről valaha álmodott.",
+          "quote_8c4b0c4d35": "Noxus utcáin nevelkedett árva gyerekként, mire a Du Couteau család felfigyelt rá, s attól kezdve a családi hagyomány szerint képezték ki a birodalom legkíméletlenebb orgyilkosává.",
+          "quote_5150dbf060": "Egykor demaciai lovagként hagyta el posztját egy magánügy miatt, s becstelenséggel vádolták, mígnem az egyik égi Aspektus mégis őt választotta ki, hogy a Targon-hegy védelmezője legyen.",
+          "quote_33f85263eb": "Bandle City felderítőcsapatának egyik legbuzgóbb tagjaként soha nem hátrál meg egy küldetés elől, még akkor sem, ha a nála sokkal nagyobb ellenfelek felett kell győzedelmeskednie.",
+          "quote_6d9449e3d8": "Életében az Áldott-szigetek egyik legkegyetlenebb börtönőreként kínzott másokat, s a Romlás sem változtatott ezen: azóta is lelkeket gyűjt egy lámpásba, hogy örök kínszenvedésre ítélje őket.",
+          "quote_3f15868066": "Bandle City nyugalmát elhagyva indult harcba az óriások ellen, mert úgy vélte, apró termete ellenére is meg tudja védeni a nála sokkal nagyobbakat egy ágyúgolyóból kilőve magát.",
+          "quote_773de4268f": "Freljord jeges pusztaságának önjelölt királyaként kegyetlenül védi területét mindenkitől, aki átlépi a láthatatlan határvonalat, amelyet csak ő ismer igazán.",
+          "quote_0ccac88f2e": "Törzsének lemészárlása után az egyetlen túlélőként esküdött bosszút, s azóta a csatamezőn tomboló haragja olyan erős, hogy még a halál sem tud fogást találni rajta.",
+          "quote_239345013a": "Senki sem tudja biztosan, honnan érkezett Bilgewaterbe, csak azt, hogy kártyáival és szerencséjével egyaránt könnyedén tisztel meg vagy foszt meg mindenkit, akivel asztalhoz ül.",
+          "quote_c34170a7cd": "Zaun csatornáinak mélyén tengeti életét, ahonnan csak azért merészkedik elő, hogy bosszút álljon mindazokon, akik egykor kártevőként üldözték és megvetették.",
+          "quote_0fc017c921": "Freljord szellemjáróinak egyikeként négy különböző állat lelkét hordozza magában, s élete célja, hogy végre békét találjon a benne dúló, egymásnak feszülő erők között.",
+          "quote_10fa778151": "Noxus egykori kegyetlen hóhéraként saját feletteseit szolgálta, mígnem azok elárulták és Zaun legmélyebb szennygödrébe vetették, ahonnan torz szörnyetegként tért vissza bosszúra szomjazva.",
+          "quote_81141a4a0a": "Három ioniai vadász esküdött össze, hogy elpusztítanak egy darkin fegyvert, ám végül maguk is annak rabjaivá váltak, s azóta egyetlen íjas testben osztoznak a bosszú és a kárhozat között.",
+          "quote_4e67c03378": "Egy sötét éjszakán egy démon gyilkolta meg családját, s attól a naptól kezdve egyetlen célja maradt: kiirtani minden árnyékban megbúvó szörnyeteget, amíg csak él.",
+          "quote_470b89e01b": "Egy ártatlan kíváncsiságból indult útnak a sötét mágia tanulmányozása felé, mígnem apró termete ellenére Runeterra egyik legfélelmetesebb varázslójává vált.",
+          "quote_64bcf23f65": "Az Üresség egyik tudós entitásaként semmi mást nem akar, csak megérteni Runeterra minden egyes darabkáját, még ha ehhez apró részekre is kell szednie azt, amit vizsgál.",
+          "quote_daa42e8ba6": "Bandle City komor zugából származik, ahol mindenki mást boldogtalannak és gyanúsnak tart, különösen azokat, akik túl vidámnak tűnnek a saját ízlése szerint.",
+          "quote_4d7a001faa": "Zaun nyomornegyedének utcáin nevelkedett fel egy fiatalabb lánytestvérrel, akit mindennél jobban próbált megvédeni, mígnem egy robbanás örökre elszakította őket egymástól.",
+          "quote_bcc1a36949": "Az Áldott-szigetek egykori királyaként feleségének halála után tiltott mágiához folyamodott, hogy visszahozza őt az életbe, ám ehelyett egy pusztító átkot szabadított rá egész birodalmára.",
+          "quote_948c7f12ec": "Zaun nyomorából emelkedett ki azzal a meggyőződéssel, hogy a tökéletes fejlődéshez a test gyarlóságát gépi alkatrészekre kell cserélni, egyet sem kímélve, aki az útjába áll ennek eléréséhez.",
+          "quote_215458130b": "Évszázadokon át él tovább vérmágiával megfiatalítva magát, miközben Noxus felső köreiben szövi befolyásának hálóját, sosem elégedve meg azzal, amennyi hatalma máris van.",
+          "quote_65f393a9fd": "Freljord egyik ősi viharistene, aki nem hisz abban, hogy a civilizáció és a vadon valaha is békésen megférhetne egymás mellett, ezért mindent megtesz, hogy a régi rend uralkodjon.",
+          "quote_93cb6863b6": "Zaun mélyén egy szörnyeteggé torzult azok kísérletei miatt, akik a bűnözőket akarták büntetni, ám ehelyett saját éhségét is fegyverré kovácsolta a város leggonoszabb lakói ellen.",
+          "quote_c92c721702": "Ionia vándorló szerzeteseként egy bottal a kezében járja az utakat, mert mestere azt tanította neki, hogy az igazi erő nem a hatalomban, hanem az útban rejlik, amelyet bejár.",
+          "quote_7872851df3": "Népe fokozatos eltűnése miatt fegyvert fogott azok ellen, akik szerinte a vastayák kihalásáért felelősek, miközben társa inkább előadóként próbálja életben tartani régi kultúrájuk emlékét.",
+          "quote_b3c1044de7": "Shurima egyik ősi mágusaként hatalomvágya miatt zárták egy urnába évezredekre, s most, hogy kiszabadult, tiszta energiává vált testtel próbálja újjáépíteni az egykori birodalmat.",
+          "quote_7e75ce1e5a": "Egy demaciai csatában mentette meg a herceg életét, s azóta hálából és becsületből esküdött fel, hogy mindhalálig a királyi család védelmezője marad.",
+          "quote_3a25d71451": "Mestere meggyilkolásával vádolták, noha ártatlan volt, s azóta Ionia útjait rója száműzöttként, remélve, hogy egy nap megtalálja az igazi gyilkost, és tisztázhatja a nevét.",
+          "quote_8d288f798d": "Saját féltestvére kezétől halt meg egy csatában, ám a halál nem engedte nyugodni: egy démoni maszkkal az arcán tért vissza, hogy választ kapjon arra, amit sosem értett meg életében.",
+          "quote_ae78def5c5": "Az Áldott-szigetek utolsó sírásójaként holtakat és szellemeket idéz meg, hogy azok segítségével tartsa fel a Romlás pusztító árját, amely már réges-rég elnyelte otthonát.",
+          "quote_efd30631df": "Egy magára hagyott varázskönyv-macskaként bolyongott, mígnem újra társat talált magának, akihez lelkéből egy darabkát kötve most már sosem érzi magát egyedül.",
+          "quote_341176bbfc": "Zaun mérgező hulladékából kelt életre egy formátlan, mégis gyengéd óriásként, aki minden erejét arra használja, hogy megvédje a város kevésbé szerencsés lakóit.",
+          "quote_bea25ec9c9": "Egykori mestere ellen fordult, hogy megszerezze a tiltott árnyékmágia titkait, s az árulásból saját harcosrendet kovácsolt, amely azóta az árnyak közül csap le áldozataira.",
+          "quote_0fd998746f": "Egy ipari baleset során villamos energiával telítődött, s azóta ezt az erőt arra használja, hogy megvédje otthonát és családját Zaun és Piltover feszült viszonyának közepén.",
+          "quote_e77811bbfd": "Zaun és Piltover tudományos köreiben senki sem osztja annyira a robbanások iránti őszinte lelkesedését, mint ő, aki minden egyes kísérletét egy kicsivel hangosabbra tervezi az előzőnél.",
+          "quote_0985f80482": "Otthona pusztulása és szerelme elvesztése óta megszállottan kutatja az idő feletti uralom titkát, remélve, hogy egy nap visszaforgathatja az órát, és megakadályozhatja a tragédiát.",
+          "quote_851024124c": "Egy égi lény megtestesüléseként a szeszély és az alkonyat erejével játszik a halandók életével, sosem gondolva bele igazán, milyen következményekkel járhatnak tréfái.",
+          "quote_7d7a651d0f": "Ixtal mélyén egy elhallgattatott természetszellemből született újjá tövisekkel és virágokkal felfegyverkezve, hogy bosszút álljon mindazokon, akik egykor eltiporták az őt tápláló földet.",
+          "quote_bc58c60e1e": "Ionia iránt érzett rendíthetetlen hűségében ... évszázadokat töltött a szellembirodalomba zárkózva, hogy elsajátítsa az Aion Er’nát, a legendás kinkou ereklyét. Bármennyi áldozatot is hozott, ... esküje, hogy megszabadítsa a földet az egyenetlenségtől és a viszálytól, mindmáig szilárdan tartja.",
+          "quote_15e45c2ad8": "Bukott istenként, aki egyszerre birtokolja az isteni és a profán hatalmat, ... darkin társaira vadászik, miközben dacol a romlással, amely el akarja emészteni. Egykor önként zárta magát pengéjébe, hogy elkerülje az őrületet, most azonban szabadon jár – szívében nemes, tetteiben kíméletlen."
+        }
+      }
     }
   }
 }

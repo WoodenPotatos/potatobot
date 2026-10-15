@@ -1460,3 +1460,177 @@ class Schema22ManualEntitlementTests(unittest.TestCase):
         database.initialize_database()
         self.assertEqual(
             first, database.get_active_entitlements(1, "2000-01-01T00:00:00+00:00"))
+
+
+class Schema23RedeemAndRateLimitTests(unittest.TestCase):
+    """Schema 23: `fulfillment_requests.ticket_channel_id`,
+    `timed_entitlements.revoked_at`, and the new `casino_earnings_window`
+    table. All three are purely additive and gated on shape, not on a version
+    number, so an interrupted upgrade just repeats the no-op check.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _downgrade(self):
+        """Reshape a current database into the pre-schema-23 shape."""
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute(
+                "ALTER TABLE fulfillment_requests DROP COLUMN ticket_channel_id")
+            conn.execute(
+                "ALTER TABLE timed_entitlements DROP COLUMN revoked_at")
+            conn.execute("DROP TABLE casino_earnings_window")
+            conn.execute("PRAGMA user_version = 22")
+            conn.commit()
+
+    def test_a_clean_database_has_all_three_additions(self):
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
+            fulfillment_columns = {row[1] for row in conn.execute(
+                "PRAGMA table_info(fulfillment_requests)")}
+            entitlement_columns = {row[1] for row in conn.execute(
+                "PRAGMA table_info(timed_entitlements)")}
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+        self.assertIn("ticket_channel_id", fulfillment_columns)
+        self.assertIn("revoked_at", entitlement_columns)
+        self.assertIn("casino_earnings_window", tables)
+
+    def test_the_new_columns_are_nullable_and_unconstrained(self):
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            fulfillment_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'fulfillment_requests'"
+            ).fetchone()[0]
+            entitlement_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'timed_entitlements'"
+            ).fetchone()[0]
+        self.assertIn("ticket_channel_id INTEGER", fulfillment_sql)
+        self.assertNotIn("ticket_channel_id INTEGER NOT NULL", fulfillment_sql)
+        self.assertIn("revoked_at TEXT", entitlement_sql)
+        self.assertNotIn("revoked_at TEXT NOT NULL", entitlement_sql)
+
+    def test_a_pre_migration_request_survives_with_the_new_column_null(self):
+        """A row created before the column existed has nothing to carry into
+        it -- unlike schema 22's source_type, there is no legacy shape for
+        'which ticket' to derive, so NULL is the only honest value. What
+        matters is that the row itself, and its other fields, survive intact,
+        and that linking a ticket works going forward from a fresh upgrade."""
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        with database.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO reward_vouchers (voucher_id, guild_id, user_id, "
+                "reward_key, duration_days, status, acquired_at) "
+                "VALUES ('v', 1, 7, 'emoji_30d', 30, 'available', '2026-01-01')")
+            conn.commit()
+        database.redeem_voucher(1, 7, "v")
+        request = database.get_fulfillment_requests(1)[0]
+        entitlement_source = database.get_fulfillment_requests(1)
+
+        self._downgrade()
+        database.initialize_database()
+
+        rows = database.get_fulfillment_requests(1)
+        self.assertEqual(entitlement_source, rows,
+                         "the pre-existing row's other fields must be unchanged")
+        with database.get_connection() as conn:
+            stored_channel = conn.execute(
+                "SELECT ticket_channel_id FROM fulfillment_requests "
+                "WHERE request_id = ?", (request["request_id"],)
+            ).fetchone()[0]
+        self.assertIsNone(stored_channel)
+
+        # The new functionality works from here on.
+        database.link_fulfillment_ticket(1, request["request_id"], 555)
+        reloaded = database.get_open_fulfillment_by_channel(555)
+        self.assertEqual(request["request_id"], reloaded["request_id"])
+
+    def test_re_running_the_migration_changes_nothing(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.grant_manual_entitlement(1, 7, "emoji", "1", 30, 42)
+        self._downgrade()
+        database.initialize_database()
+        first = database.get_active_entitlements(1, "2000-01-01T00:00:00+00:00")
+        database.initialize_database()
+        self.assertEqual(
+            first, database.get_active_entitlements(1, "2000-01-01T00:00:00+00:00"))
+
+
+class Schema24AssetPresenceTests(unittest.TestCase):
+    """Schema 24: `timed_entitlements.discord_missing_since`, written by
+    `entitlement_cleanup`'s verification pass over grants nowhere near their
+    own expiry -- purely additive, gated on column absence."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _downgrade(self):
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute(
+                "ALTER TABLE timed_entitlements DROP COLUMN discord_missing_since")
+            conn.execute("PRAGMA user_version = 23")
+            conn.commit()
+
+    def test_a_clean_database_has_the_column(self):
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
+            columns = {row[1] for row in conn.execute(
+                "PRAGMA table_info(timed_entitlements)")}
+        self.assertIn("discord_missing_since", columns)
+
+    def test_the_column_is_nullable_and_unconstrained(self):
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'timed_entitlements'"
+            ).fetchone()[0]
+        self.assertIn("discord_missing_since TEXT", sql)
+        self.assertNotIn("discord_missing_since TEXT NOT NULL", sql)
+
+    def test_a_pre_migration_grant_survives_with_the_column_null(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.grant_manual_entitlement(1, 7, "sticker", "1", 30, 42)
+        before = database.get_active_entitlements(1, "2000-01-01T00:00:00+00:00")
+
+        self._downgrade()
+        database.initialize_database()
+
+        after = database.get_active_entitlements(1, "2000-01-01T00:00:00+00:00")
+        self.assertEqual(before, after)
+        self.assertIsNone(after[0]["discord_missing_since"])
+
+        # And the new functionality works from here on.
+        database.set_entitlement_discord_presence(
+            after[0]["entitlement_id"], True)
+        flagged = database.get_active_entitlements(1, "2000-01-01T00:00:00+00:00")
+        self.assertIsNotNone(flagged[0]["discord_missing_since"])
+
+    def test_re_running_the_migration_changes_nothing(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.grant_manual_entitlement(1, 7, "emoji", "1", 30, 42)
+        self._downgrade()
+        database.initialize_database()
+        first = database.get_active_entitlements(1, "2000-01-01T00:00:00+00:00")
+        database.initialize_database()
+        self.assertEqual(
+            first, database.get_active_entitlements(1, "2000-01-01T00:00:00+00:00"))

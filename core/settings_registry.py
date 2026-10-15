@@ -132,6 +132,12 @@ class SettingDefinition:
     # half. The registry stays the single source of truth for the value; this
     # only says the settings form is not where it is typed.
     edited_elsewhere: bool = False
+    # True Discord Administrator (or guild ownership) only -- stricter than the
+    # ordinary guild-scope write bar, which also passes "Manage Server" alone.
+    # `ticket_logs` is the case: a channel deliberately visible only to the
+    # owner must not be repointable by a member who merely has Manage Server,
+    # which is otherwise enough to open and edit every other guild setting.
+    requires_full_admin: bool = False
     # The longest value a free-text STRING may hold, or the longest item a
     # STRING_LIST may hold. Nothing bounded these, so `currency_emoji` accepted
     # ten thousand characters -- and that value reaches every embed footer,
@@ -377,6 +383,15 @@ FEATURE_DEFINITIONS = {
         _feature("casino_mines", "games", parent="casino",
                  dependencies=("economy", "casino"),
                  permissions=("embed_links",)),
+        # Anti-exploit throttle on casino payouts, not a game of its own. Ships
+        # disabled with both thresholds at the inert 0 (see the two settings
+        # below), the same shape as `warn_threshold_*`, because a shipped
+        # default here would bake one installation's own economy scaling into
+        # every copy of the bot -- exactly the rule that forbids a shipped
+        # reward naming a fixed coin amount.
+        _feature("casino_rate_limit", "games", parent="casino", default=False,
+                 dependencies=("casino",),
+                 permissions=("embed_links",)),
         # One master toggle per family of near-identical games, with the games
         # themselves as sub-toggles on the master's own settings page. Eight of
         # them in a flat list pushed everything else off the Features page.
@@ -518,6 +533,7 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
              bot_permissions: tuple[str, ...] = (),
              member_permissions: tuple[str, ...] = (),
              edited_elsewhere: bool = False,
+             requires_full_admin: bool = False,
              max_length: int | None = None,
              max_items: int | None = None):
     return SettingDefinition(
@@ -540,6 +556,7 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
         bot_channel_permissions=bot_permissions,
         member_channel_permissions=member_permissions,
         edited_elsewhere=edited_elsewhere,
+        requires_full_admin=requires_full_admin,
         max_length=max_length,
         max_items=max_items,
     )
@@ -646,6 +663,23 @@ SETTING_DEFINITIONS = {
                  {"0": 54, "100": 19, "150": 12, "200": 7, "300": 4,
                   "500": 3, "2000": 1},
                  feature="casino_wheel", json_shape=JSON_SHAPE_WHEEL_SEGMENTS),
+        # Both default to the inert 0, exactly like `warn_threshold_*`: an
+        # operator must set both before the throttle does anything, because
+        # this installation's own numbers would be the wrong default for any
+        # other installation's economy. `cogs.casino` only ever enforces the
+        # limit when the feature is on and both of these are above 0.
+        _setting("casino_rate_limit_window_seconds", "casino", "casino",
+                 SettingValueType.INTEGER, 0, feature="casino_rate_limit",
+                 minimum=0, maximum=86400),
+        _setting("casino_rate_limit_max_coins", "casino", "casino",
+                 SettingValueType.INTEGER, 0, feature="casino_rate_limit",
+                 minimum=0, maximum=10**12),
+        # Separate from `moderation_log_channel`, which is documented as the
+        # only reader of that setting -- this alert has nothing to do with
+        # member conduct.
+        _setting("casino_rate_limit_alert_channel", "casino", "casino",
+                 SettingValueType.CHANNEL, None, feature="casino_rate_limit",
+                 channel_types=TEXT_CHANNEL_TYPES),
         _setting("levels_channels", "community", "levels", SettingValueType.CHANNEL_LIST,
                  [], feature="levels", channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
@@ -667,12 +701,21 @@ SETTING_DEFINITIONS = {
                  None, channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
 
+        # `edited_elsewhere`: these render on the Ticket Launcher page instead
+        # of here, beside the panel they configure, not the generic Community
+        # settings wall.
         _setting("ticket_category", "community", "tickets", SettingValueType.CHANNEL,
                  None, feature="tickets", channel_types=CATEGORY_CHANNEL_TYPES,
-                 bot_permissions=('view_channel', 'manage_channels', 'manage_roles', 'attach_files', 'read_message_history')),
+                 bot_permissions=('view_channel', 'manage_channels', 'manage_roles', 'attach_files', 'read_message_history'),
+                 edited_elsewhere=True),
+        # `requires_full_admin`: a member who merely clears the ordinary
+        # dashboard-access bar (Manage Server) must not be able to repoint the
+        # ticket log channel at something they themselves can read -- see
+        # `dashboard_api.is_full_admin_session`.
         _setting("ticket_logs", "community", "tickets", SettingValueType.CHANNEL,
                  None, feature="tickets", channel_types=TEXT_CHANNEL_TYPES,
-                 bot_permissions=('view_channel', 'send_messages', 'embed_links', 'attach_files')),
+                 bot_permissions=('view_channel', 'send_messages', 'embed_links', 'attach_files'),
+                 edited_elsewhere=True, requires_full_admin=True),
         _setting("admin_category", "administration", "logging", SettingValueType.CHANNEL,
                  None, channel_types=CATEGORY_CHANNEL_TYPES),
         _setting("bot_log_channel", "administration", "logging", SettingValueType.CHANNEL,
@@ -694,8 +737,12 @@ SETTING_DEFINITIONS = {
                  None, feature="economy", assignable_role=True),
         _setting("member_role", "community", "onboarding", SettingValueType.ROLE,
                  None, feature="onboarding", assignable_role=True),
+        # `edited_elsewhere`: renders on the Entry Gate page instead, beside
+        # the airlock panel it gates -- unlike `member_role`/`autoroles`
+        # below, which stay here since they are general-purpose and must not
+        # be gated behind the entry-gate system a guild may not even use.
         _setting("onboarding_role", "community", "onboarding", SettingValueType.ROLE,
-                 None, feature="onboarding", assignable_role=True),
+                 None, feature="onboarding", assignable_role=True, edited_elsewhere=True),
         _setting("autoroles", "community", "onboarding", SettingValueType.ROLE_LIST,
                  [], feature="onboarding", assignable_role=True),
         _setting("ignored_users", "moderation", "inactivity", SettingValueType.STRING_LIST,

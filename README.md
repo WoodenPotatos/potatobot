@@ -12,10 +12,10 @@ For the moment i won't share any file that is related to the AI in question. The
 
 The bot's main language is Hungarian but it has a full English localization, and it is quite easy to add other languages. However i would be really happy if you could help me translate to other languages so that i could also add them to the repo for others to use. 
 
-Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. Also it is currently a bare metal build, a Docker build is in plans however i need to do some testing and fixing first.
+Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.15.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.16.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -93,7 +93,7 @@ Important environment variables are documented in `.env.example`. In particular:
 - `POTATOBOT_LEGACY_GUILD_ID` identifies the original guild when a legacy private database is connected to multiple guilds.
 - Dashboard OAuth requires matching HTTPS values for `POTATOBOT_DASHBOARD_EXTERNAL_URL` and `DISCORD_REDIRECT_URI`, with the latter ending in `/api/callback`.
 
-The schema is at version 11. Prices, rewards, voice preferences, leaderboards, ranks, rental cleanup, `/work` responses and gacha banners are per guild, with `guild_id` 0 holding the installation default; installation-wide settings live in their own table with no guild dimension at all. Wallets are not: `users` is still keyed by Discord user ID alone, so the live economy is not multi-guild-safe yet and cooldowns are deliberately installation-wide. Dashboard access still uses a single `ADMIN_DISCORD_ID`.
+The schema is at version 22. Prices, rewards, voice preferences, leaderboards, ranks, rental cleanup, `/work` responses and gacha banners are per guild, with `guild_id` 0 holding the installation default; installation-wide settings live in their own table with no guild dimension at all. Wallets are not: `users` is still keyed by Discord user ID alone, so the live economy is not multi-guild-safe yet and cooldowns are deliberately installation-wide. Dashboard access still uses a single `ADMIN_DISCORD_ID`.
 
 Members can export their data with `/mydata` and erase it with `/deletemydata`; the host can erase on a member's behalf from the dashboard. Erasure keeps the economy row under an anonymous tombstone so installation totals never change silently. See `docs/privacy.md`.
 
@@ -172,6 +172,15 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.16.0-beta.1
+
+- **Casino payouts can be rate-limited per member**, as an anti-exploit safeguard against a bug or glitch letting a balance grow abnormally fast. Ships off, with no default threshold, so it does nothing until an operator sets both a time window and a coin ceiling; a win that would cross the ceiling within that window is then capped rather than refused, and the configured staff channel gets an alert.
+- **A redeem ticket and its fulfillment request now know about each other.** The ticket carries its own "Mark Fulfilled" button, so staff never have to leave Discord to enter the asset id; completing or cancelling the request from the dashboard instead now posts a notice back into the ticket, rather than leaving a plain request number as the only thread between the two.
+- **Adding someone to a temporary voice room with the dedicated button now actually makes the room visible to them**, not just joinable — a permitted member could previously fail to see the channel at all (and could not go live into it) unless the lobby's own default already showed it.
+- **The dashboard's Redeems page can cancel an open request or revoke an active grant.** Revoking an entitlement also tears down its Discord side automatically where possible — removing a role, or deleting a mis-made emoji/sticker/sound — the same logic that already runs on natural expiry and member erasure.
+- **The Redeems page now shows when a granted emoji, sticker or sound has gone missing from Discord**, instead of staying silent until the entitlement happens to expire on its own, which can be up to a year away. A daily check (not a live one, to stay clear of Discord's rate limit) looks at every still-active grant and flags it the first time the asset is confirmed gone.
+- **A `/ticket`-opened support channel is now named after the member**, like a redeem or rental ticket already was, instead of their raw Discord id.
+
 ### 2.15.0-beta.1
 
 - **The bot now posts patch and update notes for eleven games**, one channel per game per guild: League of Legends, Valorant, Minecraft, Phasmophobia, Dead by Daylight, Genshin Impact, Counter-Strike 2, Rainbow Six Siege, Honkai: Star Rail, Wuthering Waves and Zenless Zone Zero. A master toggle turns the whole feature on or off, and each game has its own toggle and channel underneath it. Every source is checked once per tick regardless of how many guilds are watching, and one game's source being unreachable never stops the other ten from being checked.
@@ -182,7 +191,7 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - **`/leaderboard` has a fourth board: luck.** Ranked by the fewest average pulls it takes a member to land a 5★, not by how many they have pulled overall — a member needs at least three 5★ pulls on a banner before they are ranked.
 - **The wheel segment editor shows whether the table still pays out correctly.** Editing `/wheel`'s weights in the dashboard now shows the actual expected return live, instead of only finding out it does not add up to exactly 98% after trying to save.
 - **The dashboard's message preview now renders real formatting**, not just channel and role mentions: bold, italic, underline, strikethrough, spoilers, code, code blocks, quotes, headings, lists, links and timestamps all show roughly the way Discord will actually render them.
-- …and 3 more, in [CHANGELOG.md](CHANGELOG.md).
+- …and 5 more, in [CHANGELOG.md](CHANGELOG.md).
 
 ### 2.14.0-beta.1
 
@@ -195,18 +204,6 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - **Moderation commands say why they could not act.** `/kick`, `/ban` and `/timeout` now tell the moderator when the target's role is above the bot's, and a reason can no longer ping roles or overflow the log embed.
 - **Cooldowns and daily resets keep the right length across a clock change.** Every timestamp is stored in one clock now, and a `/daily` countdown says how long until local midnight rather than until a moment that shifted with daylight saving.
 - …and 3 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.13.1-beta.1
-
-- **The Genshindle grid's headings line up again.** A column was removed from the game a while back but not from the heading row, so everything to the right of "Nem" was labelled with the wrong name — the weekly boss under "Alkat", the version under "Heti boss".
-- **The daily bonus now follows the streak you are actually shown.** Losing a streak and starting again still paid the old streak's bonus, so the same "1 nap" could be worth different amounts on different days. A second Everydle game on the same day was also paid one step too high.
-- **The coin symbol is no longer printed as a code in game footers.** Crash, higher-or-lower, the wheel and Russian roulette showed `<:potatocoins:…>` instead of the symbol, because a footer cannot draw a custom emoji. A custom symbol is now left out of those footers; a plain one still shows.
-- **The gacha can run with the shop switched off.** It never needed the shop — nothing in it reads that switch — so a server can now sell nothing and hand every item out through the gacha. The premium role and the item values stay editable when the shop is off, because the gacha grants those items too. Switching the shop off now stops the shop and rentals, and nothing else.
-- **The feature switch says which feature needs which.** Turning something off used to list what would go with it as bare names; each one now names the feature that requires it.
-- **The bot notices when it has stopped being connected and restarts itself.** On 31 August the connection to Discord went away at 21:59 and nothing rebuilt it. The process stayed alive and idle, so the server saw a perfectly healthy service and the dashboard kept working — the bot was simply absent from Discord until somebody noticed by hand the next day. A watchdog now checks that the connection is really there and that the bot is still doing work, and ends the process if either has been false for a few minutes, which makes the server start it again within ten seconds.
-- The wait before it acts is deliberately several minutes, so a Discord outage or an ordinary reconnection is waited out rather than restarted through.
-- **And it can now be asked what it is doing.** The cause of that outage could not be established, because there was no way to see where the bot was stuck. `kill -USR1` now writes every thread's position into the log. See `docs/performance_recovery_plan.md`.
-- …and 14 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

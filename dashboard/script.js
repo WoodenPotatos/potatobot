@@ -13,6 +13,9 @@ const API = '/api';
 let locale = {};
 let csrf = '';
 let isHost = false;
+// Per guild, unlike `isHost`: refreshed on every `loadGuild()`, never carried
+// over from the previously active guild.
+let isFullAdminForGuild = false;
 let guildId = null;
 let featureState = {};
 let registry = {};
@@ -646,6 +649,8 @@ function bindShell() {
     // typing and `change` covers the selectors and checkboxes.
     settingsForm.addEventListener('input', refreshSettingsDirtyState);
     settingsForm.addEventListener('change', refreshSettingsDirtyState);
+    wireInlineSettingsForm('ticket-settings-form', 'ticket-settings-grid');
+    wireInlineSettingsForm('entry-gate-settings-form', 'entry-gate-settings-grid');
     document.getElementById('gacha-form').addEventListener('submit', saveGacha);
     document.getElementById('gacha-banner-form').addEventListener('submit', createGachaBanner);
     document.getElementById('work-response-form').addEventListener('submit', createWorkResponse);
@@ -827,6 +832,7 @@ async function loadGuild() {
         ]);
         featureState = features.data;
         settings = settingData.data;
+        isFullAdminForGuild = settingData.is_full_admin === true;
         permissionFindings = null;
         // The payload grew a wrapper when the shipped reward table joined it, so
         // an older shape (a bare array) is still accepted rather than crashing
@@ -949,6 +955,16 @@ async function showPage(page) {
     if (page === 'work-responses') await loadWorkResponses();
     if (page === 'shop-builder') await loadShopItems();
     if (page === 'redeems') await loadRedeems();
+    if (page === 'ticket-launcher') {
+        renderInlineSettingsCard('ticket-settings-grid', ['ticket_category', 'ticket_logs']);
+        refreshInlineSettingsDirtyState('ticket-settings-grid', 'ticket-settings-form');
+        applyPermissionNotes();
+    }
+    if (page === 'entry-gate') {
+        renderInlineSettingsCard('entry-gate-settings-grid', ['onboarding_role']);
+        refreshInlineSettingsDirtyState('entry-gate-settings-grid', 'entry-gate-settings-form');
+        applyPermissionNotes();
+    }
     if (MANAGED_PAGES[page]) await loadManaged(page);
     if (page === 'audit') await loadAudit();
     if (page === 'permissions') await loadPermissionReport();
@@ -1219,6 +1235,71 @@ function visibleDefinitions(category) {
         && (!definition.owner_feature || featureState[definition.owner_feature]?.enabled !== false));
 }
 
+/** One setting's field: label, control, hint, apply badge and (for an
+ *  instance-scoped value) the disabling that only the host may lift. Shared
+ *  by the category settings pages and any `edited_elsewhere` setting's own
+ *  card, so the two can never draw a field differently. */
+function buildSettingField(definition) {
+    // A <label> forwards a click to the labelable control it wraps, and a
+    // button is labelable — so a field whose editor *contains* buttons
+    // must be a div. That is why the picker types are listed here, and
+    // a shaped-JSON editor is full of them too: row pickers, an add
+    // button and a remove button per row.
+    const wrapsButton = ['channel', 'role', 'channel_list', 'role_list']
+        .includes(definition.value_type)
+        || Boolean(JSON_ROW_SHAPES[definition.json_shape]);
+    const group = element(wrapsButton ? 'div' : 'label', 'input-group');
+    if (['string_list', 'json', 'channel_list', 'role_list'].includes(definition.value_type)) {
+        group.classList.add('wide');
+    }
+    group.appendChild(element('span', 'field-label', tr(definition.locale_key)));
+
+    group.dataset.setting = definition.key;
+    const input = settingInput(definition, settings[definition.key]?.value);
+    input.dataset.key = definition.key;
+    group.appendChild(input);
+
+    if (WEIGHT_GROUPS[definition.key]) {
+        const share = element('small', 'field-share');
+        share.dataset.forKey = definition.key;
+        group.appendChild(share);
+    }
+
+    const hint = fieldHint(definition.key);
+    if (hint) group.appendChild(hint);
+
+    const badge = element('small', `apply-${definition.apply_behavior}`,
+        tr(`dashboard.apply_${definition.apply_behavior}`));
+    group.appendChild(badge);
+    // An installation-wide setting is edited from a guild page but is
+    // not that guild's, so the badge says so — an operator changing "the
+    // language" for one server and finding it changed everywhere would
+    // be right to call that a bug. The API refuses the save for anyone
+    // but the host now, so a guild admin is shown the control disabled
+    // rather than being allowed to try and then told no.
+    if (definition.scope === 'instance') {
+        group.appendChild(element('small', 'field-scope',
+            tr('dashboard.scope_instance')));
+        if (!isHost) {
+            const control = group.querySelector(
+                'input, textarea, select, .picker-trigger');
+            if (control) control.disabled = true;
+        }
+    }
+    // Same reasoning, one guild narrower: a `requires_full_admin` setting
+    // refuses the save server-side for anyone short of owner/Administrator,
+    // so a merely-Manage-Server operator is shown it disabled rather than
+    // being allowed to try and then told no.
+    if (definition.requires_full_admin && !isFullAdminForGuild) {
+        group.appendChild(element('small', 'field-scope',
+            tr('dashboard.scope_full_admin')));
+        const control = group.querySelector(
+            'input, textarea, select, .picker-trigger');
+        if (control) control.disabled = true;
+    }
+    return group;
+}
+
 function renderSettings(category) {
     document.getElementById('settings-heading').textContent = tr(`dashboard.category_${category}`);
     const host = document.getElementById('settings-grid');
@@ -1274,55 +1355,7 @@ function renderSettings(category) {
         section.appendChild(legend);
         const grid = element('div', 'form-grid');
 
-        entries.forEach((definition) => {
-            // A <label> forwards a click to the labelable control it wraps, and a
-            // button is labelable — so a field whose editor *contains* buttons
-            // must be a div. That is why the picker types are listed here, and
-            // a shaped-JSON editor is full of them too: row pickers, an add
-            // button and a remove button per row.
-            const wrapsButton = ['channel', 'role', 'channel_list', 'role_list']
-                .includes(definition.value_type)
-                || Boolean(JSON_ROW_SHAPES[definition.json_shape]);
-            const group = element(wrapsButton ? 'div' : 'label', 'input-group');
-            if (['string_list', 'json', 'channel_list', 'role_list'].includes(definition.value_type)) {
-                group.classList.add('wide');
-            }
-            group.appendChild(element('span', 'field-label', tr(definition.locale_key)));
-
-            group.dataset.setting = definition.key;
-            const input = settingInput(definition, settings[definition.key]?.value);
-            input.dataset.key = definition.key;
-            group.appendChild(input);
-
-            if (WEIGHT_GROUPS[definition.key]) {
-                const share = element('small', 'field-share');
-                share.dataset.forKey = definition.key;
-                group.appendChild(share);
-            }
-
-            const hint = fieldHint(definition.key);
-            if (hint) group.appendChild(hint);
-
-            const badge = element('small', `apply-${definition.apply_behavior}`,
-                tr(`dashboard.apply_${definition.apply_behavior}`));
-            group.appendChild(badge);
-            // An installation-wide setting is edited from a guild page but is
-            // not that guild's, so the badge says so — an operator changing "the
-            // language" for one server and finding it changed everywhere would
-            // be right to call that a bug. The API refuses the save for anyone
-            // but the host now, so a guild admin is shown the control disabled
-            // rather than being allowed to try and then told no.
-            if (definition.scope === 'instance') {
-                group.appendChild(element('small', 'field-scope',
-                    tr('dashboard.scope_instance')));
-                if (!isHost) {
-                    const control = group.querySelector(
-                        'input, textarea, select, .picker-trigger');
-                    if (control) control.disabled = true;
-                }
-            }
-            grid.appendChild(group);
-        });
+        entries.forEach((definition) => grid.appendChild(buildSettingField(definition)));
 
         section.appendChild(grid);
         host.appendChild(section);
@@ -1370,7 +1403,10 @@ async function ensurePermissionFindings() {
  *  same sentence where an operator would actually act on it. */
 async function applyPermissionNotes() {
     const found = await ensurePermissionFindings();
-    document.querySelectorAll('#settings-grid .input-group[data-setting]').forEach((group) => {
+    // Not scoped to `#settings-grid`: an `edited_elsewhere` setting's own
+    // card (Ticket Launcher, Entry Gate) builds the same `.input-group`
+    // shape via `buildSettingField` and deserves the same diagnostic note.
+    document.querySelectorAll('.input-group[data-setting]').forEach((group) => {
         group.querySelectorAll('.field-finding').forEach((node) => node.remove());
         (found.subjects[group.dataset.setting] || []).forEach((finding) => {
             const note = element('div', `field-finding ${finding.severity}`);
@@ -1412,12 +1448,15 @@ function canonicalValue(value) {
     return JSON.stringify(walk(value ?? null));
 }
 
-/** The edits the form would submit, or null when one field cannot be parsed. */
-function collectSettingChanges() {
+/** The edits the form would submit, or null when one field cannot be parsed.
+ *  `container` defaults to the category settings grid; an `edited_elsewhere`
+ *  setting's own card passes its own grid so the two forms never read each
+ *  other's fields. */
+function collectSettingChanges(container = document.getElementById('settings-grid')) {
     try {
         // Only dirty fields are submitted, so one edit does not bump every
         // revision in the category or write an audit row per untouched setting.
-        return [...document.querySelectorAll('#settings-grid [data-key]')]
+        return [...container.querySelectorAll('[data-key]')]
             .map((input) => {
                 const key = input.dataset.key;
                 return {
@@ -1843,6 +1882,23 @@ function jsonRowEditor(definition, value) {
     // and role by name and hands them to addRow as its usual initial values,
     // exactly as if the operator had picked them in the pickers themselves.
     if (definition.json_shape === 'lfg_channels') {
+        // A game already has a row once its channel or role reads back its
+        // name -- the same name match the picker itself uses to fill a row,
+        // reversed. No stored "game" field exists per row to compare against
+        // directly.
+        const isGameAdded = (key, label) => {
+            const needle = label.toLowerCase();
+            return [...rows.querySelectorAll('.menu-row')].some((row) => {
+                const channelId = readField(
+                    row.querySelector('[data-column="__key"]'), shape.key);
+                const roleId = readField(
+                    row.querySelector('[data-column="role"]'), shape.columns[0]);
+                const channel = resources.channels.find((c) => String(c.id) === channelId);
+                const role = resources.roles.find((r) => String(r.id) === roleId);
+                return [channel?.name, role?.name].some(
+                    (name) => name && name.toLowerCase().includes(needle));
+            });
+        };
         const quickPick = gameQuickPick((label) => {
             const textChannels = resources.channels.filter(
                 (channel) => channel.type === 'text' || channel.type === 'news');
@@ -1850,7 +1906,7 @@ function jsonRowEditor(definition, value) {
             const roleId = matchResourceByName(resources.roles, label);
             addRow(channelId || '', roleId || null);
             serialise();
-        });
+        }, isGameAdded);
         wrapper.appendChild(quickPick);
     }
 
@@ -2211,10 +2267,13 @@ function readSettingInput(definition, field) {
     return input.value;
 }
 
-async function saveSettings(event) {
+/** `container` defaults to the category settings grid, exactly as
+ *  `collectSettingChanges` does -- an `edited_elsewhere` setting's own card
+ *  passes its own grid so the two forms save independently. */
+async function saveSettings(event, container = document.getElementById('settings-grid')) {
     event.preventDefault();
     const submit = event.target.querySelector('button[type="submit"]');
-    const changes = collectSettingChanges();
+    const changes = collectSettingChanges(container);
 
     if (changes === null) {
         toast(tr('dashboard.invalid_json'), true);
@@ -2240,6 +2299,50 @@ async function saveSettings(event) {
     } finally {
         submit.disabled = false;
     }
+}
+
+/** An `edited_elsewhere` setting's own small card -- `ticket_category`/
+ *  `ticket_logs` on the Ticket Launcher page, `onboarding_role` on the Entry
+ *  Gate page -- rendered beside the panel each one configures instead of on
+ *  the Community settings wall. Reuses `buildSettingField` so a field never
+ *  looks or behaves differently depending on which page drew it. */
+function renderInlineSettingsCard(gridId, keys) {
+    const host = document.getElementById(gridId);
+    if (!host) return;
+    host.replaceChildren();
+    keys.forEach((key) => {
+        const definition = registry[key];
+        if (!definition) return;
+        host.appendChild(buildSettingField(definition));
+    });
+}
+
+/** The same unsaved-count/disable behavior `refreshSettingsDirtyState` gives
+ *  the category settings form, scoped to one inline settings card. No
+ *  per-section pill: a card this small has only the one section. */
+function refreshInlineSettingsDirtyState(gridId, formId) {
+    const form = document.getElementById(formId);
+    const grid = document.getElementById(gridId);
+    if (!form || !grid) return;
+    const submit = form.querySelector('button[type="submit"]');
+    const changes = collectSettingChanges(grid);
+    submit.textContent = changes && changes.length
+        ? format('dashboard.save_settings_count', {count: changes.length})
+        : tr('dashboard.save_settings');
+    submit.disabled = changes !== null && changes.length === 0;
+}
+
+/** Wires one inline settings card's form to the shared save path and to its
+ *  own dirty-state refresh, exactly once at startup -- the same delegation
+ *  `settingsForm` uses for the category settings page, so a picker added to
+ *  the card later is covered without adding a second listener for it. */
+function wireInlineSettingsForm(formId, gridId) {
+    const form = document.getElementById(formId);
+    if (!form) return;
+    const refresh = () => refreshInlineSettingsDirtyState(gridId, formId);
+    form.addEventListener('input', refresh);
+    form.addEventListener('change', refresh);
+    form.addEventListener('submit', (event) => saveSettings(event, document.getElementById(gridId)));
 }
 
 /* ------------------------------------------------------------------ gacha */
@@ -3831,14 +3934,35 @@ function formatRemaining(seconds) {
     return format('dashboard.remaining_minutes', {minutes});
 }
 
+/** Revoke an active entitlement: marks it cancelled and queues the
+ *  Discord-side teardown (role removal, or deleting an emoji/sticker/sound)
+ *  that `revoke_entitlement` already knows how to do -- reused unchanged
+ *  from the member-erasure path, never reimplemented here. */
+async function revokeEntitlement(row, button) {
+    const accepted = await confirmAction(
+        format('dashboard.entitlement_revoke_confirm', {user: row.user_id}));
+    if (!accepted) return;
+    button.disabled = true;
+    try {
+        const result = await api(
+            `/guilds/${guildId}/entitlements/${row.entitlement_id}`,
+            {method: 'DELETE', headers: headers()});
+        toast(result.message);
+        await loadRedeems();
+    } catch (error) {
+        handleApiError(error);
+        button.disabled = false;
+    }
+}
+
 function renderActiveEntitlements(host, rows) {
     const node = table([
         'dashboard.column_user', 'dashboard.column_grant',
         'dashboard.column_source', 'dashboard.column_remaining',
-        'dashboard.column_expires',
+        'dashboard.column_expires', 'dashboard.column_actions',
     ]);
     const body = node.querySelector('tbody');
-    if (!rows.length) emptyRow(body, 5, 'dashboard.active_empty');
+    if (!rows.length) emptyRow(body, 6, 'dashboard.active_empty');
 
     rows.forEach((row) => {
         const line = element('tr');
@@ -3851,6 +3975,14 @@ function renderActiveEntitlements(host, rows) {
         grant.appendChild(element('div', null, tr(`dashboard.grant_kinds.${kind}`)));
         if (row.discord_item_id) {
             grant.appendChild(element('div', 'cell-key', row.discord_item_id));
+        }
+        if (row.missing_on_discord) {
+            // Set by entitlement_cleanup's daily verification pass, never a
+            // live per-row Discord call.
+            const missing = element('span', 'pill pending',
+                tr('dashboard.missing_on_discord'));
+            missing.title = tr('dashboard.missing_on_discord_hint');
+            grant.appendChild(missing);
         }
         line.appendChild(grant);
 
@@ -3866,9 +3998,39 @@ function renderActiveEntitlements(host, rows) {
                                  formatRemaining(row.remaining_seconds)));
         line.appendChild(element('td', 'cell-mono',
                                  (row.expires_at || '').slice(0, 16).replace('T', ' ')));
+
+        const actionCell = element('td', 'cell-actions');
+        const revoke = element('button', 'btn-icon danger', '');
+        revoke.type = 'button';
+        revoke.title = tr('dashboard.revoke');
+        revoke.setAttribute('aria-label', tr('dashboard.revoke'));
+        revoke.appendChild(icon('ic-trash', 'ic ic-sm'));
+        revoke.addEventListener('click', () => revokeEntitlement(row, revoke));
+        actionCell.appendChild(revoke);
+        line.appendChild(actionCell);
+
         body.appendChild(line);
     });
     host.replaceChildren(node);
+}
+
+/** Cancel an open redemption request -- the request never happened, so
+ *  there is no Discord-side teardown to queue (nothing was granted yet). */
+async function cancelFulfillment(item, button) {
+    const accepted = await confirmAction(
+        format('dashboard.redeem_cancel_confirm', {request: item.request_id}));
+    if (!accepted) return;
+    button.disabled = true;
+    try {
+        const result = await api(
+            `/guilds/${guildId}/fulfillment/${item.request_id}`,
+            {method: 'DELETE', headers: headers()});
+        toast(result.message);
+        await loadRedeems();
+    } catch (error) {
+        handleApiError(error);
+        button.disabled = false;
+    }
 }
 
 function renderFulfillmentTable(host) {
@@ -3919,6 +4081,15 @@ function renderFulfillmentTable(host) {
             }
         });
         actionCell.appendChild(button);
+
+        const cancel = element('button', 'btn-icon danger', '');
+        cancel.type = 'button';
+        cancel.title = tr('dashboard.cancel_fulfillment');
+        cancel.setAttribute('aria-label', tr('dashboard.cancel_fulfillment'));
+        cancel.appendChild(icon('ic-trash', 'ic ic-sm'));
+        cancel.addEventListener('click', () => cancelFulfillment(item, cancel));
+        actionCell.appendChild(cancel);
+
         row.appendChild(actionCell);
         body.appendChild(row);
     });
@@ -5016,17 +5187,35 @@ function supportedGameOptions() {
  *  the resolved display name and resets to the placeholder; it never writes
  *  anything by itself. Suggests a name so an operator does not retype
  *  "Valorant", nothing more -- the channel/role it goes with is still the
- *  operator's own pick, exactly like every other setting in this dashboard. */
-function gameQuickPick(onPick) {
+ *  operator's own pick, exactly like every other setting in this dashboard.
+ *
+ *  `isAdded(key, label)`, when given, is re-run every time the list is about
+ *  to open rather than once at construction -- the panel it feeds keeps this
+ *  same `<select>` alive across adds and removes, so a snapshot taken at
+ *  build time would still offer a game the operator already added in this
+ *  session. */
+function gameQuickPick(onPick, isAdded) {
     const select = element('select', 'game-quick-pick');
-    const placeholder = element('option', null, tr('dashboard.game_quick_pick_placeholder'));
-    placeholder.value = '';
-    select.appendChild(placeholder);
-    supportedGameOptions().forEach(({key, label}) => {
-        const option = element('option', null, label);
-        option.value = key;
-        select.appendChild(option);
-    });
+    const rebuild = () => {
+        const previous = select.value;
+        select.replaceChildren();
+        const placeholder = element('option', null, tr('dashboard.game_quick_pick_placeholder'));
+        placeholder.value = '';
+        select.appendChild(placeholder);
+        supportedGameOptions()
+            .filter(({key, label}) => !(isAdded && isAdded(key, label)))
+            .forEach(({key, label}) => {
+                const option = element('option', null, label);
+                option.value = key;
+                select.appendChild(option);
+            });
+        select.value = [...select.options].some((o) => o.value === previous) ? previous : '';
+    };
+    rebuild();
+    if (isAdded) {
+        select.addEventListener('focus', rebuild);
+        select.addEventListener('mousedown', rebuild);
+    }
     select.addEventListener('change', () => {
         const chosen = supportedGameOptions().find((g) => g.key === select.value);
         select.value = '';
@@ -5137,11 +5326,16 @@ function managedRepeat(spec, existing, menuKeyControl) {
     // construction, or a brand-new "games" menu would never see it appear.
     if (spec.name === 'entries' && menuKeyControl) {
         const quickPickWrap = element('span', 'game-quick-pick-wrap');
+        const isGameAdded = (key, label) => {
+            const needle = label.toLowerCase();
+            return [...rows.querySelectorAll('[data-column="label"]')].some(
+                (input) => (input.value || '').toLowerCase().includes(needle));
+        };
         const quickPick = gameQuickPick((label) => {
             const roleId = matchResourceByName(resources.roles, label);
             addRow({label, role_id: roleId || ''});
             notify();
-        });
+        }, isGameAdded);
         quickPickWrap.appendChild(quickPick);
         const syncVisibility = () => {
             quickPickWrap.hidden = menuKeyControl.read() !== 'games';

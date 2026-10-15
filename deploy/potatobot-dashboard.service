@@ -16,6 +16,13 @@
 #
 # Note the dashboard needs DISCORD_TOKEN as well as the OAuth values: without an
 # in-process bot it reads guild channels and roles over the Discord REST API.
+#
+# `User=woody`, not a dedicated `potatobot` system account: none exists on
+# the deployed host -- `potatobot.service` itself runs as `woody` (confirmed
+# via `systemctl show potatobot.service -p User`). This unit is not deployed
+# on the current single-process host, but would otherwise fail identically
+# to `potatobot.service` and `potatobot-offsite-backup.service`, both of
+# which shipped with the same wrong assumption until 2026-09-25.
 
 [Unit]
 Description=PotatoBot dashboard
@@ -30,8 +37,8 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=potatobot
-Group=potatobot
+User=woody
+Group=woody
 WorkingDirectory=/opt/potatobot
 EnvironmentFile=/opt/potatobot/.env
 Environment=POTATOBOT_DASHBOARD_ENABLED=true

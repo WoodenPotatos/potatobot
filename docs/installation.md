@@ -282,6 +282,22 @@ nothing else.
   untested backup is a guess.
 - Migrations write their own timestamped backup before the first upgrade. Keep
   them; they are the only rollback for a schema change that rebuilds tables.
+- **Every backup above lives on this one host.** Set up the offsite copy too:
+  1. Install `rclone` (the distribution package, or `curl https://rclone.org/install.sh | sudo bash`).
+  2. Run `rclone config` as the service user (`sudo -u potatobot rclone config`)
+     and create a remote named `gdrivebot` with Google Drive as the storage
+     type — this step is interactive (a browser-based Google login) and only
+     you can do it.
+  3. `sudo cp deploy/potatobot-offsite-backup.{service,timer} /etc/systemd/system/`,
+     `sudo systemctl daemon-reload`, `sudo systemctl enable --now potatobot-offsite-backup.timer`.
+  4. Confirm it once by hand: `sudo systemctl start potatobot-offsite-backup`,
+     then `journalctl -u potatobot-offsite-backup --since '5 minutes ago'`.
+
+  `scripts/offsite_backup.py` copies exactly one file — a snapshot taken
+  through SQLite's own online backup API, the same consistency guarantee as
+  the manual `.backup` above — never the project tree, so it needs no
+  Discord or OAuth secret and is never handed `.env`. It prunes remote
+  copies older than 30 days on every run (`--retention-days`, adjustable).
 
 ## Upgrading
 

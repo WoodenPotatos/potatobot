@@ -7,10 +7,13 @@ from core.minigame_data import MinigameDataError, load_localized_dataset
 
 
 ROOT = Path(__file__).resolve().parents[1]
-# Datasets a specific administrator maintains by hand. They are never edited
-# automatically, which is why their English catalogs stay blank and the games
-# they back are unavailable in English.
-OWNER_MAINTAINED_GAMES = {"loldle"}
+# Datasets whose English catalog is deliberately incomplete right now, each
+# with its own reason recorded where it is used. Empty since 2026-09-27:
+# `loldle.champions` lost its entry when the external maintainer who
+# justified it left, and `loldle.hard_mode` (new content) was filled for
+# English in the same follow-up change that also covered its last two
+# missing champions.
+ENGLISH_INCOMPLETE_DATASETS = {}
 
 DATASETS = {
     "loldle": [("champions.json", "champions"), ("loldlehardmode.json", "hard_mode")],
@@ -37,7 +40,9 @@ def collect_leaf_paths(value, prefix=()):
 
 class MinigameLocalizationTests(unittest.TestCase):
     def test_hungarian_catalogs_load_every_dataset(self):
-        expected_empty = {("loldle", "hard_mode")}
+        """Hungarian is the source language, so every dataset must be complete
+        in it — there is no longer any dataset that ships empty on this side,
+        `loldle.hard_mode` included since 2026-09-27."""
         for game, datasets in DATASETS.items():
             locale_path = ROOT / "data" / game / "locales" / "hu.json"
             for filename, dataset_name in datasets:
@@ -46,51 +51,46 @@ class MinigameLocalizationTests(unittest.TestCase):
                     locale_path,
                     dataset_name,
                 )
-                if (game, dataset_name) in expected_empty:
-                    self.assertEqual({}, entities)
-                else:
-                    self.assertTrue(entities, f"{game}.{dataset_name} has no entities")
-                    self.assertTrue(aliases, f"{game}.{dataset_name} has no aliases")
+                self.assertTrue(entities, f"{game}.{dataset_name} has no entities")
+                self.assertTrue(aliases, f"{game}.{dataset_name} has no aliases")
 
     def test_english_catalogs_match_the_hungarian_shape(self):
-        for game in DATASETS:
+        for game, datasets in DATASETS.items():
             locale_dir = ROOT / "data" / game / "locales"
             hu = json.loads((locale_dir / "hu.json").read_text(encoding="utf-8"))
             en = json.loads((locale_dir / "en.json").read_text(encoding="utf-8"))
-            with self.subTest(game=game):
-                self.assertEqual(collect_leaf_paths(hu), collect_leaf_paths(en))
+            for _, dataset_name in datasets:
+                with self.subTest(game=game, dataset=dataset_name):
+                    if (game, dataset_name) in ENGLISH_INCOMPLETE_DATASETS:
+                        continue
+                    hu_paths = collect_leaf_paths(hu["datasets"][dataset_name])
+                    en_paths = collect_leaf_paths(en["datasets"][dataset_name])
+                    self.assertEqual(hu_paths, en_paths)
 
-    def test_english_catalogs_load_every_dataset_except_the_owned_one(self):
+    def test_english_catalogs_load_every_dataset_except_the_deferred_ones(self):
         """English is generated alongside Hungarian since 2026-08-22, so these
         catalogs are complete rather than empty placeholders.
 
-        `data/loldle/` is the exception: it is maintained by a named
-        administrator who asked that it not be edited automatically, so its
-        English catalog is still blank and LoLdle is unavailable in English.
+        `ENGLISH_INCOMPLETE_DATASETS` names the exceptions: a blank entity
+        name is fatal by design in `load_localized_dataset`, which is what
+        makes an unfinished catalog remove the game rather than render empty
+        names to a player — asserted here as the expected failure, not a
+        surprise.
         """
-        expected_empty = {("loldle", "hard_mode")}
         for game, datasets in DATASETS.items():
             locale_path = ROOT / "data" / game / "locales" / "en.json"
             for filename, dataset_name in datasets:
                 core = ROOT / "data" / game / filename
                 with self.subTest(game=game, dataset=dataset_name):
-                    if game in OWNER_MAINTAINED_GAMES:
-                        # A blank entity name is fatal by design, which is what
-                        # makes an unfinished catalog remove the game rather
-                        # than render empty names to a player.
-                        if (game, dataset_name) in expected_empty:
-                            continue
+                    if (game, dataset_name) in ENGLISH_INCOMPLETE_DATASETS:
                         with self.assertRaises(MinigameDataError):
                             load_localized_dataset(core, locale_path, dataset_name)
                         continue
                     entities, aliases = load_localized_dataset(
                         core, locale_path, dataset_name
                     )
-                    if (game, dataset_name) in expected_empty:
-                        self.assertEqual({}, entities)
-                    else:
-                        self.assertTrue(entities)
-                        self.assertTrue(aliases)
+                    self.assertTrue(entities)
+                    self.assertTrue(aliases)
 
     def test_an_incomplete_catalog_still_fails_closed(self):
         """The guarantee that makes an unfinished translation safe: a blank name
@@ -111,11 +111,13 @@ class MinigameLocalizationTests(unittest.TestCase):
     def test_english_entity_names_are_not_translated_away(self):
         """Entity names are proper nouns, so the two catalogs agree on them. An
         attribute label is prose and must not."""
-        for game in set(DATASETS) - OWNER_MAINTAINED_GAMES:
+        for game in DATASETS:
             locale_dir = ROOT / "data" / game / "locales"
             hu = json.loads((locale_dir / "hu.json").read_text(encoding="utf-8"))
             en = json.loads((locale_dir / "en.json").read_text(encoding="utf-8"))
             for dataset_name, dataset in en["datasets"].items():
+                if (game, dataset_name) in ENGLISH_INCOMPLETE_DATASETS:
+                    continue  # Empty by design; nothing to compare yet.
                 source = hu["datasets"][dataset_name]
                 with self.subTest(game=game, dataset=dataset_name):
                     for entity_id, identity in dataset["entities"].items():

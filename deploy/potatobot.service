@@ -8,6 +8,15 @@
 # This unit owns schema creation, so start it before the dashboard on a fresh
 # database. Set POTATOBOT_DASHBOARD_ENABLED=false in the environment file when
 # running the dashboard as its own service.
+#
+# `User=woody`, not a dedicated `potatobot` system account: none exists on
+# the deployed host (confirmed via `systemctl show potatobot.service -p
+# User`). The live unit was hand-patched to `woody` at install time and that
+# fix never made it back here -- this file was wrong from 2026-09-17 until
+# caught 2026-09-25 by a new unit copying the same stale pattern and failing
+# with "Failed to determine user credentials: No such process". The reverse
+# gap also exists: the live unit still lacks `RemoveIPC=true`, present here
+# since it was added -- redeploy this file to pick it up.
 
 [Unit]
 Description=PotatoBot Discord bot
@@ -22,8 +31,8 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=potatobot
-Group=potatobot
+User=woody
+Group=woody
 WorkingDirectory=/opt/potatobot
 EnvironmentFile=/opt/potatobot/.env
 ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/main.py

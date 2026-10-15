@@ -85,16 +85,23 @@ use by `scripts/everydle_sources.py`. Requires a `User-Agent` and
 
 | Game | `gids` | Verified | Article title heuristic | Permalink |
 |---|---|---|---|---|
-| Genshin Impact | 2 | Yes | Contains `"Version"` and (`"Update Details"` or `"What's New"`) — e.g. `"Everwinter Without Mercy" Version 7.0 Update Details` | `https://www.hoyolab.com/article/{post_id}` (confirmed HTTP 200) |
-| Honkai: Star Rail | 6 | Yes | Same heuristic — e.g. `Version 4.5 "To Roll the Stars in Astropolis" Update Details` | `https://www.hoyolab.com/article/{post_id}` |
+| Genshin Impact | 2 | Yes | Contains `"version"` and (`"update"` or `"what's new"`) — e.g. `"Everwinter Without Mercy" Version 7.0 Update Details` | `https://www.hoyolab.com/article/{post_id}` (confirmed HTTP 200) |
+| Honkai: Star Rail | 6 | Yes | Same heuristic — e.g. `Version 4.5 "To Roll the Stars in Astropolis" Update Details`, or `Version 4.6 "Nameless Honor" Update` | `https://www.hoyolab.com/article/{post_id}` |
 
 The title heuristic is not perfectly consistent across every historical
-post (older Genshin posts used a different phrasing, `Version "Luna VIII"
-Version Details - What's New`) — the adapter matches on the substring
-`"Version"` plus one of a small set of known suffixes, and skips (does not
-crash) a feed item it can't confidently classify as a version-update post,
-scanning further down the `page_size` results rather than falling back to
-the very first item unconditionally.
+post — older Genshin posts used a different phrasing (`Version "Luna VIII"
+Version Details - What's New`), and HSR's 4.6 post (verified live
+2026-09-25) dropped straight to a bare `"... Update"` with no `"Details"` or
+`"Notice"` suffix, which a three-item exact-suffix list missed for over a
+day of ticks before this heuristic was broadened. The adapter now matches
+on the substring `"version"` plus either `"update"` or `"what's new"`
+appearing anywhere in the title — deliberately a loose substring check
+rather than an enumerated suffix list, since HoYoLAB's phrasing has already
+drifted twice and a stricter match only means the next drift reaches the
+same silent dead end again. It still skips (does not crash) a feed item it
+can't confidently classify as a version-update post, scanning further down
+the `page_size` results rather than falling back to the very first item
+unconditionally.
 
 ## Minecraft — the article slug, found via the site's own sitemap
 

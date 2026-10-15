@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.16.0-beta.1
+
+- **Casino payouts can be rate-limited per member**, as an anti-exploit
+  safeguard against a bug or glitch letting a balance grow abnormally fast.
+  Ships off, with no default threshold, so it does nothing until an operator
+  sets both a time window and a coin ceiling; a win that would cross the
+  ceiling within that window is then capped rather than refused, and the
+  configured staff channel gets an alert.
+- **A redeem ticket and its fulfillment request now know about each
+  other.** The ticket carries its own "Mark Fulfilled" button, so staff
+  never have to leave Discord to enter the asset id; completing or
+  cancelling the request from the dashboard instead now posts a notice back
+  into the ticket, rather than leaving a plain request number as the only
+  thread between the two.
+- **Adding someone to a temporary voice room with the dedicated button now
+  actually makes the room visible to them**, not just joinable — a
+  permitted member could previously fail to see the channel at all (and
+  could not go live into it) unless the lobby's own default already showed
+  it.
+- **The dashboard's Redeems page can cancel an open request or revoke an
+  active grant.** Revoking an entitlement also tears down its Discord side
+  automatically where possible — removing a role, or deleting a
+  mis-made emoji/sticker/sound — the same logic that already runs on
+  natural expiry and member erasure.
+- **The Redeems page now shows when a granted emoji, sticker or sound has
+  gone missing from Discord**, instead of staying silent until the
+  entitlement happens to expire on its own, which can be up to a year away.
+  A daily check (not a live one, to stay clear of Discord's rate limit)
+  looks at every still-active grant and flags it the first time the asset
+  is confirmed gone.
+- **A `/ticket`-opened support channel is now named after the member**,
+  like a redeem or rental ticket already was, instead of their raw Discord
+  id.
+
 ## 2.15.0-beta.1
 
 - **The bot now posts patch and update notes for eleven games**, one
@@ -59,6 +93,16 @@
   reader of the fallback (`settings_registry.legacy_config_value` and the
   `legacy_path` declared on each setting) are deleted. Nothing for an operator
   to do: every value that mattered already has a row.
+- **Music playback no longer fails right after a successful search.** A
+  change on YouTube's side meant the player identity `/play` was resolving
+  a stream link through sometimes had that link refused the moment
+  playback actually started, even though the search itself, the "now
+  playing" message and the thumbnail all worked. Pinned to the identity
+  confirmed to still work.
+- **The bot now leaves a voice channel the moment everyone else does**,
+  instead of only ever leaving after three minutes of silence once the
+  queue ran out. It used to sit alone in an empty channel until that
+  unrelated timer happened to also be running.
 
 ## 2.14.0-beta.1
 

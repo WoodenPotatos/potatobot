@@ -226,6 +226,16 @@ class BoundedContainerTests(unittest.TestCase):
         self.assertEqual(timings.pop(7), 1.5)
         self.assertIsNone(timings.pop(7))
 
+    def test_timestamp_map_get_peeks_without_claiming(self):
+        """`get` is for a caller that only needs to know how recently a key
+        was seen -- a dedup window, not a start/stop pair -- so unlike `pop`
+        it must not remove the entry."""
+        timings = BoundedTimestampMap()
+        timings.start(7, 1.5)
+        self.assertEqual(timings.get(7), 1.5)
+        self.assertEqual(timings.get(7), 1.5)
+        self.assertIsNone(timings.get("never-started"))
+
     def test_interaction_timing_map_is_bounded(self):
         from core import feature_access
 

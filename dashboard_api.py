@@ -554,8 +554,10 @@ def callback():
         if not is_host:
             return t("dashboard.access_denied", user_id=user_id), 403
         authorized_guild_ids = active_guild_ids
+        full_admin_guild_ids = active_guild_ids
     elif is_host:
         authorized_guild_ids = active_guild_ids
+        full_admin_guild_ids = active_guild_ids
     else:
         try:
             guild_response = requests.get(
@@ -585,6 +587,20 @@ def callback():
         }
         if not authorized_guild_ids:
             return t("dashboard.no_authorized_guilds"), 403
+        # Stricter than `authorized_guild_ids`: owner or true Administrator
+        # only, never "Manage Server" alone. A `requires_full_admin` setting
+        # (`ticket_logs`) must refuse a member who merely clears the ordinary
+        # dashboard-access bar above.
+        full_admin_guild_ids = {
+            int(guild["id"])
+            for guild in user_guilds
+            if str(guild.get("id", "")).isdigit()
+            and int(guild["id"]) in active_guild_ids
+            and (
+                guild.get("owner") is True
+                or int(guild.get("permissions", "0")) & DISCORD_PERMISSION_ADMINISTRATOR
+            )
+        }
 
     # Rotate: a fresh session on login means a pre-login cookie cannot be
     # replayed with post-login authority.
@@ -599,6 +615,7 @@ def callback():
         "avatar": user_data.get("avatar"),
     }
     session["authorized_guild_ids"] = [str(item) for item in authorized_guild_ids]
+    session["full_admin_guild_ids"] = [str(item) for item in full_admin_guild_ids]
     session["csrf_token"] = secrets.token_urlsafe(32)
     # The sliding idle window lives in the cookie's own expiry; this is what the
     # absolute cap is measured from, so refreshing the cookie cannot move it.
@@ -747,11 +764,14 @@ def verify_csrf_token():
 
 
 
-def _refresh_authorized_guilds(session_id: str) -> list[str] | None:
+def _refresh_authorized_guilds(session_id: str) -> tuple[list[str], list[str]] | None:
     """Recompute a session's manageable guilds from live Discord permissions.
 
-    Returns None when the OAuth grant can no longer be used, which the caller
-    treats as an expired session.
+    Returns `(authorized, full_admin)` -- the ordinary dashboard-access list
+    (owner, Administrator or Manage Server) and the stricter one (owner or
+    Administrator only) a `requires_full_admin` setting checks. Returns None
+    when the OAuth grant can no longer be used, which the caller treats as an
+    expired session.
     """
     token = _server_access_token(session_id)
     if not token:
@@ -766,12 +786,19 @@ def _refresh_authorized_guilds(session_id: str) -> list[str] | None:
     response.raise_for_status()
     guilds = response.json()
     active = database.run_read_sync(database.get_active_guild_ids)
-    return sorted(
+    authorized = sorted(
         str(guild["id"]) for guild in guilds
         if str(guild.get("id", "")).isdigit() and int(guild["id"]) in active
         and (guild.get("owner") is True or int(guild.get("permissions", "0"))
              & (DISCORD_PERMISSION_ADMINISTRATOR | DISCORD_PERMISSION_MANAGE_GUILD))
     )
+    full_admin = sorted(
+        str(guild["id"]) for guild in guilds
+        if str(guild.get("id", "")).isdigit() and int(guild["id"]) in active
+        and (guild.get("owner") is True
+             or int(guild.get("permissions", "0")) & DISCORD_PERMISSION_ADMINISTRATOR)
+    )
+    return authorized, full_admin
 
 
 # A read is refreshed too, but it must never be the thing that takes the
@@ -847,10 +874,13 @@ def recheck_mutation_guild_permissions():
         # A host's authority comes from ADMIN_DISCORD_ID, which is_host_session
         # re-derives per request, not from a Discord guild grant. Requiring a live
         # Discord call here would only make the host unable to work while Discord
-        # is unreachable, so the guild list is refreshed locally instead.
-        session["authorized_guild_ids"] = [
+        # is unreachable, so the guild list is refreshed locally instead. A host
+        # is full admin everywhere they are authorized, same as the login path.
+        active = [
             str(item) for item in database.run_read_sync(database.get_active_guild_ids)
         ]
+        session["authorized_guild_ids"] = active
+        session["full_admin_guild_ids"] = active
         return None
 
     session_id = session.get("server_session_id")
@@ -860,7 +890,7 @@ def recheck_mutation_guild_permissions():
 
     cached = _permission_cache.get(session_id)
     if cached is not None:
-        session["authorized_guild_ids"] = cached
+        session["authorized_guild_ids"], session["full_admin_guild_ids"] = cached
         return None
 
     # One Discord call per session, however many requests arrive together. The
@@ -869,10 +899,10 @@ def recheck_mutation_guild_permissions():
     with _session_refresh_lock(session_id):
         cached = _permission_cache.get(session_id)
         if cached is not None:
-            session["authorized_guild_ids"] = cached
+            session["authorized_guild_ids"], session["full_admin_guild_ids"] = cached
             return None
         try:
-            authorized = _refresh_authorized_guilds(session_id)
+            refreshed = _refresh_authorized_guilds(session_id)
         except requests.HTTPError as exc:
             # Discord answered, and only two answers mean the grant is gone: 401,
             # the token is no longer valid, and 403, it may not ask. Neither
@@ -898,13 +928,13 @@ def recheck_mutation_guild_permissions():
         except (requests.RequestException, ValueError) as exc:
             return _permission_refresh_unavailable(mutating, type(exc).__name__)
 
-        if authorized is None:
+        if refreshed is None:
             _forget_session(session_id)
             session.clear()
             return unauthorized_response()
 
-        _permission_cache.put(session_id, authorized)
-    session["authorized_guild_ids"] = authorized
+        _permission_cache.put(session_id, refreshed)
+    session["authorized_guild_ids"], session["full_admin_guild_ids"] = refreshed
     return None
 
 
@@ -1007,6 +1037,22 @@ def is_guild_authorized(guild_id: int) -> bool:
     if session.get("logged_in") is not True:
         return False
     return str(guild_id) in session.get("authorized_guild_ids", [])
+
+
+def is_full_admin_session(guild_id: int) -> bool:
+    """Owner or true Discord Administrator for this guild -- stricter than
+    `is_guild_authorized`, which also passes on "Manage Server" alone.
+
+    Backs `SettingDefinition.requires_full_admin` (`ticket_logs`): a member
+    who merely clears the ordinary dashboard-access bar must not be able to
+    repoint a channel meant to stay unseen by anyone but the owner. The host
+    branch of both the login and the periodic refresh sets
+    `full_admin_guild_ids` to every active guild, so a host needs no separate
+    check here, exactly like `is_guild_authorized` above.
+    """
+    if session.get("logged_in") is not True:
+        return False
+    return str(guild_id) in session.get("full_admin_guild_ids", [])
 
 
 def unauthorized_response():
@@ -1915,7 +1961,14 @@ def guild_settings(guild_id):
                 }
                 data[key] = {**row,
                              "value": _wire_value(definition, row["value"])}
-            return jsonify({"status": "success", "data": data})
+            return jsonify({
+                "status": "success", "data": data,
+                # Per guild, unlike `is_host`: an operator can be the true
+                # Administrator of one guild and only Manage-Server on
+                # another. Drives disabling a `requires_full_admin` field the
+                # same way `is_host` already disables an instance-scoped one.
+                "is_full_admin": is_full_admin_session(guild_id),
+            })
         payload = require_json_object()
         require_exact_keys(payload, {"changes"})
         if not isinstance(payload["changes"], list) or not payload["changes"]:
@@ -1942,6 +1995,14 @@ def guild_settings(guild_id):
                     and not is_host_session()):
                 raise RequestValidationError(
                     "dashboard.errors.instance_setting_host_only")
+            # Stricter than the guild-scope bar above: `ticket_logs` is the
+            # case, a channel deliberately visible to nobody but the owner
+            # that "Manage Server" alone must not be able to repoint.
+            if (definition is not None
+                    and definition.requires_full_admin
+                    and not is_full_admin_session(guild_id)):
+                raise RequestValidationError(
+                    "dashboard.errors.setting_requires_full_admin")
         result = database.set_guild_settings(
             guild_id, actor_id(), payload["changes"]
         )
@@ -3098,6 +3159,11 @@ def guild_entitlements(guild_id):
             "granted_by": (str(row["granted_by"]) if row["granted_by"] else None),
             "expires_at": row["expires_at"],
             "remaining_seconds": remaining,
+            # Set by entitlement_cleanup's verification pass, not checked
+            # live here -- a per-page-load Discord call per row does not
+            # scale and the recorded last-known state is good enough for a
+            # status label.
+            "missing_on_discord": row["discord_missing_since"] is not None,
         })
     return jsonify({"status": "success", "data": data})
 
@@ -3163,10 +3229,71 @@ def complete_guild_fulfillment(guild_id, request_id):
         )
         if not result["fulfilled"]:
             return jsonify({"status": "error", "message": t("dashboard.fulfillment_unavailable")}), 409
+        if result.get("ticket_channel_id"):
+            # Best-effort notice back to the ticket; the database half has
+            # already committed and must not wait on, or be undone by, the
+            # Discord half -- the bot executes this asynchronously.
+            database.queue_control_action(
+                guild_id, actor_id(), "notify_redeem_fulfilled",
+                {"channel_id": result["ticket_channel_id"],
+                 "request_id": request_id, "discord_item_id": discord_item_id,
+                 "outcome": "fulfilled"},
+            )
         return jsonify({"status": "success", "message": t("dashboard.fulfillment_completed"),
                         "data": result})
     except ValueError as error:
         return invalid_request_response(error)
+
+
+@app.route("/api/guilds/<int:guild_id>/fulfillment/<int:request_id>", methods=["DELETE"])
+def cancel_guild_fulfillment(guild_id, request_id):
+    """Cancel an open redemption request -- the counterpart to completing one.
+
+    No revision check: like the POST above, this guards on the request's own
+    `status = 'open'` rather than a settings-style revision counter, since a
+    fulfillment request is not a typed setting.
+    """
+    if not is_guild_authorized(guild_id):
+        return unauthorized_response()
+    result = database.cancel_fulfillment_request(guild_id, request_id, actor_id())
+    if not result["cancelled"]:
+        return jsonify({"status": "error",
+                        "message": t("dashboard.fulfillment_unavailable")}), 409
+    if result.get("ticket_channel_id"):
+        database.queue_control_action(
+            guild_id, actor_id(), "notify_redeem_fulfilled",
+            {"channel_id": result["ticket_channel_id"], "request_id": request_id,
+             "outcome": "cancelled"},
+        )
+    return jsonify({"status": "success",
+                    "message": t("dashboard.fulfillment_cancelled"), "data": result})
+
+
+@app.route("/api/guilds/<int:guild_id>/entitlements/<int:entitlement_id>", methods=["DELETE"])
+def revoke_guild_entitlement(guild_id, entitlement_id):
+    """Revoke an active entitlement from the Redeems page.
+
+    Marks the record cancelled immediately, then queues the Discord-side
+    teardown for the bot to execute -- `revoke_entitlement` already knows how
+    to remove a role or delete an emoji/sticker/sound, reused unchanged from
+    the member-erasure path. An entitlement kind it cannot tear down just
+    settles the queued action as done with nothing left to do, the same
+    "unrecognised key reports success" rule erasure already follows.
+    """
+    if not is_guild_authorized(guild_id):
+        return unauthorized_response()
+    result = database.revoke_timed_entitlement(guild_id, entitlement_id, actor_id())
+    if not result["revoked"]:
+        return jsonify({"status": "error",
+                        "message": t("dashboard.entitlement_unavailable")}), 409
+    database.queue_control_action(
+        guild_id, actor_id(), "revoke_entitlement",
+        {"entitlement_id": entitlement_id, "user_id": result["user_id"],
+         "entitlement_key": result["entitlement_key"],
+         "discord_item_id": result["discord_item_id"]},
+    )
+    return jsonify({"status": "success",
+                    "message": t("dashboard.entitlement_revoked"), "data": result})
 
 
 def run_api():
@@ -3339,6 +3466,51 @@ async def execute_channel_permission_repair(channel, action):
     return None
 
 
+async def execute_redeem_fulfilled_notice(channel, action) -> str | None:
+    """Tell a redeem ticket its request was settled, from either side.
+
+    Best-effort and channel-shaped like publish/delete: the database half has
+    already committed by the time this runs, so a ticket that is already
+    closed is not a failure to retry, just nothing left to notify.
+    """
+    payload = action["payload"]
+    actor = channel.guild.get_member(action["actor_id"])
+    staff_name = actor.mention if actor else t("gacha.redeem_fulfill_unknown_staff")
+    if payload.get("outcome") == "cancelled":
+        text = t("gacha.redeem_fulfill_notice_cancelled", staff=staff_name)
+    else:
+        text = t("gacha.redeem_fulfill_notice_fulfilled", staff=staff_name,
+                 item_id=payload.get("discord_item_id", ""))
+    await channel.send(text)
+    return None
+
+
+async def execute_entitlement_revocation(bot, action) -> str | None:
+    """Tear down the Discord side of a revoked entitlement.
+
+    Reuses `cogs.gacha.revoke_entitlement` unchanged -- already proven on the
+    member-erasure path -- so a role is removed or an emoji/sticker/sound is
+    deleted exactly as it would be on natural expiry. An entitlement kind it
+    does not recognise settles as done with nothing left to do, the same
+    "unrecognised key reports success" rule that path already follows.
+    """
+    from cogs.gacha import revoke_entitlement
+
+    guild = bot.get_guild(action["guild_id"])
+    if not guild:
+        return None  # The guild is gone; nothing left to tear down.
+    payload = action["payload"]
+    entitlement = {
+        "entitlement_id": payload.get("entitlement_id"),
+        "user_id": payload.get("user_id"),
+        "entitlement_key": payload.get("entitlement_key"),
+        "discord_item_id": payload.get("discord_item_id"),
+    }
+    if not await revoke_entitlement(guild, entitlement):
+        return "discord_http_error"
+    return None
+
+
 async def control_action_worker(bot):
     """Execute queued Discord publishes after live permission and feature checks."""
     next_prune = 0.0
@@ -3393,6 +3565,18 @@ async def control_action_worker(bot):
                     error_code is None, error_code,
                 )
                 continue
+            if action["action_type"] == "revoke_entitlement":
+                # Acts on a member's grant, not a channel, so it cannot share
+                # the channel preamble below either.
+                if not guild or not actor or not actor.guild_permissions.manage_guild:
+                    error_code = "permission_denied"
+                else:
+                    error_code = await execute_entitlement_revocation(bot, action)
+                await database.run_write(
+                    database.finish_control_action, action["action_id"],
+                    error_code is None, error_code,
+                )
+                continue
             if not guild or not actor or not actor.guild_permissions.manage_guild:
                 error_code = "permission_denied"
             elif not isinstance(channel, discord.TextChannel):
@@ -3403,6 +3587,8 @@ async def control_action_worker(bot):
                 error_code = await execute_managed_publish(guild, channel, action)
             elif action["action_type"] == "delete_managed":
                 error_code = await execute_managed_delete(channel, action)
+            elif action["action_type"] == "notify_redeem_fulfilled":
+                error_code = await execute_redeem_fulfilled_notice(channel, action)
             else:
                 error_code = "feature_disabled_or_unsupported"
         except discord.HTTPException:

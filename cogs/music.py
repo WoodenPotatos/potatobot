@@ -3,6 +3,7 @@ import itertools
 import logging
 import random
 import asyncio
+import shlex
 import time
 import yt_dlp
 import os
@@ -21,7 +22,7 @@ from core import database
 from discord.ext import commands, tasks
 from datetime import timedelta
 from cogs.utils import BoundedCooldownMap, handle_loop_error, t
-from core.feature_access import require_interaction_feature
+from core.feature_access import is_enabled, require_interaction_feature
 
 music_logger = logging.getLogger("PotatoBot.Music")
 
@@ -76,8 +77,23 @@ def can_control_music(member, guild):
     )
 
 # Prefer Opus-compatible audio and reconnect FFmpeg streams after brief network loss.
+#
+# `player_client` is pinned to `android` rather than left at yt-dlp's own
+# default selection. Verified live 2026-09-27 against yt-dlp==2026.8.19: a
+# production 403 traced to yt-dlp's default client choice landing on
+# `android_vr` for that request -- extraction succeeded (the embed/thumbnail
+# posted fine) but the resolved googlevideo URL itself 403'd on fetch,
+# with or without replaying yt-dlp's own request headers, reproduced
+# identically in isolation. Of every client tried live that day (`web`,
+# `mweb`, `tv`, `tv_simply`, `web_creator`, `ios`, `android`, `android_vr`),
+# only `android` both extracted and served a fetchable stream URL, across
+# repeated tries and through the actual `ytsearch1:` search path this bot
+# uses. This is an active, moving arms race on YouTube's side (most other
+# clients failed outright with a sign-in or format-not-found error, not a
+# stream-fetch 403), so re-verify the same way rather than trusting this
+# comment once `android` stops working too.
 ytdl_format_options = {
-    'format': 'bestaudio[ext=webm][acodec=opus]/bestaudio/best', 
+    'format': 'bestaudio[ext=webm][acodec=opus]/bestaudio/best',
     'noplaylist': False,
     'playlistend': MUSIC_PLAYLIST_LIMIT,
     'quiet': True,
@@ -87,6 +103,7 @@ ytdl_format_options = {
     'retries': 2,
     'fragment_retries': 2,
     'ignoreconfig': True,
+    'extractor_args': {'youtube': {'player_client': ['android']}},
 }
 
 ffmpeg_options = {
@@ -98,6 +115,37 @@ ffmpeg_options = {
         "-reconnect_streamed 1 -reconnect_delay_max 5"
     ),
 }
+
+
+def _ffmpeg_options_for(song: dict) -> dict:
+    """Per-song ffmpeg options, replaying the format's own request headers.
+
+    yt-dlp records the request headers (principally `User-Agent`) it used to
+    resolve a googlevideo stream URL, and some player clients' URLs check
+    that whatever fetches them presents the same identity -- fetching with
+    ffmpeg's bare defaults instead risks a 403 on a client that cares. This
+    is defense in depth, not the whole fix: the `android_vr` client that
+    caused the production 403 this was written for rejected the fetch with
+    or without these headers (see `ytdl_format_options`'s own comment) -- the
+    real fix there was not choosing that client in the first place. Header
+    keys/values are dropped if they carry CR/LF, since those are line
+    delimiters in ffmpeg's own `-headers` block and have no legitimate
+    reason to appear in a header yt-dlp generated itself.
+    """
+    headers = song.get("http_headers") or {}
+    safe_headers = {
+        str(key): str(value)
+        for key, value in headers.items()
+        if key and value and "\r" not in str(value) and "\n" not in str(value)
+    }
+    if not safe_headers:
+        return ffmpeg_options
+    header_block = "".join(f"{key}: {value}\r\n" for key, value in safe_headers.items())
+    options = dict(ffmpeg_options)
+    options["before_options"] = (
+        ffmpeg_options["before_options"] + " -headers " + shlex.quote(header_block)
+    )
+    return options
 
 
 def _youtube_input(value: str) -> str:
@@ -182,6 +230,7 @@ def song_from_entry(entry, requester):
         return None
     return {
         "url": stream_url,
+        "http_headers": dict(entry.get("http_headers") or {}),
         "title": entry.get("title") or t("music.unknown_song"),
         "webpage_url": entry.get("webpage_url") or entry.get("original_url"),
         "thumbnail": entry.get("thumbnail"),
@@ -479,6 +528,39 @@ class Music(commands.Cog):
         if not self.extraction_watchdog.is_running():
             self.extraction_watchdog.start()
 
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        # Only a real member actually leaving the bot's own channel matters
+        # here -- a mute/deafen toggle fires this same event with an
+        # unchanged channel, and the bot's own disconnect fires it for
+        # itself (always filtered out by the `member.bot` check).
+        if member.bot or not before.channel or before.channel == after.channel:
+            return
+        guild = before.channel.guild
+        vc = guild.voice_client
+        if not vc or vc.channel.id != before.channel.id:
+            return
+        if not is_enabled(guild.id, "music"):
+            return
+        if any(not m.bot for m in before.channel.members):
+            return
+        # Nobody real is left. Stop waiting out the inactivity timer --
+        # there is nobody left to be inactive for -- and leave now.
+        if guild.id in music_timers and not music_timers[guild.id].done():
+            music_timers[guild.id].cancel()
+        # A queue left mid-song would otherwise survive the disconnect and
+        # get resumed from a stale position the next time someone plays
+        # something in this guild.
+        music_queues.pop(guild.id, None)
+        music_states.pop(guild.id, None)
+        panel = last_panels.pop(guild.id, None)
+        await vc.disconnect()
+        if panel is not None:
+            try:
+                await panel.channel.send(t("music.left_channel_empty"))
+            except Exception:
+                pass
+
     def cog_unload(self):
         if self.extraction_watchdog.is_running():
             self.extraction_watchdog.cancel()
@@ -538,7 +620,7 @@ class Music(commands.Cog):
                 self.bot.loop.call_soon_threadsafe(self.play_next, guild, text_channel)
 
             vc.play(
-                discord.FFmpegPCMAudio(song['url'], **ffmpeg_options),
+                discord.FFmpegPCMAudio(song['url'], **_ffmpeg_options_for(song)),
                 after=handle_next,
             )
 

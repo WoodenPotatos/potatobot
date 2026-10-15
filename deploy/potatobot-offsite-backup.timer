@@ -1,0 +1,13 @@
+# Daily schedule for the offsite database backup. See the matching .service unit.
+
+[Unit]
+Description=Daily PotatoBot offsite database backup
+Documentation=https://github.com/WoodenPotatos/potatobotbeta
+
+[Timer]
+OnCalendar=daily
+# A missed run (host was off) happens on the next boot rather than being skipped.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

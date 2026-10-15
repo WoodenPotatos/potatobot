@@ -85,3 +85,10 @@ class BoundedTimestampMap:
     def pop(self, key, default=None):
         with self._lock:
             return self._entries.pop(key, default)
+
+    def get(self, key, default=None):
+        """Peek a start time without claiming it, for a caller that only
+        needs to know how recently a key was seen -- a dedup window, not a
+        start/stop pair."""
+        with self._lock:
+            return self._entries.get(key, default)

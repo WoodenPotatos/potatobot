@@ -381,6 +381,7 @@ class JavaScriptIsActuallyRunTests(unittest.TestCase):
             "tests.test_dashboard_boot.DashboardBootTests",
             "tests.test_item_creator.TemplateFieldsFollowTheChoiceTests",
             "tests.test_dashboard_boot.StaleClientNoticeTests",
+            "tests.test_redeem_ticket_linkage.RedeemsPageActionsTests",
         ])
         result = unittest.TestResult()
         suite.run(result)
