@@ -16,6 +16,7 @@ import os
 import queue
 import signal
 import smtplib
+import ssl
 import sys
 import threading
 import time
@@ -108,7 +109,9 @@ class AlertEmailHandler(logging.Handler):
         message["To"] = self._recipient
         message.set_content(body)
         with smtplib.SMTP(self._host, self._port, timeout=10) as smtp:
-            smtp.starttls()
+            # A context, or `starttls` verifies nothing and an on-path attacker
+            # reads the SMTP password and every alert body.
+            smtp.starttls(context=ssl.create_default_context())
             if self._username:
                 smtp.login(self._username, self._password)
             smtp.send_message(message)

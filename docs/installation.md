@@ -30,11 +30,13 @@ message bus: the bot and the dashboard coordinate through one SQLite file.
 git clone https://github.com/WoodenPotatos/potatobot.git /opt/potatobot
 cd /opt/potatobot
 python3 -m venv venv
-./venv/bin/python -m pip install --requirement requirements.lock
+./venv/bin/python -m pip install --require-hashes --requirement requirements.lock
 ```
 
 Use `requirements.lock`, not `pip install .` — the lockfile is what CI tests
-against and what the reference deployment runs.
+against and what the reference deployment runs. It pins every transitive
+package with its hashes, so `--require-hashes` refuses anything that is not
+the exact file that was locked.
 
 ## 3. Create the Discord application
 
@@ -112,15 +114,27 @@ refuses to start otherwise — it rejects a plain-HTTP origin, an external URL w
 a path, mismatched origins, a callback that does not end in `/api/callback`, and
 a non-loopback bind behind a proxy.
 
-The reference deployment uses Tailscale Serve, which gets you a real certificate
-on a private name with no port forwarding:
+Two shapes need no port forwarding. **Tailscale Serve** gets you a real
+certificate on a private name only your tailnet can reach:
 
 ```bash
 tailscale serve --bg http://127.0.0.1:5000
 tailscale serve status          # note the https://<host>.<tailnet>.ts.net name
 ```
 
+A **Cloudflare Tunnel** (`cloudflared`) publishes a public hostname with no
+inbound port open on the host. The page and the OAuth start are then reachable
+by anyone, so Discord OAuth is the only authentication unless you put
+Cloudflare Access in front; turn on "Always Use HTTPS" in the zone, or plain
+HTTP is answered rather than redirected.
+
 nginx or Caddy in front of `127.0.0.1:5000` works identically.
+
+`POTATOBOT_TRUSTED_PROXY_HOPS` counts the proxies that append to
+`X-Forwarded-For`. Tailscale Serve, nginx alone, or a Cloudflare Tunnel straight
+to loopback is **1**, the default. Cloudflare in front of nginx is **2** — and
+then the origin must accept connections from Cloudflare's addresses only, or a
+client reaching nginx directly chooses its own rate-limit identity.
 
 Then in `.env` — **the origin must be byte-identical in all three places**: here,
 and in the Discord Developer Portal's redirect URI:
@@ -304,7 +318,7 @@ nothing else.
 ```bash
 sudo systemctl stop potatobot
 git -C /opt/potatobot pull
-./venv/bin/python -m pip install --requirement requirements.lock   # if it changed
+./venv/bin/python -m pip install --require-hashes --requirement requirements.lock   # if it changed
 (umask 027; POTATOBOT_DB_PATH=/opt/potatobot/economy.db ./venv/bin/python update_db.py)
 sudo systemctl start potatobot
 ```

@@ -662,6 +662,7 @@
     "filter_channel_label": "Channel",
     "filter_match_label": "Matching entry",
     "unwarn_not_found": "No warning with the id #{warning_id} was found for this user on this server.",
+    "unwarn_issuer_senior": "❌ This warning was issued by {mod}, whose role is equal to or higher than yours, so you cannot remove it.",
     "unwarn_success": "Warning #{warning_id} was removed from {user}. Warnings remaining: {count}.",
     "warn_entry_title_with_id": "#{warning_id} | {date} | Moderator: {mod}",
     "modlogs_title": "📂 User file: {user}",
@@ -900,7 +901,8 @@
     "usage_mydata": "/mydata",
     "cmd_deletemydata": "Permanently delete the data stored about you.",
     "usage_deletemydata": "/deletemydata",
-    "gacha_banner_description": "Which banner to pull from. Leave empty for the default one."
+    "gacha_banner_description": "Which banner to pull from. Leave empty for the default one.",
+    "search_err_needed_range": "❌ The number of players needed must be between 0 and {limit} (0 = no limit)."
   },
   "everydle": {
     "diff_choice_easy": "Easy (from the stats)",
@@ -2173,7 +2175,8 @@
     "err_no_perms": "🚫 **Access denied:** you do not have moderation permissions.",
     "err_no_dm": "🚫 You cannot use this command in direct messages.",
     "err_wrong_channel": "🚫 **Wrong channel!**\nUse this command here: {channels}",
-    "anonymous_member": "Anonymous member #{tag}"
+    "anonymous_member": "Anonymous member #{tag}",
+    "asset_not_in_guild": "❌ No item of that type (emoji, sticker or sound) with this ID exists on this server. Copy the exact ID from the server settings."
   },
   "privacy": {
     "confirm_btn": "Yes, delete my data",

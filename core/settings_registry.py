@@ -723,8 +723,14 @@ SETTING_DEFINITIONS = {
         _setting("temporary_voice_lobbies", "community", "voice", SettingValueType.CHANNEL_LIST,
                  [], feature="temporary_voice", channel_types=VOICE_CHANNEL_TYPES,
                  bot_permissions=('view_channel', 'connect', 'manage_channels', 'manage_roles', 'move_members')),
+        # `requires_full_admin` on the four settings that decide which role a
+        # member is *handed* (or, for `admin_roles`, which members the bot
+        # treats as staff): with Manage Server alone, an operator could point
+        # one at an Administrator role or add their own role to the staff list.
+        # Settings that only act on members already there stay at the ordinary
+        # bar, by the maintainer's decision of 2026-10-15.
         _setting("admin_roles", "administration", "permissions", SettingValueType.ROLE_LIST,
-                 []),
+                 [], requires_full_admin=True),
         _setting("premium_roles", "economy", "premium", SettingValueType.ROLE_LIST,
                  [], feature="economy"),
         # `economy`, not `shop`: this is the role a **gacha** premium voucher
@@ -744,7 +750,8 @@ SETTING_DEFINITIONS = {
         _setting("onboarding_role", "community", "onboarding", SettingValueType.ROLE,
                  None, feature="onboarding", assignable_role=True, edited_elsewhere=True),
         _setting("autoroles", "community", "onboarding", SettingValueType.ROLE_LIST,
-                 [], feature="onboarding", assignable_role=True),
+                 [], feature="onboarding", assignable_role=True,
+                 requires_full_admin=True),
         _setting("ignored_users", "moderation", "inactivity", SettingValueType.STRING_LIST,
                  [], feature="inactivity", max_length=24, max_items=1000),
         # Where a crossed threshold is reported. Separate from bot_log_channel,
@@ -801,7 +808,8 @@ SETTING_DEFINITIONS = {
         # had. A role id cannot be guessed for somebody else's guild, so there is
         # no honest default; `docs/level_setup.md` documents the ladder instead.
         _setting("level_roles", "community", "levels", SettingValueType.JSON,
-                 {}, feature="levels", json_shape=JSON_SHAPE_LEVEL_ROLES),
+                 {}, feature="levels", json_shape=JSON_SHAPE_LEVEL_ROLES,
+                 requires_full_admin=True),
         # The three role menus were settings here until schema 12. A guild may
         # have any number of menus now, each one a `managed_messages` row with a
         # posted message the dashboard can edit, so a fixed trio of settings
@@ -810,7 +818,8 @@ SETTING_DEFINITIONS = {
         # the same rule the settings save used, so the two cannot disagree about
         # what a malformed menu is.
         _setting("factions", "factions", "factions", SettingValueType.JSON,
-                 {}, feature="factions", json_shape=JSON_SHAPE_FACTIONS),
+                 {}, feature="factions", json_shape=JSON_SHAPE_FACTIONS,
+                 requires_full_admin=True),
         # LFG owns a category of its own. It used to be one page inside
         # Community while its second channel sat in a "Games and prices"
         # category that priced nothing and owned nothing else — the prices are

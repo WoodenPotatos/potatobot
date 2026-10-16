@@ -39,6 +39,7 @@ Usage:
 import argparse
 import importlib.util
 import os
+import secrets
 import shutil
 import socket
 import sys
@@ -155,7 +156,7 @@ def ensure_dependencies() -> None:
         "The dashboard needs the project's runtime dependencies. Either:\n"
         f"  {interpreter or 'venv/bin/python'} scripts/local_dashboard.py\n"
         "or install them into the current interpreter:\n"
-        "  python -m pip install --requirement requirements.lock"
+        "  python -m pip install --require-hashes --requirement requirements.lock"
     )
 
 
@@ -206,6 +207,33 @@ def refuse_unsafe_environment() -> None:
             "POTATOBOT_DEPLOYMENT_PROFILE=managed. Refusing to start the local "
             "development dashboard against a managed deployment's environment."
         )
+
+
+def refuse_real_database(source: Path, target: Path) -> None:
+    """The working copy may never be a database something else serves.
+
+    `copy_database` reuses an existing target, so `--db economy.db` used to
+    migrate and serve the real file in place with OAuth bypassed. The source,
+    the database `POTATOBOT_DB_PATH` names and the default `./economy.db` are
+    refused by resolved path, so a relative spelling cannot slip past.
+    """
+    resolved = target.resolve()
+    protected = {source.resolve(), (ROOT / "economy.db").resolve()}
+    configured = os.getenv("POTATOBOT_DB_PATH", "").strip()
+    if configured:
+        protected.add(Path(configured).resolve())
+    if resolved in protected:
+        raise SystemExit(
+            f"--db {target} is a real database, not a working copy. Refusing to "
+            "migrate and serve it with OAuth bypassed; pick a path under "
+            f"{LOCAL_DEV_DIR}."
+        )
+
+
+#: The only `Host` values the injected sign-in answers. The server binds
+#: loopback, but a browser will send another name for the same socket after a
+#: DNS rebind, and that page would then be signed in as the host.
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost"}
 
 
 def copy_database(source: Path, target: Path, fresh: bool) -> bool:
@@ -474,18 +502,23 @@ def install_session_injection(dashboard_api, guild_ids) -> None:
     before an appended one would and would reject the first mutation of the
     session's life.
     """
-    from flask import session
+    from flask import abort, request, session
 
     authorized = [str(guild_id) for guild_id in guild_ids]
+    # Per run, never a constant: a fixed token is one any page on the machine
+    # could send, which is the whole of what CSRF protection prevents.
+    csrf_token = secrets.token_urlsafe(32)
 
     def inject_local_session():
+        if request.host.rsplit(":", 1)[0] not in LOOPBACK_HOSTS:
+            abort(403)
         if session.get("logged_in") is True:
             return None
         session.permanent = True
         session["logged_in"] = True
         session["user_id"] = LOCAL_HOST_ID
         session["display"] = {"username": "local-dev", "avatar": None}
-        session["csrf_token"] = "local-development-csrf-token"
+        session["csrf_token"] = csrf_token
         session["server_session_id"] = "local-development-session"
         session["authorized_guild_ids"] = authorized
         session["authenticated_at"] = __import__("time").time()
@@ -524,6 +557,7 @@ def main() -> int:
     print("Preflight")
     refuse_unsafe_environment()
     ensure_dependencies()
+    refuse_real_database(arguments.source, arguments.db)
     port = resolve_port(arguments.port, arguments.auto_port)
     print(f"  interpreter {sys.executable}")
     print(f"  serving on 127.0.0.1:{port}")

@@ -224,3 +224,25 @@ class LfgViewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SearchNeededBoundTests(unittest.IsolatedAsyncioTestCase):
+    """`/search needed` is refused out of range before anything is posted.
+
+    The prefix form takes any integer; one past SQLite's 64-bit range raised
+    an `OverflowError` after the post was sent, leaving a party whose buttons
+    answered "expired".
+    """
+
+    async def test_out_of_range_values_post_nothing(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        import cogs.general as general
+
+        cog = general.General.__new__(general.General)
+        for needed in (-1, general.LFG_MAX_NEEDED + 1, 2 ** 63):
+            with self.subTest(needed=needed):
+                ctx = SimpleNamespace(send=AsyncMock())
+                await general.General.search.callback(cog, ctx, needed)
+                ctx.send.assert_awaited_once()
+                self.assertTrue(ctx.send.await_args.kwargs.get("ephemeral"))

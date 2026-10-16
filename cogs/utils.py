@@ -230,6 +230,24 @@ def anonymous_member_tag(guild_id: int, user_id: int) -> str:
     return digest.hexdigest()
 
 
+_INLINE_MARKDOWN = re.compile(r"([\\*_~`|\[\]])")
+
+
+def plain_markdown(text) -> str:
+    """Upstream text made inert inside a bot-authored embed.
+
+    A stream, video, song or patch title is chosen by whoever published it, and
+    every template wraps it in `**…**` beside a link the bot vouches for, so
+    `foo](https://evil) [bar` rendered a second link under the bot's identity.
+    `discord.utils.escape_markdown` does not stop that -- it deliberately skips
+    anything that looks like a URL. Every inline markdown character is
+    backslash-escaped here, brackets included, and a line break becomes a space
+    so a title cannot start a heading or a quote on a line of its own.
+    """
+    flattened = " ".join(str(text or "").split())
+    return _INLINE_MARKDOWN.sub(r"\\\1", flattened)
+
+
 def display_member_name(guild, user_id: int) -> str:
     """Name one account for a guild-facing list without leaking its identity.
 
@@ -596,12 +614,24 @@ async def reconcile_level_roles(member, level, level_milestones_map=None):
     target = (_milestone_role(member.guild, target_value)
               if target_value is not None else None)
 
+    # A milestone may name any role, including one carrying administrator or a
+    # staff role, so the grant is screened exactly like every self-service role
+    # path. A role that fails is neither granted nor taken away: the bot does
+    # not manage a role it may not hand out. Skipped with a warning rather than
+    # raised, because a raise here would swallow the member's level-up.
+    if target is not None and not can_self_assign_role(member.guild, target):
+        utility_logger.warning(
+            "Level role skipped: privileged, staff, managed or above the bot "
+            "(guild_id=%s, role_id=%s).", member.guild.id, target.id)
+        target = None
+
     # Every milestone role the member currently holds, whichever milestone named
     # it. Comparing the whole set is what lets this remove a role as well as add
     # one — and what makes "already correct" cost nothing.
     all_values = list(level_milestones_map.values())
     held = [role for role in member.roles
-            if role.id in all_values or role.name in all_values]
+            if (role.id in all_values or role.name in all_values)
+            and can_self_assign_role(member.guild, role)]
     # Compared by id, never by object: `guild.get_role` and `member.roles` are
     # the same objects in discord.py but need not be anywhere else, and an
     # identity comparison that silently fails re-grants a role the member
@@ -679,6 +709,28 @@ def is_staff():
         await ctx.send(t("utils.err_no_perms"), ephemeral=True)
         return False
     return commands.check(predicate)
+
+def is_host():
+    """The installation's host, re-derived from ADMIN_DISCORD_ID per call.
+
+    `commands.is_owner()` resolves to the application owner -- for a
+    team-owned application, every team member with the Admin or Developer
+    role -- which is not who the dashboard and `set_guild_setting` mean by the
+    host. With no host configured it falls back to exactly that, so an
+    installation that never set the variable keeps its recovery commands.
+    Raises `NotOwner`, a `CheckFailure`, so the existing error path answers.
+    """
+    async def predicate(ctx):
+        host = (os.getenv("ADMIN_DISCORD_ID") or "").strip()
+        if host:
+            allowed = str(ctx.author.id) == host
+        else:
+            allowed = await ctx.bot.is_owner(ctx.author)
+        if not allowed:
+            raise commands.NotOwner("host only")
+        return True
+    return commands.check(predicate)
+
 
 def is_channel(allowed_ids, fallback=None):
     """Restrict a command to the channels one typed setting names.
@@ -866,7 +918,14 @@ def voice_reward_block(member):
 
 
 def can_self_assign_role(guild, role):
-    """Rejects privileged, staff, managed, and bot-unmanageable roles."""
+    """Rejects privileged, staff, managed, and bot-unmanageable roles.
+
+    Every role the bot grants on configuration rather than on a Discord
+    permission it checked itself goes through here: role menus, onboarding,
+    the shop, the gacha, `/sync_autoroles`, level roles, join autoroles and a
+    faction leader's `/manage`. A new grant path that skips it lets whoever can
+    edit a setting hand out an Administrator role.
+    """
     if role is None or guild.me is None:
         return False
     privileged_permissions = (
@@ -884,6 +943,34 @@ def can_self_assign_role(guild, role):
             for permission in privileged_permissions
         )
     )
+
+
+ASSET_KINDS = ("emoji", "sticker", "sound")
+
+
+async def resolve_guild_asset(guild, kind, raw_id):
+    """The emoji, sticker or soundboard sound `raw_id` names *in this guild*.
+
+    A staff-entered asset id is stored and later deleted when the rental or
+    entitlement it records runs out, so an unchecked string let a staff member
+    without Manage Expressions schedule the deletion of any asset in the guild
+    -- or store something non-numeric that made the record never expire.
+    Returns None for anything that is not a snowflake resolving to an asset of
+    `kind` here, including a transient Discord failure: the caller refuses and
+    staff retry, which is cheaper than recording an id nobody verified.
+    """
+    raw_id = str(raw_id or "").strip()
+    if kind not in ASSET_KINDS or not raw_id.isdigit() or len(raw_id) > 20:
+        return None
+    asset_id = int(raw_id)
+    try:
+        if kind == "emoji":
+            return guild.get_emoji(asset_id)
+        if kind == "sticker":
+            return await guild.fetch_sticker(asset_id)
+        return await guild.fetch_soundboard_sound(asset_id)
+    except discord.HTTPException:
+        return None
 
 
 # --- Background loop supervision -------------------------------------------

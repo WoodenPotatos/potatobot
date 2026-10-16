@@ -195,6 +195,11 @@ class HelpSelect(discord.ui.Select):
         if not await require_interaction_feature(interaction, "general"):
             return
         choice = self.values[0]
+        # Only a value this member was offered: the options were filtered for
+        # the hidden staff, admin and leader lists when the menu was built, and
+        # a forged value would otherwise show one of them or raise KeyError.
+        if choice not in {option.value for option in self.options}:
+            return await interaction.response.defer()
         data = get_help_data()[choice]
         
         embed = discord.Embed(
@@ -254,6 +259,8 @@ def lfg_embed(guild, post):
 
 #: The longest game name `/search` accepts for a free-text party.
 LFG_GAME_TEXT_LIMIT = 200
+# The party size a post asks for; Discord's own voice-channel user limit.
+LFG_MAX_NEEDED = 99
 
 
 class LFGView(discord.ui.View):
@@ -477,6 +484,13 @@ class General(commands.Cog):
     @commands.hybrid_command(name="search", description=t("general.cmd_search"))
     @commands.cooldown(1, 120, commands.BucketType.user)
     async def search(self, ctx, needed: int = 0, *, game: str = None):
+        # Checked before anything is sent: the prefix form takes any integer,
+        # and one past SQLite's 64-bit range raised after the post existed,
+        # leaving a party whose buttons answer "expired".
+        if not 0 <= needed <= LFG_MAX_NEEDED:
+            return await ctx.send(
+                t("general.search_err_needed_range", limit=LFG_MAX_NEEDED),
+                ephemeral=True)
         lfg_channels = guild_setting_sync(ctx.guild.id, "lfg_channels") or {}
         default_lfg = guild_setting_sync(ctx.guild.id, "lfg_default_channel")
         default_lfg_channel_id = str(default_lfg or "")

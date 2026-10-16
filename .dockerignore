@@ -34,3 +34,16 @@ botdata/
 # Compiled bytecode is rebuilt in the image and only bloats the layer.
 __pycache__/
 *.pyc
+# Local working files that `.gitignore` already keeps out of the repository
+# and that a `COPY . .` from a working tree would otherwise bake in: session
+# notes, the knowledge graph, screenshots of the live dashboard, rehearsal
+# copies of a database, the Everydle deck and the drafted guild message.
+handoff/
+graphify-out/
+Screenshot*.png
+migration-rehearsal-*/
+data/everydle_state.json
+docs/guild_message.md
+node_modules/
+*.log
+.aider*

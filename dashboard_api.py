@@ -66,6 +66,11 @@ dashboard_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashbo
 app = Flask(__name__, static_folder=dashboard_dir, static_url_path="/")
 
 
+#: Where the generated session secret lived before it followed the database.
+LEGACY_SESSION_SECRET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                          ".dashboard_session_secret")
+
+
 def _load_session_secret() -> str:
     """Load a stable secret or create a private installation-local fallback."""
     configured = os.getenv("POTATOBOT_DASHBOARD_SESSION_SECRET", "").strip()
@@ -76,14 +81,22 @@ def _load_session_secret() -> str:
             )
         return configured
 
-    secret_path = os.path.join(os.path.dirname(__file__), ".dashboard_session_secret")
-    try:
-        with open(secret_path, "r", encoding="utf-8") as secret_file:
-            stored = secret_file.read().strip()
-        if len(stored) >= 32:
-            return stored
-    except FileNotFoundError:
-        pass
+    # Beside the database, which is the one directory every deployment shape
+    # keeps writable and persistent: in the image `/app` is root-owned and is
+    # not the volume, so a secret there either fails to write or dies with the
+    # container, ending every session. Unset, the database is beside this file
+    # anyway. A secret already at the old spot is still read first, so moving
+    # the default logs nobody out.
+    secret_path = os.path.join(
+        os.path.dirname(os.path.abspath(database.DB_PATH)), ".dashboard_session_secret")
+    for candidate in dict.fromkeys((LEGACY_SESSION_SECRET_PATH, secret_path)):
+        try:
+            with open(candidate, "r", encoding="utf-8") as secret_file:
+                stored = secret_file.read().strip()
+            if len(stored) >= 32:
+                return stored
+        except FileNotFoundError:
+            pass
 
     generated = secrets.token_urlsafe(48)
     try:
@@ -2429,7 +2442,10 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
     fields = {"template_type", "enabled", "price", "config", "text", "category"}
     if require_key:
         fields.add("item_key")
-    if set(payload) != fields or payload["template_type"] not in SAFE_SHOP_TEMPLATES:
+    # Type before membership throughout: a list is unhashable, so `in` on a set
+    # raised TypeError and answered 500 instead of the 400 this is.
+    if (set(payload) != fields or not isinstance(payload["template_type"], str)
+            or payload["template_type"] not in SAFE_SHOP_TEMPLATES):
         raise RequestValidationError("dashboard.errors.shop_template_invalid")
 
     key = None
@@ -2496,11 +2512,13 @@ def _validate_shop_item(payload: dict, *, require_key: bool):
     # picker can never disagree about which consumables exist.
     if template == "consumable" and (
         set(item_config) != {"item_key"}
+        or not isinstance(item_config["item_key"], str)
         or item_config["item_key"] not in item_catalog.INVENTORY_ITEM_KEYS
     ):
         raise RequestValidationError("dashboard.errors.shop_config_consumable")
     if template == "fulfillment_voucher" and (
         set(item_config) != {"asset_type", "duration_days"}
+        or not isinstance(item_config["asset_type"], str)
         or item_config["asset_type"] not in {"emoji", "sticker", "sound"}
         or not isinstance(item_config["duration_days"], int)
         or not 1 <= item_config["duration_days"] <= 3650
@@ -3187,7 +3205,7 @@ def grant_guild_entitlement(guild_id):
         except ValueError:
             raise RequestValidationError("dashboard.errors.manual_grant_user_id_invalid") from None
         asset_type = payload["asset_type"]
-        if asset_type not in {"emoji", "sticker", "sound"}:
+        if not isinstance(asset_type, str) or asset_type not in {"emoji", "sticker", "sound"}:
             raise RequestValidationError("dashboard.errors.manual_grant_asset_type_invalid")
         discord_item_id = str(payload["discord_item_id"])
         if not discord_item_id.isdigit():

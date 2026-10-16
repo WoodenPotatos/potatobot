@@ -20,7 +20,7 @@ if ROOT_DIR not in sys.path:
 
 from core import database
 from cogs.utils import (can_self_assign_role, guild_setting_sync,
-                        handle_loop_error, is_channel, t)
+                        handle_loop_error, is_channel, resolve_guild_asset, t)
 from core.feature_access import is_enabled, maintenance_blocks, require_interaction_feature
 from core.support_tickets import open_ticket
 from cogs.tickets import is_ticket_staff
@@ -222,12 +222,26 @@ async def revoke_entitlement(guild, entitlement) -> bool:
                     entitlement["entitlement_id"], kind,
                 )
                 return True
-            if kind == "emoji":
-                item = guild.get_emoji(int(item_id))
-            elif kind == "sticker":
-                item = await guild.fetch_sticker(int(item_id))
-            else:
-                item = await guild.fetch_soundboard_sound(int(item_id))
+            if not str(item_id).isdigit():
+                # Stored before ids were validated. Nothing can be reached
+                # through it, and refusing would keep the record active forever.
+                gacha_logger.warning(
+                    "Asset entitlement has a malformed Discord id, nothing to "
+                    "revoke (entitlement_id=%s, kind=%s).",
+                    entitlement["entitlement_id"], kind,
+                )
+                return True
+            try:
+                if kind == "emoji":
+                    item = guild.get_emoji(int(item_id))
+                elif kind == "sticker":
+                    item = await guild.fetch_sticker(int(item_id))
+                else:
+                    item = await guild.fetch_soundboard_sound(int(item_id))
+            except discord.NotFound:
+                # Already deleted by hand: the obligation is over, so the record
+                # may end rather than retry against a 404 every pass.
+                item = None
             if item:
                 await item.delete(reason=t("gacha.asset_expired_reason"))
         else:
@@ -304,7 +318,14 @@ class RedeemFulfillModal(discord.ui.Modal):
         if request is None:
             return await interaction.response.send_message(
                 t("gacha.redeem_fulfill_already_settled"), ephemeral=True)
-        item_id = self.discord_item_id.value.strip()
+        # Recorded on the entitlement and deleted from Discord when it runs
+        # out, so it must name an asset of the requested type in this guild.
+        asset = await resolve_guild_asset(
+            interaction.guild, request["asset_type"], self.discord_item_id.value)
+        if asset is None:
+            return await interaction.response.send_message(
+                t("utils.asset_not_in_guild"), ephemeral=True)
+        item_id = str(asset.id)
         result = await database.run_write(
             database.fulfill_voucher_request, request["guild_id"],
             request["request_id"], interaction.user.id, item_id,

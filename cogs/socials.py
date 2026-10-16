@@ -14,7 +14,7 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from discord.ext import commands, tasks
-from cogs.utils import guild_setting_sync, handle_loop_error, t
+from cogs.utils import guild_setting_sync, handle_loop_error, plain_markdown, t
 from core.feature_access import is_enabled
 
 social_logger = logging.getLogger("PotatoBot.Socials")
@@ -181,7 +181,7 @@ class Socials(commands.Cog):
                     if (guild.id, streamer_login) not in self.live_twitch:
                         embed = discord.Embed(
                             title=t("socials.twitch_live_title", streamer=stream_info['user_name']),
-                            description=t("socials.twitch_live_desc", title=stream_info['title'], game=stream_info['game_name']),
+                            description=t("socials.twitch_live_desc", title=plain_markdown(stream_info['title']), game=plain_markdown(stream_info['game_name'])),
                             url=f"https://twitch.tv/{streamer_login}",
                             color=0x9146FF
                         )
@@ -265,7 +265,7 @@ class Socials(commands.Cog):
                         elif seen != video_id:
                             embed = discord.Embed(
                                 title=t("socials.youtube_new_video_title", channel=channel_name),
-                                description=t("socials.youtube_new_video_desc", title=title),
+                                description=t("socials.youtube_new_video_desc", title=plain_markdown(title)),
                                 url=link,
                                 color=0xFF0000
                             )

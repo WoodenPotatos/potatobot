@@ -174,3 +174,59 @@ class VoicePremiumRateTests(unittest.TestCase):
             self.assertTrue(is_premium(member))
         with patch("cogs.utils.guild_setting_sync", return_value=[]):
             self.assertFalse(is_premium(member))
+
+
+class _ScreenedRole:
+    """Enough of `discord.Role` for `can_self_assign_role` to judge it."""
+
+    def __init__(self, role_id, position=1, **permissions):
+        self.id = role_id
+        self.position = position
+        self.managed = False
+        self.permissions = SimpleNamespace(**permissions)
+
+    def is_default(self):
+        return False
+
+    def __ge__(self, other):
+        return self.position >= other.position
+
+
+class AutoroleScreeningTests(unittest.IsolatedAsyncioTestCase):
+    """An autorole is screened on join exactly as `/sync_autoroles` screens it.
+
+    The join path granted whatever `autoroles` named, so an operator who could
+    edit that setting could hand an Administrator role to the next member in.
+    """
+
+    async def test_a_privileged_autorole_is_not_granted_on_join(self):
+        import cogs.utils as utils
+
+        roles = {501: _ScreenedRole(501),
+                 2001: _ScreenedRole(2001, administrator=True)}
+        granted = []
+
+        async def add_roles(*added):
+            granted.extend(role.id for role in added)
+
+        guild = SimpleNamespace(
+            id=123, get_channel=lambda channel_id: None, get_role=roles.get,
+            me=SimpleNamespace(top_role=_ScreenedRole(1, position=100)))
+        member = SimpleNamespace(id=9, guild=guild, add_roles=add_roles)
+        cog = ServerEvents(SimpleNamespace())
+        globals_ = cog.on_member_join.__func__.__globals__
+
+        async def database_run(function, *args, **kwargs):
+            return True
+
+        settings = {"autoroles": [501, 2001], "join_channel": None}
+        with (
+            patch.dict(globals_, {
+                "is_enabled": lambda guild_id, key: key == "onboarding",
+                "guild_setting_sync": lambda guild_id, key: settings[key],
+            }),
+            patch.object(globals_["database"], "run", side_effect=database_run),
+            patch.object(utils, "guild_setting_sync", lambda guild_id, key: []),
+        ):
+            await cog.on_member_join(member)
+        self.assertEqual([501], granted)

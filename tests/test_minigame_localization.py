@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -221,3 +222,41 @@ class GenshindleHeaderTests(unittest.TestCase):
         for language, word in (("hu", "Alkat"), ("en", "Build")):
             with self.subTest(language=language):
                 self.assertNotIn(word, self.header_columns(language))
+
+
+class EverydleStateVolumeTests(unittest.TestCase):
+    """The state file may live on another filesystem than the datasets.
+
+    compose puts `POTATOBOT_EVERYDLE_STATE_PATH` on the `/data` volume while
+    `DATA_DIR` stays in the image. The temp file was created in `DATA_DIR`, so
+    `os.replace` crossed filesystems and raised EXDEV -- every Everydle command
+    failed on each day boundary in that topology, and nowhere else.
+    """
+
+    def test_the_state_is_saved_across_a_volume_boundary(self):
+        import errno
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from cogs import everydle
+
+        real_replace = os.replace
+
+        def replace_within_one_filesystem(source, target):
+            # Two directories stand in for two filesystems: a rename between
+            # them fails exactly as it does between the image and the volume.
+            if os.path.dirname(os.path.abspath(source)) != \
+                    os.path.dirname(os.path.abspath(target)):
+                raise OSError(errno.EXDEV, "Invalid cross-device link")
+            return real_replace(source, target)
+
+        with tempfile.TemporaryDirectory() as image, \
+                tempfile.TemporaryDirectory() as volume:
+            state_path = Path(volume) / "everydle_state.json"
+            with patch.object(everydle, "STATE_FILE", str(state_path)), \
+                    patch.object(everydle, "DATA_DIR", image), \
+                    patch.object(everydle.os, "replace", replace_within_one_filesystem):
+                everydle._save_everydle_state({"decks": {}, "dailies": {}})
+            self.assertEqual({"decks": {}, "dailies": {}},
+                             json.loads(state_path.read_text(encoding="utf-8")))
+            self.assertEqual([], os.listdir(image))

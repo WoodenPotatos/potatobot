@@ -4,10 +4,10 @@
 # image started with a different command, which is what lets the two run as
 # separate supervised services against one shared database volume.
 #
-# Build (from the repository root):  podman build -t potatobot:2.16.0a1 -f container/Containerfile .
-# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.16.0a1
+# Build (from the repository root):  podman build -t potatobot:2.16.1a1 -f container/Containerfile .
+# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.16.1a1
 # Panel:  podman run --env-file .env -v potatobot-data:/data -p 127.0.0.1:5000:5000 \
-#             potatobot:2.16.0a1 python dashboard_api.py
+#             potatobot:2.16.1a1 python dashboard_api.py
 
 # Pinned by digest, not tag: `3.13-slim` is a moving name, and an image that
 # changes under the same tag is a supply-chain change nobody reviewed.
@@ -32,20 +32,20 @@ WORKDIR /app
 
 # Dependencies first, so a source change does not invalidate the install layer.
 COPY requirements.lock ./
-RUN python -m pip install --no-cache-dir --requirement requirements.lock
+RUN python -m pip install --no-cache-dir --require-hashes --requirement requirements.lock
 
-COPY --chown=potatobot:potatobot . .
-
-# `WORKDIR` above created `/app` itself as root, before this COPY ran --
-# `--chown` only reaches the files it copies, never the parent directory that
-# already existed. Without this, the first thing `main.py` does (creating
-# `logs/`) and the dashboard's session-secret write both hit a PermissionError
-# the moment the container actually starts as `potatobot`.
-RUN chown potatobot:potatobot /app
+# Root-owned and read-only to the runtime user: code the process can rewrite
+# is code a compromise can persist in. Everything the bot writes at runtime
+# is pointed at the volume below instead -- the database, the logs, the
+# Everydle deck and (beside the database) the dashboard's session secret.
+COPY . .
 
 # The database lives on a volume, never in the image, so an upgrade cannot
-# replace it and a rollback cannot lose it.
+# replace it and a rollback cannot lose it. The other two paths default into
+# `/app`, which this image does not let the runtime user write.
 ENV POTATOBOT_DB_PATH=/data/economy.db \
+    POTATOBOT_LOG_DIR=/data/logs \
+    POTATOBOT_EVERYDLE_STATE_PATH=/data/everydle_state.json \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 RUN mkdir -p /data && chown potatobot:potatobot /data

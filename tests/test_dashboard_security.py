@@ -79,6 +79,44 @@ class DashboardSecurityTests(unittest.TestCase):
         banners = self.client.get("/api/guilds/123/gacha").get_json()["data"]["banners"]
         return next(banner for banner in banners if banner["is_default"])
 
+    def test_a_list_where_a_string_belongs_is_a_400_not_a_500(self):
+        """`value not in <set>` ran before any type check, so a list raised
+        `TypeError: unhashable` -- a 500 and two tracebacks per request."""
+        import copy
+        self.authenticate()
+        headers = {"X-CSRF-Token": "csrf-token"}
+        text = {"name": "Item", "description": "Thing"}
+
+        def shop_item(template, config):
+            return {"item_key": "probe", "template_type": template, "enabled": True,
+                    "price": 1, "config": config, "text": text, "category": None}
+
+        banner = self.default_banner()
+        bad_banner = copy.deepcopy(banner["config"])
+        bad_banner["rewards"]["3"][0]["kind"] = ["item"]
+        probes = {
+            "template_type": ("post", "/api/guilds/123/shop-items",
+                              shop_item(["consumable"], {})),
+            "config.item_key": ("post", "/api/guilds/123/shop-items",
+                                shop_item("consumable", {"item_key": ["x"]})),
+            "config.asset_type": ("post", "/api/guilds/123/shop-items",
+                                  shop_item("fulfillment_voucher",
+                                            {"asset_type": ["emoji"], "duration_days": 30})),
+            "entitlement asset_type": ("post", "/api/guilds/123/entitlements",
+                                       {"user_id": "1420070400000000001",
+                                        "asset_type": ["emoji"],
+                                        "discord_item_id": "1420070400000000002",
+                                        "duration_days": 30}),
+            "rewards kind": ("patch", "/api/guilds/123/gacha",
+                             {"enabled": True, "starts_at": None, "ends_at": None,
+                              "config": bad_banner, "revision": banner["revision"]}),
+        }
+        for field, (method, url, body) in probes.items():
+            with self.subTest(field=field):
+                response = getattr(self.client, method)(url, json=body, headers=headers)
+                self.assertEqual(400, response.status_code,
+                                 response.get_data(as_text=True))
+
     def test_login_uses_state_and_exact_redirect_uri(self):
         response = self.client.get("/api/auth/login")
         self.assertEqual(response.status_code, 302)
@@ -452,6 +490,31 @@ class DashboardSecurityTests(unittest.TestCase):
         )
         self.assertEqual(400, response.status_code, response.get_data(as_text=True))
         self.assertNotIn("ticket_logs", database.get_guild_settings(123))
+
+    def test_role_granting_settings_require_full_admin(self):
+        """Exactly these settings decide which role a member is handed, or who
+        the bot treats as staff. Pinned as a set, so widening or narrowing it
+        is a visible decision rather than a drive-by edit."""
+        from core.settings_registry import SETTING_DEFINITIONS
+        flagged = {key for key, definition in SETTING_DEFINITIONS.items()
+                   if definition.requires_full_admin}
+        self.assertEqual(
+            {"ticket_logs", "admin_roles", "autoroles", "level_roles", "factions"},
+            flagged)
+
+    def test_admin_roles_is_refused_for_a_guild_admin_without_full_admin(self):
+        """Manage Server alone must not add its own role to the staff list and
+        then run kick, ban and timeout through the bot."""
+        self._authenticate_guild_admin()
+        response = self.client.patch(
+            "/api/guilds/123/settings",
+            json={"changes": [{"key": "admin_roles",
+                               "value": ["1420070400000000001"],
+                               "revision": 0}]},
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
+        self.assertEqual(400, response.status_code, response.get_data(as_text=True))
+        self.assertNotIn("admin_roles", database.get_guild_settings(123))
 
     def test_a_full_admin_may_change_ticket_logs(self):
         """Guards the premise: a gate that refuses everyone is not a gate."""

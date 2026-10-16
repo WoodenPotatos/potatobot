@@ -105,6 +105,56 @@ class LocalDevelopmentDashboardTests(unittest.TestCase):
         # The WAL sidecars must travel with the file or recent commits are lost.
         self.assertIn('for suffix in ("", "-wal", "-shm")', self.SOURCE)
 
+    def load_script(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "local_dashboard_under_test", ROOT / "scripts" / "local_dashboard.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_it_refuses_to_serve_a_real_database_in_place(self):
+        """`copy_database` reuses an existing target, so `--db economy.db`
+        migrated and served the real file with OAuth bypassed."""
+        import os
+        import tempfile
+        from unittest.mock import patch
+        script = self.load_script()
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.db"
+            configured = Path(directory) / "configured.db"
+            with patch.dict(os.environ, {"POTATOBOT_DB_PATH": str(configured)}):
+                for target in (source, configured, ROOT / "economy.db",
+                               Path(os.path.relpath(ROOT / "economy.db"))):
+                    with self.subTest(target=str(target)):
+                        with self.assertRaises(SystemExit):
+                            script.refuse_real_database(source, target)
+                script.refuse_real_database(source, Path(directory) / "copy.db")
+
+    def test_the_injected_session_is_loopback_only_with_a_per_run_token(self):
+        import flask
+        script = self.load_script()
+        tokens = []
+        for _ in range(2):
+            app = flask.Flask("probe")
+            app.secret_key = "probe"
+            stand_in = type("Module", (), {"app": app})
+
+            @app.route("/probe")
+            def probe():
+                return flask.session.get("csrf_token", "")
+
+            script.install_session_injection(stand_in, [1])
+            client = app.test_client()
+            local = client.get("/probe", headers={"Host": "127.0.0.1:5001"})
+            self.assertEqual(200, local.status_code)
+            tokens.append(local.get_data(as_text=True))
+            rebound = app.test_client().get("/probe",
+                                            headers={"Host": "attacker.example"})
+            self.assertEqual(403, rebound.status_code)
+        self.assertNotEqual(tokens[0], tokens[1])
+        self.assertNotIn("local-development-csrf-token", tokens)
+
     def test_the_working_directory_is_untracked(self):
         ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn(".local-dev/", ignore)
@@ -346,11 +396,35 @@ class ConfigurationSecurityTests(unittest.TestCase):
             "actions/setup-python@v5", "actions/setup-python@v4",
             "gitleaks/gitleaks-action@v2",
         }
-        for action in deprecated:
-            self.assertNotIn(action, workflow, f"{action} runs on Node 20")
+        # Restated when the actions were pinned by commit: the version now
+        # lives in the `# vN` comment beside the SHA, so that is what is read.
+        uses = re.findall(r"uses:\s*([\w./-]+)@[0-9a-f]{40}\s+#\s*(v\d+)", workflow)
+        self.assertTrue(uses)
+        for action, version in uses:
+            self.assertNotIn(f"{action}@{version}", deprecated,
+                             f"{action}@{version} runs on Node 20")
         # The secret scan needs full history and its own job.
         self.assertIn("fetch-depth: 0", workflow)
         self.assertIn("secrets:", workflow)
+
+    def test_every_action_is_pinned_to_a_commit(self):
+        """A tag is a moving name; whoever controls the action's repository
+        can repoint it, and the next run executes that code with our token."""
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        uses = re.findall(r"^\s*-?\s*uses:\s*(\S+)(.*)$", workflow, re.MULTILINE)
+        self.assertTrue(uses)
+        for reference, rest in uses:
+            with self.subTest(action=reference):
+                self.assertRegex(reference, r"@[0-9a-f]{40}$")
+                self.assertRegex(rest, r"#\s*v\d+", "keep the tag as a comment")
+
+    def test_a_pull_request_is_scanned_with_the_base_branchs_allowlist(self):
+        """Otherwise one change can add a secret and the entry that hides it."""
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn('git checkout "origin/${GITHUB_BASE_REF}" -- .gitleaks.toml .gitleaksignore',
+                      workflow)
+        self.assertLess(workflow.index("GITHUB_BASE_REF"),
+                        workflow.index("gitleaks/gitleaks-action@"))
 
     def test_split_deployment_keeps_one_schema_owner(self):
         """Only the bot may create the schema, so the packaged dashboard must
@@ -389,6 +463,11 @@ class ConfigurationSecurityTests(unittest.TestCase):
                                   "ProtectClock=true", "ProtectHostname=true",
                                   "RemoveIPC=true"):
                     self.assertIn(directive, text)
+
+        # Tried on the host and kept (2026-10-15), so it ships. The dashboard
+        # unit was never measured with it and still inherits systemd's `false`.
+        bot_unit = (ROOT / "deploy" / "potatobot.service").read_text(encoding="utf-8")
+        self.assertIn("\nMemoryDenyWriteExecute=true\n", bot_unit)
 
         dashboard_unit = (ROOT / "deploy" / "potatobot-dashboard.service").read_text(
             encoding="utf-8"
@@ -433,6 +512,53 @@ class ConfigurationSecurityTests(unittest.TestCase):
                         ".dashboard_session_secret", "venv/", ".git"):
             with self.subTest(pattern=pattern):
                 self.assertIn(pattern, text)
+
+    def test_the_ignore_files_exclude_the_local_working_files_too(self):
+        """`.gitignore` kept these out of the repository but the image's
+        `COPY . .` from a working tree did not -- session notes, screenshots of
+        the live dashboard and rehearsal copies of a database included."""
+        text = (ROOT / ".containerignore").read_text(encoding="utf-8")
+        for pattern in ("handoff/", "graphify-out/", "Screenshot*.png",
+                        "migration-rehearsal-*/", "data/everydle_state.json",
+                        "node_modules/"):
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, text.splitlines())
+
+    def test_the_image_code_is_not_writable_by_the_runtime_user(self):
+        """Code the process can rewrite is code a compromise can persist in,
+        so `/app` stays root-owned and every runtime write is on the volume."""
+        containerfile = (ROOT / "container" / "Containerfile").read_text(encoding="utf-8")
+        instructions = [line for line in containerfile.splitlines()
+                        if line.strip() and not line.lstrip().startswith("#")]
+        self.assertNotIn("chown potatobot:potatobot /app", "\n".join(instructions))
+        self.assertIn("COPY . .", instructions)
+        for setting in ("POTATOBOT_LOG_DIR=/data/logs",
+                        "POTATOBOT_EVERYDLE_STATE_PATH=/data/everydle_state.json"):
+            with self.subTest(setting=setting):
+                self.assertIn(setting, containerfile)
+
+    def test_the_generated_session_secret_follows_the_database(self):
+        import stat
+        import tempfile
+        from unittest.mock import patch
+        import dashboard_api
+        from core import database
+        with tempfile.TemporaryDirectory() as directory, \
+                tempfile.TemporaryDirectory() as code_dir:
+            legacy = Path(code_dir) / ".dashboard_session_secret"
+            with patch.dict(os.environ, {"POTATOBOT_DASHBOARD_SESSION_SECRET": ""}), \
+                    patch.object(database, "DB_PATH", str(Path(directory) / "economy.db")), \
+                    patch.object(dashboard_api, "LEGACY_SESSION_SECRET_PATH", str(legacy)):
+                generated = dashboard_api._load_session_secret()
+                beside = Path(directory) / ".dashboard_session_secret"
+                self.assertEqual(generated, beside.read_text(encoding="utf-8"))
+                self.assertEqual(0o600, stat.S_IMODE(beside.stat().st_mode))
+                self.assertFalse(legacy.exists())
+
+                # A secret at the old location still wins, so moving the default
+                # does not end every existing session.
+                legacy.write_text("x" * 40, encoding="utf-8")
+                self.assertEqual("x" * 40, dashboard_api._load_session_secret())
 
     def test_license_carries_the_canonical_agpl_text(self):
         text = (Path(__file__).resolve().parents[1] / "LICENSE").read_text(encoding="utf-8")
@@ -563,6 +689,61 @@ class PinnedDependencyTests(unittest.TestCase):
         lock = self._pins("requirements.lock", (
             (ROOT / "requirements.lock").read_text(encoding="utf-8").splitlines()))
         self.assertEqual(set(), set(project) - set(lock))
+
+    # Both lockfiles are generated by `uv pip compile --generate-hashes` and
+    # installed with `--require-hashes` (docs/development.md). Before that the
+    # lock named only the top-level packages, so everything beneath them
+    # floated on every fresh install.
+    LOCKS = ("requirements.lock", "requirements-dev.lock")
+
+    def _lock_pins(self, path):
+        return self._pins(path, (ROOT / path).read_text(encoding="utf-8").splitlines())
+
+    def test_every_locked_pin_carries_a_hash(self):
+        """`--require-hashes` refuses an unhashed pin, so one would break every install."""
+        for path in self.LOCKS:
+            unhashed, current = [], None
+            for line in (ROOT / path).read_text(encoding="utf-8").splitlines():
+                match = self.PIN.match(line)
+                if match:
+                    if current:
+                        unhashed.append(current)
+                    current = match.group(1)
+                elif current and line.strip().startswith("--hash=sha256:"):
+                    current = None
+            if current:
+                unhashed.append(current)
+            with self.subTest(lock=path):
+                self.assertEqual([], unhashed)
+
+    def test_the_dev_lock_is_the_runtime_lock_plus_tooling(self):
+        """CI tests with the dev lock, so a runtime pin moving there tests the wrong tree."""
+        runtime = self._lock_pins("requirements.lock")
+        dev = self._lock_pins("requirements-dev.lock")
+        self.assertEqual(set(), set(runtime) - set(dev))
+        self.assertEqual({}, {name: (version, dev[name])
+                              for name, version in runtime.items()
+                              if dev[name] != version})
+
+    def test_the_dev_group_is_locked_at_its_declared_versions(self):
+        group = self._pins("pyproject.toml [dependency-groups]", (
+            (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+            .split("[dependency-groups]")[1].split("]")[0].splitlines()))
+        dev = self._lock_pins("requirements-dev.lock")
+        self.assertEqual({}, {name: (version, dev.get(name))
+                              for name, version in group.items()
+                              if dev.get(name) != version})
+
+    def test_every_install_path_requires_hashes(self):
+        for path in ("container/Containerfile", ".github/workflows/ci.yml",
+                     "docs/installation.md", "scripts/update_readme.py"):
+            installs = [line for line in
+                        (ROOT / path).read_text(encoding="utf-8").splitlines()
+                        if "-m pip install" in line and "requirements" in line]
+            with self.subTest(path=path):
+                self.assertTrue(installs, f"no lockfile install found in {path}")
+                self.assertEqual([], [line for line in installs
+                                      if "--require-hashes" not in line])
 
 
 if __name__ == "__main__":

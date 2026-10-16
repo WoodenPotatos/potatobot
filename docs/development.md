@@ -165,7 +165,7 @@ DISCORD_REDIRECT_URI=https://potatobot.example-tailnet.ts.net/api/callback
 POTATOBOT_TRUSTED_PROXY_HOPS=1
 ```
 
-`POTATOBOT_TRUSTED_PROXY_HOPS` defaults to 1 whenever an external URL is configured, which matches one Tailscale Serve or nginx front end. It controls how many forwarded hops `ProxyFix` honours; without it every request appears to come from loopback and the login rate limit becomes installation-wide. Set it explicitly only for a different topology.
+`POTATOBOT_TRUSTED_PROXY_HOPS` defaults to 1 whenever an external URL is configured, which matches one front end: Tailscale Serve, nginx alone, or a Cloudflare Tunnel straight to loopback. Cloudflare in front of nginx is 2, and the origin must then accept Cloudflare's addresses only. It controls how many forwarded hops `ProxyFix` honours; without it every request appears to come from loopback and the login rate limit becomes installation-wide. Set it explicitly only for a different topology.
 
 The callback URI must also be registered in the Discord Developer Portal. Raw LAN or Tailscale IP addresses are not substitutes for the canonical browser origin.
 
@@ -338,11 +338,13 @@ The live checkout is under `/opt/potatobot` and runs with `/opt/potatobot/venv/b
 The private dashboard pattern is:
 
 ```text
-Browser -> HTTPS MagicDNS origin -> Tailscale Serve -> 127.0.0.1:5000
-                                               |
-                                      PotatoBot process
-                                      Discord gateway/REST
-                                      SQLite WAL database
+Browser -> HTTPS origin -> one reverse proxy -> 127.0.0.1:5000
+                           (Tailscale Serve,
+                            a Cloudflare Tunnel, nginx)
+                                                       |
+                                               PotatoBot process
+                                               Discord gateway/REST
+                                               SQLite WAL database
 ```
 
 Keep the process under service supervision, keep port 5000 off untrusted interfaces, and restart after environment-variable changes because deployment and OAuth settings are read at import time.
@@ -477,6 +479,38 @@ Normal-operation targets are acknowledgement under one second, no-database ackno
 Never commit `.env`, session secrets, databases, backups, logs, tokens, OAuth secrets, or live deployment exports. Every guild and instance setting lives in SQLite and is hot-reloadable through the settings cache; there is no configuration file to review any more.
 
 The private repository history contains a historical token-shaped value. Do not make this repository public or mirror its refs. Export a sanitized working tree into a separate clean-history repository, scan it and all exported refs, remove private deployment data, then add licensing, locked dependencies, packaging, operator documentation, release notes, and stable version tags.
+
+### Dependency lockfiles
+
+`requirements.lock` (runtime) and `requirements-dev.lock` (runtime plus the dev
+group's `bandit`, `mypy` and `pip-audit`) are **generated, never edited**.
+uv generates them from `pyproject.toml`, and they pin every transitive package
+with its hashes. Every install path uses `--require-hashes`: the venv, the
+image, CI and the installation guide. pip then refuses any file whose hash
+doesn't match, and any requirement that isn't pinned. This came from the
+2026-10-15 audit. Before it, the lock named only the nine top-level packages,
+so everything beneath them floated on each fresh install.
+
+To change a version, edit the pin in `pyproject.toml` (in `dependencies`, or in
+`[dependency-groups] dev`), then regenerate both files:
+
+```
+uv pip compile pyproject.toml --universal --python-version 3.12 --generate-hashes -o requirements.lock
+uv pip compile pyproject.toml --group dev --universal --python-version 3.12 --generate-hashes -o requirements-dev.lock
+```
+
+To move a transitive package without touching a top-level pin, add
+`--upgrade-package <name>` to both commands.
+
+Why the flags are what they are:
+
+- `--universal` writes environment markers rather than resolving for this
+  machine, so one file serves 3.12–3.14. An example is `audioop-lts` from 3.13.
+- `--python-version 3.12` is the floor `requires-python` declares.
+
+`PinnedDependencyTests` keeps the files honest. It checks that the locks agree
+with `pyproject.toml` and with each other, and that every pin carries a hash.
+After regenerating, run `pip_audit -r requirements.lock`.
 
 ## 13. Documentation and backlog discipline
 

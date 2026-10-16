@@ -58,10 +58,11 @@ RestrictNamespaces=true
 RestrictSUIDSGID=true
 RestrictRealtime=true
 LockPersonality=true
-# Left off until measured on the host: PyNaCl and yt-dlp may map W+X pages
-# for their native code, and a first start with `true` is the only way to
-# know. Try it on the deployment; if voice or extraction survives, keep it.
-MemoryDenyWriteExecute=false
+# Measured on the deployment before it shipped here: the live unit has run
+# with `true` (systemd-analyze security 1.8 OK, recorded 2026-10-15) with
+# voice and extraction working. If a future PyNaCl or yt-dlp build starts
+# mapping W+X pages, the symptom is SIGSYS/EPERM in the journal on first use.
+MemoryDenyWriteExecute=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 # Every file the service creates -- the database's WAL sidecars, a migration's
 # backup, a log -- lands group-readable and world-nothing. Without this the

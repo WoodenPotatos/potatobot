@@ -20,7 +20,8 @@ from core.clock import local_date, local_time, parse_stored, utc_now
 from cogs.utils import (
     BoundedCooldownMap, apply_admin_level_change, can_self_assign_role,
     currency_emoji, guild_setting_sync, guild_settings_sync, is_staff,
-    send_moderation_log, set_guild_setting, t, update_user_data,
+    resolve_guild_asset, send_moderation_log, set_guild_setting, t,
+    update_user_data,
 )
 from core.settings_registry import SETTING_DEFINITIONS
 from core.feature_access import is_enabled, require_interaction_feature
@@ -529,6 +530,12 @@ class Admin(commands.Cog):
     async def rent_start(self, ctx, item_type: str, item_id: str):
         if item_type not in ["emoji", "sound"]:
             return await ctx.send(t("admin.invalid_rent_type"), ephemeral=True)
+        # The id is deleted from Discord when the rental runs out, so it must
+        # name an asset of that type in this guild before it is recorded.
+        asset = await resolve_guild_asset(ctx.guild, item_type, item_id)
+        if asset is None:
+            return await ctx.send(t("utils.asset_not_in_guild"), ephemeral=True)
+        item_id = str(asset.id)
 
         expires = (utc_now() + timedelta(days=30)).isoformat()
         await database.run(database.add_rented_item, item_type, item_id, expires, ctx.guild.id)

@@ -73,8 +73,12 @@ def _save_everydle_state(state):
     """Atomically persist daily IDs so interrupted writes cannot erase game state."""
     temp_path = None
     try:
+        # Beside the target, never in DATA_DIR: `os.replace` cannot cross a
+        # filesystem, and compose puts STATE_FILE on the `/data` volume while
+        # DATA_DIR stays in the image -- EXDEV on every day boundary.
         with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", dir=DATA_DIR, delete=False
+            "w", encoding="utf-8",
+            dir=os.path.dirname(os.path.abspath(STATE_FILE)), delete=False
         ) as temp_file:
             json.dump(state, temp_file, indent=4)
             temp_file.flush()
@@ -201,7 +205,7 @@ class LoldleHardModal(discord.ui.Modal):
             for child in v.children: child.disabled = True
             win_content = t("everydle.lore_win_msg", quote=target_data['quote'], header=header, history="\n".join(v.guess_history), reward=reward)
             await interaction.edit_original_response(content=win_content, view=v)
-            await interaction.channel.send(t("everydle.lore_public_win", user=interaction.user.display_name, count=len(v.guess_history), reward=reward))
+            await interaction.channel.send(t("everydle.lore_public_win", user=discord.utils.escape_mentions(interaction.user.display_name), count=len(v.guess_history), reward=reward))
         else:
             board_content = t("everydle.lore_board", quote=target_data['quote'], header=header, history="\n".join(v.guess_history))
             await interaction.edit_original_response(content=board_content, view=v)
@@ -338,7 +342,7 @@ class LoldleModal(discord.ui.Modal):
                 child.disabled = True
 
             await interaction.edit_original_response(content=win_content, embed=None, view=v)
-            await interaction.channel.send(t("everydle.loldle_public_win", user=interaction.user.display_name, diff_name=diff_name, count=len(v.guess_history), reward=reward))
+            await interaction.channel.send(t("everydle.loldle_public_win", user=discord.utils.escape_mentions(interaction.user.display_name), diff_name=diff_name, count=len(v.guess_history), reward=reward))
         else:
             target_stats_str = f"{format_target_stats()}\n\n" if is_easy else ""
             board_content = t("everydle.loldle_board", icon=diff_icon, diff_name=diff_name, header=header_text, target_stats=target_stats_str, history=history_joined)
@@ -413,7 +417,7 @@ class ValdleModal(discord.ui.Modal):
                 
             win_content = t("everydle.valdle_win_msg", header=header, history="\n".join(v.guess_history), reward=reward)
             await interaction.edit_original_response(content=win_content, view=v)
-            await interaction.channel.send(t("everydle.valdle_public_win", user=interaction.user.display_name, count=len(v.guess_history), reward=reward))
+            await interaction.channel.send(t("everydle.valdle_public_win", user=discord.utils.escape_mentions(interaction.user.display_name), count=len(v.guess_history), reward=reward))
         else:
             board_content = t("everydle.valdle_board", header=header, history="\n".join(v.guess_history))
             await interaction.edit_original_response(content=board_content, view=v)
@@ -510,7 +514,7 @@ class GenshindleModal(discord.ui.Modal):
             await interaction.edit_original_response(content=win_content, view=v)
             await interaction.channel.send(t(
                 "everydle.genshindle_public_win",
-                user=interaction.user.display_name,
+                user=discord.utils.escape_mentions(interaction.user.display_name),
                 count=len(v.guess_history), reward=reward))
         else:
             board_content = t("everydle.genshindle_board", header=header,
@@ -630,7 +634,7 @@ class DbdleModal(discord.ui.Modal):
                 
             win_content = t("everydle.dbdle_win_msg", header=header, history="\n".join(v.guess_history), reward=reward)
             await interaction.edit_original_response(content=win_content, view=v)
-            await interaction.channel.send(t("everydle.dbdle_public_win", user=interaction.user.display_name, count=len(v.guess_history), reward=reward))
+            await interaction.channel.send(t("everydle.dbdle_public_win", user=discord.utils.escape_mentions(interaction.user.display_name), count=len(v.guess_history), reward=reward))
         else:
             board_content = t("everydle.dbdle_board", header=header, history="\n".join(v.guess_history))
             await interaction.edit_original_response(content=board_content, view=v)

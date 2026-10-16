@@ -117,7 +117,8 @@ class MusicInputSecurityTests(unittest.TestCase):
         )
 
     def test_live_and_overlong_entries_are_rejected(self):
-        base = {"url": "https://media.example/audio", "title": "Test"}
+        base = {"url": "https://media.example/audio", "title": "Test",
+                "extractor_key": "Youtube"}
         self.assertIsNone(music.song_from_entry({**base, "is_live": True}, "user"))
         self.assertIsNone(
             music.song_from_entry(
@@ -134,16 +135,46 @@ class MusicInputSecurityTests(unittest.TestCase):
             "title": "Test",
             "duration": 60,
             "http_headers": {"User-Agent": "yt-dlp test client"},
+            "extractor_key": "Youtube",
         }
         song = music.song_from_entry(entry, "user")
         self.assertEqual(song["http_headers"], {"User-Agent": "yt-dlp test client"})
 
     def test_a_song_with_no_http_headers_gets_an_empty_dict(self):
         song = music.song_from_entry(
-            {"url": "https://media.example/audio", "title": "Test", "duration": 60},
+            {"url": "https://media.example/audio", "title": "Test", "duration": 60,
+             "extractor_key": "Youtube"},
             "user",
         )
         self.assertEqual(song["http_headers"], {})
+
+    def test_spellings_no_youtube_extractor_claims_are_normalised_or_refused(self):
+        """Each of these passed the host check but was handed over verbatim,
+        so no YouTube extractor claimed it and it fell to `generic`."""
+        self.assertEqual("https://www.youtube.com/watch?v=abc",
+                         music._youtube_input("https://www.youtube.com./watch?v=abc"))
+        self.assertEqual("https://www.youtube.com/watch?v=abc",
+                         music._youtube_input("https://WWW.YOUTUBE.COM/watch?v=abc"))
+        for source in ("https://youtu.be/../x", "https://youtu.be/%2e%2e/x"):
+            with self.subTest(source=source):
+                with self.assertRaises(ValueError):
+                    music._youtube_input(source)
+
+    def test_only_youtube_extractors_are_loaded(self):
+        """The allowlist is what keeps `generic` out of reach entirely."""
+        import yt_dlp
+        with yt_dlp.YoutubeDL(dict(music.ytdl_format_options)) as extractor:
+            loaded = set(extractor._ies)
+        self.assertNotIn("Generic", loaded)
+        self.assertTrue(loaded)
+        self.assertTrue(all(key.startswith("Youtube") for key in loaded), loaded)
+
+    def test_an_entry_from_another_extractor_is_refused(self):
+        entry = {"url": "https://media.example/audio", "title": "Test",
+                 "duration": 60, "extractor_key": "Generic"}
+        self.assertIsNone(music.song_from_entry(entry, "user"))
+        self.assertIsNone(music.song_from_entry(
+            {**entry, "extractor_key": None}, "user"))
 
 
 class FfmpegHeaderForwardingTests(unittest.TestCase):

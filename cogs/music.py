@@ -9,7 +9,7 @@ import yt_dlp
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse, urlunparse
 
 # Resolve repository imports independently of the process working directory.
 COG_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,7 +21,7 @@ from core import database
 
 from discord.ext import commands, tasks
 from datetime import timedelta
-from cogs.utils import BoundedCooldownMap, handle_loop_error, t
+from cogs.utils import BoundedCooldownMap, handle_loop_error, plain_markdown, t
 from core.feature_access import is_enabled, require_interaction_feature
 
 music_logger = logging.getLogger("PotatoBot.Music")
@@ -104,6 +104,11 @@ ytdl_format_options = {
     'fragment_retries': 2,
     'ignoreconfig': True,
     'extractor_args': {'youtube': {'player_client': ['android']}},
+    # Only YouTube's own extractors are loaded. A URL none of them claims --
+    # a trailing-dot or upper-case host, a `..` path -- would otherwise fall
+    # to `generic`, which fetches the page, follows redirects to any host and
+    # returns whatever media it finds there. With the allowlist it is refused.
+    'allowed_extractors': [r'youtube.*'],
 }
 
 ffmpeg_options = {
@@ -165,7 +170,12 @@ def _youtube_input(value: str) -> str:
             hostname == "youtube.com" or hostname.endswith(".youtube.com")
         ):
             raise ValueError("unsupported music source")
-        return value
+        if any(segment in (".", "..")
+               for segment in unquote(parsed.path).split("/")):
+            raise ValueError("unsupported music source")
+        # Hand over the host that was validated, not the original spelling:
+        # yt-dlp matches its extractors against the literal string.
+        return urlunparse(parsed._replace(netloc=hostname))
     return f"ytsearch1:{value}"
 
 
@@ -224,6 +234,10 @@ def song_from_entry(entry, requester):
         return None
     duration = int(entry.get("duration") or 0)
     if duration > MUSIC_MAX_DURATION:
+        return None
+    # Defence in depth behind `allowed_extractors`: whatever produced this
+    # entry, only a YouTube extractor's result reaches ffmpeg.
+    if not str(entry.get("extractor_key") or "").startswith("Youtube"):
         return None
     stream_url = entry.get("url")
     if not stream_url:
@@ -633,7 +647,7 @@ class Music(commands.Cog):
 
                 embed = discord.Embed(
                     title=t("music.now_playing_title"),
-                    description=t("music.now_playing_desc", title=song['title'], url=song.get('webpage_url', song['url'])),
+                    description=t("music.now_playing_desc", title=plain_markdown(song['title']), url=song.get('webpage_url', song['url'])),
                     color=discord.Color.blurple()
                 )
                 embed.set_thumbnail(url=song.get('thumbnail'))

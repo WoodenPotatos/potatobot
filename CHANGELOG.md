@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.16.1-beta.1
+
+This release contains the fixes from a security audit. No setting needs
+changing and the schema is unchanged.
+
+- **Roles the bot hands out are now screened for dangerous permissions.**
+  Level roles, join autoroles and a faction leader's `/manage` used to grant
+  whatever role was configured. A role carrying administrator or similar
+  permissions is now skipped with a warning, so it can no longer be granted
+  this way.
+- **The settings that grant roles or staff powers now need full
+  administrator rights on the dashboard.** These are the staff roles, level
+  roles, autoroles and factions. Manage Server is no longer enough to edit
+  them.
+- **Moderation commands now follow rank.**
+  - `/unwarn` and `/untimeout` refuse what `/warn` and `/timeout` refuse:
+    nobody can clear the record of a member ranked at or above them,
+    themselves included.
+  - `/unwarn` also refuses to remove a warning issued by a moderator ranked
+    at or above you. Administrators can still remove any warning. So can
+    the issuer, and anyone can once the issuer has left the server.
+  - `/minigame_reset` is staff-only.
+- **`/play` only uses YouTube.** A crafted link could previously reach
+  yt-dlp's generic extractor.
+- **`?reload` and `?reloadconfig` answer only to the installation's host**
+  (`ADMIN_DISCORD_ID`), not to every owner of the Discord application.
+- **Asset ids entered by staff are now checked.** In `/rent_start` and Mark
+  Fulfilled, an id must name a real emoji, sticker or sound in the server. A
+  grant whose asset id is malformed or already deleted now still expires,
+  instead of being retried forever.
+- **Text from outside sources can no longer smuggle in links or pings.**
+  - Song, stream, video and patch-note titles are shown as plain text.
+  - Everydle win messages no longer ping whatever a member put in their
+    display name.
+- **Smaller fixes:**
+  - `/search` checks the party size before the post goes out.
+  - The help menu answers only the options it offered.
+  - Five dashboard fields now reject a malformed value with an error
+    message instead of a server error.
+  - Email alerts verify the mail server's certificate.
+- **Dependencies are installed hash-pinned.** `requirements.lock` now pins
+  every package, including indirect ones, with its hashes. Install with
+  `pip install --require-hashes -r requirements.lock`; the installation
+  guide and the container image already do.
+- **The container image's code is read-only to the bot.** Everything the bot
+  writes goes on the `/data` volume, including the session secret, the logs
+  and the Everydle state.
+
 ## 2.16.0-beta.1
 
 - **Casino payouts can be rate-limited per member**, as an anti-exploit

@@ -10,6 +10,7 @@ import re
 import os
 import sqlite3
 import tempfile
+import types
 import unittest
 
 from core import database
@@ -691,11 +692,40 @@ class EntitlementRevocationTests(unittest.IsolatedAsyncioTestCase):
             self.guild, self._entitlement("sticker", item_id=None))
         self.assertTrue(ok)
 
-    async def test_a_type_error_is_caught_and_reported_as_a_failure(self):
-        # Belt and braces: the handler catches TypeError/ValueError too, so a
-        # future malformed row is a False rather than an aborted erasure.
+    async def test_a_malformed_id_ends_the_record_rather_than_raising(self):
+        # Restated 2026-10-15. This asserted False -- "retry next pass" -- which
+        # for an id nothing can ever resolve meant the entitlement never
+        # expired. What still holds is that a malformed row cannot abort an
+        # erasure; what changed is that it now completes instead of retrying.
         ok = await self.gacha.revoke_entitlement(
             self.guild, self._entitlement("emoji", item_id="not-an-id"))
+        self.assertTrue(ok)
+
+    async def test_an_asset_already_deleted_by_hand_ends_the_record(self):
+        """A sticker deleted from Discord by hand answered 404 on every pass
+        and kept its entitlement active forever."""
+        import discord
+
+        async def gone(sticker_id):
+            raise discord.NotFound(
+                types.SimpleNamespace(status=404, reason="Not Found"), "gone")
+
+        self.guild.fetch_sticker = gone
+        ok = await self.gacha.revoke_entitlement(
+            self.guild, self._entitlement("sticker", item_id="1420070400000000001"))
+        self.assertTrue(ok)
+
+    async def test_a_transient_discord_error_still_retries(self):
+        """Guards the premise: only a definite 404 ends the record."""
+        import discord
+
+        async def flaky(sticker_id):
+            raise discord.HTTPException(
+                types.SimpleNamespace(status=503, reason="Unavailable"), "later")
+
+        self.guild.fetch_sticker = flaky
+        ok = await self.gacha.revoke_entitlement(
+            self.guild, self._entitlement("sticker", item_id="1420070400000000001"))
         self.assertFalse(ok)
 
 

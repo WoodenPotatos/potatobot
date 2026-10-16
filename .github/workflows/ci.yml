@@ -13,6 +13,11 @@ on:
 permissions:
   contents: read
 
+# Every action is pinned to a commit, with its tag as a comment. A tag is a
+# moving name: whoever controls the action's repository can repoint it, and the
+# next run executes that code with this workflow's token. Bump a pin
+# deliberately, by resolving the tag again (`git ls-remote`), never by editing
+# the comment alone.
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -21,8 +26,8 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -31,14 +36,16 @@ jobs:
       # payload each creator submits. Without Node they call `skipTest` and pass,
       # so the checks guarding the defects that reached the deployment were the
       # ones CI never ran.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
       # Test-only. The dashboard itself has no build step and no runtime
       # dependencies; jsdom exists so a test can actually boot the page, which
       # is the only thing that catches a throw during startup.
-      - run: npm install --no-audit --no-fund
-      - run: python -m pip install --requirement requirements-dev.lock
+      # `ci`, not `install`: installs exactly package-lock.json and fails if it
+      # disagrees with package.json, so a run cannot resolve a newer jsdom.
+      - run: npm ci --no-audit --no-fund
+      - run: python -m pip install --require-hashes --requirement requirements-dev.lock
       - run: python -m compileall -q . -x './\.git|./venv|./\.venv'
       # Scoped to core/ only -- see the comment on [tool.mypy] in
       # pyproject.toml for why cogs/ is out of scope for now.
@@ -60,7 +67,7 @@ jobs:
   container:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: docker build -f container/Containerfile -t potatobot:ci .
 
   # Separate from the Python matrix so the secret scan runs once rather than
@@ -77,13 +84,19 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # The action scans a commit range, so the base commit must exist
           # locally; a shallow clone breaks it. Full depth also lets the
           # scheduled run cover the whole history.
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v3
+      # On a pull request, scan with the *base* branch's rules and allowlist.
+      # Otherwise one change can add a secret and the allowlist entry that
+      # hides it, and the scan approves its own exemption. Changing either
+      # file therefore needs a change of its own that lands first.
+      - if: github.event_name == 'pull_request'
+        run: git checkout "origin/${GITHUB_BASE_REF}" -- .gitleaks.toml .gitleaksignore
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Pinned so a new upstream rule cannot turn a green build red without

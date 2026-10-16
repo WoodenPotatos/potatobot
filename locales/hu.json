@@ -656,6 +656,7 @@
     "filter_channel_label": "Csatorna",
     "filter_match_label": "Illeszkedő bejegyzés",
     "unwarn_not_found": "Nem található #{warning_id} azonosítójú figyelmeztetés ennél a felhasználónál ezen a szerveren.",
+    "unwarn_issuer_senior": "❌ Ezt a figyelmeztetést {mod} adta ki, aki ugyanolyan vagy magasabb rangban van nálad, ezért nem távolíthatod el.",
     "unwarn_success": "A(z) #{warning_id} figyelmeztetés eltávolítva {user} felhasználótól. Hátralévő figyelmeztetések: {count}.",
     "warn_entry_title_with_id": "#{warning_id} | {date} | Moderátor: {mod}",
     "modlogs_title": "📂 Felhasználói Dosszié: {user}",
@@ -882,6 +883,7 @@
     "version_maint_false": "Hamis ✅",
     "version_unknown": "Ismeretlen",
     "search_err_role_not_found": "❌ Hiba: A konfigurált rang nem található a szerveren!",
+    "search_err_needed_range": "❌ A keresett létszám 0 és {limit} között lehet (0 = nincs korlát).",
     "search_ping_msg": "{role} | **{user}** embereket keres!",
     "search_err_no_game": "❌ Ebben a csatornában meg kell adnod a játék nevét is! Pl: `/search 4 Minecraft`",
     "search_err_game_too_long": "❌ A játék neve legfeljebb {limit} karakter lehet.",
@@ -2148,6 +2150,7 @@
     "level_up_2": "🎉 {user} elérte a **2. szintet**! A kaland elkezdődött.",
     "level_up_x": "🏆 Mérföldkő teljesítve! {user} elérte a **{level} szintet**!",
     "err_no_perms": "🚫 **Hozzáférés megtagadva:** Nincsen moderálási jogosultságod.",
+    "asset_not_in_guild": "❌ Ezzel az azonosítóval nem található ilyen típusú elem (emoji, matrica vagy hang) ezen a szerveren. Másold ki a pontos azonosítót a szerver beállításaiból.",
     "err_no_dm": "🚫 Nem használhatod ezt a parancsot privátban.",
     "err_wrong_channel": "🚫 **Rossz csatorna!**\nEzt a parancsot használd itt: {channels}",
     "anonymous_member": "Névtelen tag #{tag}"

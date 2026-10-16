@@ -583,5 +583,58 @@ class EditedMessageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], self.counting_channel.deleted)
 
 
+class MinigameResetGateTests(unittest.IsolatedAsyncioTestCase):
+    """`/minigame_reset` wipes a chain and its streak, so the bot must refuse it.
+
+    It carried only `default_permissions(manage_guild=True)`, which is Discord's
+    *default* for the slash form: an administrator can override it, and the
+    prefix form never reads it, so any member could `?minigame_reset counting`.
+    """
+
+    def setUp(self):
+        # Its own database, so `admin_roles` resolves from a known empty guild
+        # rather than from whatever stray `economy.db` sits in the checkout.
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "reset_gate.db")
+        database.initialize_database()
+        settings_cache.invalidate()
+
+    def tearDown(self):
+        settings_cache.invalidate()
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def ctx(self, administrator):
+        sent = []
+
+        async def send(*args, **kwargs):
+            sent.append((args, kwargs))
+
+        author = types.SimpleNamespace(
+            guild_permissions=types.SimpleNamespace(administrator=administrator),
+            roles=[types.SimpleNamespace(id=555)],
+        )
+        return types.SimpleNamespace(author=author, guild=types.SimpleNamespace(id=GUILD),
+                                     send=send, sent=sent)
+
+    async def run_checks(self, ctx):
+        import cogs.minigames
+        command = cogs.minigames.Minigames.minigame_reset
+        self.assertTrue(command.checks, "minigame_reset carries no bot-side check")
+        for check in command.checks:
+            if not await check(ctx):
+                return False
+        return True
+
+    async def test_an_ordinary_member_is_refused(self):
+        ctx = self.ctx(administrator=False)
+        self.assertFalse(await self.run_checks(ctx))
+        self.assertTrue(ctx.sent)
+
+    async def test_an_administrator_passes(self):
+        self.assertTrue(await self.run_checks(self.ctx(administrator=True)))
+
+
 if __name__ == "__main__":
     unittest.main()

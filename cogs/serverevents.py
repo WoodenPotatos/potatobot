@@ -18,7 +18,8 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta
 from core.clock import local_date, local_time, parse_stored, utc_now
 from cogs.utils import (BoundedCooldownMap, BoundedValueMap,
-                        apply_database_result, guild_setting_sync,
+                        apply_database_result, can_self_assign_role,
+                        guild_setting_sync,
                         handle_loop_error, is_premium, mark_top_ranker_dirty,
                         update_user_data, voice_reward_block, t)
 
@@ -289,10 +290,19 @@ class ServerEvents(commands.Cog):
         )
         roles_to_add = []
 
+        # Screened exactly like `/sync_autoroles`, so an autorole configured
+        # onto a privileged, staff or unmanageable role is never handed to
+        # whoever joins next.
         for role_id in autorole_ids:
             role = member.guild.get_role(role_id)
-            if role:
+            if role is None:
+                continue
+            if can_self_assign_role(member.guild, role):
                 roles_to_add.append(role)
+            else:
+                event_logger.warning(
+                    "Autorole skipped: privileged, staff, managed or above the "
+                    "bot (guild_id=%s, role_id=%s).", member.guild.id, role.id)
 
         if roles_to_add:
             try:

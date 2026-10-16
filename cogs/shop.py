@@ -697,8 +697,19 @@ class Shop(commands.Cog):
                 # asset lived on in whichever guild owned it — one silently, two
                 # after logging a misleading "failed to delete".
                 found = False
+                # Stored before `/rent_start` validated ids: nothing can be
+                # reached through it, so it counts as already gone rather than
+                # failing `int()` -- and keeping the row -- on every pass.
+                malformed = not str(discord_item_id).isdigit()
+                if malformed:
+                    shop_logger.warning(
+                        "Expired %s rental has a malformed Discord ID; clearing it.",
+                        item_type,
+                    )
                 try:
-                    if item_type == "emoji":
+                    if malformed:
+                        pass
+                    elif item_type == "emoji":
                         emoji = guild.get_emoji(int(discord_item_id))
                         found = emoji is not None
                         if emoji:

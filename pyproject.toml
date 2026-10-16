@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "potatobot"
-version = "2.16.0b1"
+version = "2.16.1b1"
 description = "A Hungarian-first Discord community bot and control plane"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
@@ -19,6 +19,15 @@ dependencies = [
   "requests==2.34.2",
   "waitress==3.0.2",
   "yt-dlp==2026.8.19",
+]
+
+# The development and security tooling `requirements-dev.lock` is compiled
+# from. Both lockfiles are generated, never edited; see docs/development.md.
+[dependency-groups]
+dev = [
+  "bandit==1.9.4",
+  "mypy==2.3.1",
+  "pip-audit==2.10.1",
 ]
 
 [tool.setuptools]

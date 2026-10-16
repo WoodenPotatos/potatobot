@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from core import database
 from core.bounded import BoundedCooldownMap, BoundedValueMap
@@ -152,3 +152,114 @@ class MusicExecutorTests(unittest.TestCase):
     def test_the_executor_outnumbers_the_semaphore(self):
         import cogs.music
         self.assertEqual(4, cogs.music.music_extract_executor._max_workers)
+
+
+class HostOnlyReloadTests(unittest.IsolatedAsyncioTestCase):
+    """`?reload`/`?reloadconfig` mean the host, as everything else does.
+
+    They were `commands.is_owner()`, which for a team-owned application admits
+    every team member with the Admin or Developer role -- not
+    `ADMIN_DISCORD_ID`, the one id the dashboard and `set_guild_setting` call
+    the host.
+    """
+
+    def ctx(self, author_id, application_owner=False):
+        async def is_owner(user):
+            return application_owner
+        return SimpleNamespace(author=SimpleNamespace(id=author_id),
+                               bot=SimpleNamespace(is_owner=is_owner))
+
+    async def check(self, ctx, host):
+        from discord.ext import commands
+        from cogs.utils import is_host
+
+        @is_host()
+        async def command(ctx):
+            pass
+
+        environment = {"ADMIN_DISCORD_ID": host} if host is not None else {}
+        with patch.dict(os.environ, environment, clear=False):
+            if host is None:
+                os.environ.pop("ADMIN_DISCORD_ID", None)
+            try:
+                return await command.__commands_checks__[0](ctx)
+            except commands.NotOwner:
+                return False
+
+    async def test_a_team_member_who_is_not_the_host_is_refused(self):
+        self.assertFalse(await self.check(self.ctx(7, application_owner=True), "42"))
+
+    async def test_the_host_passes(self):
+        self.assertTrue(await self.check(self.ctx(42), "42"))
+
+    async def test_with_no_host_configured_the_application_owner_keeps_access(self):
+        self.assertTrue(await self.check(self.ctx(7, application_owner=True), None))
+        self.assertFalse(await self.check(self.ctx(7), None))
+
+    def test_both_reload_commands_use_the_host_check(self):
+        import ast
+        tree = ast.parse((ROOT / "main.py").read_text(encoding="utf-8"))
+        for name in ("reload", "reload_config_cmd"):
+            function = next(node for node in ast.walk(tree)
+                            if isinstance(node, ast.AsyncFunctionDef)
+                            and node.name == name)
+            decorators = {ast.unparse(d) for d in function.decorator_list}
+            with self.subTest(command=name):
+                self.assertIn("is_host()", decorators)
+                self.assertNotIn("commands.is_owner()", decorators)
+
+
+class StaffAssetIdTests(unittest.IsolatedAsyncioTestCase):
+    """A staff-entered asset id must name an asset of that type in this guild.
+
+    `/rent_start` and the Mark Fulfilled modal stored any string, and the
+    expiry passes later `int()`ed it and deleted whatever it named -- so an
+    `admin_roles` member without Manage Expressions could schedule deletion of
+    any emoji, sticker or sound, and a non-numeric id never expired.
+    """
+
+    def guild(self):
+        import discord
+
+        async def fetch_sticker(sticker_id):
+            if sticker_id == 77:
+                return SimpleNamespace(id=77)
+            raise discord.NotFound(SimpleNamespace(status=404, reason="x"), "gone")
+
+        return SimpleNamespace(
+            id=111,
+            get_emoji=lambda emoji_id: SimpleNamespace(id=55) if emoji_id == 55 else None,
+            fetch_sticker=fetch_sticker,
+        )
+
+    async def test_only_an_asset_of_that_kind_in_this_guild_resolves(self):
+        from cogs.utils import resolve_guild_asset
+        guild = self.guild()
+        self.assertEqual(55, (await resolve_guild_asset(guild, "emoji", " 55 ")).id)
+        self.assertEqual(77, (await resolve_guild_asset(guild, "sticker", "77")).id)
+        for kind, raw in (("emoji", "56"), ("sticker", "78"), ("emoji", "abc"),
+                          ("emoji", ""), ("emoji", "-55"), ("role", "55"),
+                          ("emoji", "9" * 21)):
+            with self.subTest(kind=kind, raw=raw):
+                self.assertIsNone(await resolve_guild_asset(guild, kind, raw))
+
+    async def test_rent_start_records_nothing_for_an_unresolved_id(self):
+        import cogs.admin as admin
+        sent, recorded = [], []
+
+        async def send(*args, **kwargs):
+            sent.append(args)
+
+        async def run(function, *args):
+            recorded.append(function)
+
+        ctx = SimpleNamespace(guild=self.guild(), send=send)
+        cog = admin.Admin.__new__(admin.Admin)
+        with patch.object(admin.database, "run", run):
+            await admin.Admin.rent_start.callback(cog, ctx, "emoji", "424242")
+        self.assertEqual([], recorded)
+        self.assertEqual(1, len(sent))
+
+        with patch.object(admin.database, "run", run):
+            await admin.Admin.rent_start.callback(cog, ctx, "emoji", "55")
+        self.assertEqual([admin.database.add_rented_item], recorded)

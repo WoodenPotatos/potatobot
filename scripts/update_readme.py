@@ -68,7 +68,7 @@ def render_install() -> str:
         "git clone https://github.com/WoodenPotatos/potatobot.git /opt/potatobot",
         "cd /opt/potatobot",
         "python3 -m venv venv",
-        "./venv/bin/python -m pip install --requirement requirements.lock",
+        "./venv/bin/python -m pip install --require-hashes --requirement requirements.lock",
         "cp .env.example .env        # add your bot token",
         "POTATOBOT_DB_PATH=$PWD/economy.db ./venv/bin/python update_db.py",
         "./venv/bin/python main.py",

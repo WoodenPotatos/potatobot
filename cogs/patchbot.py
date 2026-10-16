@@ -30,7 +30,7 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
-from cogs.utils import guild_setting_sync, handle_loop_error, t
+from cogs.utils import guild_setting_sync, handle_loop_error, plain_markdown, t
 from core import database
 from core.feature_access import is_enabled
 
@@ -367,7 +367,7 @@ class Patchbot(commands.Cog):
         role_id = guild_setting_sync(guild.id, f"patchbot_{game_key}_role")
         embed = discord.Embed(
             title=t("patchbot.new_patch_title", game=t(f"dashboard.game_names.{game_key}")),
-            description=t("patchbot.new_patch_desc", title=title),
+            description=t("patchbot.new_patch_desc", title=plain_markdown(title)),
             url=url,
             color=0x2ECC71,
         )

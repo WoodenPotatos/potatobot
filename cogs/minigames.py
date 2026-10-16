@@ -31,7 +31,7 @@ from discord.ext import commands
 
 from core import database
 from core import wordchain_dictionary
-from cogs.utils import guild_setting_sync, guild_settings_sync, t
+from cogs.utils import guild_setting_sync, guild_settings_sync, is_staff, t
 from core.feature_access import is_enabled, maintenance_blocks
 
 minigame_logger = logging.getLogger("PotatoBot.Minigames")
@@ -357,6 +357,10 @@ class Minigames(commands.Cog):
 
     @commands.hybrid_command(name="minigame_reset",
                              description=t("general.cmd_minigame_reset"))
+    # `default_permissions` is only Discord's default: an administrator can
+    # override it per guild and the prefix form never consults it. `is_staff`
+    # is the check the bot itself enforces.
+    @is_staff()
     @discord.app_commands.default_permissions(manage_guild=True)
     @discord.app_commands.choices(game=MINIGAME_CHOICES)
     async def minigame_reset(self, ctx, game: str):

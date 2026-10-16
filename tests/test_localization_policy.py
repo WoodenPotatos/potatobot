@@ -364,8 +364,9 @@ class JavaScriptIsActuallyRunTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("actions/setup-node", workflow)
         # And the one test-only package, or the boot test skips in CI —
-        # which is the silence this whole class exists to prevent.
-        self.assertIn("npm install", workflow)
+        # which is the silence this whole class exists to prevent. `npm ci`
+        # since 2026-10-15: the same install, from the lockfile exactly.
+        self.assertIn("npm ci", workflow)
 
     def test_the_skip_is_the_only_reason_they_would_not_run(self):
         """If Node is here, none of them may skip — a skip then means the

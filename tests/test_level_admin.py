@@ -156,9 +156,20 @@ class DeltaReportsOldExperienceTests(unittest.TestCase):
 
 
 class Role:
-    def __init__(self, role_id, name="role"):
+    """Enough of `discord.Role` for `can_self_assign_role` to judge it."""
+
+    def __init__(self, role_id, name="role", position=1, **permissions):
         self.id = role_id
         self.name = name
+        self.position = position
+        self.managed = False
+        self.permissions = SimpleNamespace(**permissions)
+
+    def is_default(self):
+        return False
+
+    def __ge__(self, other):
+        return self.position >= other.position
 
 
 class LevelRoleReconciliationTests(unittest.IsolatedAsyncioTestCase):
@@ -170,14 +181,22 @@ class LevelRoleReconciliationTests(unittest.IsolatedAsyncioTestCase):
     """
 
     MILESTONES = {5: 501, 10: 1001, 20: 2001}
+    # Configured as the level-20 milestone, and carrying administrator.
+    PRIVILEGED = {2001}
+
+    def role(self, role_id):
+        if role_id in self.PRIVILEGED:
+            return Role(role_id, administrator=True)
+        return Role(role_id)
 
     def member(self, *roles):
         return SimpleNamespace(
             id=7, roles=list(roles),
             guild=SimpleNamespace(
                 id=99,
-                get_role=lambda rid: Role(rid),
-                roles=[Role(rid) for rid in self.MILESTONES.values()],
+                get_role=self.role,
+                roles=[self.role(rid) for rid in self.MILESTONES.values()],
+                me=SimpleNamespace(top_role=Role(1, position=100)),
             ),
             add_roles=AsyncMock(), remove_roles=AsyncMock(),
         )
@@ -186,8 +205,25 @@ class LevelRoleReconciliationTests(unittest.IsolatedAsyncioTestCase):
         import cogs.utils as utils
 
         with patch.object(utils, "guild_setting",
-                          AsyncMock(return_value=dict(self.MILESTONES))):
+                          AsyncMock(return_value=dict(self.MILESTONES))), \
+                patch.object(utils, "guild_setting_sync",
+                             lambda guild_id, key: []):
             await utils.reconcile_level_roles(member, level)
+
+    async def test_a_privileged_milestone_role_is_never_granted(self):
+        """A Manage Server operator could name an Administrator role as a
+        milestone; levelling up must not hand it out."""
+        member = self.member(Role(1001))
+        await self.reconcile(member, 20)
+        member.add_roles.assert_not_awaited()
+
+    async def test_a_privileged_role_the_member_holds_is_left_alone(self):
+        """The bot does not manage a role it may not grant, in either
+        direction: a staff member holding it keeps it on a demotion."""
+        member = self.member(self.role(2001))
+        await self.reconcile(member, 5)
+        member.remove_roles.assert_not_awaited()
+        self.assertEqual(501, member.add_roles.await_args.args[0].id)
 
     async def test_a_promotion_grants_the_role_and_clears_the_lower_one(self):
         member = self.member(Role(501))

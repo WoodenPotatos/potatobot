@@ -142,6 +142,24 @@ class MigrationTests(unittest.TestCase):
             )
         self.assertEqual(len(glob.glob(f"{database.DB_PATH}.backup-v1-*")), 1)
 
+    def test_the_pre_migration_backup_is_owner_only_whatever_the_umask(self):
+        """`sqlite3.connect` took the backup's mode from the caller's umask, so
+        a migration run from an ordinary `0022` shell left a full copy of every
+        member's data world-readable beside the database."""
+        import stat
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("CREATE TABLE users (user_id INTEGER PRIMARY KEY, balance INTEGER)")
+            conn.execute("PRAGMA user_version = 1")
+            conn.commit()
+        previous = os.umask(0o022)
+        try:
+            database.initialize_database()
+        finally:
+            os.umask(previous)
+        backups = glob.glob(f"{database.DB_PATH}.backup-v1-*")
+        self.assertEqual(1, len(backups))
+        self.assertEqual(0o600, stat.S_IMODE(os.stat(backups[0]).st_mode))
+
     def test_newer_database_version_is_rejected(self):
         with closing(sqlite3.connect(database.DB_PATH)) as conn:
             conn.execute(f"PRAGMA user_version = {database.LATEST_SCHEMA_VERSION + 1}")

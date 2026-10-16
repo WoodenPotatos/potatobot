@@ -31,7 +31,7 @@ if deployment_settings.dashboard_enabled:
 
 from core import logging_setup
 from core.bounded import BoundedCooldownMap
-from cogs.utils import t
+from cogs.utils import is_host, t
 from discord.ext import commands
 
 # Configure logging before the bot starts so startup and migration failures are
@@ -466,13 +466,13 @@ async def on_command_error(ctx, error):
         )
 
 @bot.command()
-@commands.is_owner()
+@is_host()
 async def reload(ctx, cog_name: str):
     await bot.reload_extension(f"cogs.{cog_name}")
     await ctx.send(t("system.extension_reloaded", cog=cog_name))
 
 @bot.command(name="reloadconfig")
-@commands.is_owner()
+@is_host()
 async def reload_config_cmd(ctx):
     """Force an immediate settings-cache refresh.
 

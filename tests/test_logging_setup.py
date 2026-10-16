@@ -82,6 +82,23 @@ class AlertEmailHandlerBehaviorTests(unittest.TestCase):
                 handler.close()
         mocked_smtp.assert_called_once()
 
+    def test_starttls_verifies_the_server_certificate(self):
+        """With no `context`, `starttls()` checks no certificate at all."""
+        import ssl
+        with patch("core.logging_setup.smtplib.SMTP") as mocked_smtp:
+            smtp_instance = MagicMock()
+            mocked_smtp.return_value.__enter__.return_value = smtp_instance
+            handler = self._handler()
+            try:
+                handler.emit(self._record("boom"))
+                handler._queue.join()
+            finally:
+                handler.close()
+        context = smtp_instance.starttls.call_args.kwargs.get("context")
+        self.assertIsInstance(context, ssl.SSLContext)
+        self.assertEqual(ssl.CERT_REQUIRED, context.verify_mode)
+        self.assertTrue(context.check_hostname)
+
     def test_a_burst_of_identical_records_sends_exactly_one_email(self):
         with patch("core.logging_setup.smtplib.SMTP") as mocked_smtp:
             smtp_instance = MagicMock()

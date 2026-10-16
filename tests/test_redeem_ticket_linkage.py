@@ -217,9 +217,16 @@ class RedeemFulfillViewTests(_FulfillmentTestCase, unittest.IsolatedAsyncioTestC
         self.is_staff_patch.stop()
         super().tearDown()
 
+    #: Emoji that exist in the stand-in guild; any other id resolves nowhere.
+    GUILD_EMOJI = {123456, 999}
+
     def _interaction(self, channel_id, user_id=STAFF):
+        guild = types.SimpleNamespace(
+            id=GUILD,
+            get_emoji=lambda emoji_id: (types.SimpleNamespace(id=emoji_id)
+                                        if emoji_id in self.GUILD_EMOJI else None))
         return types.SimpleNamespace(
-            channel_id=channel_id,
+            channel_id=channel_id, guild=guild,
             user=types.SimpleNamespace(id=user_id, mention=f"<@{user_id}>"),
             response=types.SimpleNamespace(
                 send_message=AsyncMock(), send_modal=AsyncMock(),
@@ -254,6 +261,26 @@ class RedeemFulfillViewTests(_FulfillmentTestCase, unittest.IsolatedAsyncioTestC
                 "SELECT status FROM fulfillment_requests WHERE request_id = ?",
                 (request["request_id"],)).fetchone()[0]
         self.assertEqual("fulfilled", status)
+
+    async def test_an_id_that_names_no_asset_in_this_guild_is_refused(self):
+        """The id is deleted from Discord when the entitlement runs out, so an
+        unchecked one let staff schedule the deletion of any asset -- or store
+        a non-numeric string that made the entitlement never expire."""
+        request = self._open_request()
+        database.link_fulfillment_ticket(GUILD, request["request_id"], 555)
+        for value in ("424242", "not-an-id"):
+            with self.subTest(value=value):
+                modal = self.gacha.RedeemFulfillModal()
+                modal.discord_item_id._value = value
+                interaction = self._interaction(channel_id=555)
+                await modal.on_submit(interaction)
+                interaction.response.send_message.assert_awaited_once()
+                interaction.response.edit_message.assert_not_called()
+        with database.get_connection() as conn:
+            status = conn.execute(
+                "SELECT status FROM fulfillment_requests WHERE request_id = ?",
+                (request["request_id"],)).fetchone()[0]
+        self.assertEqual("open", status)
 
     async def test_submitting_the_modal_on_an_already_settled_request_is_refused(self):
         request = self._open_request()

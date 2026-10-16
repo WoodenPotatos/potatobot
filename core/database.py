@@ -1511,6 +1511,12 @@ def initialize_database():
                 # database, not a value anything parses.
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
                 backup_path = f"{DB_PATH}.backup-v{current_version}-{timestamp}"
+                # Created owner-only before SQLite opens it: `sqlite3.connect`
+                # takes its mode from whatever umask the caller happens to
+                # have, and a backup is a full copy of every member's data.
+                # O_EXCL also refuses to write into a file already there.
+                os.close(os.open(backup_path,
+                                 os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
                 with closing(sqlite3.connect(backup_path)) as backup_conn:
                     conn.backup(backup_conn)
                 db_logger.info("Pre-migration database backup created: %s", backup_path)
@@ -4541,7 +4547,8 @@ def _validated_gacha_config(config_value: dict, banner_key: str | None = None) -
                 <= {"key", "kind", "amount", "weight", "enabled", "featured"}
             ):
                 raise ValidationError("gacha_reward_fields", "gacha reward has unexpected fields")
-            if entry["kind"] not in {"coins", "item", "vault", "voucher"}:
+            if (not isinstance(entry["kind"], str)
+                    or entry["kind"] not in {"coins", "item", "vault", "voucher"}):
                 raise ValidationError("gacha_reward_kind", "gacha reward kind is invalid")
             if "enabled" in entry and not isinstance(entry["enabled"], bool):
                 raise ValidationError("gacha_reward_enabled", "gacha reward enabled must be boolean")

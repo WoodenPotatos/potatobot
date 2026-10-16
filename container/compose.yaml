@@ -12,8 +12,8 @@
 # Copy .env.example to ../.env and fill in real values first -- both services
 # declare env_file: ../.env below and neither starts without it. Set a real
 # POTATOBOT_DASHBOARD_SESSION_SECRET there too: without one, the dashboard
-# falls back to a generated file under /app, which is not the /data volume
-# and is lost on every recreate, silently ending every session.
+# generates a file beside the database on the /data volume, which survives a
+# recreate but is one more secret living with the data rather than the config.
 #
 # Run migrations once, before first start:
 #   podman-compose -f container/compose.yaml run --rm bot python update_db.py
@@ -42,7 +42,7 @@ services:
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.16.0a1
+    image: potatobot:2.16.1a1
     restart: unless-stopped
     env_file: ../.env
     environment:
@@ -62,7 +62,7 @@ services:
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.16.0a1
+    image: potatobot:2.16.1a1
     command: ["python", "dashboard_api.py"]
     restart: unless-stopped
     env_file: ../.env

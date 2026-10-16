@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.16.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.16.1-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -27,7 +27,7 @@ Early access. Expect breaking changes between releases.
 git clone https://github.com/WoodenPotatos/potatobot.git /opt/potatobot
 cd /opt/potatobot
 python3 -m venv venv
-./venv/bin/python -m pip install --requirement requirements.lock
+./venv/bin/python -m pip install --require-hashes --requirement requirements.lock
 cp .env.example .env        # add your bot token
 POTATOBOT_DB_PATH=$PWD/economy.db ./venv/bin/python update_db.py
 ./venv/bin/python main.py
@@ -77,7 +77,7 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Ever
 - Optional Twitch API credentials for stream notifications
 - Optional Tailscale Serve for the private HTTPS dashboard
 
-Runtime dependencies are pinned in `requirements.lock`; development and security tooling is pinned in `requirements-dev.lock`.
+Runtime dependencies are pinned in `requirements.lock`; development and security tooling is pinned in `requirements-dev.lock`. Both are generated with hashes for every transitive package, so install with `--require-hashes`.
 
 ## Configuration
 
@@ -172,6 +172,18 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.16.1-beta.1
+
+- **Roles the bot hands out are now screened for dangerous permissions.** Level roles, join autoroles and a faction leader's `/manage` used to grant whatever role was configured. A role carrying administrator or similar permissions is now skipped with a warning, so it can no longer be granted this way.
+- **The settings that grant roles or staff powers now need full administrator rights on the dashboard.** These are the staff roles, level roles, autoroles and factions. Manage Server is no longer enough to edit them.
+- **Moderation commands now follow rank.** - `/unwarn` and `/untimeout` refuse what `/warn` and `/timeout` refuse: nobody can clear the record of a member ranked at or above them, themselves included. - `/unwarn` also refuses to remove a warning issued by a moderator ranked at or above you. Administrators can still remove any warning. So can the issuer, and anyone can once the issuer has left the server. - `/minigame_reset` is staff-only.
+- **`/play` only uses YouTube.** A crafted link could previously reach yt-dlp's generic extractor.
+- **`?reload` and `?reloadconfig` answer only to the installation's host** (`ADMIN_DISCORD_ID`), not to every owner of the Discord application.
+- **Asset ids entered by staff are now checked.** In `/rent_start` and Mark Fulfilled, an id must name a real emoji, sticker or sound in the server. A grant whose asset id is malformed or already deleted now still expires, instead of being retried forever.
+- **Text from outside sources can no longer smuggle in links or pings.** - Song, stream, video and patch-note titles are shown as plain text. - Everydle win messages no longer ping whatever a member put in their display name.
+- **Smaller fixes:** - `/search` checks the party size before the post goes out. - The help menu answers only the options it offered. - Five dashboard fields now reject a malformed value with an error message instead of a server error. - Email alerts verify the mail server's certificate.
+- …and 2 more, in [CHANGELOG.md](CHANGELOG.md).
+
 ### 2.16.0-beta.1
 
 - **Casino payouts can be rate-limited per member**, as an anti-exploit safeguard against a bug or glitch letting a balance grow abnormally fast. Ships off, with no default threshold, so it does nothing until an operator sets both a time window and a coin ceiling; a win that would cross the ceiling within that window is then capped rather than refused, and the configured staff channel gets an alert.
@@ -192,18 +204,6 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - **The wheel segment editor shows whether the table still pays out correctly.** Editing `/wheel`'s weights in the dashboard now shows the actual expected return live, instead of only finding out it does not add up to exactly 98% after trying to save.
 - **The dashboard's message preview now renders real formatting**, not just channel and role mentions: bold, italic, underline, strikethrough, spoilers, code, code blocks, quotes, headings, lists, links and timestamps all show roughly the way Discord will actually render them.
 - …and 5 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.14.0-beta.1
-
-- **A word chain now knows Hungarian letters.** `sz`, `gy`, `ny`, `cs`, `ly`, `ty`, `zs`, `dz` and `dzs` are single letters to anyone playing, but the bot compared one character at a time — so after `busz` it deleted `szék` and accepted `zebra`. It now joins words by the letter a player would name, and a doubled digraph like `rossz` ends in `sz` as it should. Servers set to English keep single letters, because `only` and `many` end in `y` there.
-- **A word only counts once in a chain.** Repeating a word from earlier is refused with a note saying so; only the word immediately before it was caught until now. `/minigame_reset` clears the used words along with the chain, and a chain already in progress keeps every word it played before this arrived.
-- **Only the bot's host can switch maintenance mode.** `/maintenance` stops the bot in every server it is in, and it used to accept anyone with a staff role. It now refuses everyone but the installation's owner, the same rule the dashboard already applied, and says so.
-- **Erasing a member now reaches the LFG parties they joined, the last-player mark in the counting and word-chain channels, and the queued erasure itself.** Those records arrived after the privacy work and were being left behind.
-- **Text settings have a length, and list settings have a size.** The currency symbol, the command prefix, filter words, ignored users, streamers and channels each carry a limit the form shows and the server enforces, because an over-long currency symbol would have broken every message that prints a balance.
-- **Amounts have a ceiling.** `/pay`, `/award`, `/awardall` and every casino stake refuse anything above a trillion with a message, instead of the command silently doing nothing on an absurd number.
-- **Moderation commands say why they could not act.** `/kick`, `/ban` and `/timeout` now tell the moderator when the target's role is above the bot's, and a reason can no longer ping roles or overflow the log embed.
-- **Cooldowns and daily resets keep the right length across a clock change.** Every timestamp is stored in one clock now, and a `/daily` countdown says how long until local midnight rather than until a moment that shifted with daylight saving.
-- …and 3 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

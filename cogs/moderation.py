@@ -31,7 +31,8 @@ from datetime import datetime, timedelta
 from core.clock import local_date, local_time, parse_stored, utc_now
 from core.feature_access import is_enabled, maintenance_blocks
 from core.settings_registry import WARN_DEFAULT_TAG, WARN_TAGS
-from cogs.utils import (is_staff, is_higher_than, role_autocomplete, t,
+from cogs.utils import (can_self_assign_role, is_staff, is_higher_than,
+                        role_autocomplete, t,
                         guild_setting_sync, guild_settings_many,
                         send_moderation_log)
 
@@ -402,6 +403,10 @@ class Moderation(commands.Cog):
             return await ctx.send(
                 t("moderation.hierarchy_error", user=member.mention), ephemeral=True
             )
+        if member.top_role >= ctx.guild.me.top_role:
+            return await ctx.send(
+                t("moderation.bot_cannot_moderate", user=member.mention), ephemeral=True
+            )
         await member.timeout(None, reason=t("moderation.untimeout_reason"))
         await ctx.send(t("moderation.untimeout_success", user=member.display_name))
 
@@ -493,11 +498,47 @@ class Moderation(commands.Cog):
         await apply_warn_escalation(ctx.guild, member, tag,
                                     record["tag_count"], reason)
 
+    @staticmethod
+    def _senior_issuer(author, guild, issuer_id):
+        """The warning's issuer when they outrank `author` for removal, else None.
+
+        No issuer on record, an issuer who has left, the issuer themselves, an
+        administrator and the host all pass: an issuer who cannot be resolved
+        cannot be compared, and a warning nobody may remove has no way out.
+        """
+        if issuer_id is None or int(issuer_id) == author.id:
+            return None
+        host = (os.getenv("ADMIN_DISCORD_ID") or "").strip()
+        if host and str(author.id) == host:
+            return None
+        if author.guild_permissions.administrator:
+            return None
+        issuer = guild.get_member(int(issuer_id))
+        if issuer is None or is_higher_than(author, issuer):
+            return None
+        return issuer
+
     @commands.hybrid_command(name="unwarn", description=t("general.cmd_unwarn"))
     @discord.app_commands.default_permissions(moderate_members=True)
     @is_staff()
     async def unwarn(self, ctx, member: discord.Member, warning_id: int):
         """Remove one warning by its guild-visible identifier."""
+        # The same hierarchy `/warn` enforces: nobody clears the record of a
+        # member at or above their own rank, which includes themselves.
+        if not is_higher_than(ctx.author, member):
+            return await ctx.send(
+                t("moderation.hierarchy_error", user=member.mention), ephemeral=True
+            )
+        # And nobody clears a warning issued by someone ranked at or above
+        # them. Read before the write, outside its transaction: `mod_id` never
+        # changes after insert, so there is nothing to race.
+        warnings = await database.run(database.get_warnings, member.id, ctx.guild.id)
+        issuer_id = next((row[3] for row in warnings if row[0] == warning_id), None)
+        issuer = self._senior_issuer(ctx.author, ctx.guild, issuer_id)
+        if issuer is not None:
+            return await ctx.send(
+                t("moderation.unwarn_issuer_senior", mod=issuer.mention), ephemeral=True
+            )
         removed = await database.run(
             database.remove_warning, warning_id, member.id, ctx.guild.id, ctx.author.id
         )
@@ -670,6 +711,16 @@ class Moderation(commands.Cog):
                     break
     
         if not is_authorized:
+            return await interaction.response.send_message(t("moderation.no_role_manage_perms"), ephemeral=True)
+
+        # A faction's `manageable_ids` may name any role, so a leader's grant is
+        # screened like every self-service role path: no privileged, staff or
+        # managed role through `/manage`. Administrators keep their bypass,
+        # since Discord already lets them grant any role directly.
+        if (
+            not interaction.user.guild_permissions.administrator
+            and not can_self_assign_role(interaction.guild, target_role)
+        ):
             return await interaction.response.send_message(t("moderation.no_role_manage_perms"), ephemeral=True)
 
         if target_role.is_default() or target_role.managed:

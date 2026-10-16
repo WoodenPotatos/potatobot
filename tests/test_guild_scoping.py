@@ -326,6 +326,16 @@ class RentalCleanupCogTests(unittest.IsolatedAsyncioTestCase):
                                               self.expired(111))
         self.assertEqual([42], self.deleted)
 
+    async def test_a_malformed_id_is_cleared_rather_than_kept_forever(self):
+        """Stored before `/rent_start` validated ids: `int()` failed on every
+        pass and the generic handler kept the row for good."""
+        guild = MagicMock()
+        past = (datetime.now() - timedelta(days=1)).isoformat()
+        await self.shop._expire_guild_rentals(
+            guild, [(42, "emoji", "not-an-id", past, 111)])
+        self.assertEqual([42], self.deleted)
+        guild.get_emoji.assert_not_called()
+
     async def test_a_transient_discord_error_keeps_the_row_for_the_next_pass(self):
         guild = MagicMock()
         guild.get_emoji.side_effect = RuntimeError("discord had a moment")
