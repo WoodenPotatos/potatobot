@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.18.0-beta.2
+
+Release notes only; the code is the same as 2.18.0-beta.1.
+
+- **Corrected the 2.18.0-beta.1 notes.** They said the schema was unchanged,
+  which is wrong: that release adds schema 25, as its first paragraph says.
+
 ## 2.18.0-beta.1
 
 This release adds a schema migration (schema 25, one new table). It runs on
@@ -29,8 +36,8 @@ schema.
   `requirements.lock` with `--require-hashes`; the container image picks them
   up on its next build.
 
-This release closes out the 2.x line before the per-guild wallets of 3.0. No
-setting needs changing and the schema is unchanged.
+It also closes out the 2.x line before the per-guild wallets of 3.0. None of
+the changes below needs a setting changed.
 
 - **Dashboard actions now run when the bot and the dashboard are separate
   services.** In the two-service layout (`container/compose.yaml`), posting or

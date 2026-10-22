@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, `deploy/` holds the systemd units and a rootless podman Quadlet unit, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.18.0-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.18.0-beta.2** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -175,6 +175,10 @@ matrices — is in [docs/development.md](docs/development.md).
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.18.0-beta.2
+
+- **Corrected the 2.18.0-beta.1 notes.** They said the schema was unchanged, which is wrong: that release adds schema 25, as its first paragraph says.
+
 ### 2.18.0-beta.1
 
 - **An optional invite log shows who invited each new member.** Turn it on under Features ("Invite log"). It posts to the bot log channel, or to a channel of its own if you tick "Use a separate channel" under Administration → Logging and pick one. The bot needs the **Manage Server** permission, because Discord only lists a server's invites to members who have it. When the inviter cannot be told apart, for example when two people join at the same moment, the log says so instead of guessing. The post never pings anyone, and nothing is stored.
@@ -198,15 +202,6 @@ matrices — is in [docs/development.md](docs/development.md).
 - **Text from outside sources can no longer smuggle in links or pings.** - Song, stream, video and patch-note titles are shown as plain text. - Everydle win messages no longer ping whatever a member put in their display name.
 - **Smaller fixes:** - `/search` checks the party size before the post goes out. - The help menu answers only the options it offered. - Five dashboard fields now reject a malformed value with an error message instead of a server error. - Email alerts verify the mail server's certificate.
 - …and 2 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.16.0-beta.1
-
-- **Casino payouts can be rate-limited per member**, as an anti-exploit safeguard against a bug or glitch letting a balance grow abnormally fast. Ships off, with no default threshold, so it does nothing until an operator sets both a time window and a coin ceiling; a win that would cross the ceiling within that window is then capped rather than refused, and the configured staff channel gets an alert.
-- **A redeem ticket and its fulfillment request now know about each other.** The ticket carries its own "Mark Fulfilled" button, so staff never have to leave Discord to enter the asset id; completing or cancelling the request from the dashboard instead now posts a notice back into the ticket, rather than leaving a plain request number as the only thread between the two.
-- **Adding someone to a temporary voice room with the dedicated button now actually makes the room visible to them**, not just joinable — a permitted member could previously fail to see the channel at all (and could not go live into it) unless the lobby's own default already showed it.
-- **The dashboard's Redeems page can cancel an open request or revoke an active grant.** Revoking an entitlement also tears down its Discord side automatically where possible — removing a role, or deleting a mis-made emoji/sticker/sound — the same logic that already runs on natural expiry and member erasure.
-- **The Redeems page now shows when a granted emoji, sticker or sound has gone missing from Discord**, instead of staying silent until the entitlement happens to expire on its own, which can be up to a year away. A daily check (not a live one, to stay clear of Discord's rate limit) looks at every still-active grant and flags it the first time the asset is confirmed gone.
-- **A `/ticket`-opened support channel is now named after the member**, like a redeem or rental ticket already was, instead of their raw Discord id.
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->
