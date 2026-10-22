@@ -49,12 +49,21 @@
 # reason the database access above is scoped to one directory rather than
 # all of `/opt`.
 #
+# `gdrivecrypt:` is an `rclone crypt` remote layered over the Drive remote
+# (`gdrivebot:PotatoBotBackups-crypt`), so the database is encrypted before it
+# leaves the host. Before 2026-10-16 this pointed at `gdrivebot:PotatoBotBackups`
+# directly, which meant that anyone holding the Google account or its refresh
+# token could read every balance, warning and ticket. The crypt passwords
+# have to live in `rclone.conf` for the upload to work. Keep a copy *off* the
+# host, because losing the host is exactly when the backup is needed, and
+# without the passwords the copies cannot be read.
+#
 # Read the result with:
 #   journalctl -u potatobot-offsite-backup --since '1 week ago'
 
 [Unit]
 Description=PotatoBot offsite database backup
-Documentation=https://github.com/WoodenPotatos/potatobotbeta
+Documentation=https://github.com/WoodenPotatos/potatobot
 After=network-online.target
 Wants=network-online.target
 
@@ -63,7 +72,7 @@ Type=oneshot
 User=woody
 Group=woody
 WorkingDirectory=/opt/potatobot
-ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py /opt/potatobot/economy.db gdrivebot:PotatoBotBackups
+ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py /opt/potatobot/economy.db gdrivecrypt:
 SyslogIdentifier=potatobot-offsite-backup
 
 NoNewPrivileges=true

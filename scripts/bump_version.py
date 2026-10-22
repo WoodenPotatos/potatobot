@@ -18,7 +18,7 @@ Every check runs before the file is touched, so a rejected bump leaves nothing
 half-written.
 
 Usage:
-    python scripts/bump_version.py major|minor|patch [--channel alpha|beta|stable]
+    python scripts/bump_version.py major|minor|patch|prerelease [--channel alpha|beta|stable]
     python scripts/bump_version.py prerelease        # 2.1.0a3 -> 2.1.0a4
     python scripts/bump_version.py --set 2.1.0b1
     python scripts/bump_version.py --show

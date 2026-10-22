@@ -368,22 +368,60 @@ class JavaScriptIsActuallyRunTests(unittest.TestCase):
         # since 2026-10-15: the same install, from the lockfile exactly.
         self.assertIn("npm ci", workflow)
 
+    #: Named, not discovered, so a class leaving the list is a visible diff.
+    #: `test_every_node_driven_class_is_listed` diffs it against the source in
+    #: both directions: eight classes had drifted out of a hand-kept list by
+    #: 2026-10-16, each free to skip forever without anything noticing.
+    NODE_DRIVEN = {
+        "tests.test_dashboard_boot.ApiErrorRoutingTests",
+        "tests.test_dashboard_boot.DashboardBootTests",
+        "tests.test_dashboard_boot.StaleClientNoticeTests",
+        "tests.test_deployment_and_features.FeatureCascadePromptTests",
+        "tests.test_gacha.FeaturedChanceFormulaTests",
+        "tests.test_item_creator.CustomRewardPoolFreshnessTests",
+        "tests.test_item_creator.ItemConfigWireFormatTests",
+        "tests.test_item_creator.TemplateFieldsFollowTheChoiceTests",
+        "tests.test_item_creator.TemplateRoundTripTests",
+        "tests.test_localization_policy.LocaleLookupTests",
+        "tests.test_managed_messages.CreatorAcceptedByTheApiTests",
+        "tests.test_managed_messages.CreatorRoundTripTests",
+        "tests.test_permission_audit.PermissionRepairButtonTests",
+        "tests.test_redeem_ticket_linkage.RedeemsPageActionsTests",
+        "tests.test_settings_cache.RowEditorReportsCleanTests",
+        "tests.test_settings_cache.SupportedGameQuickPickTests",
+        "tests.test_shop_items.TierImportTests",
+    }
+
+    def test_every_node_driven_class_is_listed(self):
+        """Every class that can skip for want of Node is in `NODE_DRIVEN`,
+        and everything in it still can: a class that skips directly, or calls
+        a module-level helper that does."""
+        import ast
+
+        marker = "node is not installed"
+        found = set()
+        for path in sorted((ROOT / "tests").glob("test_*.py")):
+            source = path.read_text(encoding="utf-8")
+            if marker not in source:
+                continue
+            tree = ast.parse(source)
+            helpers = {node.name for node in tree.body
+                       if isinstance(node, ast.FunctionDef)
+                       and marker in ast.get_source_segment(source, node)}
+            for node in tree.body:
+                if not isinstance(node, ast.ClassDef) or node.name == type(self).__name__:
+                    continue
+                segment = ast.get_source_segment(source, node)
+                if marker in segment or any(f"{name}(" in segment for name in helpers):
+                    found.add(f"tests.{path.stem}.{node.name}")
+        self.assertEqual(sorted(self.NODE_DRIVEN), sorted(found))
+
     def test_the_skip_is_the_only_reason_they_would_not_run(self):
         """If Node is here, none of them may skip — a skip then means the
         harness broke rather than that the environment lacks a runtime."""
         if shutil.which("node") is None:
             self.skipTest("node is not installed")
-        suite = unittest.defaultTestLoader.loadTestsFromNames([
-            "tests.test_settings_cache.RowEditorReportsCleanTests",
-            "tests.test_localization_policy.LocaleLookupTests",
-            "tests.test_managed_messages.CreatorRoundTripTests",
-            "tests.test_gacha.FeaturedChanceFormulaTests",
-            "tests.test_item_creator.TemplateRoundTripTests",
-            "tests.test_dashboard_boot.DashboardBootTests",
-            "tests.test_item_creator.TemplateFieldsFollowTheChoiceTests",
-            "tests.test_dashboard_boot.StaleClientNoticeTests",
-            "tests.test_redeem_ticket_linkage.RedeemsPageActionsTests",
-        ])
+        suite = unittest.defaultTestLoader.loadTestsFromNames(sorted(self.NODE_DRIVEN))
         result = unittest.TestResult()
         suite.run(result)
         self.assertEqual([], [str(case) for case, _ in result.skipped])

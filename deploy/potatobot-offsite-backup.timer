@@ -2,7 +2,7 @@
 
 [Unit]
 Description=Daily PotatoBot offsite database backup
-Documentation=https://github.com/WoodenPotatos/potatobotbeta
+Documentation=https://github.com/WoodenPotatos/potatobot
 
 [Timer]
 OnCalendar=daily

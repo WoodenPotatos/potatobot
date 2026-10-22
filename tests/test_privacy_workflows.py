@@ -12,6 +12,7 @@ import sqlite3
 import tempfile
 import types
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from core import database
 
@@ -114,6 +115,11 @@ class PrivacyWorkflowTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO active_channels (channel_id, owner_id, guild_id) "
                 "VALUES (950, 7, 111)"
+            )
+            # A demotion the dashboard has been told about.
+            conn.execute(
+                "INSERT INTO dashboard_access_invalidations (guild_id, user_id, "
+                "created_at) VALUES (111, 7, 'now')"
             )
             conn.execute(
                 "INSERT INTO user_identities (user_id, first_seen_at, last_seen_at) "
@@ -448,6 +454,7 @@ class ErasureColumnCoverageTests(unittest.TestCase):
         "event_id": "row id", "action_id": "row id", "document_id": "row id",
         "request_id": "row id", "pull_id": "row id", "entry_id": "row id",
         "audit_id": "row id", "entitlement_id": "row id",
+        "invalidation_id": "row id",
         "response_id": "row id",
     }
     # JSON columns that never carry a member id, with why. The ones that can
@@ -584,6 +591,40 @@ class ErasureReachesLateTablesTests(unittest.TestCase):
         self.assertIn("joined", database.join_lfg_post(111, 1003, 1007))
         database.anonymize_user(7, actor_id=42, guild_id=111)
         self.assertEqual([1007], database.get_lfg_post(111, 1003)["joined"])
+
+
+class QueuedErasureAuthorityTests(unittest.IsolatedAsyncioTestCase):
+    """The outbox erasure re-derives host authority from the environment per
+    call, never from the queued row or from a value read at import."""
+
+    ACTION = {"actor_id": 42, "guild_id": 111, "payload": {"user_id": 7}}
+
+    async def run_erasure(self, host):
+        from core import control_actions
+        revoke = AsyncMock(return_value=0)
+        write = AsyncMock(return_value={"tombstone_id": 1})
+        with patch.dict(os.environ, {"ADMIN_DISCORD_ID": host}), \
+                patch("cogs.privacy.revoke_all_entitlements", revoke), \
+                patch.object(control_actions.database, "run_write", write):
+            error = await control_actions.execute_member_erasure(None, self.ACTION)
+        return error, revoke, write
+
+    async def test_an_actor_who_is_no_longer_the_host_is_refused(self):
+        error, revoke, write = await self.run_erasure("999")
+        self.assertEqual("permission_denied", error)
+        revoke.assert_not_awaited()
+        write.assert_not_awaited()
+
+    async def test_an_unset_host_refuses_everyone(self):
+        error, revoke, _ = await self.run_erasure("")
+        self.assertEqual("permission_denied", error)
+        revoke.assert_not_awaited()
+
+    async def test_the_current_host_erases(self):
+        error, revoke, write = await self.run_erasure("42")
+        self.assertIsNone(error)
+        revoke.assert_awaited_once()
+        write.assert_awaited_once()
 
 
 class SubjectTableCoverageTests(unittest.TestCase):

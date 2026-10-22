@@ -450,6 +450,11 @@ FEATURE_DEFINITIONS = {
                  permissions=("manage_messages", "read_message_history")),
         _feature("member_announcements", "community",
                  permissions=("send_messages", "embed_links")),
+        # Off by default because it asks for Manage Server: Discord lists a
+        # guild's invites, and so their use counts, only to a member holding it,
+        # and the use counts are the only way to tell who invited a joiner.
+        _feature("invite_logging", "community", default=False,
+                 permissions=("manage_guild", "send_messages", "embed_links")),
         _feature("social_twitch", "socials",
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
@@ -720,6 +725,14 @@ SETTING_DEFINITIONS = {
                  None, channel_types=CATEGORY_CHANNEL_TYPES),
         _setting("bot_log_channel", "administration", "logging", SettingValueType.CHANNEL,
                  None, channel_types=TEXT_CHANNEL_TYPES),
+        # The invite log posts to `bot_log_channel` unless this box is ticked and
+        # a channel is set below. A box, not "empty means the bot log", because
+        # an operator asked for the choice to be visible in the form.
+        _setting("invite_log_use_separate_channel", "administration", "logging",
+                 SettingValueType.BOOLEAN, False, feature="invite_logging"),
+        _setting("invite_log_channel", "administration", "logging", SettingValueType.CHANNEL,
+                 None, feature="invite_logging", channel_types=TEXT_CHANNEL_TYPES,
+                 bot_permissions=('view_channel', 'send_messages', 'embed_links')),
         _setting("temporary_voice_lobbies", "community", "voice", SettingValueType.CHANNEL_LIST,
                  [], feature="temporary_voice", channel_types=VOICE_CHANNEL_TYPES,
                  bot_permissions=('view_channel', 'connect', 'manage_channels', 'manage_roles', 'move_members')),

@@ -12,10 +12,10 @@ For the moment i won't share any file that is related to the AI in question. The
 
 The bot's main language is Hungarian but it has a full English localization, and it is quite easy to add other languages. However i would be really happy if you could help me translate to other languages so that i could also add them to the repo for others to use. 
 
-Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, and CI builds the image on every push.
+Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, `deploy/` holds the systemd units and a rootless podman Quadlet unit, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.16.1-beta.1** &nbsp;·&nbsp; channel `beta`
+**Version 2.18.0-beta.1** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -41,11 +41,15 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Ever
 - Hybrid prefix and slash commands with explicit public/private response policies
 - Atomic economy rewards, transfers, purchases, wagers, and crash-safe game settlement
 - Complete Hungarian and English localization of the bot, the dashboard and the
-  Valdle/DbDle minigame data, with Hungarian as the source language
+  Everydle minigame data, with Hungarian as the source language (LoLdle's hard
+  mode is Hungarian-only so far)
 - SQLite WAL storage with ordered, in-place migrations and asynchronous read/write execution
 - Guild feature flags with dependency checks, audit revisions, and runtime cache refresh
 - Moderation, warnings, faction management, tickets, onboarding, role menus, and temporary voice channels
-- LoLdle, Valdle, DbDle, blackjack, dice, roulette, slots, and mines
+- LoLdle, Valdle, DbDle and Genshindle daily puzzles; counting and word-chain
+  channels
+- Casino games: blackjack, dice, roulette, slots, wheel, mines, hilo, crash and
+  Russian roulette
 - HTTPS YouTube-only music playback through bounded `yt-dlp` and FFmpeg workers
 - OAuth-authenticated dashboard designed to run behind private HTTPS
 - Typed, categorized guild dashboard with feature-aware navigation, safe Discord
@@ -62,6 +66,8 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Ever
   rows; a tier a guild has not touched uses the shipped set
 - Patch-notes announcements per game, per guild, for eleven supported titles,
   with a configurable channel and an optional role ping for each
+- An optional invite log naming who invited each new member, posted to the bot
+  log channel or a separate one; it needs the Manage Server permission
 
 ## Requirements
 
@@ -75,7 +81,8 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Ever
 - FFmpeg for music playback
 - SQLite support (included with normal Python builds)
 - Optional Twitch API credentials for stream notifications
-- Optional Tailscale Serve for the private HTTPS dashboard
+- For the dashboard, an HTTPS reverse proxy in front of loopback: Tailscale
+  Serve, a Cloudflare Tunnel, nginx or Caddy
 
 Runtime dependencies are pinned in `requirements.lock`; development and security tooling is pinned in `requirements-dev.lock`. Both are generated with hashes for every transitive package, so install with `--require-hashes`.
 
@@ -93,13 +100,13 @@ Important environment variables are documented in `.env.example`. In particular:
 - `POTATOBOT_LEGACY_GUILD_ID` identifies the original guild when a legacy private database is connected to multiple guilds.
 - Dashboard OAuth requires matching HTTPS values for `POTATOBOT_DASHBOARD_EXTERNAL_URL` and `DISCORD_REDIRECT_URI`, with the latter ending in `/api/callback`.
 
-The schema is at version 22. Prices, rewards, voice preferences, leaderboards, ranks, rental cleanup, `/work` responses and gacha banners are per guild, with `guild_id` 0 holding the installation default; installation-wide settings live in their own table with no guild dimension at all. Wallets are not: `users` is still keyed by Discord user ID alone, so the live economy is not multi-guild-safe yet and cooldowns are deliberately installation-wide. Dashboard access still uses a single `ADMIN_DISCORD_ID`.
+The schema is at version 24. Prices, rewards, voice preferences, leaderboards, ranks, rental cleanup, `/work` responses and gacha banners are per guild, with `guild_id` 0 holding the installation default; installation-wide settings live in their own table with no guild dimension at all. Wallets are not: `users` is still keyed by Discord user ID alone, so the live economy is not multi-guild-safe yet and cooldowns are deliberately installation-wide. Per-guild wallets are planned for 3.0.0, and economies shared between guilds for 3.x. The dashboard has one host, `ADMIN_DISCORD_ID`; under the `self_hosted` profile each guild's owner, administrators and Manage Server holders can also manage that guild.
 
 Members can export their data with `/mydata` and erase it with `/deletemydata`; the host can erase on a member's behalf from the dashboard. Erasure keeps the economy row under an anonymous tombstone so installation totals never change silently. See `docs/privacy.md`.
 
 ## Dashboard
 
-For private deployment, bind the Waitress-served dashboard to `127.0.0.1:5000` and expose it through an HTTPS reverse proxy such as Tailscale Serve:
+Bind the Waitress-served dashboard to `127.0.0.1:5000` and expose it through one HTTPS reverse proxy: Tailscale Serve for a private name, a Cloudflare Tunnel for a public one, or nginx. With Tailscale Serve:
 
 ```bash
 tailscale serve --bg http://127.0.0.1:5000
@@ -115,7 +122,7 @@ gacha configuration, the content builders, queued Discord publishing, fulfillmen
 history. Raw full-JSON configuration and legacy price/reward endpoints are not exposed.
 
 The interface uses a dark sidebar with a light content area: an overview page with
-quick actions and counters, feature toggles grouped by dependency, settings split into
+quick actions and counters, feature toggles grouped by area with each game family under a master toggle, settings split into
 labelled sections, and tables for shop items, fulfillment requests, posted messages and
 the audit log. The account avatar sits at the top right, with the guild switcher next to
 it showing each server's icon; its menu selects the appearance mode (follow the operating
@@ -142,36 +149,44 @@ compensation instead.
 Before relying on a change:
 
 ```bash
-python -m unittest discover -s tests
-python scripts/locale_audit.py --brief
+npm ci --no-audit --no-fund       # the dashboard tests drive script.js through Node
+./venv/bin/python -m pip install --require-hashes -r requirements-dev.lock
+./venv/bin/python -m unittest discover -s tests
+./venv/bin/python scripts/locale_audit.py --brief
 ```
 
 Migrations are rehearsed against a copy, never the live file, and the full
-procedure — snapshots, row-count comparison and the acceptance matrices — is in
-[docs/development.md](docs/development.md) and
-`docs/performance_recovery_plan.md`.
+procedure — the CI gate, snapshots, row-count comparison and the acceptance
+matrices — is in [docs/development.md](docs/development.md).
 
 ## Documentation
 
-- [Contributor invariants and repository layout](CLAUDE.md)
 - [Installation and deployment guide](docs/installation.md)
 - [Setting up levels](docs/level_setup.md)
 - [Developer and operations guide](docs/development.md)
 - [Localization status and plan](docs/localization_status.md)
 - [Keeping Everydle data current](docs/everydle_data_updates.md)
-- [Retiring config.json](docs/config_retirement_plan.md)
-- [Security policy](SECURITY.md)
 - [Threat model](docs/threat_model.md)
 - [Privacy and data lifecycle](docs/privacy.md)
 - [2.0 release checklist](docs/release_checklist.md)
 - [Changelog](CHANGELOG.md)
-- [Performance recovery and acceptance plan](docs/performance_recovery_plan.md)
-- [Active backlog](todo.md)
 - [Localized minigame data format](data/README.md)
 
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.18.0-beta.1
+
+- **An optional invite log shows who invited each new member.** Turn it on under Features ("Invite log"). It posts to the bot log channel, or to a channel of its own if you tick "Use a separate channel" under Administration → Logging and pick one. The bot needs the **Manage Server** permission, because Discord only lists a server's invites to members who have it. When the inviter cannot be told apart, for example when two people join at the same moment, the log says so instead of guessing. The post never pings anyone, and nothing is stored.
+- **Losing dashboard rights takes effect straight away.** When someone loses Administrator or Manage Server, leaves the server, or a role's permissions change, the dashboard re-checks with Discord on their next click. Before, this could take up to 30 seconds. Discord still decides who gets in, and the 30-second check stays as a backstop.
+- **The audit log names who made each change**, as `name (id)` instead of a bare Discord id. Names are looked up when the page loads and are never stored. If a name cannot be found, the id is shown on its own.
+- **Security updates for two dependencies.** aiohttp, the HTTP library discord.py uses to talk to Discord, moves to 3.14.4 for eight published vulnerabilities, and certifi moves to 2026.10.19 for one. Reinstall from `requirements.lock` with `--require-hashes`; the container image picks them up on its next build.
+- **Dashboard actions now run when the bot and the dashboard are separate services.** In the two-service layout (`container/compose.yaml`), posting or updating a message, deleting one, repairing a channel permission, notifying a redeem ticket and erasing a member were queued but never carried out. The bot now processes that queue whether or not it also serves the dashboard. A single-process installation was not affected.
+- **Music uses less of the bot's CPU.** ffmpeg now encodes the audio for Discord itself, so the bot process no longer runs the encoder for every server that is playing.
+- **A podman unit ships in `deploy/potatobot.container`**, for running the bot as a rootless container under systemd. It publishes the dashboard on loopback only and keeps new files private to the bot's account.
+- **The public snapshot must pass its own tests before it is published.** The publishing script now runs the whole test suite inside the snapshot it built, and refuses to publish on any failure.
+- …and 1 more, in [CHANGELOG.md](CHANGELOG.md).
+
 ### 2.16.1-beta.1
 
 - **Roles the bot hands out are now screened for dangerous permissions.** Level roles, join autoroles and a faction leader's `/manage` used to grant whatever role was configured. A role carrying administrator or similar permissions is now skipped with a warning, so it can no longer be granted this way.
@@ -193,23 +208,11 @@ procedure — snapshots, row-count comparison and the acceptance matrices — is
 - **The Redeems page now shows when a granted emoji, sticker or sound has gone missing from Discord**, instead of staying silent until the entitlement happens to expire on its own, which can be up to a year away. A daily check (not a live one, to stay clear of Discord's rate limit) looks at every still-active grant and flags it the first time the asset is confirmed gone.
 - **A `/ticket`-opened support channel is now named after the member**, like a redeem or rental ticket already was, instead of their raw Discord id.
 
-### 2.15.0-beta.1
-
-- **The bot now posts patch and update notes for eleven games**, one channel per game per guild: League of Legends, Valorant, Minecraft, Phasmophobia, Dead by Daylight, Genshin Impact, Counter-Strike 2, Rainbow Six Siege, Honkai: Star Rail, Wuthering Waves and Zenless Zone Zero. A master toggle turns the whole feature on or off, and each game has its own toggle and channel underneath it. Every source is checked once per tick regardless of how many guilds are watching, and one game's source being unreachable never stops the other ten from being checked.
-- **A wedged music extraction no longer needs a manual restart to clear.** `/play` could leave a worker permanently stuck if the source it was fetching from hung, and every stuck worker after that made the queue slower until nothing was left. A watchdog now recycles the whole extraction pool once a job has run far longer than any real one should.
-- **The weekly Everydle drift check no longer goes blind after the first unreachable game.** One game timing out used to abort the whole run before it reached the games after it in the list, which is how two new Genshin Impact characters went unnoticed for a week. Every game is now checked independently, and the report says exactly which ones it could not reach that week.
-- **A few Genshin Impact characters answer to their given name.** Raiden, Heizou, Shinobu, Ayaka, Ayato, Kazuha, Itto, Sara, Kokomi and Mizuki can now be guessed by their short name as well as their full one.
-- **Word-chain can take a custom word list.** A server can now allow extra words the built-in dictionary does not have, on top of it rather than instead of it, behind its own toggle in the dashboard.
-- **`/leaderboard` has a fourth board: luck.** Ranked by the fewest average pulls it takes a member to land a 5★, not by how many they have pulled overall — a member needs at least three 5★ pulls on a banner before they are ranked.
-- **The wheel segment editor shows whether the table still pays out correctly.** Editing `/wheel`'s weights in the dashboard now shows the actual expected return live, instead of only finding out it does not add up to exactly 98% after trying to save.
-- **The dashboard's message preview now renders real formatting**, not just channel and role mentions: bold, italic, underline, strikethrough, spoilers, code, code blocks, quotes, headings, lists, links and timestamps all show roughly the way Discord will actually render them.
-- …and 5 more, in [CHANGELOG.md](CHANGELOG.md).
-
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->
 
 ## Development status
 
-PotatoBot is production-bound for one private deployment, so database compatibility and safe rollout take priority over rapid breaking changes. Remaining major work includes fully guild-scoping runtime storage, separating dashboard supervision for non-private deployments, rehearsing managed deployment, packaging, and publishing only a sanitized clean-history release.
+PotatoBot is production-bound for one private deployment, so database compatibility and safe rollout take priority over rapid breaking changes. Remaining major work is guild-scoped wallets (3.0.0) and then shared economies between guilds (3.x), followed by rehearsing a managed deployment. Public releases are sanitised snapshots on the `beta` channel, with no history from the private development line.
 
 New sanitized releases are licensed under AGPL-3.0-only; see [LICENSE](LICENSE).

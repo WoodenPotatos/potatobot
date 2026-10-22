@@ -1,0 +1,79 @@
+# PotatoBot (devboard) as a rootless podman container, through Quadlet.
+#
+# Measured locally 2026-10-16: the image built and run under exactly the
+# flags Quadlet generates from this file migrates, logs and refuses a
+# placeholder token the way the bare-metal bot does, with files landing 0640.
+#
+# Install, as the `potatobot` system account (lingering enabled, so it starts
+# at boot without a login):
+#   install -m 0644 deploy/potatobot.container ~potatobot/.config/containers/systemd/
+#   systemctl --user daemon-reload
+#   systemctl --user start potatobot
+#
+# Quadlet generates `potatobot.service` from this file; `systemctl --user
+# enable` does not apply to a generated unit, the [Install] section does.
+#
+# One container, bot and dashboard in one process, matching the host today
+# (one service; `potatobot-dashboard` was never installed). The bot owns
+# schema creation, so `update_db.py` runs as its own step before a start that
+# carries a migration -- see the runbook.
+
+[Unit]
+Description=PotatoBot Discord bot (rootless podman)
+After=network-online.target
+Wants=network-online.target
+# The same backoff as deploy/potatobot.service. GATEWAY_GRACE_SECONDS in
+# main.py is sized against these two numbers (RestartLimitTests), so they
+# must not drift apart between the two ways of running the bot.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Container]
+ContainerName=potatobot
+# A stable local tag rather than the version, so a release never has to edit
+# an installed unit. A deploy builds `potatobot:<version>-<commit>` and moves
+# this tag onto it; a rollback moves the tag back to the previous image. The
+# commit is in the name because the alpha line deploys one version many times.
+Image=localhost/potatobot:devboard
+
+# The host account maps onto the image's own `potatobot` (uid 10001), so the
+# bind-mounted data directory is owned by the same account on both sides.
+UserNS=keep-id:uid=10001,gid=10001
+
+# Data on a bind mount, not a named volume, so the host-side offsite-backup
+# and drift units keep reading a plain path. `Z`: the host enforces SELinux.
+Volume=/var/lib/potatobot:/data:Z
+
+# Secrets stay out of the image and out of this file: root:potatobot 0640.
+EnvironmentFile=/etc/potatobot/potatobot.env
+Environment=POTATOBOT_DB_PATH=/data/economy.db
+Environment=POTATOBOT_LOG_DIR=/data/logs
+Environment=POTATOBOT_EVERYDLE_STATE_PATH=/data/everydle_state.json
+Environment=POTATOBOT_DASHBOARD_ENABLED=true
+# Inside the container's own network namespace; the host side is loopback.
+Environment=POTATOBOT_DASHBOARD_HOST=0.0.0.0
+Environment=POTATOBOT_DASHBOARD_PORT=5000
+# cloudflared on the host is the one proxy hop in front of the dashboard.
+Environment=POTATOBOT_TRUSTED_PROXY_HOPS=1
+
+# Loopback only. cloudflared reaches it on 127.0.0.1:5000, exactly as today;
+# a published port bypasses firewalld, so this mapping is the only restriction.
+PublishPort=127.0.0.1:5000:5000
+
+# The container-native hardening subset compose.yaml already ships.
+NoNewPrivileges=true
+DropCapability=all
+# What `UMask=0027` is to deploy/potatobot.service: without it the container
+# inherits 0022 and the database, every migration backup and the session
+# secret land 0644 on the host's bind mount. Measured 2026-10-16. Quadlet has
+# no key of its own for this, so it goes through to `podman run` directly.
+PodmanArgs=--umask=0027
+
+[Service]
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=30
+SyslogIdentifier=potatobot
+
+[Install]
+WantedBy=default.target

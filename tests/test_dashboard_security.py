@@ -2086,3 +2086,105 @@ class AuditHardeningTests(unittest.TestCase):
              "setting_key": "bot_log_channel"},
             claimed["payload"])
 
+
+
+class AuditActorNameTests(unittest.TestCase):
+    """The audit feed names each actor as `name (id)`, looked up live.
+
+    Nothing is stored, so every assertion here is about the lookup: the bot's
+    cache first, Discord's REST API for what it does not hold, a cap per
+    request, and a None rather than an error whenever no name can be had.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "dashboard.db")
+        database.initialize_database()
+        database.register_guild(123, "Test Guild")
+        dashboard_api.app.config.update(TESTING=True)
+        self.client = dashboard_api.app.test_client()
+        self.original_admin_id = dashboard_api.ADMIN_ID
+        dashboard_api.ADMIN_ID = "42"
+        self.original_bot = dashboard_api._dashboard_bot
+        dashboard_api._dashboard_bot = None
+        dashboard_api._rate_limit_events.clear()
+        dashboard_api._actor_name_cache._entries.clear()
+        with self.client.session_transaction() as session:
+            session["logged_in"] = True
+            session["user_id"] = "42"
+            session["display"] = {"username": "tester", "avatar": None}
+            session["csrf_token"] = "csrf-token"
+            session["server_session_id"] = "server-session"
+            session["authorized_guild_ids"] = ["123"]
+            session["authenticated_at"] = time.time()
+
+    def tearDown(self):
+        dashboard_api._dashboard_bot = self.original_bot
+        dashboard_api.ADMIN_ID = self.original_admin_id
+        dashboard_api._actor_name_cache._entries.clear()
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def record(self, *actors):
+        for index, actor in enumerate(actors):
+            database.record_settings_audit(123, actor, "setting.update",
+                                           f"key_{index}", None, index)
+
+    def audit(self):
+        response = self.client.get("/api/guilds/123/audit")
+        self.assertEqual(200, response.status_code)
+        return {entry["target_key"]: entry for entry in response.get_json()["data"]}
+
+    @staticmethod
+    def rest_answer(username):
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"id": "1", "username": username}
+        return response
+
+    def test_an_in_process_member_is_named_from_the_bot_cache(self):
+        member = SimpleNamespace(name="alice")
+        guild = SimpleNamespace(get_member=lambda uid: member if uid == 777 else None)
+        dashboard_api._dashboard_bot = SimpleNamespace(
+            get_guild=lambda gid: guild if gid == 123 else None,
+            get_user=lambda uid: None)
+        self.record(777)
+        with patch.object(dashboard_api.requests, "get") as get:
+            entry = self.audit()["key_0"]
+        self.assertEqual(("alice", "777"), (entry["actor_name"], entry["actor_id"]))
+        get.assert_not_called()
+
+    def test_a_standalone_dashboard_asks_discord_once_per_actor(self):
+        self.record(777, 777)
+        with patch.dict(os.environ, {"DISCORD_TOKEN": "token"}), \
+                patch.object(dashboard_api.requests, "get",
+                             return_value=self.rest_answer("bob")) as get:
+            first = self.audit()
+            second = self.audit()
+        self.assertEqual({"bob"}, {entry["actor_name"] for entry in first.values()})
+        self.assertEqual(first, second)
+        # Two rows and two page loads, one call: de-duplicated, then cached.
+        get.assert_called_once()
+        self.assertTrue(get.call_args.args[0].endswith("/users/777"))
+
+    def test_discord_failing_leaves_the_id_and_the_page_loads(self):
+        self.record(777)
+        with patch.dict(os.environ, {"DISCORD_TOKEN": "token"}), \
+                patch.object(dashboard_api.requests, "get",
+                             side_effect=requests.ConnectionError("down")):
+            entry = self.audit()["key_0"]
+        self.assertIsNone(entry["actor_name"])
+        self.assertEqual("777", entry["actor_id"])
+
+    def test_one_page_load_makes_a_bounded_number_of_calls(self):
+        actors = [1000 + index for index in range(
+            dashboard_api.MAX_ACTOR_LOOKUPS_PER_REQUEST + 5)]
+        self.record(*actors)
+        with patch.dict(os.environ, {"DISCORD_TOKEN": "token"}), \
+                patch.object(dashboard_api.requests, "get",
+                             return_value=self.rest_answer("name")) as get:
+            entries = self.audit()
+        self.assertEqual(dashboard_api.MAX_ACTOR_LOOKUPS_PER_REQUEST, get.call_count)
+        unnamed = [entry for entry in entries.values() if entry["actor_name"] is None]
+        self.assertEqual(5, len(unnamed))

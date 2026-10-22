@@ -1,5 +1,55 @@
 # Changelog
 
+## 2.18.0-beta.1
+
+This release adds a schema migration (schema 25, one new table). It runs on
+its own at startup and writes a backup first. Rolling back to an earlier
+version means restoring that backup, because older versions refuse a newer
+schema.
+
+- **An optional invite log shows who invited each new member.** Turn it on
+  under Features ("Invite log"). It posts to the bot log channel, or to a
+  channel of its own if you tick "Use a separate channel" under Administration
+  → Logging and pick one. The bot needs the **Manage Server** permission,
+  because Discord only lists a server's invites to members who have it.
+  When the inviter cannot be told apart, for example when two people join at
+  the same moment, the log says so instead of guessing. The post never pings
+  anyone, and nothing is stored.
+- **Losing dashboard rights takes effect straight away.** When someone loses
+  Administrator or Manage Server, leaves the server, or a role's permissions
+  change, the dashboard re-checks with Discord on their next click. Before,
+  this could take up to 30 seconds. Discord still decides who gets in, and
+  the 30-second check stays as a backstop.
+- **The audit log names who made each change**, as `name (id)` instead of a
+  bare Discord id. Names are looked up when the page loads and are never
+  stored. If a name cannot be found, the id is shown on its own.
+- **Security updates for two dependencies.** aiohttp, the HTTP library
+  discord.py uses to talk to Discord, moves to 3.14.4 for eight published
+  vulnerabilities, and certifi moves to 2026.10.19 for one. Reinstall from
+  `requirements.lock` with `--require-hashes`; the container image picks them
+  up on its next build.
+
+This release closes out the 2.x line before the per-guild wallets of 3.0. No
+setting needs changing and the schema is unchanged.
+
+- **Dashboard actions now run when the bot and the dashboard are separate
+  services.** In the two-service layout (`container/compose.yaml`), posting or
+  updating a message, deleting one, repairing a channel permission, notifying
+  a redeem ticket and erasing a member were queued but never carried out. The
+  bot now processes that queue whether or not it also serves the dashboard. A
+  single-process installation was not affected.
+- **Music uses less of the bot's CPU.** ffmpeg now encodes the audio for
+  Discord itself, so the bot process no longer runs the encoder for every
+  server that is playing.
+- **A podman unit ships in `deploy/potatobot.container`**, for running the bot
+  as a rootless container under systemd. It publishes the dashboard on
+  loopback only and keeps new files private to the bot's account.
+- **The public snapshot must pass its own tests before it is published.** The
+  publishing script now runs the whole test suite inside the snapshot it
+  built, and refuses to publish on any failure.
+- `scripts/load_test.py` measures how much database load the bot can take. It
+  only ever runs against a fresh temporary database.
+
 ## 2.16.1-beta.1
 
 This release contains the fixes from a security audit. No setting needs

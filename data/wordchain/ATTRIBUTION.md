@@ -17,8 +17,11 @@ the same shape `cogs/minigames.WORD_PATTERN` requires of a chain submission,
 so a form nothing could ever type is not worth keeping.
 
 The surviving stems were folded with the exact function
-`cogs.minigames.fold` uses (Unicode NFD normalisation, casefold, strip
-combining marks) and stored as that folded form, not the original spelling.
+`cogs.minigames.fold` uses (casefold, then Unicode NFD normalisation, then
+strip combining marks) and stored as that folded form, not the original
+spelling. `core/wordchain_dictionary.py` folds each line again on load with a
+duplicate of that function, so the list matches what a chain submission is
+folded to.
 This is deliberate, not an oversight: every other comparison in word chain —
 the chain-letter rule, the same-word check, the used-word ledger — already
 treats an accented letter and its bare form as identical, and a dictionary

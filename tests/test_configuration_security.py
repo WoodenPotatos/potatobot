@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -184,8 +185,8 @@ class ConfigurationSecurityTests(unittest.TestCase):
     #: `.claude/skills/` frees very little here and is not done for the size:
     #: what is left in this file is constraint, which has to stay loaded because
     #: a skill applies only when something thought to load it.
-    CLAUDE_MD_MAX_LINES = 1350
-    CLAUDE_MD_MAX_CHARS = 106_000
+    CLAUDE_MD_MAX_LINES = 1345
+    CLAUDE_MD_MAX_CHARS = 105_600
 
     def test_the_instruction_file_stays_within_its_budget(self):
         """Nothing noticed `CLAUDE.md` reaching six times its recommended size.
@@ -582,10 +583,11 @@ class RepositoryLayoutTests(unittest.TestCase):
     """The root holds what is *run*; `core/` holds what they import.
 
     Sixteen modules used to sit in the root with nothing distinguishing the
-    three that get executed from the thirteen that only ever get imported. The
-    split is only worth anything if it holds, and nothing about adding a
-    fourteenth shared module to the root would look wrong at review time -- it
-    would simply work, the way all thirteen did.
+    three that get executed from the thirteen that only ever got imported. The
+    split is only worth anything if it holds, and nothing about adding another
+    shared module to the root would look wrong at review time -- it would
+    simply work, the way all thirteen did. `SHARED_MODULES` below is the
+    current set.
 
     The three entry points stay at the root because that is where the things
     that run them look: `deploy/potatobot.service` names `main.py` by absolute
@@ -610,7 +612,8 @@ class RepositoryLayoutTests(unittest.TestCase):
     # `len(modules) > 10` passes with three of them deleted, which is how the
     # hardening walk in `test_hardening_invariants.py` came to cover nothing.
     SHARED_MODULES = {
-        "__init__.py", "bounded.py", "clock.py", "database.py", "deployment.py",
+        "__init__.py", "bounded.py", "clock.py", "control_actions.py",
+        "database.py", "deployment.py",
         "feature_access.py", "item_catalog.py", "logging_setup.py",
         "managed_messages.py", "minigame_data.py", "permission_audit.py",
         "settings_cache.py", "settings_registry.py", "support_tickets.py",
@@ -639,6 +642,140 @@ class RepositoryLayoutTests(unittest.TestCase):
         offenders = [type(node).__name__ for node in tree.body
                      if not isinstance(node, ast.Expr)]
         self.assertEqual([], offenders)
+
+
+class OutboxIsDrainedInEveryTopologyTests(unittest.TestCase):
+    """Only the bot executes `control_actions`, so it must always start the worker.
+
+    It was started only when `POTATOBOT_DASHBOARD_ENABLED` was true, because the
+    worker lived in `dashboard_api` and the bot imported that module only then.
+    Under the two-process split every publish, deletion, erasure and fulfilment
+    notice was queued with nothing to run it, and nothing about that is an
+    error: the dashboard reports "queued" and the action waits forever.
+    """
+
+    def main_tree(self):
+        return ast.parse((ROOT / "main.py").read_text(encoding="utf-8"))
+
+    @staticmethod
+    def guarded_by_dashboard_flag(tree, target):
+        """Whether any `if` enclosing `target` tests `dashboard_enabled`."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.If) and "dashboard_enabled" in ast.unparse(node.test):
+                if any(child is target for child in ast.walk(node)):
+                    return True
+        return False
+
+    def test_main_starts_the_worker_whatever_the_dashboard_flag(self):
+        tree = self.main_tree()
+        starts = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and ast.unparse(node.func) == "control_actions.control_action_worker"
+        ]
+        self.assertEqual(1, len(starts))
+        self.assertFalse(self.guarded_by_dashboard_flag(tree, starts[0]))
+
+    def test_main_imports_the_worker_unconditionally(self):
+        imports = [node for node in self.main_tree().body
+                   if isinstance(node, ast.ImportFrom) and node.module == "core"
+                   and any(alias.name == "control_actions" for alias in node.names)]
+        self.assertEqual(1, len(imports))
+
+    def test_the_worker_module_brings_no_dashboard_with_it(self):
+        """Importing `dashboard_api` loads, and may create, the session secret,
+        which is why the worker could not simply be imported from there."""
+        probe = ("import sys, core.control_actions; "
+                 "print(sorted(m for m in ('dashboard_api', 'flask', 'waitress') "
+                 "if m in sys.modules))")
+        result = subprocess.run(
+            [sys.executable, "-c", probe], cwd=ROOT,
+            capture_output=True, text=True, check=True)
+        self.assertEqual("[]", result.stdout.strip())
+
+    def test_dashboard_api_no_longer_defines_the_worker(self):
+        """One definition, so the two processes cannot grow two workers."""
+        tree = ast.parse((ROOT / "dashboard_api.py").read_text(encoding="utf-8"))
+        defined = {node.name for node in tree.body
+                   if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        self.assertEqual(set(), {name for name in defined
+                                 if name == "control_action_worker"
+                                 or name.startswith("execute_")})
+
+
+class QuadletUnitTests(unittest.TestCase):
+    """`deploy/potatobot.container` is the podman migration's unit, and each
+    property pinned here is one the bare-metal unit gets from systemd instead.
+
+    None of them shows up as an error when it is lost: a dashboard published on
+    every interface still answers, a named volume still holds the database, a
+    container running as root still runs, and a 0022 umask still writes the
+    backups -- readable by every account on the host.
+    """
+
+    @staticmethod
+    def directives(name):
+        """Section -> list of (key, value), keeping repeated keys such as
+        `Environment=`, which a ConfigParser would collapse to the last one."""
+        sections: dict[str, list[tuple[str, str]]] = {}
+        current = None
+        for raw in (ROOT / "deploy" / name).read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("[") and line.endswith("]"):
+                current = sections.setdefault(line[1:-1], [])
+                continue
+            key, _, value = line.partition("=")
+            current.append((key, value))
+        return sections
+
+    def setUp(self):
+        self.unit = self.directives("potatobot.container")
+        self.container = self.unit["Container"]
+
+    def values(self, key):
+        return [value for name, value in self.container if name == key]
+
+    def test_the_dashboard_is_published_on_loopback_only(self):
+        self.assertEqual(["127.0.0.1:5000:5000"], self.values("PublishPort"))
+
+    def test_the_container_runs_as_the_images_unprivileged_account(self):
+        """keep-id onto the uid the Containerfile creates, so the host account
+        and the container's `potatobot` own the bind mount alike."""
+        containerfile = (ROOT / "container" / "Containerfile").read_text(encoding="utf-8")
+        uid = re.search(r"useradd [^\n]*--uid (\d+) potatobot", containerfile).group(1)
+        self.assertEqual([f"keep-id:uid={uid},gid={uid}"], self.values("UserNS"))
+        self.assertNotIn("User", dict(self.container))
+
+    def test_data_is_a_host_bind_mount_with_an_selinux_label(self):
+        self.assertEqual(["/var/lib/potatobot:/data:Z"], self.values("Volume"))
+        environment = self.values("Environment")
+        for path in ("POTATOBOT_DB_PATH=/data/economy.db",
+                     "POTATOBOT_LOG_DIR=/data/logs",
+                     "POTATOBOT_EVERYDLE_STATE_PATH=/data/everydle_state.json"):
+            with self.subTest(path=path):
+                self.assertIn(path, environment)
+
+    def test_new_files_are_not_world_readable(self):
+        self.assertIn("--umask=0027", self.values("PodmanArgs"))
+
+    def test_secrets_come_from_a_file_outside_the_image(self):
+        self.assertEqual(["/etc/potatobot/potatobot.env"], self.values("EnvironmentFile"))
+
+    def test_the_hardening_subset_matches_compose(self):
+        self.assertEqual(["true"], self.values("NoNewPrivileges"))
+        self.assertEqual(["all"], self.values("DropCapability"))
+
+    def test_the_restart_backoff_matches_the_bare_metal_unit(self):
+        """GATEWAY_GRACE_SECONDS is sized against these (RestartLimitTests);
+        the two ways of running the bot must give systemd the same limits."""
+        bare = dict(self.directives("potatobot.service")["Unit"])
+        unit = dict(self.unit["Unit"])
+        for key in ("StartLimitIntervalSec", "StartLimitBurst"):
+            with self.subTest(key=key):
+                self.assertEqual(bare[key], unit[key])
+        self.assertEqual("on-failure", dict(self.unit["Service"])["Restart"])
 
 
 class PinnedDependencyTests(unittest.TestCase):

@@ -21,8 +21,8 @@ alone — it would be corrected away by their next message.
 Quadratic, so each level costs a little more than the last. Level 2 is ten XP;
 level 100 is ninety-eight thousand.
 
-XP comes from these, at the rates a fresh installation ships with. All ten are
-typed settings you can change per guild from the dashboard.
+XP comes from these, at the rates a fresh installation ships with. Every one is
+a typed setting you can change per guild from the dashboard.
 
 | Source | XP | Setting |
 | --- | --- | --- |
@@ -30,10 +30,12 @@ typed settings you can change per guild from the dashboard.
 | Voice, per minute | 5 | `reward_voice_minute_normal_xp` |
 | Voice, per minute, premium | 10 | `reward_voice_minute_premium_xp` |
 | `/daily` | 50 | `reward_daily_normal_xp` |
-| Everydle win (Valdle, DbDle, LoLdle easy/medium) | 100 | `reward_valdle_xp`, … |
+| `/daily`, premium | 50 | `reward_daily_premium_xp` |
+| Everydle win (Valdle, DbDle, Genshindle, LoLdle easy/medium) | 100 | `reward_valdle_xp`, … |
 | LoLdle hard | 150 | `reward_loldle_hard_xp` |
 | `/work`, ordinary | 25 | `work_xp_normal` |
 | `/work`, no-payout outcome | 50 | `work_xp_free` |
+| `/work`, high-payout outcome | 5 | `work_xp_high` |
 
 Chat XP is per message and has the same anti-spam cooldown as everything else,
 so it is a slow trickle rather than a lever. Voice is the fast one: an hour in a
@@ -115,8 +117,10 @@ Two behaviours worth knowing:
   inside the level-up path, and raising there would swallow the member's level-up
   along with the bad entry.
 
-Roles are granted **cumulatively downward**: on reaching a milestone the member
-receives that milestone's role. Make sure the bot's own role sits **above** every
+A member holds **one** level role: the role of the highest milestone they have
+reached. Reaching the next milestone swaps it for the new one, and a lower level
+takes it back. A role carrying administrator or similar permissions, a staff
+role, or a managed role is skipped with a warning rather than granted. Make sure the bot's own role sits **above** every
 level role, or it cannot hand them out — `/checkperms` and the dashboard setup
 check both report this, and it is the single most common reason a correctly
 configured ladder does nothing.

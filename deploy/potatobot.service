@@ -14,13 +14,17 @@
 # User`). The live unit was hand-patched to `woody` at install time and that
 # fix never made it back here -- this file was wrong from 2026-09-17 until
 # caught 2026-09-25 by a new unit copying the same stale pattern and failing
-# with "Failed to determine user credentials: No such process". The reverse
-# gap also exists: the live unit still lacks `RemoveIPC=true`, present here
-# since it was added -- redeploy this file to pick it up.
+# with "Failed to determine user credentials: No such process".
+#
+# The live unit deliberately omits `RemoveIPC=true`. Under a login account
+# such as `woody` it deletes that account's own System V and POSIX IPC
+# objects every time the service stops (docs/installation.md). It is kept
+# here for an installation that runs the bot as a dedicated account, so drop
+# it when installing this file under a login account.
 
 [Unit]
 Description=PotatoBot Discord bot
-Documentation=https://github.com/WoodenPotatos/potatobotbeta
+Documentation=https://github.com/WoodenPotatos/potatobot
 After=network-online.target
 Wants=network-online.target
 # Discord outages and DNS problems can flap; back off rather than hammer.

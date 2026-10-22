@@ -4,10 +4,10 @@
 # image started with a different command, which is what lets the two run as
 # separate supervised services against one shared database volume.
 #
-# Build (from the repository root):  podman build -t potatobot:2.16.1a1 -f container/Containerfile .
-# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.16.1a1
+# Build (from the repository root):  podman build -t potatobot:2.18.0a2 -f container/Containerfile .
+# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.18.0a2
 # Panel:  podman run --env-file .env -v potatobot-data:/data -p 127.0.0.1:5000:5000 \
-#             potatobot:2.16.1a1 python dashboard_api.py
+#             potatobot:2.18.0a2 python dashboard_api.py
 
 # Pinned by digest, not tag: `3.13-slim` is a moving name, and an image that
 # changes under the same tag is a supply-chain change nobody reviewed.

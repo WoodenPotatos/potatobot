@@ -237,7 +237,7 @@ async def minecraft_adapter(session):
     Every full release's announcement article lives at
     `minecraft-java-edition-<id>`, id with every `.` replaced by `-`
     (`26.3` -> `minecraft-java-edition-26-3`, `26.1.1` ->
-    `minecraft-java-edition-26-1-1`) -- confirmed live against five releases
+    `minecraft-java-edition-26-1-1`) -- confirmed live against six releases
     spanning both the current date-based scheme and the legacy `1.21.x` one;
     see docs/patchbot_data_sources.md for how this was found (the site's own
     sitemap, not the article grid, which still loads client-side and 404s

@@ -23,6 +23,7 @@
     "permissions_title": "🔍 Jogosultság-ellenőrző",
     "permission_names": {
       "send_messages": "Üzenetek küldése",
+      "manage_guild": "Szerver kezelése",
       "embed_links": "Beágyazott hivatkozások",
       "read_message_history": "Üzenetelőzmények olvasása",
       "attach_files": "Fájlok csatolása",
@@ -459,6 +460,17 @@
     "no_reason": "Nem született indok.",
     "booster_title": "💎 Új szerver booster!",
     "booster_desc": "HATALMAS PACSI {mention} a boosthoz! Köszönetképpen kaptál **{amount} *{coin}ot* **!"
+  },
+  "invitelog": {
+    "title": "📨 Új tag csatlakozott",
+    "member_field": "Tag",
+    "account_created_field": "Fiók létrehozva",
+    "inviter_field": "Meghívta",
+    "invite_field": "Meghívó",
+    "invite_value": "`{code}` ({uses} használat)",
+    "vanity": "A szerver egyedi linkje",
+    "unknown": "Nem állapítható meg",
+    "no_inviter": "Ismeretlen"
   },
   "roleselect": {
     "cooldown": "⏳ Várj még {seconds} másodpercet a következő rangmódosítás előtt.",
@@ -1326,6 +1338,7 @@
       "voice_rewards": "Hangcsatorna-jutalmak",
       "inactivity": "Inaktivitáskezelés",
       "member_announcements": "Tagértesítések",
+      "invite_logging": "Meghívónapló",
       "social_twitch": "Twitch-értesítések",
       "social_youtube": "YouTube-értesítések",
       "patchbot": "Játékfrissítés-értesítések",
@@ -1366,6 +1379,8 @@
       "ticket_logs": "Ticket naplócsatorna",
       "admin_category": "Adminisztrációs kategória",
       "bot_log_channel": "Bot naplócsatorna",
+      "invite_log_use_separate_channel": "Külön csatorna a meghívónaplónak",
+      "invite_log_channel": "Meghívónapló csatornája",
       "temporary_voice_lobbies": "Ideiglenes hangcsatorna várók",
       "admin_roles": "Adminisztrátori rangok",
       "premium_roles": "Prémium rangok",
@@ -1910,6 +1925,8 @@
     "weight_share": "= az esetek {percent}%-a",
     "weight_share_none": "= nincs beállított súly",
     "hints": {
+      "invite_log_use_separate_channel": "Kikapcsolva a meghívónapló a bot naplócsatornájába kerül.",
+      "invite_log_channel": "Csak akkor használt, ha a külön csatorna be van kapcsolva. A bot csak a Szerver kezelése jogosultsággal látja, ki kit hívott meg.",
       "casino_ladder_max_bet": "Ennyi lehet legfeljebb egy Crash, Mines vagy Hilo kör tétje. Ezekben a játékokban a résztvevő dönti el, hány lépésnyi szorzót kockáztat, így ez korlátozza, mennyire gyorsan nőhet az egyenleg egyetlen kör alatt — azt nem korlátozza, hány kör játszható egymás után.",
       "casino_rate_limit_window_seconds": "0 esetén a korlátozás nem lép életbe, akkor sem, ha a funkció be van kapcsolva. Mindkét mezőt be kell állítani, hogy a korlátozás működjön.",
       "casino_rate_limit_max_coins": "Ennyi kaszinónyereményt gyűjthet össze egy tag a fenti időablakon belül; efölött a többlet nem kerül jóváírásra, és a megadott csatorna értesítést kap. 0 esetén a korlátozás nem lép életbe.",
@@ -2075,6 +2092,7 @@
     "permission_finding_administrator_granted": "A bot Administrator jogot kapott, ami minden mást felülír.",
     "permission_names": {
       "send_messages": "Üzenetek küldése",
+      "manage_guild": "Szerver kezelése",
       "embed_links": "Beágyazott hivatkozások",
       "read_message_history": "Üzenetelőzmények olvasása",
       "attach_files": "Fájlok csatolása",

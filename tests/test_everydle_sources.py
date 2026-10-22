@@ -760,8 +760,8 @@ class GenshindleDatasetTests(unittest.TestCase):
         raising *is* the collision guard. The equality this test used to
         assert instead (`len(data) == len(aliases)`) held only because every
         genshindle entity used to carry exactly one alias; it stopped being
-        true once nickname aliases were added deliberately (todo.md's
-        Genshindle nickname entry), and it was never what "no collision"
+        true once given-name nickname aliases ("Raiden" for Raiden Shogun) were
+        added deliberately, and it was never what "no collision"
         actually means. Every entity still owes the alias map at least its
         own display name."""
         from core import minigame_data

@@ -12,9 +12,13 @@ The snapshot itself is taken through SQLite's own online-backup API, the
 same guarantee `docs/installation.md`'s manual `.backup` procedure relies
 on, so a live writer never produces a torn copy.
 
+Each run uploads, then downloads that copy back and compares it, and only
+then prunes. Point it at an `rclone crypt` remote so the copy is encrypted
+before it leaves the host; the script itself is the same either way.
+
 Usage:
-    python scripts/offsite_backup.py economy.db gdrivebot:PotatoBotBackups
-    python scripts/offsite_backup.py economy.db gdrivebot:PotatoBotBackups --retention-days 30
+    python scripts/offsite_backup.py economy.db gdrivecrypt:
+    python scripts/offsite_backup.py economy.db gdrivecrypt: --retention-days 30
 
 Requires `rclone` on PATH and a remote already configured with `rclone
 config` — this script only invokes it, it does not set one up.
@@ -63,6 +67,24 @@ def upload(snapshot: Path, remote: str) -> None:
     )
 
 
+def verify(snapshot: Path, remote: str) -> None:
+    """Download the uploaded copy and compare it byte for byte.
+
+    `--download` rather than a hash comparison, because an `rclone crypt`
+    remote stores no plaintext hashes, and the plain `check` it would
+    otherwise fall back to compares sizes only. `--one-way` with the one
+    file included checks this run's snapshot alone, not the older copies
+    beside it. Raises on a mismatch or a missing file, which stops the run
+    before `prune`: a night whose upload did not land never deletes the
+    copies that did.
+    """
+    subprocess.run(
+        ["rclone", "check", str(snapshot.parent), remote,
+         "--one-way", "--download", "--include", snapshot.name],
+        check=True,
+    )
+
+
 def prune(remote: str, retention_days: int) -> None:
     subprocess.run(
         ["rclone", "delete", remote, "--min-age", f"{retention_days}d"],
@@ -74,7 +96,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                       formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("database", type=Path, help="the live database to back up")
-    parser.add_argument("remote", help="an rclone remote:path, e.g. gdrivebot:PotatoBotBackups")
+    parser.add_argument("remote", help="an rclone remote:path, e.g. gdrivecrypt:")
     parser.add_argument("--retention-days", type=int, default=30,
                          help="delete remote copies older than this many days (default: 30)")
     arguments = parser.parse_args(argv)
@@ -91,6 +113,7 @@ def main(argv=None) -> int:
         snapshot = Path(workdir) / f"{source.stem}-{stamp}.db"
         backup_snapshot(source, snapshot)
         upload(snapshot, arguments.remote)
+        verify(snapshot, arguments.remote)
 
     prune(arguments.remote, arguments.retention_days)
 

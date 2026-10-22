@@ -25,6 +25,7 @@ from core.feature_access import (
     refresh_feature_cache_async,
 )
 from core import settings_cache
+from core import control_actions
 
 if deployment_settings.dashboard_enabled:
     import dashboard_api
@@ -358,11 +359,12 @@ async def on_ready():
             monitor_event_loop_lag(), name="event-loop-watchdog"
         )
     start_process_watchdog()
-    if deployment_settings.dashboard_enabled and (
-        dashboard_action_task is None or dashboard_action_task.done()
-    ):
+    # Unconditional: the outbox is drained by the bot whether or not this
+    # process also serves the dashboard. Gated on `dashboard_enabled`, the
+    # two-process split queued every publish and erasure with nothing to run it.
+    if dashboard_action_task is None or dashboard_action_task.done():
         dashboard_action_task = asyncio.create_task(
-            dashboard_api.control_action_worker(bot), name="dashboard-control-actions"
+            control_actions.control_action_worker(bot), name="dashboard-control-actions"
         )
 
     if deployment_settings.profile.value == "private" and not legacy_adoption_checked:

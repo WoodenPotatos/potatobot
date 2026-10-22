@@ -306,7 +306,7 @@ class RedeemFulfillViewTests(_FulfillmentTestCase, unittest.IsolatedAsyncioTestC
 
 
 class ControlActionDispatcherTests(unittest.IsolatedAsyncioTestCase):
-    """The two new `control_actions` branches in dashboard_api's worker --
+    """The two newer `control_actions` branches of the outbox worker --
     `cogs.gacha.revoke_entitlement` is imported fresh at call time inside
     `execute_entitlement_revocation`, so patching it by string path here is
     not the stale-module trap tests/test_voicemod.py had to work around."""
@@ -323,7 +323,7 @@ class ControlActionDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir.cleanup()
 
     async def test_the_notice_names_the_fulfilling_staff_member_and_item(self):
-        import dashboard_api
+        from core import control_actions
         staff = types.SimpleNamespace(mention="<@99>")
         channel = types.SimpleNamespace(
             send=AsyncMock(),
@@ -331,37 +331,37 @@ class ControlActionDispatcherTests(unittest.IsolatedAsyncioTestCase):
         )
         action = {"actor_id": 99,
                   "payload": {"outcome": "fulfilled", "discord_item_id": "123"}}
-        error = await dashboard_api.execute_redeem_fulfilled_notice(channel, action)
+        error = await control_actions.execute_redeem_fulfilled_notice(channel, action)
         self.assertIsNone(error)
         sent_text = channel.send.await_args.args[0]
         self.assertIn("<@99>", sent_text)
         self.assertIn("123", sent_text)
 
     async def test_the_notice_handles_a_cancelled_outcome(self):
-        import dashboard_api
+        from core import control_actions
         staff = types.SimpleNamespace(mention="<@99>")
         channel = types.SimpleNamespace(
             send=AsyncMock(),
             guild=types.SimpleNamespace(get_member=lambda uid: staff),
         )
         action = {"actor_id": 99, "payload": {"outcome": "cancelled"}}
-        await dashboard_api.execute_redeem_fulfilled_notice(channel, action)
+        await control_actions.execute_redeem_fulfilled_notice(channel, action)
         self.assertIn("<@99>", channel.send.await_args.args[0])
 
     async def test_the_notice_falls_back_when_the_staff_member_is_uncached(self):
-        import dashboard_api
+        from core import control_actions
         channel = types.SimpleNamespace(
             send=AsyncMock(),
             guild=types.SimpleNamespace(get_member=lambda uid: None),
         )
         action = {"actor_id": 99,
                   "payload": {"outcome": "fulfilled", "discord_item_id": "1"}}
-        error = await dashboard_api.execute_redeem_fulfilled_notice(channel, action)
+        error = await control_actions.execute_redeem_fulfilled_notice(channel, action)
         self.assertIsNone(error)
         channel.send.assert_awaited_once()
 
     async def test_entitlement_revocation_reuses_revoke_entitlement(self):
-        import dashboard_api
+        from core import control_actions
         guild = types.SimpleNamespace(id=GUILD)
         bot = types.SimpleNamespace(get_guild=lambda gid: guild)
         action = {
@@ -371,7 +371,7 @@ class ControlActionDispatcherTests(unittest.IsolatedAsyncioTestCase):
         }
         with patch("cogs.gacha.revoke_entitlement",
                    AsyncMock(return_value=True)) as mocked:
-            error = await dashboard_api.execute_entitlement_revocation(bot, action)
+            error = await control_actions.execute_entitlement_revocation(bot, action)
         self.assertIsNone(error)
         mocked.assert_awaited_once()
         passed_guild, passed_entitlement = mocked.await_args.args
@@ -380,21 +380,21 @@ class ControlActionDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("777", passed_entitlement["discord_item_id"])
 
     async def test_entitlement_revocation_reports_a_discord_failure(self):
-        import dashboard_api
+        from core import control_actions
         guild = types.SimpleNamespace(id=GUILD)
         bot = types.SimpleNamespace(get_guild=lambda gid: guild)
         action = {"guild_id": GUILD, "payload": {
             "entitlement_id": 5, "user_id": MEMBER,
             "entitlement_key": "emoji", "discord_item_id": "777"}}
         with patch("cogs.gacha.revoke_entitlement", AsyncMock(return_value=False)):
-            error = await dashboard_api.execute_entitlement_revocation(bot, action)
+            error = await control_actions.execute_entitlement_revocation(bot, action)
         self.assertEqual("discord_http_error", error)
 
     async def test_entitlement_revocation_is_a_no_op_if_the_guild_is_gone(self):
-        import dashboard_api
+        from core import control_actions
         bot = types.SimpleNamespace(get_guild=lambda gid: None)
         action = {"guild_id": GUILD, "payload": {}}
-        error = await dashboard_api.execute_entitlement_revocation(bot, action)
+        error = await control_actions.execute_entitlement_revocation(bot, action)
         self.assertIsNone(error)
 
 

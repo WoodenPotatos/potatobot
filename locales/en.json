@@ -39,7 +39,8 @@
       "manage_expressions": "Manage emoji, stickers and sounds",
       "mention_everyone": "Mention everyone and roles",
       "view_channel": "View channel",
-      "use_application_commands": "Use application commands"
+      "use_application_commands": "Use application commands",
+      "manage_guild": "Manage Server"
     },
     "testboost_title": "💎 New server booster! (TEST)",
     "testboost_desc": "Huge thanks for the boost, {user}! Your reward: **{amount} {coin}**.",
@@ -1356,7 +1357,8 @@
       "patchbot_r6": "Rainbow Six Siege patch notes",
       "patchbot_hsr": "Honkai: Star Rail patch notes",
       "patchbot_wuwa": "Wuthering Waves patch notes",
-      "patchbot_zzz": "Zenless Zone Zero patch notes"
+      "patchbot_zzz": "Zenless Zone Zero patch notes",
+      "invite_logging": "Invite log"
     },
     "settings": {
       "language": "Default language",
@@ -1498,7 +1500,9 @@
       "top_ranker_role": "Top ranker role",
       "level_roles": "Level roles (level → role)",
       "lfg_default_channel": "Default LFG channel",
-      "warn_announce_channel": "Warnings channel"
+      "warn_announce_channel": "Warnings channel",
+      "invite_log_use_separate_channel": "Use a separate channel for the invite log",
+      "invite_log_channel": "Invite log channel"
     },
     "nav_label": "Main navigation",
     "nav_overview": "Overview",
@@ -1956,7 +1960,9 @@
       "managed_image": "A large image under the leading section, as an https address. This is where a /rules_verify banner belongs.",
       "managed_key": "A stable identifier; it cannot change once the message is posted.",
       "managed_name": "For you, in the list. Members never see it.",
-      "warn_announce_channel": "Where issued warnings are published so members can see them too. Leave it empty and the warning appears where the moderator used the command. The moderation log stays separate: the filtered word and the threshold reports only go there."
+      "warn_announce_channel": "Where issued warnings are published so members can see them too. Leave it empty and the warning appears where the moderator used the command. The moderation log stays separate: the filtered word and the threshold reports only go there.",
+      "invite_log_use_separate_channel": "Unticked, the invite log goes to the bot log channel.",
+      "invite_log_channel": "Used only when the separate channel is ticked. The bot can only see who invited whom with the Manage Server permission."
     },
     "role_menu_label": "Button label",
     "role_menu_emoji": "Emoji",
@@ -2107,7 +2113,8 @@
       "manage_expressions": "Manage emoji, stickers and sounds",
       "mention_everyone": "Mention everyone and roles",
       "view_channel": "View channel",
-      "use_application_commands": "Use application commands"
+      "use_application_commands": "Use application commands",
+      "manage_guild": "Manage Server"
     },
     "work_response_created": "The work response was created.",
     "work_response_updated": "The work response was updated.",
@@ -2190,5 +2197,16 @@
     "export_dm_closed": "I could not send you a direct message. Allow messages from server members, then try again.",
     "export_failed": "The export could not be delivered. Try again later.",
     "export_sent": "Sent to you in a direct message: {rows} rows from {tables} tables."
+  },
+  "invitelog": {
+    "title": "📨 New member joined",
+    "member_field": "Member",
+    "account_created_field": "Account created",
+    "inviter_field": "Invited by",
+    "invite_field": "Invite",
+    "invite_value": "`{code}` ({uses} uses)",
+    "vanity": "The server's vanity link",
+    "unknown": "Could not be determined",
+    "no_inviter": "Unknown"
   }
 }

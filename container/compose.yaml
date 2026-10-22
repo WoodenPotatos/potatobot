@@ -42,7 +42,7 @@ services:
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.16.1a1
+    image: potatobot:2.18.0a2
     restart: unless-stopped
     env_file: ../.env
     environment:
@@ -62,7 +62,7 @@ services:
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.16.1a1
+    image: potatobot:2.18.0a2
     command: ["python", "dashboard_api.py"]
     restart: unless-stopped
     env_file: ../.env
@@ -80,7 +80,7 @@ services:
     volumes:
       - data:/data
     ports:
-      # Loopback only. Terminate HTTPS with Tailscale Serve or nginx in front;
+      # Loopback only. Terminate HTTPS with a Cloudflare Tunnel, Tailscale Serve or nginx in front;
       # never publish this port to an untrusted network.
       - "127.0.0.1:5000:5000"
     depends_on:

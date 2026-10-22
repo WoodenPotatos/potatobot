@@ -1652,3 +1652,87 @@ class Schema24AssetPresenceTests(unittest.TestCase):
         database.initialize_database()
         self.assertEqual(
             first, database.get_active_entitlements(1, "2000-01-01T00:00:00+00:00"))
+
+
+class Schema25AccessInvalidationTests(unittest.TestCase):
+    """Schema 25: `dashboard_access_invalidations`, the bot's signal that a
+    Discord event may have changed who can use the dashboard -- a new table,
+    purely additive, gated on `IF NOT EXISTS`."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _downgrade(self):
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("DROP TABLE dashboard_access_invalidations")
+            conn.execute("PRAGMA user_version = 24")
+            conn.commit()
+
+    def _fingerprint(self):
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            return {
+                table: conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
+                for table in ("users", "guilds", "settings_audit")
+            }
+
+    def test_a_clean_database_has_the_table(self):
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(25, conn.execute("PRAGMA user_version").fetchone()[0])
+            columns = [row[1] for row in conn.execute(
+                "PRAGMA table_info(dashboard_access_invalidations)")]
+        self.assertEqual(["invalidation_id", "guild_id", "user_id", "created_at"],
+                         columns)
+
+    def test_a_schema_24_database_upgrades_and_keeps_its_rows(self):
+        database.initialize_database()
+        database.register_guild(1, "Guild")
+        database.create_new_user(7, "2026-01-01T00:00:00+00:00")
+        database.record_settings_audit(1, 42, "setting.update", "language", "hu", "en")
+        self._downgrade()
+        before = self._fingerprint()
+
+        database.initialize_database()
+
+        self.assertEqual(before, self._fingerprint())
+        self.assertEqual(0, database.get_latest_access_invalidation_id())
+        database.record_access_invalidations([(1, 7)])
+        self.assertEqual([{"invalidation_id": 1, "guild_id": "1", "user_id": "7"}],
+                         database.get_access_invalidations_since(0))
+
+    def test_re_running_the_migration_changes_nothing(self):
+        database.initialize_database()
+        database.record_access_invalidations([(1, 7), (1, None)])
+        first = database.get_access_invalidations_since(0)
+        database.initialize_database()
+        self.assertEqual(first, database.get_access_invalidations_since(0))
+
+    def test_ids_keep_rising_after_pruning_empties_the_table(self):
+        """The dashboard follows the id, so an id below one it has seen would
+        read as already handled. Plain rowids restart once the table empties;
+        AUTOINCREMENT does not."""
+        database.initialize_database()
+        database.record_access_invalidations([(1, 7), (1, 8)])
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("DELETE FROM dashboard_access_invalidations")
+            conn.commit()
+        database.record_access_invalidations([(1, 9)])
+        self.assertEqual([3], [row["invalidation_id"] for row in
+                               database.get_access_invalidations_since(2)])
+
+    def test_rows_older_than_the_retention_are_pruned_on_write(self):
+        database.initialize_database()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute(
+                "INSERT INTO dashboard_access_invalidations (guild_id, user_id, "
+                "created_at) VALUES (1, 7, '2000-01-01T00:00:00+00:00')")
+            conn.commit()
+        database.record_access_invalidations([(1, 8)])
+        self.assertEqual(["8"], [row["user_id"] for row in
+                                 database.get_access_invalidations_since(0)])

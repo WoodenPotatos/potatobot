@@ -1,10 +1,12 @@
 # Localization: state and rules
 
 Re-generate every figure here with `python scripts/locale_audit.py`. Last
-measured 2026-09-27, after LoLdle's ownership exemption ended, `champions`
-was filled for English, and — same day, a follow-up pass — `hard_mode`
-gained its last two champions (Yunara, Zaahen) and was filled for English
-too. LoLdle is now fully bilingual across both datasets.
+measured **2026-10-16**: every catalog, general and minigame, is 100% filled in
+both languages, and the audit reports 0 missing keys and 0 unlocalized
+user-visible literals. LoLdle became fully bilingual across both datasets on
+2026-09-27, when its ownership exemption ended, `champions` was filled for
+English and `hard_mode` gained its last two champions (Yunara, Zaahen) and was
+filled for English too.
 
 ---
 
@@ -30,9 +32,10 @@ too. LoLdle is now fully bilingual across both datasets.
    visible immediately rather than at the next red build.
 7. **`data/loldle/`'s ownership exemption ended 2026-09-27.** Its external
    maintainer left, and `champions` was filled for English in the same change
-   — no dataset is owner-exempt any more. `hard_mode` (new, redacted-lore hard
-   mode) is separately incomplete in English: newly-authored content, Hungarian
-   only so far, same as any other unfinished-for-one-language dataset.
+   — no dataset is owner-exempt any more. `hard_mode` (the redacted-lore hard
+   mode) was filled for English the same day, so it loads in both languages; a
+   dataset added later that is Hungarian-only would be taken offline in English
+   by `load_or_disable`, like any unfinished-for-one-language dataset.
 
 ### What enforces them
 
@@ -63,13 +66,19 @@ Translation *quality* is still the one thing no test can judge. Read the diff.
 
 | Surface | Hungarian | English |
 | --- | --- | --- |
-| General catalog (1393 keys) | **100%** | **100%** |
-| Dashboard namespace (542 keys) | 100% | 100% |
-| Runtime-composed key families (26) | 100% | 100% |
-| Valdle data (63 strings) | 100% | **100%** |
-| DbDle data (137 strings) | 100% | **100%** |
-| LoLdle `champions` (331 strings) | 100% | **100% — ownership exemption ended 2026-09-27** |
-| LoLdle `hard_mode` (346 strings) | 100% | **100% — translated 2026-09-27, same day as the rest** |
+| General catalog (2056 keys) | **100%** | **100%** |
+| … of which the dashboard namespace (965 keys) | 100% | 100% |
+| Runtime-composed key families (33) | 100% | 100% |
+| Literal keys referenced in source (1364) | 0 missing | 0 missing |
+| Valdle data (65 strings) | 100% | **100%** |
+| DbDle data (136 strings) | 100% | **100%** |
+| Genshindle data (191 strings) | 100% | **100%** |
+| LoLdle data, both datasets (677 strings) | 100% | **100% — ownership exemption ended 2026-09-27** |
+
+The audit also lists **56 unreferenced catalog keys**. They are not a gate and
+not automatically dead: some belong to a computed family the audit does not
+model, and some were retired deliberately (see section 3). Read why a key was
+orphaned before wiring it back up or deleting it.
 
 ### 2.2 Selecting a language
 
@@ -84,7 +93,8 @@ What `language = "en"` does today:
 - Every bot message, command description, button label and error → English.
 - The dashboard → English (its display language is a separate per-browser
   preference and works independently).
-- Valdle, DbDle and every `/loldle` difficulty, `hard` included → English.
+- Valdle, DbDle, Genshindle and every `/loldle` difficulty, `hard` included →
+  English.
 
 ### 2.3 How resolution works
 
@@ -109,7 +119,7 @@ This is the best-organised part of the project and it did not need changing.
 Stable English entity ids and numeric mechanics live in `data/<game>/*.json`;
 display names, aliases and attribute labels live in
 `data/<game>/locales/<lang>.json`. The English catalogs generated for Valdle,
-DbDle and both LoLdle datasets copy the entity names — they are already
+DbDle, Genshindle and both LoLdle datasets copy the entity names — they are already
 English proper nouns — and translate the attribute labels (`hard_mode`'s
 "attribute" is a full lore quote per champion rather than an enum, but the
 same opaque-id mechanism carries it without any loader change).
@@ -131,19 +141,22 @@ same opaque-id mechanism carries it without any loader change).
   `music.join_failed_safe`, `music.search_error` → `music.search_failed`, and so
   on). None may be revived: they were retired precisely because echoing
   extractor and exception text to users is forbidden.
-- **Four Discord audit-log reasons** moved into the catalogs
+- **Discord audit-log reasons** moved into the catalogs
   (`roleselect.audit_reason`, `tickets.audit_reason_setup_failed`,
-  `shop.audit_reason_setup_failed`). Server staff read those in the audit log, so
-  the project's own rule covers them.
+  `shop.audit_reason_setup_failed`, and later
+  `moderation.escalation_audit_reason`). Server staff read those in the audit
+  log, so the project's own rule covers them. `shop.audit_reason_setup_failed`
+  has since lost its caller — ticket setup moved to `core/support_tickets.py`,
+  which uses the tickets key — and is one of the unreferenced keys above.
 - **`t()` was rewritten** for the fallback chain and the format-argument split
   described above.
 - **`language` became a constrained choice** with a dashboard dropdown.
 
-One thing is deliberately *not* fixed. `cogs/music.py:445` logs a playback
-failure and tells the member nothing; the track auto-advances. The key that used
-to report it (`music.playback_error`) was deleted rather than revived, because it
-interpolated the raw error. If that silence should become a message, it needs a
-new key that names the failure without quoting the exception.
+A playback failure used to be logged and told the member nothing. The key that
+once reported it (`music.playback_error`) was deleted rather than revived,
+because it interpolated the raw error; the `after` callback in `cogs/music.py`
+now posts the generic `music.playback_failed` instead, which names the failure
+without quoting the exception, and the track still auto-advances.
 
 ---
 

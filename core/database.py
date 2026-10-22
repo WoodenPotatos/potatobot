@@ -71,6 +71,7 @@ READ_ONLY_OPERATIONS = {
     "export_user_data", "get_active_entitlements_for_user",
     "get_retention_candidates",
     "get_game_patch_state", "get_guild_patch_announcement",
+    "get_latest_access_invalidation_id", "get_access_invalidations_since",
 }
 
 
@@ -168,7 +169,7 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_survivor", "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 24
+LATEST_SCHEMA_VERSION = 25
 
 # The largest amount any single balance change, stake or transfer may carry.
 # Far above any real balance, and far below 2**63: an amount past that reaches
@@ -178,8 +179,11 @@ LATEST_SCHEMA_VERSION = 24
 # the backstop for the paths that do not.
 MAX_AMOUNT = 10**12
 
-# A claimed control action is re-queued only once its lease expires. The worker
-# renews the lease as it runs, so slowness never causes a duplicate Discord post.
+# A claimed control action is re-queued only once its lease expires. Nothing
+# renews it today: `renew_control_action_lease` exists but has no runtime
+# caller. A slow publish still cannot be posted twice, because the one worker is
+# sequential and only reclaims lapsed leases when it claims its *next* action.
+# A second concurrent worker would need the renewal wired in first.
 CONTROL_ACTION_LEASE_SECONDS = 120
 
 USER_COLUMNS = {
@@ -675,6 +679,23 @@ def _create_scoped_schema(conn):
         -- is kept: who played a word is in the channel and in
         -- `minigame_state.last_user_id`, and storing it again would put this
         -- table on the erasure path for nothing.
+        -- Schema 25. A Discord event that may have changed who can use the
+        -- dashboard for a guild: a member gaining or losing Administrator or
+        -- Manage Server, leaving, or an ownership transfer (one member), or a
+        -- role's own permissions changing (`user_id` NULL: everyone in the
+        -- guild). The bot writes a row; the dashboard, which may be another
+        -- process, reads rows newer than the last it saw and forgets the
+        -- cached permission snapshots they touch, so the next request asks
+        -- Discord again instead of waiting out the cache. A row decides
+        -- nothing about access itself. AUTOINCREMENT because the dashboard
+        -- follows the id: plain rowids restart below the last id once pruning
+        -- empties the table, and every later event would read as already seen.
+        CREATE TABLE IF NOT EXISTS dashboard_access_invalidations (
+            invalidation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER,
+            created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS minigame_used_words (
             guild_id INTEGER NOT NULL,
             game_key TEXT NOT NULL,
@@ -1036,8 +1057,8 @@ def _create_control_plane_v5_schema(conn):
     if "started_at" not in action_columns:
         conn.execute("ALTER TABLE control_actions ADD COLUMN started_at TEXT")
     if "lease_expires_at" not in action_columns:
-        # Schema 7. A worker renews this while it runs, so a legitimately slow
-        # publish is no longer re-queued and posted to Discord a second time.
+        # Schema 7. Only a lapsed lease is reclaimed, so a legitimately slow
+        # publish is not re-queued while it is still running.
         conn.execute("ALTER TABLE control_actions ADD COLUMN lease_expires_at TEXT")
     pity_columns = {row[1] for row in conn.execute("PRAGMA table_info(gacha_pity)")}
     if "pulls_toward_four_star" not in pity_columns:
@@ -4486,6 +4507,60 @@ def get_settings_audit(guild_id: int, limit: int = 100) -> list[dict]:
             for row in rows]
 
 
+# Long enough that a dashboard process down for a while still sees what it
+# missed, and short enough that the table stays a handful of rows. A dashboard
+# that missed more than this starts with an empty permission cache anyway.
+ACCESS_INVALIDATION_RETENTION_HOURS = 24
+ACCESS_INVALIDATION_READ_LIMIT = 500
+
+
+def record_access_invalidations(rows) -> int:
+    """Record `(guild_id, user_id or None)` events and prune old ones."""
+    now = utc_now()
+    cutoff = (now - timedelta(hours=ACCESS_INVALIDATION_RETENTION_HOURS)).isoformat()
+    values = [(int(guild_id), None if user_id is None else int(user_id), now.isoformat())
+              for guild_id, user_id in rows]
+    try:
+        with get_connection() as conn:
+            conn.execute("DELETE FROM dashboard_access_invalidations "
+                         "WHERE created_at < ?", (cutoff,))
+            conn.executemany(
+                "INSERT INTO dashboard_access_invalidations "
+                "(guild_id, user_id, created_at) VALUES (?, ?, ?)", values)
+            conn.commit()
+            return len(values)
+    except sqlite3.Error as exc:
+        db_logger.exception("Dashboard access invalidation write failed")
+        raise DatabaseOperationError("access invalidation write failed") from exc
+
+
+def get_latest_access_invalidation_id() -> int:
+    try:
+        with get_connection() as conn:
+            row = conn.execute("SELECT COALESCE(MAX(invalidation_id), 0) "
+                               "FROM dashboard_access_invalidations").fetchone()
+            return int(row[0])
+    except sqlite3.Error as exc:
+        db_logger.exception("Dashboard access invalidation read failed")
+        raise DatabaseOperationError("access invalidation read failed") from exc
+
+
+def get_access_invalidations_since(after_id: int) -> list[dict]:
+    """Rows newer than `after_id`, oldest first, ids as strings for comparison."""
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT invalidation_id, guild_id, user_id "
+                "FROM dashboard_access_invalidations WHERE invalidation_id > ? "
+                "ORDER BY invalidation_id LIMIT ?",
+                (int(after_id), ACCESS_INVALIDATION_READ_LIMIT)).fetchall()
+    except sqlite3.Error as exc:
+        db_logger.exception("Dashboard access invalidation read failed")
+        raise DatabaseOperationError("access invalidation read failed") from exc
+    return [{"invalidation_id": row[0], "guild_id": str(row[1]),
+             "user_id": None if row[2] is None else str(row[2])} for row in rows]
+
+
 def _validated_gacha_config(config_value: dict, banner_key: str | None = None) -> dict:
     """Validate and normalise one banner's configuration.
 
@@ -7483,6 +7558,7 @@ SUBJECT_TABLES = (
     ("user_identities", "user_id = ?", 1),
     ("user_sharing_preferences", "user_id = ?", 1),
     ("activity_events", "user_id = ?", 1),
+    ("dashboard_access_invalidations", "user_id = ?", 1),
 )
 
 # Deleted outright, children before parents. Foreign keys are enforced on runtime
@@ -7511,6 +7587,9 @@ ERASE_DELETE_ORDER = (
     # *joined* somebody else's post are inside `joined_json` and are scrubbed
     # out of it below rather than deleting the host's post over them.
     ("lfg_posts", "host_id = ?", 1),
+    # A day-long signal that the member's dashboard access may have changed;
+    # nothing about it needs to outlive them.
+    ("dashboard_access_invalidations", "user_id = ?", 1),
 )
 
 # Re-keyed to the tombstone instead of deleted. ``users`` and ``scoped_accounts``

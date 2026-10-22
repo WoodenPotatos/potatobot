@@ -1,18 +1,42 @@
 # Keeping Everydle data current
 
-**Implemented on 2026-08-22.** Every number below was measured against the live
-sources that day, and phases 1 to 5 are done — see section 8 for what shipped and
-what deliberately did not.
+**Implemented on 2026-08-22.** Sections 1 to 7 are the plan as written that day,
+with the numbers measured against the live sources then; phases 1 to 5 are done —
+see section 8 for what shipped and what deliberately did not. The reasoning is
+kept as written, because it is the part that explains why the tooling reports
+rather than edits.
 
-The reasoning is kept as written, because it is the part that explains why the
-tooling reports rather than edits.
+### State as of 2026-10-16
+
+| Game | Dataset | Managed | Local entities | Adapter |
+| --- | --- | --- | --- | --- |
+| Valdle | `agents` | yes, since 2026-08-22 | 29 | `fetch_valdle` |
+| DbDle | `killers` | yes, since 2026-08-22 | 43 | `fetch_dbdle` |
+| Genshindle | `characters` | yes, since 2026-08-27 | 122 | `fetch_genshindle` |
+| LoLdle | `champions` | yes, since 2026-09-27 | 174 (one, `romeo`, local only) | `fetch_loldle` |
+| LoLdle | `hard_mode` | no | 173 | none |
+| DbDle | `survivors`, `perks` | no — scaffolding no command loads | — | none |
+
+`MANAGED_DATASETS` in `scripts/everydle_sources.py` is the authority for the
+managed column, and `LOCKED_GAMES` is empty: nothing is refused by name any more.
 
 **League of Legends joined the managed set 2026-09-27**, once the administrator
 who held that request left the project. `champions` now has an adapter
-(`fetch_loldle` in `scripts/everydle_sources.py`); `hard_mode` (redacted-lore
-hard mode) stays unmanaged on its own merits — it is entirely hand-authored
-lore with no plausible upstream source, the same category as Valdle's own
-`gender`/`species`/`origin` fields, not an ownership restriction.
+(`fetch_loldle`); `hard_mode` stays unmanaged on its own merits — it is entirely
+hand-authored lore with no plausible upstream source, the same category as
+Valdle's own `gender`/`species`/`origin` fields, not an ownership restriction.
+**Hard mode shipped the same day** as `/loldle difficulty:hard`: the player
+guesses the champion from a redacted lore snippet, with the release year as a
+higher/lower hint (`LoldleHardModal`/`LoldleHardView` in `cogs/everydle.py`).
+
+**Open findings.** The last live drift run recorded (2026-09-25, in `todo.md`)
+had Genshindle in step and DbDle **one killer behind**: upstream
+lists 44 killers to the local 43, the new one being `the_judgment`, whose draft
+needs a person for `country` — the one DbDle field the source cannot answer. It
+has not been added. The recorded fixtures under `tests/fixtures/everydle/`
+predate both that killer and Genshin's 7.1 characters, so a `--fixtures` run
+reports `vesna` and `vodyanitsa` as *missing upstream*; that is the fixture's
+age, not drift, and re-recording clears it.
 
 **Data Dragon's automatable surface is thin.** Verified live 2026-09-27
 against `https://ddragon.leagueoflegends.com/cdn/<version>/data/en_US/champion.json`
@@ -34,7 +58,7 @@ Every Everydle dataset is hand-written. When a game ships a new character, the
 puzzle silently stays on the old roster until somebody notices and edits JSON in
 three places: the mechanics file, the Hungarian catalog, and now the English one.
 
-That is already the situation. Measured today:
+That was the situation when this plan was written. Measured 2026-08-22:
 
 | Game | Local | Upstream | Drift |
 | --- | --- | --- | --- |
@@ -123,8 +147,10 @@ Two things it does *not* publish, both settled deliberately:
   rather than by matching names.
 - **Whether a character has actually been released.** `version` is when they
   entered the data, so an upcoming character already carries one — the roster
-  cannot tell you. That is the only fact a person supplies, and it is one line in
-  `EXCLUDED_ENTITIES` per character, deleted the day they arrive.
+  cannot tell you. That is the only fact a person supplies. It is answered per
+  finding, **not** recorded in `EXCLUDED_ENTITIES`: an entry there is a permanent
+  decision, and Alyosha was briefly listed as unreleased and should not have been,
+  since 7.0 shipped both her and Odette.
 
 What looked at first like a third gap turned out not to be one. `region` is blank
 for eleven characters, but every one of them still carries an `associationType`,
@@ -260,7 +286,7 @@ Phase 1 is worth doing regardless of whether any of the rest happens.
 - **Scope creep beyond what's managed.** This risk predated LoLdle joining
   `champions` 2026-09-27 (a deliberate code change and conversation, exactly as
   this note asked for) — it now reads as: the adapter registry should still
-  have no mechanism for adding a *fourth* game, or for pulling `hard_mode` in
+  have no mechanism for adding a *fifth* game, or for pulling `hard_mode` in
   alongside `champions`, without the same kind of deliberate step.
 - **A new attribute value needs both catalogs.** Adding, say, a nationality that
   does not exist yet means a new value id plus Hungarian and English text. The
@@ -276,10 +302,13 @@ Phase 1 is worth doing regardless of whether any of the rest happens.
 | dbd.tricky.lol | `/api/characters` | 2026-08-22 | HTTP 200, 96 characters, `gender`/`height`/`dlc`/`tunables` present |
 | dbd.tricky.lol | `/api/perks` | 2026-08-22 | HTTP 200, 315 perks |
 | api.nightlight.gg | `/v1/characters` | 2026-08-22 | HTTP 404 — not a usable endpoint |
+| genshin-db-api.vercel.app | `/api/v5/characters`, `/api/v5/talents` | 2026-08-27 | 122 characters, 125 talent records, one request each |
+| ddragon.leagueoflegends.com | `/api/versions.json`, `/cdn/<version>/data/en_US/champion.json` | 2026-09-27 | 173 champions; only `range` is trustworthy (see the top of this file) |
 
 Riot publishes no official endpoint carrying agent lore attributes, and Behaviour
 Interactive publishes no public Dead by Daylight API at all, which is why both
-usable sources are community-run.
+of those sources are community-run. Data Dragon is Riot's own; genshin-db-api is
+community-run.
 
 ---
 
@@ -292,6 +321,8 @@ usable sources are community-run.
 | 3 — DbDle adapter | **done** | same |
 | 4 — proposal generator | **done** | `scripts/everydle_propose.py` |
 | 5 — scheduled run | **done, differently** | `deploy/potatobot-everydle-drift.{service,timer}` |
+| later — Genshindle adapter | **done** 2026-08-27 | `fetch_genshindle`; see *The Genshindle adapter* below |
+| later — LoLdle `champions` adapter | **done** 2026-09-27 | `fetch_loldle` |
 
 ### Phase 1, as applied
 
@@ -338,11 +369,17 @@ reading it. Deleting an entry makes it a finding again.
 ### Phase 5, and why it is a timer
 
 The plan said this belonged beside the social-notification polling inside the
-bot. It ships as a systemd timer instead. The check is worth running weekly at
-most, and keeping it out of the bot means no third-party HTTP dependency sits on
+bot. It ships as a systemd timer instead, firing Mondays at 05:30. The check is
+worth running weekly at most, and keeping it out of the bot means no third-party HTTP dependency sits on
 the event loop that has to meet Discord's three-second interaction deadline. The
 report already exits 1 for drift and 2 for an unreachable source, so the unit
 distinguishes them with `SuccessExitStatus=1 2` and the journal is the record.
+One game's source being unreachable no longer hides the others: `run_checks`
+catches `SourceError` per game, lists the unreachable ones in their own section,
+and still compares every reachable dataset — exit 2 if anything was unreachable,
+else 1 if anything drifted, else 0. Before 2026-09-24 one `try` wrapped the whole
+loop, so `dbd.tricky.lol` timing out stopped the run before Genshindle, which is
+how Vesna and Vodyanitsa went unnoticed for a week.
 
 ### Running it
 
@@ -350,6 +387,7 @@ distinguishes them with `SuccessExitStatus=1 2` and the journal is the record.
 python scripts/everydle_drift.py                      # live sources
 python scripts/everydle_drift.py --fixtures tests/fixtures/everydle
 python scripts/everydle_propose.py draft -o patch.json
+python scripts/everydle_propose.py draft --game genshindle -o patch.json
 python scripts/everydle_propose.py apply patch.json --dry-run
 python scripts/everydle_sources.py record tests/fixtures/everydle   # re-record
 ```
@@ -362,8 +400,8 @@ After applying, run `?reload everydle` or restart; the datasets load at import.
 
 ## The Genshindle adapter
 
-Moved out of `CLAUDE.md`, which is loaded into every session; this is reference
-for whoever next touches the adapter.
+Reference for whoever next touches the adapter; `CLAUDE.md` keeps only the
+rules.
 
 **Genshindle is the first dataset with no lore attribute at all**, which is what
 made it worth building as a managed dataset rather than by hand. Two bulk
@@ -396,19 +434,28 @@ every element rather than none — seven talent records, one per element — so 
 element and weekly boss read `All`, which plays as a clue instead of a hole and
 covers any future Traveller form automatically.
 
-**`EXCLUDED_ENTITIES` holds two kinds of absence and the difference matters.**
-*Not playable* is permanent and verifiable — Manekin and Manekina appear in the
-roster with no talent record at all. *Not released yet* is temporary and is the
-one fact this source does not carry: `version` is when a character entered the
-data, so an upcoming character already has one. That entry names the date and the
-release it was checked against, and deleting the line is all it takes to add them.
+**`EXCLUDED_ENTITIES` records only permanent absences.** *Not playable* is
+permanent and verifiable — Manekin and Manekina appear in the roster with no
+talent record at all — and so is LoLdle's `romeo`, a local easter-egg entity with
+no upstream record. *Not released yet* is temporary and is the one fact this
+source does not carry: `version` is when a character entered the data, so an
+upcoming character already has one. That makes it a finding for a person to
+answer each time rather than an entry; Alyosha was briefly listed as unreleased
+and should not have been, since 7.0 shipped both her and Odette.
+
+**Ten characters carry a given-name alias** (added 2026-09-25): Inazuman
+names, most written family name first, which players type by the short name —
+`raiden_shogun` answers to `Raiden` as well as `Raiden Shogun`, `kamisato_ayaka`
+to `Ayaka`, `kaedehara_kazuha` to `Kazuha`. Aliases live in the locale catalogs' `aliases` lists,
+are the one piece of local knowledge this dataset has, and are the safe way to
+accept another spelling — never a renamed id.
 
 ## The rules these scripts enforce
 
-`python scripts/everydle_drift.py` compares the Valdle, DbDle and Genshindle datasets with upstream and reports what changed; `scripts/everydle_propose.py` drafts and applies a reviewed patch. Four invariants govern anything touching `data/`. **Never rename an entity id** — `get_daily_target` filters the persisted deck to ids that still exist, so a rename re-draws today's answer under anyone mid-game; add an alias. **Never re-derive an attribute value id** — they are opaque and dataset-scoped, so an existing id must be looked up and reused or the mechanics file's references are orphaned. **Apply attribute changes at a day boundary**, because the colour feedback a player already received was computed against the old value. And **datasets load at import**, so a change needs `?reload everydle` or a restart. `loldle` joined `champions` (not `hard_mode`) in the managed set 2026-09-27, once the tooling's ownership-based refusal of it ended with the maintainer who held it.
+`python scripts/everydle_drift.py` compares the Valdle, DbDle, Genshindle and LoLdle (`champions`) datasets with upstream and reports what changed; `scripts/everydle_propose.py` drafts and applies a reviewed patch. Four invariants govern anything touching `data/`. **Never rename an entity id** — `get_daily_target` filters the persisted deck to ids that still exist, so a rename re-draws today's answer under anyone mid-game; add an alias. **Never re-derive an attribute value id** — they are opaque and dataset-scoped, so an existing id must be looked up and reused or the mechanics file's references are orphaned. **Apply attribute changes at a day boundary**, because the colour feedback a player already received was computed against the old value. And **datasets load at import**, so a change needs `?reload everydle` or a restart. `loldle` joined `champions` (not `hard_mode`) in the managed set 2026-09-27, once the tooling's ownership-based refusal of it ended with the maintainer who held it.
 
 **A missing attribute is not a gap, it is an outage.** `_resolve_value` raises on an unresolvable id and `load_or_disable` turns that into the whole minigame vanishing for that language, so an entity may only enter a dataset with every field filled, and `everydle_propose.py` refuses a patch with any null. A `users` cooldown column, by contrast, needs no schema-version bump: `USER_COLUMNS` is applied idempotently by `PRAGMA table_info` on every start.
 
 **An attribute a source publishes is not automatically an attribute worth having.** `body_type` shipped and was removed the same week: five values across 120 characters, most in two, so a guess almost never learned anything while it cost a column in an already wide grid. Removing one means **five** places — the dataset, both locale catalogs' value entries, `GENSHIN_FIELDS` in the cog, the updater's `SOURCE_AUTHORITATIVE` list, and `everydle.<game>_header`, a hand-written column list that is nobody's idea of a place an attribute lives. Missing the header is not a stray word: it leaves the grid one column wider than its rows, so every heading right of the gap labels the wrong column. A test asserts the header's column count equals the field tuple plus name and version. `SOURCE_AUTHORITATIVE` is the other easy miss: leave it there and every drift run reports the field as missing forever. It belongs **out** of that list rather than in `ACCEPTED_DIVERGENCES`, because the dataset no longer carries the field and there is nothing to disagree about.
 
-`SOURCE_AUTHORITATIVE` names the fields the game itself publishes and changes with a balance patch, so a disagreement is something to *apply* rather than decide; `merge_base_value` replaces only the leading component of a multi-value label, so power-state speeds a person maintains survive a base-speed change. Everything else is lore or editorial, and `ACCEPTED_DIVERGENCES` records the ones already decided, with a reason each — they stay visible but are not findings, because a report that cries wolf stops being read. **`EXCLUDED_ENTITIES` is where a deliberate absence is recorded**, with a reason each, or the entity is reported as new every week. The per-adapter specifics — the Genshindle endpoints, the weekly-boss and association maps, the release-version packing — are in `docs/everydle_data_updates.md`.
+`SOURCE_AUTHORITATIVE` names the fields the game itself publishes and changes with a balance patch, so a disagreement is something to *apply* rather than decide; `merge_base_value` replaces only the leading component of a multi-value label, so power-state speeds a person maintains survive a base-speed change. Everything else is lore or editorial, and `ACCEPTED_DIVERGENCES` records the ones already decided, with a reason each — they stay visible but are not findings, because a report that cries wolf stops being read. **`EXCLUDED_ENTITIES` is where a deliberate absence is recorded**, with a reason each, or the entity is reported as new every week. The per-adapter specifics — the Genshindle endpoints, the weekly-boss and association maps, the release-version packing — are in *The Genshindle adapter* above.

@@ -214,6 +214,48 @@ class FfmpegHeaderForwardingTests(unittest.TestCase):
         self.assertEqual(header_block, "User-Agent: safe\r\n")
 
 
+class OpusSourceTests(unittest.TestCase):
+    """ffmpeg encodes Opus itself, so the bot's process never runs the encoder.
+
+    `FFmpegPCMAudio` handed raw PCM to discord.py, which encoded Opus inside
+    the bot a 20 ms frame at a time for every playing guild -- the heaviest
+    per-guild CPU cost and the one place the GIL could turn music into
+    event-loop lag for every other command. Nothing adjusts volume, so nothing
+    needs PCM. The security options must reach the new class unchanged.
+    """
+
+    def _play(self, song):
+        class _Loop:
+            def create_task(self, coroutine):
+                coroutine.close()
+
+            def call_soon_threadsafe(self, *args):
+                pass
+
+        played = []
+        voice = types.SimpleNamespace(play=lambda source, after: played.append(source))
+        guild = types.SimpleNamespace(id=4242, voice_client=voice)
+        cog = music.Music.__new__(music.Music)
+        cog.bot = types.SimpleNamespace(loop=_Loop())
+        original = dict(music.music_queues)
+        self.addCleanup(lambda: (music.music_queues.clear(), music.music_queues.update(original)))
+        music.music_queues[guild.id] = [song]
+        with patch.object(music.discord, "FFmpegOpusAudio") as opus:
+            cog.play_next(guild, types.SimpleNamespace())
+        return opus, played
+
+    def test_playback_uses_ffmpeg_opus_with_the_security_options(self):
+        song = {"url": "https://media.example/audio", "title": "t",
+                "requester": "r", "http_headers": {"User-Agent": "ua"}}
+        opus, played = self._play(song)
+        opus.assert_called_once_with(song["url"], **music._ffmpeg_options_for(song))
+        self.assertEqual(played, [opus.return_value])
+        options = opus.call_args.kwargs
+        self.assertIn("-protocol_whitelist http,https,tcp,tls,crypto", options["before_options"])
+        self.assertIn("-nostdin", options["before_options"])
+        self.assertIn("-headers", options["before_options"])
+
+
 class _FakeVoiceClient:
     def __init__(self, channel_id):
         self.channel = types.SimpleNamespace(id=channel_id)

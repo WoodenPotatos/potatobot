@@ -5,8 +5,9 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now potatobot-everydle-drift.timer
 #
-# This runs `scripts/everydle_drift.py`, which is read-only: it compares the
-# Valdle and DbDle datasets with their upstream sources and reports what changed.
+# This runs `scripts/everydle_drift.py`, which is read-only: it compares every
+# managed dataset (`MANAGED_DATASETS` in `scripts/everydle_sources.py`) with its
+# upstream source and reports what changed.
 # It never edits `data/`, so a bad or missing upstream response can only produce
 # a noisy journal entry.
 #
@@ -29,7 +30,7 @@
 
 [Unit]
 Description=PotatoBot Everydle data drift check
-Documentation=https://github.com/WoodenPotatos/potatobotbeta
+Documentation=https://github.com/WoodenPotatos/potatobot
 After=network-online.target
 Wants=network-online.target
 

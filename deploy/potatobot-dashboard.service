@@ -22,11 +22,13 @@
 # via `systemctl show potatobot.service -p User`). This unit is not deployed
 # on the current single-process host, but would otherwise fail identically
 # to `potatobot.service` and `potatobot-offsite-backup.service`, both of
-# which shipped with the same wrong assumption until 2026-09-25.
+# which shipped with the same wrong assumption until 2026-09-25. Drop
+# `RemoveIPC=true` below when installing under a login account, for the
+# reason `potatobot.service` gives.
 
 [Unit]
 Description=PotatoBot dashboard
-Documentation=https://github.com/WoodenPotatos/potatobotbeta
+Documentation=https://github.com/WoodenPotatos/potatobot
 After=network-online.target potatobot.service
 Wants=network-online.target
 # The bot owns schema creation; start after it so a fresh database is migrated.

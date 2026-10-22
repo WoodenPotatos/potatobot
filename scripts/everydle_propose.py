@@ -13,7 +13,9 @@ Usage:
 After applying, the bot has to re-read the files: `?reload everydle`, or a
 restart. `cogs/everydle.py` loads its datasets at import time.
 
-See `docs/everydle_data_updates.md`. LoLdle is excluded throughout.
+See `docs/everydle_data_updates.md`. Which datasets this covers is
+`MANAGED_DATASETS` in `scripts/everydle_sources.py`; LoLdle's `champions`
+joined it 2026-09-27, and `hard_mode`, which has no upstream, stays out.
 """
 
 import argparse

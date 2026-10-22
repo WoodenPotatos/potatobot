@@ -1,4 +1,4 @@
-"""The Flask control-plane API and the durable Discord action outbox.
+"""The Flask control-plane API. It queues Discord work; `core/control_actions.py` runs it.
 
 Rules that bind changes here: docs/subsystems/dashboard.md
 """
@@ -38,10 +38,7 @@ from core.clock import parse_stored
 
 from core import database
 from core import managed_messages
-from core.managed_messages import (
-    MANAGED_KIND_FEATURES,
-    render_managed_message,
-)
+from core.managed_messages import MANAGED_KIND_FEATURES
 from core import item_catalog
 from core.supported_games import SUPPORTED_GAME_KEYS
 from core import permission_audit
@@ -221,8 +218,27 @@ class TtlCache:
         with self._lock:
             self._entries.pop(key, None)
 
+    def forget_matching(self, predicate) -> int:
+        """Drop every entry for which `predicate(key, value)` is true."""
+        with self._lock:
+            doomed = [key for key, (_, value) in self._entries.items()
+                      if predicate(key, value)]
+            for key in doomed:
+                del self._entries[key]
+        return len(doomed)
+
 
 _permission_cache = TtlCache(PERMISSION_CACHE_SECONDS, MAX_TRACKED_SESSIONS)
+
+# Whose session each cached snapshot belongs to, so an event naming one member
+# can find their sessions. Written beside every `_permission_cache.put`.
+_session_users: dict[str, str] = {}
+_session_users_lock = threading.Lock()
+# The newest `dashboard_access_invalidations` row this process has applied.
+# None until the first read, which only records where the table stands: a
+# process that has just started has no cached snapshot for a row to stale.
+_last_access_invalidation_id: int | None = None
+_access_invalidation_lock = threading.Lock()
 
 # One refresh at a time per session. `loadGuild()` fires four `/api/guilds/…`
 # reads at once and a fresh session's cache is empty, so all four missed it and
@@ -267,6 +283,8 @@ def _forget_session(session_id: str | None):
     with _oauth_token_lock:
         _oauth_tokens.pop(session_id, None)
     _permission_cache.forget(session_id)
+    with _session_users_lock:
+        _session_users.pop(session_id, None)
     with _refresh_locks_guard:
         _refresh_locks.pop(session_id, None)
 
@@ -855,6 +873,49 @@ def _permission_refresh_unavailable(mutating: bool, cause: str):
     return None
 
 
+def _apply_access_invalidations():
+    """Forget the cached snapshots a Discord event has made stale.
+
+    The bot writes a row when a member gains or loses Administrator or Manage
+    Server, leaves, or a role's permissions or the guild's owner change. A row
+    naming a member forgets that member's sessions; a guild-wide row forgets
+    every session whose snapshot includes the guild. The next request then asks
+    Discord, which stays the only authority.
+
+    Fails open to the existing refresh: an unreadable table means waiting out
+    `PERMISSION_CACHE_SECONDS`, never refusing anybody.
+    """
+    global _last_access_invalidation_id
+    try:
+        with _access_invalidation_lock:
+            if _last_access_invalidation_id is None:
+                _last_access_invalidation_id = database.run_read_sync(
+                    database.get_latest_access_invalidation_id)
+                return
+            rows = database.run_read_sync(
+                database.get_access_invalidations_since, _last_access_invalidation_id)
+            if not rows:
+                return
+            _last_access_invalidation_id = rows[-1]["invalidation_id"]
+    except Exception:
+        dashboard_logger.warning(
+            "Dashboard access invalidations unreadable; relying on the "
+            "%s-second refresh.", PERMISSION_CACHE_SECONDS, exc_info=True)
+        return
+    users = {row["user_id"] for row in rows if row["user_id"] is not None}
+    guilds = {row["guild_id"] for row in rows if row["user_id"] is None}
+    with _session_users_lock:
+        named = {session_id for session_id, user_id in _session_users.items()
+                 if user_id in users}
+    forgotten = _permission_cache.forget_matching(
+        lambda session_id, snapshot: session_id in named
+        or bool(guilds.intersection(snapshot[0])))
+    if forgotten:
+        dashboard_logger.info(
+            "Discord permission change; re-checking %s dashboard session(s).",
+            forgotten)
+
+
 #: The only answers from Discord that mean this session's grant is gone. Every
 #: other status — 429 above all — is a reason to try later, not to log somebody
 #: out. Kept as a set so the list of what ends a session is short and readable.
@@ -901,6 +962,7 @@ def recheck_mutation_guild_permissions():
         session.clear()
         return unauthorized_response()
 
+    _apply_access_invalidations()
     cached = _permission_cache.get(session_id)
     if cached is not None:
         session["authorized_guild_ids"], session["full_admin_guild_ids"] = cached
@@ -947,6 +1009,11 @@ def recheck_mutation_guild_permissions():
             return unauthorized_response()
 
         _permission_cache.put(session_id, refreshed)
+        with _session_users_lock:
+            if session_id not in _session_users:
+                while len(_session_users) >= MAX_TRACKED_SESSIONS:
+                    del _session_users[next(iter(_session_users))]
+            _session_users[session_id] = str(session.get("user_id"))
     session["authorized_guild_ids"], session["full_admin_guild_ids"] = refreshed
     return None
 
@@ -1210,6 +1277,72 @@ def _resources_from_discord_rest(guild_id: int) -> dict | None:
                    "manageable": not row.get("managed", False)}
                   for row in role_rows if str(row["id"]) != str(guild_id)],
     }
+
+
+# The audit feed names its actors as `name (id)`. Names are looked up when the
+# page is read and never stored: a stored name goes stale, and would be one more
+# copy of a member's identity for erasure to find. An erased actor's row already
+# carries a tombstone id, which resolves to nothing and shows as the id alone.
+ACTOR_NAME_CACHE_SECONDS = 600
+# A page holds at most 100 rows but rarely more than a few distinct actors. The
+# cap bounds what one page load can cost a Waitress thread when Discord is slow.
+MAX_ACTOR_LOOKUPS_PER_REQUEST = 10
+_actor_name_cache = TtlCache(ACTOR_NAME_CACHE_SECONDS, 1024)
+
+
+def _actor_name_from_bot(guild_id: int, user_id: int) -> str | None:
+    if _dashboard_bot is None:
+        return None
+    guild = _dashboard_bot.get_guild(guild_id)
+    member = guild.get_member(user_id) if guild else None
+    user = member or _dashboard_bot.get_user(user_id)
+    return str(user.name) if user else None
+
+
+def _actor_name_from_rest(user_id: int) -> str | None:
+    token = (os.getenv("DISCORD_TOKEN") or "").strip()
+    if not token:
+        return None
+    try:
+        response = requests.get(
+            f"{DISCORD_API_ENDPOINT}/users/{user_id}",
+            headers={"Authorization": f"Bot {token}"}, timeout=5,
+        )
+        response.raise_for_status()
+        name = response.json().get("username")
+    except (requests.RequestException, ValueError, AttributeError):
+        return None
+    return str(name) if name else None
+
+
+def _resolve_actor_names(guild_id: int, actor_ids) -> dict[str, str | None]:
+    """Discord usernames for the given ids, or None where none can be found.
+
+    The bot's own cache first, then Discord's REST API for what it does not
+    hold, at most `MAX_ACTOR_LOOKUPS_PER_REQUEST` per call. Every failure is a
+    None, never an error: the audit page must load when Discord cannot answer.
+    """
+    names: dict[str, str | None] = {}
+    lookups = 0
+    for raw in dict.fromkeys(str(actor) for actor in actor_ids):
+        if not raw.isdigit() or int(raw) <= 0:
+            names[raw] = None
+            continue
+        cached = _actor_name_cache.get(f"{guild_id}:{raw}")
+        if cached is not None:
+            names[raw] = cached["name"]
+            continue
+        name = _actor_name_from_bot(guild_id, int(raw))
+        if name is None:
+            if lookups >= MAX_ACTOR_LOOKUPS_PER_REQUEST:
+                # Not cached: the next page load gets to try it.
+                names[raw] = None
+                continue
+            lookups += 1
+            name = _actor_name_from_rest(int(raw))
+        _actor_name_cache.put(f"{guild_id}:{raw}", {"name": name})
+        names[raw] = name
+    return names
 
 
 @app.route("/api/guilds/<int:guild_id>/discord-resources")
@@ -2131,7 +2264,11 @@ def repair_guild_channel_permission(guild_id):
 def guild_audit(guild_id):
     if not is_guild_authorized(guild_id):
         return unauthorized_response()
-    return jsonify({"status": "success", "data": database.run_read_sync(database.get_settings_audit, guild_id)})
+    entries = database.run_read_sync(database.get_settings_audit, guild_id)
+    names = _resolve_actor_names(guild_id, (entry["actor_id"] for entry in entries))
+    for entry in entries:
+        entry["actor_name"] = names.get(entry["actor_id"])
+    return jsonify({"status": "success", "data": entries})
 
 
 @app.route("/api/guilds/<int:guild_id>/privacy/erasures", methods=["POST"])
@@ -3347,277 +3484,6 @@ def start_dashboard_thread(bot=None):
     global _dashboard_bot
     _dashboard_bot = bot
     threading.Thread(target=run_api, daemon=True).start()
-
-
-CONTROL_ACTION_RETENTION_DAYS = 30
-# Pruning shares the worker's idle path rather than owning a timer of its own.
-CONTROL_ACTION_PRUNE_INTERVAL = 3600
-
-
-async def execute_member_erasure(bot, action) -> str | None:
-    """Carry out an operator-requested erasure. Returns an error code or None.
-
-    The dashboard process cannot revoke a Discord grant, so the route queues the
-    request and the bot performs it here: grants first, then the database, so no
-    premium role or rented asset outlives the record that would have expired it.
-    """
-    from cogs.privacy import revoke_all_entitlements
-
-    # Re-derive authority here rather than trust the queued row: the action may
-    # have been enqueued before ADMIN_DISCORD_ID last changed.
-    if not ADMIN_ID or str(action["actor_id"]) != ADMIN_ID:
-        return "permission_denied"
-    subject_id = action["payload"].get("user_id")
-    try:
-        subject_id = int(subject_id)
-    except (TypeError, ValueError):
-        return "invalid_subject"
-    if subject_id <= 0:
-        return "invalid_subject"
-    try:
-        revoked = await revoke_all_entitlements(bot, subject_id)
-        receipt = await database.run_write(
-            database.anonymize_user, subject_id, action["actor_id"],
-            action["guild_id"], "operator_request",
-        )
-    except database.ValidationError:
-        return "invalid_subject"
-    except Exception:
-        # Broad on purpose: this settles one outbox action, and an escaping
-        # exception would leave the operator with no error code at all.
-        dashboard_logger.exception("Operator-requested erasure failed.")
-        return "internal_error"
-    dashboard_logger.info(
-        "Operator-requested erasure complete (tombstone=%s, revoked=%s).",
-        receipt["tombstone_id"], revoked,
-    )
-    return None
-
-
-async def execute_managed_publish(guild, channel, action):
-    """Post the managed message, or edit the one already posted.
-
-    A recorded message that Discord no longer has is posted afresh rather than
-    reported as an error: the operator deleted it by hand, and the alternative is
-    a row that can never be published again.
-    """
-    payload = action["payload"]
-    stored = await database.run_read(database.get_managed_message, guild.id,
-                                     payload.get("kind"), payload.get("menu_key"))
-    if not stored:
-        return "document_unavailable"
-    embeds, view = render_managed_message(guild, stored)
-    if embeds is None:
-        return view  # the error code
-
-    if stored["message_id"]:
-        # The message is wherever it was posted -- the recorded channel -- and
-        # not necessarily the one the operator picked this time. Fetching it
-        # from the target meant a publish into a second channel found nothing
-        # there, posted a fresh copy, and left the first alive with working
-        # buttons. A recorded message is edited where it is; moving one is a
-        # delete and a re-post, which the delete route already does cleanly.
-        recorded = (guild.get_channel(int(stored["channel_id"]))
-                    if stored.get("channel_id") else None)
-        source = recorded if isinstance(recorded, discord.TextChannel) else channel
-        try:
-            posted = await source.fetch_message(int(stored["message_id"]))
-            await posted.edit(embeds=embeds, view=view,
-                              allowed_mentions=discord.AllowedMentions.none())
-            return None
-        except discord.NotFound:
-            dashboard_logger.info(
-                "Managed message %s/%s was gone; posting a new one "
-                "(guild_id=%s)", stored["kind"], stored["menu_key"], guild.id)
-
-    message = await channel.send(embeds=embeds, view=view,
-                                 allowed_mentions=discord.AllowedMentions.none())
-    await database.run_write(database.record_managed_post, guild.id,
-                             stored["kind"], stored["menu_key"],
-                             channel.id, message.id)
-    return None
-
-
-async def execute_managed_delete(channel, action):
-    """Remove a message whose row is already gone.
-
-    The ids travel in the payload because the row was deleted in the request that
-    queued this — the row is the operator's decision and takes effect at once,
-    while removing the message is Discord work that can be retried.
-    """
-    payload = action["payload"]
-    try:
-        message = await channel.fetch_message(int(payload["message_id"]))
-    except discord.NotFound:
-        return None  # Already gone, which is the outcome that was asked for.
-    if not channel.permissions_for(channel.guild.me).manage_messages:
-        return "bot_permission_denied"
-    await message.delete()
-    return None
-
-
-async def execute_channel_permission_repair(channel, action):
-    """Grant the bot's own missing permission(s) on one channel.
-
-    `permissions` in the payload is the audit's own tuple, captured the
-    moment the repair was queued and re-validated against `VALID_FLAGS`
-    here -- never operator free text, and never trusted blindly even so.
-    `set_permissions`'s keyword form merges into the bot's existing
-    overwrite, leaving every other entry on the channel, and everyone else's
-    permissions, untouched.
-    """
-    payload = action["payload"]
-    names = payload.get("permissions") or []
-    valid = discord.Permissions.VALID_FLAGS
-    if not names or any(name not in valid for name in names):
-        return "internal_error"
-    await channel.set_permissions(
-        channel.guild.me,
-        reason=f"Dashboard permission repair (actor={action['actor_id']})",
-        **{name: True for name in names},
-    )
-    await database.run_write(
-        database.record_settings_audit, channel.guild.id, action["actor_id"],
-        "permission.repair", payload.get("setting_key") or "",
-        None, {"channel_id": channel.id, "permissions": names},
-    )
-    return None
-
-
-async def execute_redeem_fulfilled_notice(channel, action) -> str | None:
-    """Tell a redeem ticket its request was settled, from either side.
-
-    Best-effort and channel-shaped like publish/delete: the database half has
-    already committed by the time this runs, so a ticket that is already
-    closed is not a failure to retry, just nothing left to notify.
-    """
-    payload = action["payload"]
-    actor = channel.guild.get_member(action["actor_id"])
-    staff_name = actor.mention if actor else t("gacha.redeem_fulfill_unknown_staff")
-    if payload.get("outcome") == "cancelled":
-        text = t("gacha.redeem_fulfill_notice_cancelled", staff=staff_name)
-    else:
-        text = t("gacha.redeem_fulfill_notice_fulfilled", staff=staff_name,
-                 item_id=payload.get("discord_item_id", ""))
-    await channel.send(text)
-    return None
-
-
-async def execute_entitlement_revocation(bot, action) -> str | None:
-    """Tear down the Discord side of a revoked entitlement.
-
-    Reuses `cogs.gacha.revoke_entitlement` unchanged -- already proven on the
-    member-erasure path -- so a role is removed or an emoji/sticker/sound is
-    deleted exactly as it would be on natural expiry. An entitlement kind it
-    does not recognise settles as done with nothing left to do, the same
-    "unrecognised key reports success" rule that path already follows.
-    """
-    from cogs.gacha import revoke_entitlement
-
-    guild = bot.get_guild(action["guild_id"])
-    if not guild:
-        return None  # The guild is gone; nothing left to tear down.
-    payload = action["payload"]
-    entitlement = {
-        "entitlement_id": payload.get("entitlement_id"),
-        "user_id": payload.get("user_id"),
-        "entitlement_key": payload.get("entitlement_key"),
-        "discord_item_id": payload.get("discord_item_id"),
-    }
-    if not await revoke_entitlement(guild, entitlement):
-        return "discord_http_error"
-    return None
-
-
-async def control_action_worker(bot):
-    """Execute queued Discord publishes after live permission and feature checks."""
-    next_prune = 0.0
-    while not bot.is_closed():
-        if time.monotonic() >= next_prune:
-            next_prune = time.monotonic() + CONTROL_ACTION_PRUNE_INTERVAL
-            try:
-                removed = await database.run_write(
-                    database.prune_control_actions, CONTROL_ACTION_RETENTION_DAYS
-                )
-                if removed:
-                    dashboard_logger.info(
-                        "Pruned settled control actions (removed=%s)", removed
-                    )
-            except database.DatabaseOperationError:
-                dashboard_logger.exception("Control action pruning failed.")
-
-        action = await database.run_write(database.claim_control_action)
-        if action is None:
-            await asyncio.sleep(2)
-            continue
-        error_code = None
-        try:
-            if action["action_type"] == "erase_member":
-                # Erasure needs neither a channel nor a document, and its authority
-                # comes from ADMIN_DISCORD_ID rather than guild permissions, so it
-                # is handled before the publish preamble below.
-                error_code = await execute_member_erasure(bot, action)
-                await database.run_write(
-                    database.finish_control_action, action["action_id"],
-                    error_code is None, error_code,
-                )
-                continue
-            guild = bot.get_guild(action["guild_id"])
-            actor = guild.get_member(action["actor_id"]) if guild else None
-            channel = guild.get_channel(action["payload"].get("channel_id")) if guild else None
-            if action["action_type"] == "repair_channel_permission":
-                # Editing a channel's own overwrites needs `manage_roles`
-                # there, not `send_messages`, and applies to any guild
-                # channel kind -- not only a `TextChannel` -- so this cannot
-                # share the preamble below.
-                if not guild or not actor or not actor.guild_permissions.manage_guild:
-                    error_code = "permission_denied"
-                elif channel is None:
-                    error_code = "channel_unavailable"
-                elif not channel.permissions_for(guild.me).manage_roles:
-                    error_code = "bot_permission_denied"
-                else:
-                    error_code = await execute_channel_permission_repair(channel, action)
-                await database.run_write(
-                    database.finish_control_action, action["action_id"],
-                    error_code is None, error_code,
-                )
-                continue
-            if action["action_type"] == "revoke_entitlement":
-                # Acts on a member's grant, not a channel, so it cannot share
-                # the channel preamble below either.
-                if not guild or not actor or not actor.guild_permissions.manage_guild:
-                    error_code = "permission_denied"
-                else:
-                    error_code = await execute_entitlement_revocation(bot, action)
-                await database.run_write(
-                    database.finish_control_action, action["action_id"],
-                    error_code is None, error_code,
-                )
-                continue
-            if not guild or not actor or not actor.guild_permissions.manage_guild:
-                error_code = "permission_denied"
-            elif not isinstance(channel, discord.TextChannel):
-                error_code = "channel_unavailable"
-            elif not channel.permissions_for(guild.me).send_messages:
-                error_code = "bot_permission_denied"
-            elif action["action_type"] == "publish_managed":
-                error_code = await execute_managed_publish(guild, channel, action)
-            elif action["action_type"] == "delete_managed":
-                error_code = await execute_managed_delete(channel, action)
-            elif action["action_type"] == "notify_redeem_fulfilled":
-                error_code = await execute_redeem_fulfilled_notice(channel, action)
-            else:
-                error_code = "feature_disabled_or_unsupported"
-        except discord.HTTPException:
-            dashboard_logger.exception("Dashboard control action failed (action_id=%s)", action["action_id"])
-            error_code = "discord_http_error"
-        except Exception:
-            dashboard_logger.exception("Dashboard control action crashed (action_id=%s)", action["action_id"])
-            error_code = "internal_error"
-        await database.run_write(
-            database.finish_control_action, action["action_id"], error_code is None, error_code
-        )
 
 
 if __name__ == "__main__":

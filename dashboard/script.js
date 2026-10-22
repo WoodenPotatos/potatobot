@@ -6015,6 +6015,14 @@ async function loadChangelog() {
     setSubtitle('dashboard.subtitle_changelog', {count: releases.length});
 }
 
+// `name (id)` when the server could name the actor, the id alone when it could
+// not: someone who has left, an erased member's tombstone, or Discord being
+// unreachable. The id stays either way, because a name is not unique.
+function actorLabel(entry) {
+    const id = String(entry.actor_id ?? '');
+    return entry.actor_name ? `${entry.actor_name} (${id})` : id;
+}
+
 async function loadAudit() {
     const host = document.getElementById('audit-list');
     renderSkeleton(host, 4);
@@ -6052,7 +6060,7 @@ async function loadAudit() {
             when,
             element('td', 'cell-key', entry.action),
             element('td', 'cell-mono', entry.target_key ?? ''),
-            element('td', 'cell-mono', String(entry.actor_id ?? '')),
+            element('td', 'cell-mono', actorLabel(entry)),
         );
         body.appendChild(row);
     });

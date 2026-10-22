@@ -110,7 +110,7 @@ class MainTests(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     offsite_backup.main([str(source), "gdrivebot:PotatoBotBackups"])
 
-    def test_uploads_then_prunes_with_the_given_remote_and_retention(self):
+    def test_uploads_verifies_then_prunes_with_the_given_remote_and_retention(self):
         """The whole project tree is never in scope: only the one snapshot
         file this run produced is ever named in the upload call."""
         with tempfile.TemporaryDirectory() as workdir:
@@ -123,8 +123,8 @@ class MainTests(unittest.TestCase):
                     str(source), "gdrivebot:PotatoBotBackups", "--retention-days", "7",
                 ])
 
-            self.assertEqual(2, mocked_run.call_count)
-            upload_call, prune_call = mocked_run.call_args_list
+            self.assertEqual(3, mocked_run.call_count)
+            upload_call, check_call, prune_call = mocked_run.call_args_list
 
             upload_args = upload_call.args[0]
             self.assertEqual("rclone", upload_args[0])
@@ -132,9 +132,38 @@ class MainTests(unittest.TestCase):
             self.assertTrue(upload_args[2].endswith(".db"))
             self.assertEqual("gdrivebot:PotatoBotBackups", upload_args[3])
 
+            # The check names this run's snapshot alone, and compares bytes:
+            # a crypt remote has no plaintext hashes to compare.
+            check_args = check_call.args[0]
+            self.assertEqual(["rclone", "check"], check_args[:2])
+            self.assertEqual("gdrivebot:PotatoBotBackups", check_args[3])
+            self.assertIn("--download", check_args)
+            self.assertIn("--one-way", check_args)
+            self.assertEqual(Path(upload_args[2]).name,
+                             check_args[check_args.index("--include") + 1])
+            self.assertEqual(str(Path(upload_args[2]).parent), check_args[2])
+
             prune_args = prune_call.args[0]
             self.assertEqual(["rclone", "delete", "gdrivebot:PotatoBotBackups",
                               "--min-age", "7d"], prune_args)
+
+    def test_a_failed_check_stops_the_run_before_the_prune(self):
+        """An upload that did not land must never be followed by a prune."""
+        import subprocess
+        with tempfile.TemporaryDirectory() as workdir:
+            source = Path(workdir) / "source.db"
+            sqlite3.connect(source).close()
+
+            def fake_run(args, check):
+                if args[1] == "check":
+                    raise subprocess.CalledProcessError(1, args)
+
+            with patch("scripts.offsite_backup.shutil.which", return_value="/usr/bin/rclone"), \
+                 patch("scripts.offsite_backup.subprocess.run", side_effect=fake_run) as mocked_run:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    offsite_backup.main([str(source), "gdrivebot:PotatoBotBackups"])
+
+            self.assertNotIn("delete", [call.args[0][1] for call in mocked_run.call_args_list])
 
 
 if __name__ == "__main__":

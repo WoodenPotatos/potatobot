@@ -28,6 +28,7 @@ import discord
 
 from core import database
 import dashboard_api
+from core import control_actions
 from core import managed_messages
 from core import settings_cache
 from core.feature_access import refresh_feature_cache
@@ -950,7 +951,7 @@ class PublishEditsThePostedMessageWhereItIsTests(unittest.IsolatedAsyncioTestCas
             id=111, icon=None,
             get_channel=lambda cid: {1: recorded, 2: target}.get(cid))
 
-        error = await dashboard_api.execute_managed_publish(
+        error = await control_actions.execute_managed_publish(
             guild, target, {"payload": {"kind": "ticket", "menu_key": "help"}})
 
         self.assertIsNone(error)
@@ -970,7 +971,7 @@ class PublishEditsThePostedMessageWhereItIsTests(unittest.IsolatedAsyncioTestCas
             id=111, icon=None,
             get_channel=lambda cid: {1: recorded, 2: target}.get(cid))
 
-        error = await dashboard_api.execute_managed_publish(
+        error = await control_actions.execute_managed_publish(
             guild, target, {"payload": {"kind": "ticket", "menu_key": "help"}})
 
         self.assertIsNone(error)

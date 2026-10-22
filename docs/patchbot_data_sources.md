@@ -6,12 +6,16 @@ here, the same rule `docs/localization_status.md` and
 against the real endpoint with plain `curl`/`urllib` requests, no
 authentication beyond a `User-Agent` header where the target required
 one — **2026-09-17** for every source except Minecraft's article link,
-re-probed **2026-09-24** (the sitemap finding below). This document exists
+re-probed **2026-09-24** (the sitemap finding below), and Honkai: Star Rail's
+4.6 title, verified **2026-09-25** (the heuristic finding below). Nothing has
+been re-probed since. This document exists
 because this repo's rule is to probe an external source before planning
 against it and record what was seen, not to reason about what an API
 "should" look like.
 
-Governs: `cogs/patchbot.py`.
+Read by: `cogs/patchbot.py`, whose adapters cite this file. The rules that
+bind that file are `docs/subsystems/patchbot.md`; this one only records what
+the sources answered.
 
 - **Never trust a cached version string across a redesign.** Two of these
   sources (`minecraft.net`'s article grid, both Riot news pages) are
@@ -35,8 +39,9 @@ Governs: `cogs/patchbot.py`.
 One generic adapter, parameterized by `appid`. Verified live for six of the
 eleven games. Response is `{"appnews": {"newsitems": [{"gid", "title",
 "url", "author", "contents", "feedlabel", "date", "feedname"}, ...]}}`,
-newest first. The adapter takes the first item where `feedname ==
-"steam_community_announcements"`.
+newest first. The adapter requests `count=15` and takes the first item where
+`feedname == "steam_community_announcements"`, using its `gid` as the version;
+if none of the fifteen is official it raises rather than guessing.
 
 | Game | App ID | Verified | Notes |
 |---|---|---|---|
@@ -77,7 +82,7 @@ numbering schemes staying in sync.
 
 Neither game has an official public API and neither is on Steam.
 `https://bbs-api-os.hoyolab.com/community/post/wapi/getNewsList` (`gids`
-game id, `type=1`, `page_size`) is the real backend HoYoLAB's own site and
+game id, `type=1`, `page_size=10`) is the real backend HoYoLAB's own site and
 app use — unofficial in the sense of undocumented, but first-party data,
 same trust level as `genshin-db-api.vercel.app`/`dbd.tricky.lol` already in
 use by `scripts/everydle_sources.py`. Requires a `User-Agent` and
@@ -131,7 +136,7 @@ https://www.minecraft.net/en-us/article/minecraft-java-edition-<id>
 
 with every `.` in the manifest's `id` replaced by `-` — `26.3` →
 `minecraft-java-edition-26-3`, `26.1.1` → `minecraft-java-edition-26-1-1`.
-Confirmed live (HTTP 200) against five different releases spanning both
+Confirmed live (HTTP 200) against six different releases spanning both
 the current date-based scheme and the legacy one: `26.1`, `26.1.1`,
 `26.1.2`, `26.2`, `26.3`, and `1.21.4`. The `java-edition` segment matters —
 `minecraft-26-3` (no `java-edition`) 404s, and it is specific to full

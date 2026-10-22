@@ -2,11 +2,11 @@
 
 ## 1. Purpose and current maturity
 
-PotatoBot is a Hungarian-first Discord bot for a private community. It combines community administration with economy, profiles, games, music, activity automation, and a web control plane. It runs on a headless Linux server under systemd, behind a reverse proxy.
+PotatoBot is a Hungarian-first Discord bot for a private community. It combines community administration with economy, profiles, games, music, activity automation, and a web control plane. It runs on a headless Linux server under systemd (or in a container, see section 10), with the dashboard behind a reverse proxy.
 
-The current private deployment is the compatibility target. **Schema version 19** is current; `database.LATEST_SCHEMA_VERSION` is the authority and this sentence is not. Since schema 5's typed guild settings, configurable shop definitions, inventory, gacha banners/pity/pull ledgers, fixed vault reserves, vouchers, timed entitlements, fulfillment, builder drafts and dashboard action outbox: schema 6 added the persistent tenth-pull guarantee counter and voucher subsystem ownership, 7 added ticket claim persistence and action leases, 8 put `guild_id` into the last single-tenant primary keys, 9 added banner display names and the `/work` response pool, 10 added the warning tag, 11 added `instance_settings` for values that have no guild dimension, 12 gave a posted Discord message an identity so the dashboard can edit it later, 13 widened that table so a plain embed is one too — which retired the builder drafts schema 5 introduced, leaving `dashboard_documents` with no reader — 14 added the gacha featured-split guarantees, 15 added `minigame_state` for the counting and word-chain channels, 16 added a shop item's section so the menu could be split by shelf, 17 gave an LFG party post an identity so its buttons survive a restart, 18 added a voucher's subject, and 19 added `minigame_used_words` so a word chain cannot repeat itself. Legacy economy callers still remain effectively single-guild — wallets are keyed by Discord user id alone. Treat `managed` and `self_hosted` profiles as architectural foundations, not as proof of completed production isolation.
+The current private deployment is the compatibility target. **Schema version 25** is current; `database.LATEST_SCHEMA_VERSION` is the authority and this sentence is not. Since schema 5's typed guild settings, configurable shop definitions, inventory, gacha banners/pity/pull ledgers, fixed vault reserves, vouchers, timed entitlements, fulfillment, builder drafts and dashboard action outbox: schema 6 added the persistent tenth-pull guarantee counter and voucher subsystem ownership, 7 added ticket claim persistence and action leases, 8 put `guild_id` into the last single-tenant primary keys, 9 added banner display names and the `/work` response pool, 10 added the warning tag, 11 added `instance_settings` for values that have no guild dimension, 12 gave a posted Discord message an identity so the dashboard can edit it later, 13 widened that table so a plain embed is one too — which retired the builder drafts schema 5 introduced, leaving `dashboard_documents` with no reader — 14 added the gacha featured-split guarantees, 15 added `minigame_state` for the counting and word-chain channels, 16 added a shop item's section so the menu could be split by shelf, 17 gave an LFG party post an identity so its buttons survive a restart, 18 added a voucher's subject, 19 added `minigame_used_words` so a word chain cannot repeat itself, 20 added patchbot's per-game patch state, 21 gave a gacha banner an optional start and end, 22 let a timed entitlement state its own provenance and the staff member behind a manual grant, 23 recorded an operator's revocation of an entitlement and linked a fulfillment request to its redeem ticket, 24 marks an entitlement whose Discord asset has already disappeared, and 25 lets the bot tell the dashboard that a Discord role or membership change has made a session's cached permissions stale. Legacy economy callers still remain effectively single-guild — wallets are keyed by Discord user id alone. Per-guild wallets are planned as 3.0.0, and economies shared between guilds as 3.x. Treat `managed` and `self_hosted` profiles as architectural foundations, not as proof of completed production isolation.
 
-The dashboard is **load-bearing, not experimental**: it is the only way an operator configures an installation, so a dashboard defect is a bot defect. Its raw JSON and global price/reward endpoints are gone and every setting is edited through a typed control. The remaining release boundary is complete multi-guild storage integration and service separation.
+The dashboard is **load-bearing, not experimental**: it is the only way an operator configures an installation, so a dashboard defect is a bot defect. Its raw JSON and global price/reward endpoints are gone and every setting is edited through a typed control. The remaining release boundary is multi-guild storage: per-guild wallets (3.0.0).
 
 ## 2. Repository map
 
@@ -24,31 +24,35 @@ The dashboard is **load-bearing, not experimental**: it is the only way an opera
 | `core/permission_audit.py` | One Discord-permission diagnostic shared by `/checkperms` and the dashboard permissions page. Pure data: it takes a guild plus a feature-state map plus resolved settings and returns coded findings. |
 | `core/item_catalog.py` | The single definition of what a built-in item is; the shop and the gacha both derive from it. |
 | `core/bounded.py` | Bounded containers for every transient in-memory map. |
-| `dashboard_api.py`, `dashboard/` | Flask API, Discord OAuth, static dashboard client, and legacy host configuration surfaces. |
+| `dashboard_api.py`, `dashboard/` | Flask API served by Waitress, Discord OAuth, queuing to the durable Discord action outbox, and the static dashboard client. |
+| `core/control_actions.py` | The outbox worker. The bot starts it in every topology, so the two-process split drains the queue too. |
 | `locales/` | General Hungarian and structurally aligned secondary-language catalogs. |
-| `data/` | Stable Everydle datasets and game-specific locale catalogs. |
-| `botdata/` | Discord-facing images and runtime game state/assets. |
-| `tests/` | `unittest` coverage for loading, localization, migrations, transactions, feature policy, deployment, dashboard security, permission auditing, work responses, and server events. |
+| `data/` | Stable Everydle datasets, their game-specific locale catalogs, and the word-chain dictionary. |
+| `botdata/` | Game emoji uploaded to Discord by hand. No code reads it, and the public snapshot excludes it. |
+| `tests/` | `unittest` suite, one file per feature area; `tests/fixtures/` holds recorded upstream payloads. Four tests drive `dashboard/script.js` through Node and jsdom. |
+| `scripts/` | Operator and maintainer tools; see the table in section 11. |
+| `deploy/`, `container/` | systemd units and timers, the Quadlet unit `deploy/potatobot.container`, `container/Containerfile` and `container/compose.yaml`. |
 | `backups/` | Untracked. Timestamped pre-migration database copies written by `initialize_database`; these are the rollback artefacts. |
 | `dashboard-reference/` | Untracked design screenshots for the dashboard layout. |
 
-`CLAUDE.md` carries the full annotated directory tree and the invariants a change has to preserve. Read it before touching the registries, the dashboard, or the schema.
+In the private repository, `CLAUDE.md` carries the full annotated directory tree and the invariants a change has to preserve. Read it before touching the registries, the dashboard, or the schema.
 
-`todo.md` is the only active backlog. Completed incident notes and retired TODO files remain available through Git history.
+`todo.md` (private) is the only active backlog. Completed incident notes and retired TODO files remain available through Git history.
 
 ## 3. Startup and runtime lifecycle
 
 Startup follows this order:
 
-1. `main.py` loads `.env` from the repository directory.
+1. `main.py` loads `.env` from the repository directory and configures logging through `core/logging_setup.py`, including the `kill -USR1` stack dump.
 2. `core/deployment.py` validates the deployment profile, dashboard bind address, external URL, and OAuth callback.
-3. `database.initialize_database()` creates or migrates SQLite before cogs or the dashboard access it.
-4. The dashboard module starts a daemon Flask thread when enabled.
+3. `database.initialize_database()` creates or migrates SQLite before cogs or the dashboard access it, and `refund_pending_wagers()` refunds any interactive wager a lost view left pending.
+4. The settings cache loads the instance settings synchronously, because the command prefix is needed before the bot exists.
 5. `PotatoBot` is created with the required gateway intents and safe default mention policy.
-6. `setup_hook` loads every Python cog except utility/package modules.
-7. Discord connects; `on_ready` registers guilds, loads feature state, starts the feature-cache poller and event-loop watchdog, performs private-profile legacy adoption when safe, and synchronizes application commands.
+6. When `POTATOBOT_DASHBOARD_ENABLED` is true, the Waitress server starts in a daemon thread.
+7. `setup_hook` loads every Python cog except utility/package modules.
+8. Discord connects; `on_ready` registers guilds, loads feature state (guarded per guild) and settings state, starts the feature-cache poller, the event-loop lag monitor, the wedged-process watchdog thread and, with the dashboard in-process, the control-action worker; it performs private-profile legacy adoption when safe and synchronizes application commands.
 
-The dashboard and bot currently share one Python process and database module. The dashboard is synchronous Flask code in a separate thread; bot database work must go through the async executor helpers so synchronous SQLite access never blocks the Discord event loop.
+The bot and dashboard run in one process or two, decided by `POTATOBOT_DASHBOARD_ENABLED` (section 10). In-process, the dashboard is synchronous code in Waitress threads; either way, bot database work must go through the async executor helpers so synchronous SQLite access never blocks the Discord event loop.
 
 ## 4. Command and interaction lifecycle
 
@@ -123,7 +127,7 @@ Configuration has four ownership classes:
 
 Every guild and instance setting lives in SQLite and is resolved through `core/settings_cache.py`: stored row, else the registry default. `config.json` is gone (deleted 2026-09-21; see `docs/config_retirement_plan.md`), and a same-process dashboard save updates the cache immediately. Most lookups therefore change immediately, but command prefix, intents, task intervals, import-time persistent labels, Everydle language selection, and OAuth environment settings require reload or restart. Every new setting must declare `live`, `subsystem_reload`, or `restart` behavior.
 
-Hungarian is the complete source language. Every user-visible string belongs in a locale file. When adding a key to `locales/hu.json`, add the same structure to every other catalog but leave new non-Hungarian text empty for a human translator. The same policy applies to `data/*/locales/`.
+Hungarian is the primary source language and English ships with it. Every user-visible string belongs in a locale file. When adding a key to `locales/hu.json`, fill in the English value in `locales/en.json` in the same change; every language after English gets the identical key with an empty value for a human translator. The same policy applies to `data/*/locales/`. `t()` resolves requested language → English → Hungarian and treats an empty value as a miss.
 
 Run:
 
@@ -131,18 +135,20 @@ Run:
 python scripts/sync_locale_keys.py
 ```
 
-The localization tests reject structure mismatches and inappropriate hard-coded user-visible text.
+The localization tests reject structure mismatches, an empty Hungarian or English value, and inappropriate hard-coded user-visible text. `python scripts/locale_audit.py` reports the state of every surface; `--brief` is the CI gate.
 
 ## 8. Feature areas and background work
 
-The command surface covers help/version, LFG, profiles and leaderboards, economy and transfers, shop, casino games, channel minigames, Everydle games, music, moderation, faction management, tickets, onboarding, role-menu setup, temporary voice rooms, and administrative setup tools.
+The command surface covers help/version, LFG, profiles and leaderboards, economy and transfers, shop, Potato Gacha, casino games, channel minigames, Everydle games, music, moderation, faction management, tickets, onboarding, role-menu setup, temporary voice rooms, patch-note announcements, member data export and erasure, and administrative setup tools.
 
 Background behavior includes:
 
 - Twitch and YouTube checks every five minutes;
+- patch-note checks every 45 minutes, one fetch per game for every guild;
 - voice reward batching every minute;
-- daily inactivity scanning;
-- rental cleanup;
+- the music extraction watchdog every minute;
+- daily inactivity scanning, LFG pruning and the privacy retention sweep;
+- daily rental and entitlement cleanup, which no feature flag may stop;
 - member join/leave, ban, boost, chat activity, and voice-state listeners;
 - an `on_message` minigame check, which is a cached settings read per configured game and nothing more when the channel is not one;
 - feature revision polling every two seconds;
@@ -153,7 +159,7 @@ High-frequency reward paths must batch database work. XP changes mark top-ranker
 
 ## 9. Dashboard and OAuth
 
-The private deployment should use one stable HTTPS origin. Flask binds only to loopback, normally `127.0.0.1:5000`, and Tailscale Serve or another trusted reverse proxy terminates HTTPS.
+A deployment should use one stable HTTPS origin. The dashboard binds only to loopback, normally `127.0.0.1:5000`, and one trusted reverse proxy (Tailscale Serve, nginx, or a Cloudflare Tunnel) terminates HTTPS. Inside a container it binds `0.0.0.0` behind a loopback-only port mapping, which `core/deployment.py` allows only when `POTATOBOT_TRUSTED_PROXY_HOPS` is set explicitly.
 
 These values must match exactly:
 
@@ -177,7 +183,7 @@ The dashboard uses the shared typed registry, categorized feature-aware navigati
 
 The top right holds the account avatar with the guild switcher immediately to its left. Both use one anchored popover helper in `dashboard/script.js`; its outside-click listener is registered a tick after opening so the click that opened the menu cannot immediately dismiss it. The account menu carries appearance, display language and logout. Guild icons come from `_decorate_guilds` in `dashboard_api.py`, which reads `_dashboard_bot.get_guild(...).icon`; nothing is stored, and a dashboard running without a bot simply reports no icon so the monogram fallback applies. `start()` is idempotent, because binding the shell twice would attach every listener twice.
 
-The dashboard display language is a per-browser preference held in `localStorage.potatobot-language` and applied by `dashboard/theme.js` before the first request, so the interface never re-renders on load. It is independent of the `language` instance setting that controls the bot's Discord output. `get_dashboard_locale_catalog` in `cogs/utils.py` merges the requested language over Hungarian and is deliberately not shared with `t()`, which falls back Hungarian to English for the bot.
+The dashboard display language is a per-browser preference held in `localStorage.potatobot-language` and applied by `dashboard/theme.js` before the first request, so the interface never re-renders on load. It is independent of the `language` instance setting that controls the bot's Discord output. `get_dashboard_locale_catalog` in `cogs/utils.py` overlays the requested language's non-empty values over Hungarian and is deliberately not shared with `t()`, which resolves one key through requested language → English → Hungarian for the bot.
 
 Each `SettingDefinition` carries a `page`, and the category form renders one `<fieldset>` section per page value rather than a single flat grid. Adding a page value therefore requires a matching `dashboard.pages.<page>` locale key. Settings saves send only the fields the operator actually changed, so one edit no longer bumps every revision in the category or writes an audit row per untouched setting. `collectSettingChanges` computes that set once and is shared by the save handler and `refreshSettingsDirtyState`, which puts the pending count on the apply button and an unsaved marker on each dirty section; a JSON field mid-edit yields *unknown* rather than zero, because zero would disable the only way to save.
 
@@ -185,7 +191,7 @@ A `CHANNEL`/`CHANNEL_LIST` definition also declares `channel_types`, and `resour
 
 Three pages have no settings of their own. `GET /api/changelog` parses `CHANGELOG.md` into release sections server-side, because the front end may not use a markup sink and a bullet wrapped across source lines has to be rejoined; it is read from the checkout rather than a repository host, since the page has no outbound allowance and a remote copy could describe a version this installation is not running. `GET /api/guilds/<id>/permissions` runs `permission_audit.build_report` and needs the in-process bot for channel overwrites and role hierarchy, returning 503 in a standalone dashboard rather than a clean result it could not check. `/api/guilds/<id>/work-responses` is the per-guild `/work` response editor.
 
-**Front-end constraints.** The dashboard is served under `default-src 'self'; style-src 'self'; script-src 'self'` with no `font-src`. There are consequently no CDN fonts, no icon webfonts, no inline `<style>` blocks, no `style=` attributes and no inline `<script>`. Icons come from the inline SVG sprite at the top of `dashboard/index.html` and are referenced with `<use href="#ic-…">`; note that the `hidden` attribute is not mapped for SVG elements, so the sprite is hidden by an explicit `svg[hidden]` rule. Display type uses a system condensed stack.
+**Front-end constraints.** The dashboard is served under `default-src 'self'; style-src 'self'; script-src 'self'` (images also from Discord's CDN, `frame-ancestors 'none'`, `object-src 'none'`) with no `font-src`. There are consequently no CDN fonts, no icon webfonts, no inline `<style>` blocks, no `style=` attributes and no inline `<script>`. Icons come from the inline SVG sprite at the top of `dashboard/index.html` and are referenced with `<use href="#ic-…">`; note that the `hidden` attribute is not mapped for SVG elements, so the sprite is hidden by an explicit `svg[hidden]` rule. Display type uses a system condensed stack.
 
 `dashboard/style.css` defines one semantic token set twice: light under `:root` / `:root[data-theme="light"]`, and the original warm palette under `:root[data-theme="dark"]`, with a `prefers-color-scheme` block for viewers who have made no choice. Sidebar and table headers stay dark in both themes. `dashboard/theme.js` loads synchronously in `<head>` so the stored `localStorage.potatobot-theme` value is applied before first paint; the sidebar button cycles system → light → dark.
 
@@ -193,9 +199,9 @@ Three pages have no settings of their own. `GET /api/changelog` parses `CHANGELO
 
 Flask request handlers are synchronous and have no event loop, so dashboard reads use `database.run_read_sync()`. It marks the Waitress thread as a reader for one classified accessor, giving it the same `query_only` connection the read pool uses, and refuses anything absent from `READ_ONLY_OPERATIONS`. Mutations remain on the serialized writer. Before this split every page load took the process-wide write lock several times and stalled the bot's writer.
 
-The **Content** group holds five pages — Embeds, Rules panel, Role menus, Ticket launcher and Entry gate — and every one of them reads and writes `managed_messages`. Each lists what exists and offers Save, Post/Update and Delete against the message it already posted; before schema 12 nothing recorded a `message_id`, so a draft could be posted again but never updated, and schema 13 brought the last of them, the plain embed, into the same system. A message the bot posted earlier can be **adopted** by pasting its link, which is the other half of the sentence the schema-12 seed left open. Publishing still enters the durable outbox; the bot worker rechecks the actor, feature, channel, and bot permissions before a Discord send, and `core/managed_messages.py` renders the row for both the worker and the bot's own `/setup_*` and `/rules_group`. Shop creation accepts only fixed/timed roles, fixed vaults, approved consumables, non-inflationary repeatable coin bundles, and manual-fulfillment vouchers. Hungarian name and description are mandatory and item keys are immutable. The consumable and vault templates pick their item from `GET /api/item-catalog` instead of hand-written JSON, and the API validates against the same catalog. The gacha editor can add and remove reward rows, not only retune the ones a banner already stores — a guild that has saved a banner keeps its own configuration, so a newly shipped default reward reaches it only through that control. Waitress serves the application, but non-private deployment still requires separating and supervising the dashboard process.
+The **Content** group holds five pages — Embeds, Rules panel, Role menus, Ticket launcher and Entry gate — and every one of them reads and writes `managed_messages`. Each lists what exists and offers Save, Post/Update and Delete against the message it already posted; before schema 12 nothing recorded a `message_id`, so a draft could be posted again but never updated, and schema 13 brought the last of them, the plain embed, into the same system. A message the bot posted earlier can be **adopted** by pasting its link, which is the other half of the sentence the schema-12 seed left open. Publishing still enters the durable outbox; the bot worker rechecks the actor, feature, channel, and bot permissions before a Discord send, and `core/managed_messages.py` renders the row for both the worker and the bot's own `/setup_*` and `/rules_group`. Shop creation accepts only fixed/timed roles, fixed vaults, approved consumables, non-inflationary repeatable coin bundles, and manual-fulfillment vouchers. Hungarian name and description are mandatory and item keys are immutable. The consumable and vault templates pick their item from `GET /api/item-catalog` instead of hand-written JSON, and the API validates against the same catalog. The gacha editor can add and remove reward rows, not only retune the ones a banner already stores — a guild that has saved a banner keeps its own configuration, so a newly shipped default reward reaches it only through that control. Waitress serves the application; beyond a private deployment, run the dashboard as its own supervised service (section 10).
 
-The moderation surface has two destinations, and the split matters: `moderation_log_channel` carries the threshold alerts and the filter's matched term and is staff-only, while `warn_announce_channel` carries the `/warn` embed and declares member permissions because members read it. Unset, `/warn` posts where the moderator typed it. `/modlogs` is ephemeral.
+The moderation surface has two destinations, and the split matters: `moderation_log_channel` carries the threshold alerts and the filter's matched term and is staff-only, while `warn_announce_channel` carries the `/warn` embed and declares member permissions because members read it. Unset, `/warn` posts where the moderator typed it. `/modlogs` replies ephemerally until `admin_category` is set; after that it runs only in a channel under that category, administrators included, and posts there for staff.
 
 ### Managed messages
 
@@ -239,7 +245,7 @@ both sides, so an accented entry joins the same chain as its bare form.
 `database.advance_minigame` is a conditional UPDATE against the value the caller
 believed was current, so two simultaneous turns cannot both be accepted.
 
-Word chain joins words by *letter*, and nine Hungarian letters are written with
+Word chain joins words by *letter*, and eight Hungarian letters are written with
 two characters and one with three. `HUNGARIAN_LETTERS` lists them longest-first
 — `dzs` contains both `dz` and `zs` — and doubled digraphs need no case of their
 own, because Hungarian doubles the first character and the last two of `rossz`
@@ -266,23 +272,23 @@ beside `casino` and `everydle`.
 
 ### Gacha and shop inventory
 
-`shop_gacha` depends on `economy` and `shop`, defaults off, and owns the dedicated `cogs/gacha.py`.
+`shop_gacha` depends on `economy` alone, defaults off, and owns the dedicated `cogs/gacha.py`. Nothing in the gacha reads the `shop` flag, so a guild may run the gacha with the shop switched off.
 
 A guild may run up to 25 banners, the size of a Discord choice list. `banner_key` is the stable identifier written into every pull and pity row and is what `/gacha` addresses; `display_name` (schema 9) is only what an operator reads, and a banner stored earlier renders as its key. `standard` is the installation default: it is the only banner a pull may create on demand and the only one that cannot be deleted, because `/gacha` with no argument resolves to it. Every other banner is created explicitly and starts **disabled**, so a half-filled reward table is never pullable; `set_gacha_banner` and `perform_gacha_pulls` both refuse an unknown key rather than creating one, which is what stops a member naming an arbitrary key and getting a default-priced banner nobody configured. Deleting a banner leaves its pull rows and pity counters in place: pull history is immutable and a member paid for the pity they hold. Saving without a `display_name` keeps the stored one, so editing rewards cannot silently rename a banner. The `/gacha` banner autocomplete is a separate interaction and carries the same maintenance and feature gates as the command.
 
-The standard banner costs 5,000 PC per pull and permits only atomic one- or ten-pull transactions exposed as explicit Discord choices. Base tier totals are 97.8% / 1.6% / 0.6%. Every tenth pull is floored to 4-star or higher. Pulls 76–99 multiply both 4-star and 5-star totals by three and subtract the increase from 3-star; pull 100 guarantees a 5-star. Both counters are stored by guild, user, and banner and evaluated sequentially inside ten-pulls. A 5-star resets only 5-star pity; the tenth-pull cadence remains fixed. Every pull records its banner revision, outcome, and guarantee markers.
+The standard banner costs 5,000 coins per pull and permits only atomic one- or ten-pull transactions exposed as explicit Discord choices. Base tier totals are 97.8% / 1.6% / 0.6%. Every tenth pull is floored to 4-star or higher. Pulls 76–99 multiply both 4-star and 5-star totals by three and subtract the increase from 3-star; pull 100 guarantees a 5-star. Both counters are stored by guild, user, and banner and evaluated sequentially inside ten-pulls. A 5-star resets only 5-star pity; the tenth-pull cadence remains fixed. Every pull records its banner revision, outcome, and guarantee markers.
 
-The 3-star pool is loaded die (40%), lockpick (10%), and 250/500/1,000/5,000 PC (30%/10%/7%/0.8%). The six 4-star rewards split 1.6% equally; the five 5-star rewards split 0.6% equally. Loaded dice are consumed only by the next valid paid dice wager and roll twice, keeping the higher result. Lockpicks add 15 percentage points. A vault drill exposes 25% of the protected reserve. Both robbery items are consumed on the next otherwise eligible resolved attempt, win or loss.
+The shipped 3-star pool is the loaded die (40%) and six consumables at 10% each: lockpick, lucky charm, stacked deck, marked card, metal detector and parachute. No shipped reward in any tier is a coin amount, because an amount is one guild's economy; a guild that wants coins builds a `coin_bundle` item. The seven 4-star rewards split 1.6% equally; the five 5-star rewards split 0.6% equally. `DEFAULT_GACHA_CONFIG` in `core/database.py` is the authority. Loaded dice are consumed only by the next valid paid dice wager and roll twice, keeping the higher result. Lockpicks add 15 percentage points. A vault drill (`vault_glove`) exposes 25% of the protected reserve. Both robbery items are consumed on the next otherwise eligible resolved attempt, win or loss.
 
 #### One item catalog, two ways to obtain it
 
 `core/item_catalog.py` is the single definition of what a built-in item is: its stable key and the effect it applies. `database.SHOP_DEFAULTS`, `BUILTIN_SHOP_KEYS`, the `shop_price_*` settings, the shop cog's menu, and the dashboard's consumable validator all derive from it, so the Shop and Potato Gacha cannot drift into two versions of the same item. Adding an entry there gives the item a price field on the dashboard and makes it selectable in the shop builder and the banner reward picker without touching a second list.
 
-Identity is shared; acquisition is not. Lockpicks, loaded dice and vault drills are one stackable `user_inventory` row whether bought (`purchase_inventory_item`) or pulled — a bought lockpick and a pulled one are the same object. Vaults use the shop's keys in both systems (`small_vault`, `med_vault`, `big_vault`), and `_validated_gacha_config` requires a catalog vault reward to award the catalog reserve, so `big_vault` protects 500,000 PC however it arrived. What differs is the rule for a duplicate: the shop refuses the purchase and charges nothing, while a pull pays the banner's configured compensation. Banners saved before the keys were shared keep `vault_25000`/`vault_500000`; those keys are absent from the catalog, stay valid, and keep their locale entries so recorded pulls remain readable.
+Identity is shared; acquisition is not. Lockpicks, loaded dice and vault drills are one stackable `user_inventory` row whether bought (`purchase_inventory_item`) or pulled — a bought lockpick and a pulled one are the same object. Vaults use the shop's keys in both systems (`small_vault`, `med_vault`, `big_vault`), and `_validated_gacha_config` requires a catalog vault reward to award the catalog reserve, so `big_vault` protects 500,000 coins however it arrived. What differs is the rule for a duplicate: the shop refuses the purchase and charges nothing, while a pull pays the banner's configured compensation. Banners saved before the keys were shared keep `vault_25000`/`vault_500000`; those keys are absent from the catalog, stay valid, and keep their locale entries so recorded pulls remain readable.
 
 `users.rob_bonus` is a finite compatibility path rather than a second lockpick mechanic. No purchase writes it any more; `resolve_robbery` still reads it so an older buyer keeps what they paid for, and clears it on every resolved attempt. It was not migrated because the column has no guild dimension.
 
-Vault protection is a fixed reserve. Schema 5 maps old tiers to 25,000/100,000/500,000 PC. Normal accessible funds are `max(0, balance - reserve)`; a drill adds `0.25 * min(balance, reserve)` before the existing 2–10% robbery roll. A vault replaces only a smaller reserve; duplicate drops return the configured percentage (10% by default). Premium time starts on voucher redemption. Emoji, sticker, and sound time starts only when staff records fulfillment.
+Vault protection is a fixed reserve. Schema 5 maps old tiers to 25,000/100,000/500,000 coins. Normal accessible funds are `max(0, balance - reserve)`; a drill adds `0.25 * min(balance, reserve)` before the existing 2–10% robbery roll. A vault replaces only a smaller reserve; duplicate drops return the configured percentage (10% by default). Premium time starts on voucher redemption. Emoji, sticker, and sound time starts only when staff records fulfillment.
 
 Reward vouchers persist their owning subsystem. `cogs/gacha.py` expires only Gacha-created premium and asset entitlements, while `cogs/shop.py` expires custom-shop assets and timed roles. This keeps cleanup working correctly when `shop_gacha` is disabled and prevents two scheduled loops from acting on the same Discord resource.
 
@@ -292,7 +298,7 @@ Reward vouchers persist their owning subsystem. `cogs/gacha.py` expires only Gac
 
 A guild-facing list must never print a raw member id. `cogs.utils.display_member_name` returns the display name when the account resolves and a guild-salted `blake2s` pseudonym when it does not, which is the case for a member who left between the query and the render. Nothing is written and nothing is deleted, so it reverses itself: the real name reappears as soon as the member resolves again. The guild id is the salt, so the same account carries no recognisable label between guilds.
 
-Interactive blackjack and mines create a durable pending wager in the same transaction that reserves funds. Settlement is compare-and-set; delivery failure refunds immediately, and startup refunds any wager orphaned by a process restart. Music is restricted to HTTPS YouTube input and bounded by isolated extraction workers, a 20-second timeout, 25 playlist entries, 100 queued items per guild, and a three-hour duration limit.
+Interactive casino games (blackjack, hilo, crash, Russian roulette and mines) create a durable pending wager in the same transaction that reserves funds. Settlement is compare-and-set; delivery failure refunds immediately, and startup refunds any wager orphaned by a process restart. Music is restricted to HTTPS YouTube input and bounded by isolated extraction workers, a 20-second timeout, 25 playlist entries, 100 queued items per guild, and a three-hour duration limit.
 
 ## 10. Deployment and service operation
 
@@ -329,13 +335,20 @@ Three things make the split work:
 `deploy/potatobot.service` and `deploy/potatobot-dashboard.service` are ready to
 install; `container/Containerfile` and `container/compose.yaml` package the same
 split in containers, with the database on a shared volume rather than inside
-the image.
+the image, and `podman-compose -f container/compose.yaml run --rm bot python
+update_db.py` runs a migration as its own observable step before `up -d`.
+`deploy/potatobot.container` is the single-process alternative: a rootless
+podman Quadlet unit running bot and dashboard in one container, with the data
+on a bind mount, the port published to `127.0.0.1` only and `--umask=0027`.
+Two timers sit beside the units: `potatobot-everydle-drift.timer` (Mondays
+05:30, read-only) and `potatobot-offsite-backup.timer` (daily,
+`scripts/offsite_backup.py` to an rclone remote).
 
+The units expect the checkout at `/opt/potatobot` and run
+`/opt/potatobot/venv/bin/python3`. Use that interpreter for diagnostics;
+invoking the host `python3` can incorrectly report that `discord` is missing.
 
-
-The live checkout is under `/opt/potatobot` and runs with `/opt/potatobot/venv/bin/python3`. Use that interpreter for diagnostics; invoking the host `python3` can incorrectly report that `discord` is missing.
-
-The private dashboard pattern is:
+The dashboard pattern is:
 
 ```text
 Browser -> HTTPS origin -> one reverse proxy -> 127.0.0.1:5000
@@ -351,8 +364,15 @@ Keep the process under service supervision, keep port 5000 off untrusted interfa
 
 ### Reviewing the dashboard without a deployment
 
+```bash
+venv/bin/python scripts/local_dashboard.py          # then open http://127.0.0.1:5001/
+venv/bin/python scripts/local_dashboard.py --fresh  # re-copy the database first
+```
+
 `scripts/local_dashboard.py` serves the control plane on loopback with no Discord
-and no server. It copies `economy.db` to `.local-dev/economy.dev.db` with its WAL
+and no server. `--port`, `--auto-port`, `--source`, `--db`, `--guild` and
+`--skip-migration` adjust what it serves; everything it fakes is printed at
+startup. It copies `economy.db` to `.local-dev/economy.dev.db` with its WAL
 sidecars, fingerprints the copy, runs `database.initialize_database()` against it
 and prints the before/after comparison — so pointing it at a stale copy is also a
 migration rehearsal. It then builds a stand-in guild whose channels and roles are
@@ -392,21 +412,34 @@ Manage resolver settings in the active NetworkManager connection and fix the DHC
 
 ### Verification commands
 
-Run the complete test and syntax checks before committing:
+Use the virtual environment's interpreter: the host Python has no `discord`, and
+most test modules then fail to import for a reason that has nothing to do with
+the change. The jsdom harnesses need Node and `npm ci` once; CI installs both,
+and a test that would skip without them is asserted not to.
 
 ```bash
-python -m unittest discover -s tests -v
-python -m compileall -q . -x './\.git|./venv|./\.venv'
-python -m mypy
+npm ci --no-audit --no-fund
+venv/bin/python -m pip install --require-hashes -r requirements-dev.lock
+venv/bin/python -m unittest discover -s tests -v
+venv/bin/python -m compileall -q . -x './\.git|./venv|./\.venv'
+venv/bin/python -m mypy
+venv/bin/python scripts/locale_audit.py --brief
+venv/bin/python -m pip_audit -r requirements.lock
+venv/bin/bandit -r . -c pyproject.toml --severity-level high
 ```
+
+That is what `.github/workflows/ci.yml` runs on Python 3.12, 3.13 and 3.14,
+plus a container job that only builds the image and a separate gitleaks job.
+Iterate on one module (`venv/bin/python -m unittest tests.test_gacha -v`)
+rather than the whole suite.
 
 `mypy` is scoped to `core/` only (`[tool.mypy]` in `pyproject.toml`), not the
 whole repository. Checking `cogs/` was tried and produces mostly noise from
 discord.py's own broad object-union stubs (`interaction.channel`, `member.guild`,
 ...) rather than real findings — confirmed by actually running it, not assumed.
 `core/` is this project's own data and settings layer, where a wrong type has
-already reached production before (the clock and snowflake-wire-format rules in
-`CLAUDE.md` both trace back to exactly this class of bug), so that is where the
+already reached production before (the clock and snowflake wire-format rules
+both trace back to exactly this class of bug), so that is where the
 signal-to-noise ratio makes the check worth running as a gate. Extending it to a
 cog is possible later, file by file, once that file's discord.py object handling
 is narrowed enough to check cleanly.
@@ -415,48 +448,34 @@ Before deploying a schema change, rehearse it on a copy of the deployed database
 and prove no data was lost:
 
 ```bash
-python scripts/rehearse_migration.py /opt/potatobot/economy.db
+venv/bin/python scripts/rehearse_migration.py /opt/potatobot/economy.db
 ```
 
 It copies the database, fingerprints it, migrates the copy, fingerprints again and
 compares, exiting non-zero if any table's row count changes. The copy it leaves
-behind is the rollback artefact. `scripts/db_snapshot.py` does the fingerprint and
-compare steps on their own. Never point either at the live file while the bot runs.
+behind is the rollback artefact; `--workdir` chooses where it goes.
+`scripts/db_snapshot.py record` and `compare` do the fingerprint and compare
+steps on their own. Never point either at the live file while the bot runs.
 
-When adding Hungarian localization keys, synchronize empty placeholders into the other general catalogs:
+### Scripts
 
-```bash
-python scripts/sync_locale_keys.py
-```
+| Script | What it does |
+| --- | --- |
+| `sync_locale_keys.py` | Mirrors the Hungarian catalogs' key structure into every other catalog, adding new keys and removing dropped ones. Run it after any locale change. |
+| `locale_audit.py` | Reports localization coverage; `--brief` exits non-zero on a referenced key no catalog has, `--json` emits the report. |
+| `rehearse_migration.py` | Migrates a copy of a database and compares fingerprints (above). |
+| `db_snapshot.py` | `record` prints a fingerprint as JSON; `compare` diffs two and fails on a changed row count. |
+| `load_test.py` | Synthetic write load through the bot's own executors against a throwaway database it creates and deletes, reporting latency (queue time included) at rising concurrency. `--levels`, `--ops`, `--users`, `--guilds`, `--json`, `--keep`. It has no option to target an existing database, by design. |
+| `local_dashboard.py` | The dashboard on loopback against a copy of the database (section 10). |
+| `everydle_sources.py` | Upstream adapters for the Everydle datasets; `record <directory>` re-records the test fixtures. |
+| `everydle_drift.py` | Read-only drift report against upstream; exits 1 on drift and 2 when a source is unreachable. `--fixtures`, `--json`. |
+| `everydle_propose.py` | `draft -o patch.json` writes a reviewable patch; `apply patch.json [--dry-run]` applies it once no field is null. |
+| `offsite_backup.py` | One consistent database snapshot to an rclone remote, downloaded back and compared before pruning (`--retention-days`, default 30). Stdlib only. |
+| `bump_version.py` | The only writer of the version in `pyproject.toml`: `major`, `minor`, `patch` or `prerelease`, with `--channel`, `--set`, `--show` and `--dry-run`. |
+| `update_readme.py` | Regenerates the three marked blocks in `README.md`; `--check` fails when they are stale. |
+| `publish_public.py` | Builds, verifies and publishes the sanitised public snapshot (section 12). |
 
-Do not machine-translate the generated empty values.
-
-
-### Running the dashboard locally
-
-When the deployment is unreachable and you only want to look at the control
-plane:
-
-```bash
-python scripts/local_dashboard.py          # then open http://127.0.0.1:5001/
-python scripts/local_dashboard.py --fresh  # re-copy the database first
-```
-
-It copies `economy.db` into `.local-dev/`, migrates and fingerprints the copy so
-a stale database is also a migration rehearsal, builds a stand-in Discord guild
-from the stored settings and role-menu entries so the selectors resolve, and
-signs you in as the host without OAuth. It refuses to start against a proxied
-or managed environment and always binds loopback. Everything it fakes is
-printed at startup.
-
-
-The standard local gate is:
-
-```bash
-python -m unittest discover -s tests -v
-python -m compileall -q . -x './\.git|./venv|./\.venv'
-python -m mypy
-```
+### Acceptance
 
 Tests must mock Discord and HTTP boundaries. A command addition is incomplete unless cogs load, help coverage remains exact, the command policy registry is complete, and localization structure passes.
 
@@ -472,13 +491,13 @@ For live performance recovery, validate at least:
 - a disabled command, component, listener, and scheduled loop;
 - voice reward batching and top-ranker reconciliation.
 
-Normal-operation targets are acknowledgement under one second, no-database acknowledgement p95 below 100 ms, simple database command completion p95 below 500 ms, database queue wait below 100 ms, and event-loop lag below 250 ms. The full checklist is in `docs/performance_recovery_plan.md`.
+Normal-operation targets are acknowledgement under one second, no-database acknowledgement p95 below 100 ms, simple database command completion p95 below 500 ms, database queue wait below 100 ms, and event-loop lag below 250 ms. The full checklist is kept in the private `docs/performance_recovery_plan.md`.
 
 ## 12. Security and release boundary
 
 Never commit `.env`, session secrets, databases, backups, logs, tokens, OAuth secrets, or live deployment exports. Every guild and instance setting lives in SQLite and is hot-reloadable through the settings cache; there is no configuration file to review any more.
 
-The private repository history contains a historical token-shaped value. Do not make this repository public or mirror its refs. Export a sanitized working tree into a separate clean-history repository, scan it and all exported refs, remove private deployment data, then add licensing, locked dependencies, packaging, operator documentation, release notes, and stable version tags.
+This repository's history contains retired credentials, so it is never made public and its refs are never mirrored. The public repository receives sanitised snapshots on its `beta` branch, with no ancestry from here, built by `scripts/publish_public.py`. The publisher derives the file list from `git ls-files`, drops the private documents and tooling, refuses on any finding rather than warning, and runs the test suite inside the built snapshot before publishing, which needs `npm` on `PATH`. Start with `--dry-run`; `--promote` turns the current alpha into the next beta. The code is licensed AGPL-3.0-only (`pyproject.toml`).
 
 ### Dependency lockfiles
 
@@ -510,19 +529,22 @@ Why the flags are what they are:
 
 `PinnedDependencyTests` keeps the files honest. It checks that the locks agree
 with `pyproject.toml` and with each other, and that every pin carries a hash.
-After regenerating, run `pip_audit -r requirements.lock`.
+After regenerating, run `venv/bin/python -m pip_audit -r requirements.lock`.
 
 ## 13. Documentation and backlog discipline
 
 After a successful change, update documentation when the work creates durable knowledge:
 
-- `CLAUDE.md` for contributor invariants, architecture decisions, deployment lessons, and safety rules;
-- `docs/everydle_data_updates.md` for how the minigame datasets drift from the games they describe and what can be automated;
-- `docs/config_retirement_plan.md` for the plan that retired `config.json` entirely, done and closed 2026-09-21;
-- `docs/localization_status.md` for the localization rules, the measured state of every surface, and what selecting a language actually does;
 - `docs/development.md` for developer and operator behavior;
-- `README.md` for GitHub-facing capabilities and setup;
-- `todo.md` for remaining work only.
+- `docs/installation.md` for the operator's path from a bare host to a working guild;
+- `docs/level_setup.md` for the level ladder and the distribution behind it;
+- `docs/everydle_data_updates.md` for how the minigame datasets drift from the games they describe and what can be automated;
+- `docs/localization_status.md` for the localization rules, the measured state of every surface, and what selecting a language actually does;
+- `docs/privacy.md`, `docs/threat_model.md` and `docs/release_checklist.md` for their own subjects;
+- `README.md` for GitHub-facing capabilities and setup, outside its three generated blocks;
+- `CHANGELOG.md` for release notes, which the dashboard renders.
+
+The private repository also keeps `CLAUDE.md` (contributor invariants), `docs/lessons.md`, `docs/subsystems/`, `docs/deployment_host.md`, `docs/podman_runbook.md`, `docs/performance_recovery_plan.md`, `docs/config_retirement_plan.md` and `todo.md`, the only active backlog. The publisher excludes all of them, so a public reader will not find them.
 
 Do not create per-agent or per-feature TODO files. Delete completed backlog entries instead of retaining them as a changelog; Git history already records completed work.
 

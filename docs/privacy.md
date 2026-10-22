@@ -6,6 +6,11 @@ settings audit history, and limited activity timestamps. Ticket transcripts are
 sent to the configured Discord log channel when staff closes a ticket; generation
 is capped at 50,000 messages and five files below Discord's upload limit.
 
+When `invite_logging` is on, each join is posted to a log channel with the new
+member's and the inviter's names, ids and account age, and the invite code. The
+bot stores none of it: invite use counts are held in memory only, and the post
+is a Discord message that the guild's own retention governs.
+
 Self-hosters are the data controllers for their installations. They should grant
 database and backup access only to operators, define retention periods appropriate
 for their community, and disclose enabled logging/reward/moderation features to
@@ -22,8 +27,9 @@ the member can see what belongs where.
 The export deliberately includes rows where the member is not the owner: warnings
 they issued as a moderator, tickets they claimed, and other members' voice block
 lists naming them. It also includes rows the gameplay readers hide, such as
-zero-quantity inventory. Each table is capped at 5,000 rows and any table that hit
-the cap is named in `truncated_tables`. Delivery is DM-only: if DMs are closed the
+zero-quantity inventory, and the rented assets reached through the member's
+entitlements. Each table is capped at 5,000 rows and any table that hit the cap
+is named in `truncated_tables`. Delivery is DM-only: if DMs are closed the
 command says so rather than posting the file in a channel.
 
 ## Deletion
@@ -36,8 +42,8 @@ Deletion is an *anonymisation*, not a wipe, and the distinction is deliberate:
 
 - **Deleted outright** — profile and behavioural data, warnings, tickets the member
   opened, voice preferences and permissions, inventory, gacha history, vouchers,
-  entitlements, fulfilment requests, sharing preferences, activity events and the
-  LFG party posts they hosted.
+  entitlements, fulfilment requests, sharing preferences, activity events, the
+  casino earnings-rate counter and the LFG party posts they hosted.
 - **Retained under a tombstone** — the economy row, its scoped copy, settled wagers
   and reward claims. The tombstone is a fresh negative integer, which cannot
   collide with a Discord snowflake and is unique per erasure. Behavioural columns
@@ -71,8 +77,9 @@ members who have been gone for longer than the window. A member is only erased w
 **both** conditions hold: their recorded activity predates the window, **and** they
 are absent from every guild the bot serves. Staleness alone would erase a lurker
 who simply never triggered an activity write. Each daily pass erases at most 25
-members. Where guilds disagree, the shortest configured window wins, since erasure
-is installation-wide and no guild can consent on another's behalf.
+members. The window is one installation-wide setting, because erasure is
+installation-wide; the sweep still takes the shortest window any guild resolves,
+so no guild could retain data on another's behalf.
 
 ## Operators
 

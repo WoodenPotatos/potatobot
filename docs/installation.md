@@ -48,8 +48,9 @@ Discord shows it once. Under *Privileged Gateway Intents* enable:
 - **Server Members Intent** — joins, leaves, level roles, member cleanup
 - **Message Content Intent** — prefix commands and chat XP
 
-Both are required. The bot requests exactly these two beyond the defaults
-(`main.py`), and it will fail to start cleanly without them.
+Both are required. They are the only privileged intents the bot requests
+(`main.py`; the moderation and ban intents it also asks for are not
+privileged), and it will fail to start cleanly without them.
 
 **OAuth2 tab.** Copy the *Client ID* and *Client Secret* — the dashboard needs
 them. Leave the redirect URI for step 6; you cannot fill it in correctly yet.
@@ -78,6 +79,15 @@ POTATOBOT_DEPLOYMENT_PROFILE=private
 POTATOBOT_DASHBOARD_ENABLED=false
 POTATOBOT_DB_PATH=/opt/potatobot/economy.db
 ```
+
+`private` admits only `ADMIN_DISCORD_ID` to the dashboard. `self_hosted` also
+admits, for their own guild, each guild's owner and anyone holding Administrator
+or Manage Server there. `managed` is an architectural foundation, not a
+supported hosting mode.
+
+Delete the `POTATOBOT_LEGACY_GUILD_ID` line that `.env.example` carries. It only
+matters to a database that predates multi-guild storage, and its placeholder is
+not an integer.
 
 **Set `POTATOBOT_DB_PATH` explicitly.** Leaving it out is legal — the path then
 comes from the process's working directory — but it means a command you run by
@@ -132,9 +142,11 @@ nginx or Caddy in front of `127.0.0.1:5000` works identically.
 
 `POTATOBOT_TRUSTED_PROXY_HOPS` counts the proxies that append to
 `X-Forwarded-For`. Tailscale Serve, nginx alone, or a Cloudflare Tunnel straight
-to loopback is **1**, the default. Cloudflare in front of nginx is **2** — and
-then the origin must accept connections from Cloudflare's addresses only, or a
-client reaching nginx directly chooses its own rate-limit identity.
+to loopback is **1**, the default once an external URL is set. Cloudflare in
+front of nginx is **2** — and then the origin must accept connections from
+Cloudflare's addresses only, or a client reaching nginx directly chooses its own
+rate-limit identity. Too low, and every client shares the proxy's address as its
+rate-limit identity, which turns the login limit into an installation-wide one.
 
 Then in `.env` — **the origin must be byte-identical in all three places**: here,
 and in the Discord Developer Portal's redirect URI:
@@ -153,12 +165,9 @@ POTATOBOT_TRUSTED_PROXY_HOPS=1
 
 Add that exact `DISCORD_REDIRECT_URI` to **OAuth2 → Redirects** in the portal.
 
-`ADMIN_DISCORD_ID` is you. It is re-read per request rather than baked into a
-session, so changing it takes effect immediately.
-
-`POTATOBOT_TRUSTED_PROXY_HOPS` is how many forwarded hops to believe. One proxy
-means `1`. Getting it wrong makes every client share the proxy's address as its
-rate-limit identity, which turns the login limit into a guild-wide one.
+`ADMIN_DISCORD_ID` is you. Host status is checked against it on every request
+rather than stored in the session, so after you change it and restart, a cookie
+issued earlier carries no leftover authority.
 
 Leave `POTATOBOT_DASHBOARD_SESSION_SECRET` unset and a private secret file is
 generated beside the database.
@@ -167,9 +176,10 @@ generated beside the database.
 
 `deploy/potatobot.service` is a starting point. Two things about it:
 
-- It specifies `User=potatobot`/`Group=potatobot`. If you have no such account,
-  either create one and `chown -R` the tree, or change those two lines to the
-  account that owns it. Do not run it as root.
+- Its `User=`/`Group=` name the reference deployment's own login account, and
+  the paths assume `/opt/potatobot`. Change both lines to the account that owns
+  the tree, or create a dedicated `potatobot` account and `chown -R` the tree to
+  it. Do not run it as root.
 - It carries the sandboxing (`ProtectSystem=strict`, `ProtectHome`,
   `NoNewPrivileges`, `UMask=0027`, `CapabilityBoundingSet=`,
   `SystemCallFilter=@system-service`, …) with `ReadWritePaths=/opt/potatobot`.
@@ -208,19 +218,25 @@ reporting ready.
 `container/Containerfile` and `container/compose.yaml` are an alternative to
 steps 2, 5 and 7 above — one image, the bot and the dashboard as two services
 sharing one `/data` volume, because WAL needs both writers on one filesystem.
+The image runs as an unprivileged `potatobot` account (uid 10001) and publishes
+the dashboard on `127.0.0.1:5000` only; put the same reverse proxy from step 6
+in front of it.
 Steps 1, 3, 4, 6, 8 and 9 are unchanged: a container still needs the Discord
 application, the `.env` values, and the same post-install setup check.
 
 ```bash
-cp .env.example .env   # then fill in real values, including a
+cp .env.example .env   # then fill in real values, ideally including a
                         # POTATOBOT_DASHBOARD_SESSION_SECRET -- without one,
-                        # the fallback file lives outside /data and a rebuild
-                        # silently ends every session
+                        # the dashboard generates a file beside the database
+                        # on /data, which survives a rebuild but keeps a
+                        # secret with the data
 podman-compose -f container/compose.yaml run --rm bot python update_db.py
 podman-compose -f container/compose.yaml up -d
 ```
 
-(`docker compose` works the same way if that is what you have.) Expect
+(`docker compose` works the same way if that is what you have. If you build
+with plain `podman build`, pass `--format docker`: podman's default OCI format
+drops the Containerfile's `HEALTHCHECK`.) Expect
 `Database ready at schema version N (/data/economy.db)` from the migration
 step, then both containers `Up` and the dashboard answering on
 `127.0.0.1:5000`. The database, logs and Everydle's daily state all live on
@@ -233,12 +249,20 @@ Everydle drift timer — run it from the host instead, on the same schedule
 podman-compose -f container/compose.yaml run --rm bot python scripts/everydle_drift.py
 ```
 
-An ad-hoc backup or inspection the way `docs/deployment_host.md` describes for
-the bare-metal host works the same way, `sqlite3` ships in the image for it:
+For an ad-hoc inspection or backup, `sqlite3` ships in the image:
 
 ```bash
-podman exec potatobot-bot-1 sqlite3 -readonly /data/economy.db "PRAGMA integrity_check;"
+podman-compose -f container/compose.yaml exec bot sqlite3 -readonly /data/economy.db "PRAGMA integrity_check;"
 ```
+
+A single rootless podman container under systemd is the other shape:
+`deploy/potatobot.container` is a Quadlet unit that runs bot and dashboard in
+one process, with the data on a bind mount (`/var/lib/potatobot`), the
+environment in `/etc/potatobot/potatobot.env`, `--umask=0027` and
+`POTATOBOT_TRUSTED_PROXY_HOPS=1` stated explicitly, because a non-loopback bind
+is refused without it. Install it into the service account's
+`~/.config/containers/systemd/` and run `update_db.py` in the image as its own
+step before a start that carries a migration.
 
 ## 8. Check the guild, then configure it
 
@@ -263,8 +287,9 @@ concerns, so you can fix as you go.
 only exists in your guild. See **[level_setup.md](level_setup.md)** for a
 ladder that is known to work and the maths behind it.
 
-`shop_gacha` is disabled by default and depends on `economy` and `shop`. Turning
-`economy` off takes the gacha with it — the cascade prompt lists what goes.
+`shop_gacha` is disabled by default and depends on `economy` alone, so the
+gacha can run with the shop switched off. Turning `economy` off takes the gacha
+with it — the cascade prompt lists what goes.
 
 Then post the messages your members actually press, from the **Content** group.
 Each page is a list and a creator: fill it in, pick a channel, press **Post**.
@@ -302,10 +327,29 @@ nothing else.
      and create a remote named `gdrivebot` with Google Drive as the storage
      type — this step is interactive (a browser-based Google login) and only
      you can do it.
-  3. `sudo cp deploy/potatobot-offsite-backup.{service,timer} /etc/systemd/system/`,
-     `sudo systemctl daemon-reload`, `sudo systemctl enable --now potatobot-offsite-backup.timer`.
-  4. Confirm it once by hand: `sudo systemctl start potatobot-offsite-backup`,
+  3. In the same `rclone config`, create a second remote named `gdrivecrypt`
+     of type `crypt`, wrapping `gdrivebot:PotatoBotBackups-crypt`. Use
+     standard filename encryption and encrypt directory names. Let rclone
+     **generate** both the password and the salt, and save both somewhere off
+     this host, such as a password manager. They have to be in `rclone.conf`
+     for the upload to work, but if this host is lost, a copy kept only here
+     is lost with it, and every backup becomes unreadable. Without this layer,
+     whoever holds the Google account can read every member's balance,
+     warnings and tickets.
+  4. `sudo cp deploy/potatobot-offsite-backup.{service,timer} /etc/systemd/system/`,
+     then edit the installed service as for step 7: `User=`/`Group=`, the
+     `/opt/potatobot` paths, and the `ReadWritePaths=` line naming the service
+     user's `~/.config/rclone`, which rclone needs writable to refresh its
+     token. Then `sudo systemctl daemon-reload` and
+     `sudo systemctl enable --now potatobot-offsite-backup.timer`. It runs daily.
+  5. Confirm it once by hand: `sudo systemctl start potatobot-offsite-backup`,
      then `journalctl -u potatobot-offsite-backup --since '5 minutes ago'`.
+     Look for `0 differences found`: each run downloads its copy back and
+     compares it byte for byte before it prunes anything.
+  6. Prove you can restore. A backup nobody has restored is a hope. Run
+     `rclone copy gdrivecrypt:<newest file> /tmp/restore-test/`, then
+     `sqlite3 /tmp/restore-test/<file> 'PRAGMA integrity_check'`, which must
+     print `ok`. Then delete the test copy.
 
   `scripts/offsite_backup.py` copies exactly one file — a snapshot taken
   through SQLite's own online backup API, the same consistency guarantee as
@@ -325,8 +369,10 @@ sudo systemctl start potatobot
 
 Pull **before** rehearsing a migration — `scripts/rehearse_migration.py` runs
 `update_db.py` from its own checkout, so rehearsing first exercises the old code
-and proves nothing. `docs/performance_recovery_plan.md` has the full procedure
-with snapshots and comparison.
+and proves nothing. To rehearse, run
+`./venv/bin/python scripts/rehearse_migration.py /opt/potatobot/economy.db`
+before stopping the bot: it migrates a copy, fingerprints it before and after,
+and exits non-zero if any table lost rows.
 
 Restart even when no Python file changed: the command prefix is read once when
 the bot object is constructed, so changing it in the dashboard does nothing until

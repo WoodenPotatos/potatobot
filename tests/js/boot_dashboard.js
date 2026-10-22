@@ -36,8 +36,10 @@ const ok = (body) => ({ok: true, status: 200, text: async () => JSON.stringify(b
 const AUDIT = [
     // One per value shape the real feed carries: dict, list, int, bool, str,
     // and a null old_value, which is the common case.
+    // The only named actor: the rest carry no `actor_name`, the shape the
+    // server sends when it could not resolve one.
     {audit_id: 1, action: 'setting.update', target_key: 'economy_channels',
-     actor_id: GUILD, created_at: '2026-08-26T10:00:00+00:00',
+     actor_id: GUILD, actor_name: 'operator', created_at: '2026-08-26T10:00:00+00:00',
      old_value: null, new_value: [GUILD]},
     {audit_id: 2, action: 'feature.update', target_key: 'shop',
      actor_id: GUILD, created_at: '2026-08-27T02:00:00+00:00',
@@ -191,6 +193,21 @@ window.eval(script);
         } else {
             console.log(`ok    ${page}`);
         }
+    }
+
+    // An actor is `name (id)` when the server named it and the bare id when it
+    // did not. Asserted rather than trusted: a missing name renders as nothing
+    // and would look exactly like the feature never existing.
+    await window.eval('showPage("audit")');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const actors = [...window.document.querySelectorAll('#audit-list tbody tr')]
+        .map((row) => row.lastElementChild.textContent);
+    const expected = [`operator (${GUILD})`, GUILD];
+    if (actors[0] === expected[0] && actors.slice(1).every((text) => text === expected[1])) {
+        console.log('ok    audit actors are name (id), or the id alone');
+    } else {
+        console.log(`FAIL  audit actors rendered as ${JSON.stringify(actors)}`);
+        failed = true;
     }
     process.exit(failed ? 1 : 0);
 })();

@@ -634,7 +634,7 @@ class Music(commands.Cog):
                 self.bot.loop.call_soon_threadsafe(self.play_next, guild, text_channel)
 
             vc.play(
-                discord.FFmpegPCMAudio(song['url'], **_ffmpeg_options_for(song)),
+                discord.FFmpegOpusAudio(song['url'], **_ffmpeg_options_for(song)),
                 after=handle_next,
             )
 
