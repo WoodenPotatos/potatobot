@@ -257,6 +257,21 @@ def lfg_embed(guild, post):
     return embed
 
 
+def lfg_closed_embed(guild, post):
+    """A closed post: the party as it ended, greyed, with who searched."""
+    embed = lfg_embed(guild, post)
+    host = guild.get_member(int(post["host_id"]))
+    host_name = (host.mention if host
+                 else display_member_name(guild, int(post["host_id"])))
+    embed.description = (embed.description or "") + t("general.lfg_closed", host=host_name)
+    embed.color = discord.Color.dark_grey()
+    return embed
+
+
+#: Rows older than this are dropped. Longer than `lfg_auto_close_hours`'
+#: maximum (a week), so a post is always closed before its row can go.
+LFG_PRUNE_DAYS = 8
+
 #: The longest game name `/search` accepts for a free-text party.
 LFG_GAME_TEXT_LIMIT = 200
 # The party size a post asks for; Discord's own voice-channel user limit.
@@ -429,9 +444,71 @@ class General(commands.Cog):
         # instance would disable it on every party at once.
         self.bot.add_view(LFGView())
         self.lfg_prune.start()
+        self.lfg_close.start()
 
     def cog_unload(self):
         self.lfg_prune.cancel()
+        self.lfg_close.cancel()
+
+    @tasks.loop(minutes=5)
+    async def lfg_close(self):
+        """Close party posts older than the guild's `lfg_auto_close_hours`.
+
+        The message keeps its party and loses its buttons, then the row goes.
+        Deliberately not gated on the `lfg` flag: the flag decides whether a
+        post may be made, and a flag that froze closing would leave old
+        searches looking open forever. Started from `__init__`, so the error
+        handler is its only revival path.
+        """
+        for guild in self.bot.guilds:
+            try:
+                hours = int(guild_setting_sync(guild.id, "lfg_auto_close_hours") or 0)
+            except (TypeError, ValueError):
+                hours = 0
+            if hours <= 0:
+                continue
+            try:
+                posts = await database.run_read(
+                    database.get_expired_lfg_posts, guild.id, hours)
+            except Exception:
+                # One guild's read error must not stop the others closing.
+                general_logger.exception(
+                    "Could not read expired LFG posts (guild_id=%s).", guild.id)
+                continue
+            for post in posts:
+                await self._close_lfg_post(guild, post)
+
+    async def _close_lfg_post(self, guild, post):
+        channel = guild.get_channel(int(post["channel_id"]))
+        if channel is not None:
+            try:
+                await channel.get_partial_message(int(post["message_id"])).edit(
+                    embed=lfg_closed_embed(guild, post), view=None)
+            except discord.NotFound:
+                pass  # Deleted by hand; only the row is left to forget.
+            except discord.HTTPException as exc:
+                # Forbidden included. The row still goes: retrying every five
+                # minutes would never succeed, and a click on the old buttons
+                # already answers "this post has expired" once it is gone.
+                general_logger.warning(
+                    "Could not close an LFG post (guild_id=%s, error=%s).",
+                    guild.id, type(exc).__name__)
+        try:
+            await database.run_write(
+                database.delete_lfg_post, guild.id, int(post["message_id"]))
+        except database.DatabaseOperationError:
+            general_logger.exception(
+                "Could not forget a closed LFG post (guild_id=%s).", guild.id)
+
+    @lfg_close.before_loop
+    async def before_lfg_close(self):
+        await self.bot.wait_until_ready()
+
+    @lfg_close.error
+    async def lfg_close_error(self, error):
+        await handle_loop_error(
+            self.bot, self.lfg_close, "lfg_close", error, general_logger,
+        )
 
     @tasks.loop(hours=24)
     async def lfg_prune(self):
@@ -443,7 +520,7 @@ class General(commands.Cog):
         exactly why it carries an error handler.
         """
         try:
-            removed = await database.run_write(database.prune_lfg_posts, 7)
+            removed = await database.run_write(database.prune_lfg_posts, LFG_PRUNE_DAYS)
             if removed:
                 general_logger.info("Pruned %s stale LFG post(s).", removed)
         except database.DatabaseOperationError:

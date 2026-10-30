@@ -1904,3 +1904,37 @@ class PityHistoryFieldTests(unittest.TestCase):
             match, "a truncated field must say how many lines were hidden")
         shown = value.count("\n") + 1 - 1  # minus the truncation note itself
         self.assertEqual(PITY_HISTORY_LIMIT, shown + int(match.group(1)))
+
+
+class RedeemExpiryDisplayTests(unittest.TestCase):
+    """A `/redeem` reply shows its expiry as a Discord timestamp.
+
+    The stored value is UTC, and the reply used to print it raw, so a member in
+    Budapest read an expiry an hour early with nothing to say why (found live
+    2026-10-29). A Discord timestamp is drawn in each reader's own zone.
+    """
+
+    def test_a_stored_expiry_becomes_a_discord_timestamp(self):
+        from cogs.gacha import discord_expiry
+
+        self.assertEqual("<t:1798761600:f>",
+                         discord_expiry("2027-01-01T00:00:00+00:00"))
+
+    def test_both_redeem_replies_format_their_expiry(self):
+        import ast
+
+        source = (Path(__file__).resolve().parents[1] / "cogs" / "gacha.py").read_text(
+            encoding="utf-8")
+        formatted = {}
+        for node in ast.walk(ast.parse(source)):
+            if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "t"
+                    and node.args and isinstance(node.args[0], ast.Constant)):
+                continue
+            for keyword in node.keywords:
+                if keyword.arg == "expires_at":
+                    value = keyword.value
+                    formatted[node.args[0].value] = (
+                        isinstance(value, ast.Call)
+                        and getattr(value.func, "id", None) == "discord_expiry")
+        self.assertEqual({"gacha.redeem_premium_success": True,
+                          "gacha.redeem_role_success": True}, formatted)

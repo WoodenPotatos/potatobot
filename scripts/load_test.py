@@ -1,8 +1,9 @@
 """Synthetic write load against a throwaway database, to find where SQLite queues.
 
 The live guild is too quiet for a week of journal to say anything about
-contention, so the "stay on SQLite" recommendation in `todo.md` rested on
-structure alone. This drives the bot's own accessors through the bot's own
+contention, so the 2026-10-16 "stay on SQLite" recommendation rested on
+structure alone; its results are now the baseline for the PostgreSQL move in
+`todo.md`. This drives the bot's own accessors through the bot's own
 executors — `database.run_write` on the one serialized writer, `run_read` on
 the read pool — at rising concurrency, and reports latency as the caller sees
 it, queue time included.

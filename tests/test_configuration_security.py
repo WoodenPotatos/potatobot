@@ -178,15 +178,16 @@ class ConfigurationSecurityTests(unittest.TestCase):
     #: session, so its size is paid continuously rather than when somebody opens
     #: it. Set a little above what the file currently is, which leaves room to
     #: record a rule and not room to retell an incident. **Characters are the
-    #: honest measure** — the 2026-09-17 pass cut 33% of them while the line
-    #: count moved less, because it rewrapped paragraphs that had been single
-    #: 400-character lines. A budget left far above the file cannot catch creep,
-    #: so bring both down after a trim. Moving a *procedure* into a skill under
-    #: `.claude/skills/` frees very little here and is not done for the size:
-    #: what is left in this file is constraint, which has to stay loaded because
-    #: a skill applies only when something thought to load it.
-    CLAUDE_MD_MAX_LINES = 1345
-    CLAUDE_MD_MAX_CHARS = 105_600
+    #: measure, and the only one**: tokens track characters, and a line break
+    #: costs about what a space does. A line limit was dropped on 2026-10-30
+    #: because it punished the bullet layout that made rules easier to read,
+    #: while the character count it should have tracked fell by 4,500. A budget
+    #: left far above the file cannot catch creep, so bring it down after a
+    #: trim. Moving a *procedure* into a skill under `.claude/skills/` frees
+    #: very little here and is not done for the size: what is left in this
+    #: file is constraint, which has to stay loaded because a skill applies
+    #: only when something thought to load it.
+    CLAUDE_MD_MAX_CHARS = 67_000
 
     def test_the_instruction_file_stays_within_its_budget(self):
         """Nothing noticed `CLAUDE.md` reaching six times its recommended size.
@@ -203,14 +204,10 @@ class ConfigurationSecurityTests(unittest.TestCase):
             # Excluded from a published tree by name, same as the skills below.
             return
         text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-        lines = len(text.splitlines())
-        self.assertLessEqual(
-            lines, self.CLAUDE_MD_MAX_LINES,
-            f"CLAUDE.md is {lines} lines. Move narrative to docs/lessons.md "
-            f"rather than dropping a rule.")
         self.assertLessEqual(
             len(text), self.CLAUDE_MD_MAX_CHARS,
-            f"CLAUDE.md is {len(text)} characters. Same remedy.")
+            f"CLAUDE.md is {len(text)} characters. Move narrative to "
+            f"docs/lessons.md rather than dropping a rule.")
 
     def test_every_skill_declares_what_it_is_for(self):
         """A skill with no `description` is one Claude will never load on its own.
@@ -486,29 +483,25 @@ class ConfigurationSecurityTests(unittest.TestCase):
         # Music playback needs ffmpeg present in the image.
         self.assertIn("ffmpeg", containerfile)
 
-    def test_both_ignore_files_exist_and_agree(self):
-        """podman reads `.containerignore`; Docker BuildKit reads only
-        `.dockerignore`. `compose.yaml` offers `docker compose up -d` as an
-        equivalent, so a missing second file means a Docker build copies `.env`
-        into an image layer — the bot token, the Discord client secret and the
-        Twitch credentials, unremovable by a later `RUN rm`.
+    def test_one_ignore_file_serves_both_tools(self):
+        """Docker reads only `.dockerignore`; podman prefers `.containerignore`
+        and falls back to `.dockerignore` when it is absent. So `.dockerignore`
+        is the one file, and a `.containerignore` must not exist: podman would
+        read it instead, and a copy missing `.env` bakes the bot token, the
+        Discord client secret and the Twitch credentials into an image layer,
+        unremovable by a later `RUN rm`.
 
-        This is the build failure that *succeeds*, which is why it is asserted
-        rather than left to whoever next edits one of the two files.
+        This is the build failure that *succeeds*, which is why it is asserted.
+        Until 2026-10-22 the two files were kept byte-identical instead.
         """
-        container = ROOT / ".containerignore"
-        docker = ROOT / ".dockerignore"
-        for path in (container, docker):
-            with self.subTest(path=path.name):
-                self.assertTrue(path.exists(), f"{path.name} is missing")
-        self.assertEqual(container.read_text(encoding="utf-8"),
-                         docker.read_text(encoding="utf-8"),
-                         "the two ignore files must stay byte-identical")
+        self.assertTrue((ROOT / ".dockerignore").exists(), ".dockerignore is missing")
+        self.assertFalse((ROOT / ".containerignore").exists(),
+                         "podman would read .containerignore instead of .dockerignore")
 
     def test_the_ignore_files_exclude_every_secret_and_data_path(self):
         """Named explicitly, because the cost of one omission is a credential in
         a published image layer."""
-        text = (ROOT / ".containerignore").read_text(encoding="utf-8")
+        text = (ROOT / ".dockerignore").read_text(encoding="utf-8")
         for pattern in (".env", "*.db", "*.db-wal", "backups/", "logs/",
                         ".dashboard_session_secret", "venv/", ".git"):
             with self.subTest(pattern=pattern):
@@ -518,7 +511,7 @@ class ConfigurationSecurityTests(unittest.TestCase):
         """`.gitignore` kept these out of the repository but the image's
         `COPY . .` from a working tree did not -- session notes, screenshots of
         the live dashboard and rehearsal copies of a database included."""
-        text = (ROOT / ".containerignore").read_text(encoding="utf-8")
+        text = (ROOT / ".dockerignore").read_text(encoding="utf-8")
         for pattern in ("handoff/", "graphify-out/", "Screenshot*.png",
                         "migration-rehearsal-*/", "data/everydle_state.json",
                         "node_modules/"):
@@ -612,7 +605,8 @@ class RepositoryLayoutTests(unittest.TestCase):
     # `len(modules) > 10` passes with three of them deleted, which is how the
     # hardening walk in `test_hardening_invariants.py` came to cover nothing.
     SHARED_MODULES = {
-        "__init__.py", "bounded.py", "clock.py", "control_actions.py",
+        "__init__.py", "announcement_templates.py", "bounded.py", "clock.py",
+        "control_actions.py",
         "database.py", "deployment.py",
         "feature_access.py", "item_catalog.py", "logging_setup.py",
         "managed_messages.py", "minigame_data.py", "permission_audit.py",
@@ -763,6 +757,18 @@ class QuadletUnitTests(unittest.TestCase):
     def test_secrets_come_from_a_file_outside_the_image(self):
         self.assertEqual(["/etc/potatobot/potatobot.env"], self.values("EnvironmentFile"))
 
+    def test_the_container_keeps_the_hosts_timezone(self):
+        """`core/clock.py` keeps calendar days local and reads an offset-less
+        stored timestamp as local time. A container defaults to UTC, which
+        moved the day boundary to 02:00 CEST and read those values two hours
+        off -- seen in the log the moment the cutover started it."""
+        self.assertEqual(["local"], self.values("Timezone"))
+
+    def test_a_stop_reaches_the_bot_rather_than_timing_out(self):
+        """Python as PID 1 ignores SIGTERM, so without an init every stop
+        waited ten seconds and ended in SIGKILL."""
+        self.assertEqual(["true"], self.values("RunInit"))
+
     def test_the_hardening_subset_matches_compose(self):
         self.assertEqual(["true"], self.values("NoNewPrivileges"))
         self.assertEqual(["all"], self.values("DropCapability"))
@@ -776,6 +782,26 @@ class QuadletUnitTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertEqual(bare[key], unit[key])
         self.assertEqual("on-failure", dict(self.unit["Service"])["Restart"])
+
+    def test_the_podman_host_backup_reads_the_container_data_as_its_owner(self):
+        """The offsite unit for the podman host. Each line is one that would
+        fail silently: under `woody` it cannot read the `750` data directory;
+        pointed at `/opt/potatobot` it uploads a file frozen at the cutover
+        and still reports success; given `.env` it holds every credential for
+        a job that needs none."""
+        service = self.directives("potatobot-offsite-backup-podman.service")["Service"]
+        values = lambda key: [value for name, value in service if name == key]
+        self.assertEqual(["potatobot"], values("User"))
+        self.assertEqual(
+            ["/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py "
+             "/var/lib/potatobot/economy.db gdrivecrypt:"], values("ExecStart"))
+        self.assertEqual(["/var/lib/potatobot", "/home/potatobot/.config/rclone"],
+                         values("ReadWritePaths"))
+        self.assertEqual(["read-only"], values("ProtectHome"))
+        self.assertEqual(["strict"], values("ProtectSystem"))
+        self.assertEqual([], values("EnvironmentFile"))
+        self.assertNotIn("/opt/potatobot",
+                         " ".join(value for _, value in service))
 
 
 class PinnedDependencyTests(unittest.TestCase):

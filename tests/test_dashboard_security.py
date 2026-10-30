@@ -2188,3 +2188,78 @@ class AuditActorNameTests(unittest.TestCase):
         self.assertEqual(dashboard_api.MAX_ACTOR_LOOKUPS_PER_REQUEST, get.call_count)
         unnamed = [entry for entry in entries.values() if entry["actor_name"] is None]
         self.assertEqual(5, len(unnamed))
+
+
+class RedeemsNameTests(unittest.TestCase):
+    """The Redeems page names members and items beside their ids.
+
+    Asked for 2026-10-22: requests and entitlements showed bare snowflakes
+    for the member, the granting staff member and the emoji, sticker, sound
+    or role. Looked up per page load exactly as the audit feed's actors are,
+    never stored, and an id with no name stays an id.
+    """
+
+    setUp = AuditActorNameTests.setUp
+    tearDown = AuditActorNameTests.tearDown
+
+    def bot(self, members=(), emojis=(), stickers=(), sounds=(), roles=()):
+        by_id = lambda items: {item.id: item for item in items}
+        members, emojis, sounds, roles = map(by_id, (members, emojis, sounds, roles))
+        guild = SimpleNamespace(
+            get_member=members.get, get_emoji=emojis.get, stickers=list(stickers),
+            get_soundboard_sound=sounds.get, get_role=roles.get)
+        dashboard_api._dashboard_bot = SimpleNamespace(
+            get_guild=lambda gid: guild if gid == 123 else None,
+            get_user=lambda uid: None)
+
+    def test_an_entitlement_names_member_staff_and_item(self):
+        database.grant_manual_entitlement(123, 777, "sticker", "555", 30, 42)
+        self.bot(members=[SimpleNamespace(id=777, name="alice"),
+                          SimpleNamespace(id=42, name="staffer")],
+                 stickers=[SimpleNamespace(id=555, name="party_sticker")])
+        with patch.object(dashboard_api.requests, "get") as get:
+            response = self.client.get("/api/guilds/123/entitlements")
+        row = response.get_json()["data"][0]
+        self.assertEqual(("alice", "777"), (row["user_name"], row["user_id"]))
+        self.assertEqual(("staffer", "42"), (row["granted_by_name"], row["granted_by"]))
+        self.assertEqual(("party_sticker", "555"), (row["item_name"], row["discord_item_id"]))
+        get.assert_not_called()
+
+    def test_a_timed_role_is_named_from_its_key(self):
+        with database.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO timed_entitlements (guild_id, user_id, entitlement_key, "
+                "starts_at, expires_at, status) VALUES (123, 777, 'role:888', "
+                "'2026-01-01T00:00:00+00:00', '2099-01-01T00:00:00+00:00', 'active')")
+            conn.commit()
+        self.bot(roles=[SimpleNamespace(id=888, name="Premium")])
+        row = self.client.get("/api/guilds/123/entitlements").get_json()["data"][0]
+        self.assertEqual("Premium", row["item_name"])
+
+    def test_a_fulfillment_request_names_its_member(self):
+        with database.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO reward_vouchers (voucher_id, guild_id, user_id, reward_key, "
+                "source_type, duration_days, subject, acquired_at) VALUES "
+                "('v1', 123, 777, 'emoji_slot', 'gacha', 30, 'emoji', '2026-01-01T00:00:00+00:00')")
+            conn.execute(
+                "INSERT INTO fulfillment_requests (voucher_id, guild_id, user_id, "
+                "asset_type, created_at) VALUES ('v1', 123, 777, 'emoji', "
+                "'2026-01-01T00:00:00+00:00')")
+            conn.commit()
+        self.bot(members=[SimpleNamespace(id=777, name="alice")])
+        row = self.client.get("/api/guilds/123/fulfillment").get_json()["data"][0]
+        self.assertEqual(("alice", "777"), (row["user_name"], row["user_id"]))
+
+    def test_unknown_names_stay_ids_and_a_standalone_dashboard_asks_discord(self):
+        database.grant_manual_entitlement(123, 777, "emoji", "556", 30, 42)
+        answer = MagicMock()
+        answer.raise_for_status.return_value = None
+        answer.json.return_value = {"id": "556", "name": "wave"}
+        with patch.dict(os.environ, {"DISCORD_TOKEN": "token"}), \
+                patch.object(dashboard_api, "_actor_name_from_rest", return_value=None), \
+                patch.object(dashboard_api.requests, "get", return_value=answer) as get:
+            row = self.client.get("/api/guilds/123/entitlements").get_json()["data"][0]
+        self.assertIsNone(row["user_name"])
+        self.assertEqual("wave", row["item_name"])
+        self.assertIn("/guilds/123/emojis/556", get.call_args.args[0])

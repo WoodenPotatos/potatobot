@@ -19,6 +19,7 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from core import database
+from core.clock import parse_stored
 from cogs.utils import (can_self_assign_role, guild_setting_sync,
                         handle_loop_error, is_channel, resolve_guild_asset, t)
 from core.feature_access import is_enabled, maintenance_blocks, require_interaction_feature
@@ -26,6 +27,15 @@ from core.support_tickets import open_ticket
 from cogs.tickets import is_ticket_staff
 
 gacha_logger = logging.getLogger("PotatoBot.Gacha")
+
+
+def discord_expiry(stored):
+    """A stored expiry as a Discord timestamp, drawn in each reader's own zone.
+
+    The stored value is UTC, and printing it raw showed an expiry an hour
+    early to every member in Budapest, with no offset to say why.
+    """
+    return discord.utils.format_dt(parse_stored(stored), "f")
 
 
 def gacha_reward_label(key, duration_days=None, custom_items=None):
@@ -614,7 +624,8 @@ class Gacha(commands.Cog):
                 )
                 return await ctx.send(t("shop.bot_role_hierarchy_error"), ephemeral=True)
             message = t(
-                "gacha.redeem_premium_success", expires_at=result["expires_at"]
+                "gacha.redeem_premium_success",
+                expires_at=discord_expiry(result["expires_at"])
             )
         elif result["kind"] == "role":
             # One of the guild's own role vouchers. The database recorded the
@@ -640,7 +651,7 @@ class Gacha(commands.Cog):
                 return await ctx.send(t("shop.bot_role_hierarchy_error"),
                                       ephemeral=True)
             message = t("gacha.redeem_role_success", role=role.name,
-                        expires_at=result["expires_at"])
+                        expires_at=discord_expiry(result["expires_at"]))
         else:
             # An asset voucher needs a conversation: staff have to know which
             # emoji, sticker or sound to make. Before this, redeeming recorded a

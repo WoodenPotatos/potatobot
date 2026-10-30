@@ -24,7 +24,12 @@ def _declared_version() -> str:
 class ChannelDerivationTests(unittest.TestCase):
     def test_each_prerelease_suffix_maps_to_its_channel(self):
         cases = {
-            "2.1.0a1": version.CHANNEL_ALPHA,
+            "2.18.3a": version.CHANNEL_ALPHA,
+            # What PEP 440 normalises the bare letter to, as an installed
+            # distribution reports it.
+            "2.18.3a0": version.CHANNEL_ALPHA,
+            "2.18.3b": version.CHANNEL_BETA,
+            # Versions from before the 2026-10-22 change still read correctly.
             "2.1.0a47": version.CHANNEL_ALPHA,
             "2.1.0b1": version.CHANNEL_BETA,
             # A release candidate is public and not stable, so it is a beta as
@@ -46,11 +51,16 @@ class ChannelDerivationTests(unittest.TestCase):
 
 
 class DisplayTests(unittest.TestCase):
-    def test_pep440_is_rendered_for_people(self):
+    def test_the_version_reads_as_number_plus_channel_letter(self):
+        """Since 2026-10-22: no serial, so `2.18.3a`, never `-alpha.1`.
+        PEP 440's normalising `0` is never shown; a legacy nonzero serial is,
+        so two old builds never read the same."""
         cases = {
-            "2.1.0a1": "2.1.0-alpha.1",
-            "2.1.0b12": "2.1.0-beta.12",
-            "2.0.0rc1": "2.0.0-rc.1",
+            "2.18.3a": "2.18.3a",
+            "2.18.3a0": "2.18.3a",
+            "2.18.3b": "2.18.3b",
+            "2.18.0a2": "2.18.0a2",
+            "2.0.0rc1": "2.0.0rc1",
             "2.1.0": "2.1.0",
         }
         for raw, expected in cases.items():
@@ -73,7 +83,8 @@ class SingleSourceTests(unittest.TestCase):
 
     def test_the_declared_version_is_well_formed(self):
         declared = _declared_version()
-        self.assertRegex(declared, r"^\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?$")
+        # A channel letter and no serial (2026-10-22).
+        self.assertRegex(declared, r"^\d+\.\d+\.\d+(?:a|b)?$")
 
     def test_version_is_no_longer_an_operator_setting(self):
         # The whole point of the move: a version a form can change is a version
@@ -99,28 +110,38 @@ class BumpScriptTests(unittest.TestCase):
         spec.loader.exec_module(self.bump)
 
     def test_prereleases_sort_before_their_own_release(self):
-        order = ["2.1.0a1", "2.1.0a2", "2.1.0b1", "2.1.0rc1", "2.1.0", "2.1.1a1"]
+        order = ["2.18.0a2", "2.18.2b", "2.18.3a", "2.18.3b", "2.18.3", "2.18.4a",
+                 "2.19.0a"]
         keys = [self.bump.sort_key(self.bump.parse(raw)) for raw in order]
         self.assertEqual(keys, sorted(keys), "PEP 440 ordering is what the "
                                              "backwards check relies on")
 
     def test_a_step_keeps_the_channel_unless_told_otherwise(self):
-        current = self.bump.parse("2.1.0a4")
+        current = self.bump.parse("2.18.3a")
         self.assertEqual(self.bump.render(self.bump.bump(current, "patch", None)),
-                         "2.1.1a1")
-        self.assertEqual(self.bump.render(self.bump.bump(current, "minor", "beta")),
-                         "2.2.0b1")
-        self.assertEqual(self.bump.render(self.bump.bump(current, "prerelease", None)),
-                         "2.1.0a5")
+                         "2.18.4a")
+        self.assertEqual(self.bump.render(self.bump.bump(current, "minor", None)),
+                         "2.19.0a")
+        self.assertEqual(self.bump.render(self.bump.bump(current, "major", "beta")),
+                         "3.0.0b")
+        self.assertEqual(self.bump.render(self.bump.bump(current, "patch", "stable")),
+                         "2.18.4")
 
     def test_promoting_an_alpha_to_beta_moves_forward(self):
-        alpha = self.bump.parse("2.1.0a4")
-        beta = self.bump.parse("2.1.0b1")
+        alpha = self.bump.parse("2.18.3a")
+        beta = self.bump.parse("2.18.3b")
         self.assertLess(self.bump.sort_key(alpha), self.bump.sort_key(beta))
 
-    def test_a_prerelease_step_on_a_stable_version_is_refused(self):
+    def test_there_is_no_serial_step_any_more(self):
+        """`prerelease` advanced the serial the 2026-10-22 scheme removed;
+        every build moves z instead."""
         with self.assertRaises(SystemExit):
-            self.bump.bump(self.bump.parse("2.1.0"), "prerelease", None)
+            self.bump.bump(self.bump.parse("2.18.3a"), "prerelease", None)
+        import subprocess, sys
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "bump_version.py"), "prerelease",
+             "--dry-run"], capture_output=True, text=True)
+        self.assertEqual(2, result.returncode, result.stderr)
 
 
 if __name__ == "__main__":
@@ -214,9 +235,10 @@ class CurrencySymbolTests(unittest.TestCase):
     def test_t_substitutes_coin_without_the_caller_supplying_it(self):
         from cogs.utils import t
         self._set("🪙")
-        rendered = t("admin.testboost_desc", lang="en", user="Woody", amount=5)
-        self.assertEqual("Huge thanks for the boost, Woody! Your reward: **5 🪙**.",
-                         rendered)
+        rendered = t("announcements.boost_reward_desc", lang="en", user="@Woody",
+                     display_name="Woody", amount=5)
+        self.assertEqual("As a thank you for the boost, **Woody** (@Woody) received "
+                         "**5 🪙**!", rendered)
 
     def test_a_template_without_the_token_is_unaffected(self):
         """str.format ignores a keyword the template does not use, which is why
@@ -227,8 +249,8 @@ class CurrencySymbolTests(unittest.TestCase):
     def test_an_explicit_coin_argument_still_wins(self):
         from cogs.utils import t
         self._set("🪙")
-        rendered = t("admin.testboost_desc", lang="en", user="Woody", amount=5,
-                     coin="XYZ")
+        rendered = t("announcements.boost_reward_desc", lang="en", user="@Woody",
+                     display_name="Woody", amount=5, coin="XYZ")
         self.assertIn("XYZ", rendered)
         self.assertNotIn("🪙", rendered)
 

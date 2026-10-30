@@ -1,13 +1,118 @@
 # Changelog
 
-## 2.18.0-beta.2
+Versions are `x.y.z` plus a channel letter: `a` alpha, `b` beta, none for
+stable. A build keeps its number across channels, so `2.18.3a` publishes as
+`2.18.3b`. The sections below `2.18.3` were renamed into this scheme on
+2026-10-22 by adding the old beta serial to z (`2.18.0-beta.1` is `2.18.1b`);
+the public repository's git tags keep their original names.
 
-Release notes only; the code is the same as 2.18.0-beta.1.
+## 2.18.4b
 
-- **Corrected the 2.18.0-beta.1 notes.** They said the schema was unchanged,
+- **Join, leave and boost messages can be written by each server.** The
+  dashboard has a new Announcements page. Every event has its own switch and
+  channel, and its message can have a title, several text variants (one is
+  picked at random), a colour, an image, and plain text above it. Placeholders
+  such as `{user}`, `{server}` and `{member_count}` are filled in. A live
+  preview shows the result, and "Send test" posts the saved message with you
+  as the member. Anything left empty keeps the old text.
+- **Join, leave, kick and ban messages always say who it was.** They used
+  to show only a mention, which Discord turns into a bare ID once the member
+  has left. The messages now also give the display name, the username and
+  the ID as plain text, and the new `{user_id}` placeholder lets your own
+  templates do the same. The member's picture is now attached to the message
+  instead of linked, so it no longer disappears when they change it or
+  delete their account. It is not stored anywhere on the server.
+- **Settings pages list their fields in a sensible order.** Every page was
+  sorted alphabetically by internal name, which is why the boost message's
+  channel sat at the bottom instead of first. Fields now appear in the order
+  they were designed in: channels first, and related fields together (for
+  example each warning type's threshold, action and timeout side by side).
+- **Announcement variants each get their own box.** Instead of one box with
+  a variant per line, every variant is now a multi-line box of its own, and
+  "Add variant" adds another, the way the rules editor adds a section. A
+  message can have up to five. The preview shows the variant you are
+  editing, rendered with markdown, and the plain text above the embed is a
+  multi-line box too.
+- **Message previews render nested formatting correctly.** Bold with italic
+  inside (`**bold *and italic* inside**`) used to fall apart and show its
+  asterisks, and `2 * 3 * 4` came out partly italic. Every preview now
+  renders these as Discord does.
+- **The dashboard keeps its two languages apart.** Messages it shows you —
+  saved, queued, done, errors — are now always in the dashboard's language;
+  before, some arrived in the bot's language, so one action could answer in
+  Hungarian and then English. Everything that previews what members will
+  see in Discord — the announcement texts, the default buttons on panels,
+  shop item names and the shop preview — is now always in the bot's
+  language, even when the dashboard is set to another one.
+- **The Announcements page is easier to use.** Every message editor opens
+  and closes like the sidebar groups and starts closed; the ones you open
+  stay open next time. Empty boxes show the built-in text in grey, and the
+  preview shows it filled in, so it is clear what each message says before
+  you change anything.
+- **Kicks and bans are no longer announced as leaves.** A ban used to post a
+  farewell *and* a ban message, and a kick looked like someone leaving. Now
+  each produces one message of its own kind, with the moderator and reason.
+  When the bot runs `/kick` or `/ban`, the moderator who ran it is named, not
+  the bot. Kick and ban messages go to the moderation log unless they are
+  given a channel of their own; **this moves ban messages out of the leave
+  channel.** Telling a kick from a leave needs the View Audit Log permission.
+- **Every boost is announced.** The boost message used to disappear when the
+  economy was off or the booster had already received the reward that month,
+  and a second boost from the same member was never noticed. The coin reward
+  is unchanged, but its amount is now on the Economy page, and it has its own
+  message and channel.
+- **`/testboost` is a preview.** It shows the boost messages only to you, and
+  no longer gives you 2,000 coins.
+
+- **Voucher expiry times are shown in your own time.** `/redeem` showed when
+  premium or a role runs out in UTC, so in Hungary it read an hour early. It
+  now uses a Discord timestamp, which everyone sees in their own time zone,
+  and the dashboard's Redeems page shows the browser's local time.
+- **Simpler version numbers.** A version is now `x.y.z` plus a channel
+  letter: `2.18.3a` (alpha), `2.18.3b` (beta), `2.18.3` (stable). Every build
+  moves the last number, so the old `-beta.2`-style counters are gone, and the
+  older releases below were renamed the same way (`2.18.0-beta.1` is now
+  `2.18.1b`). `/version` and the dashboard show the new form.
+- **The Redeems page shows names next to ids.** Members, the staff member
+  who granted something, and the emoji, sticker, sound or role read as
+  `name (id)`, like the audit log. Names are looked up live and never stored;
+  anything the bot cannot name still shows its id.
+- **LFG searches close themselves.** After 24 hours a party post keeps its
+  host and who joined, says the search is over, and loses its buttons, so an
+  old post no longer looks open. Change the hours on the dashboard's LFG page,
+  or set 0 to keep searches open.
+- **Music no longer drops out and then rushes ahead.** YouTube sometimes cuts
+  the stream mid-song, and while the bot reconnected the sound stopped and
+  then played the missed part too fast to catch up. The bot now keeps about
+  ten seconds of the song loaded ahead, so a short reconnect is not heard.
+- **A YouTube link pasted into the music panel's search box plays.** Before,
+  only a search worked there and a link answered "no results"; `/play`
+  already took both.
+- **Skip, shuffle, loop and remove on the music panel no longer leave a
+  "Message could not be loaded" line.** Their result is now posted as an
+  ordinary message instead of a reply to the panel, which the bot replaces
+  whenever the song changes.
+- **The dashboard's "no shared server" refusal now mentions two-factor
+  authentication.** In a server that requires 2FA for moderators, Discord
+  does not pass on an admin role's permissions to an account without 2FA, so
+  that account is refused even though it holds the role.
+- **The invite log no longer misses the first join after a restart.** It
+  could not see whether it was switched on yet when the bot started, so it
+  skipped reading the server's invites and had nothing to compare the next
+  join with. It now retries every minute until it has the list, which also
+  covers switching the invite log on while the bot is running.
+- **Podman is now the container build tool, and Docker still works.** The
+  build check uses podman, and the repository keeps a single
+  `.dockerignore`, which both tools read, instead of two copies of it.
+
+## 2.18.2b
+
+Release notes only; the code is the same as 2.18.1b.
+
+- **Corrected the 2.18.1b notes.** They said the schema was unchanged,
   which is wrong: that release adds schema 25, as its first paragraph says.
 
-## 2.18.0-beta.1
+## 2.18.1b
 
 This release adds a schema migration (schema 25, one new table). It runs on
 its own at startup and writes a backup first. Rolling back to an earlier
@@ -57,7 +162,7 @@ the changes below needs a setting changed.
 - `scripts/load_test.py` measures how much database load the bot can take. It
   only ever runs against a fresh temporary database.
 
-## 2.16.1-beta.1
+## 2.16.2b
 
 This release contains the fixes from a security audit. No setting needs
 changing and the schema is unchanged.
@@ -105,7 +210,7 @@ changing and the schema is unchanged.
   writes goes on the `/data` volume, including the session secret, the logs
   and the Everydle state.
 
-## 2.16.0-beta.1
+## 2.16.1b
 
 - **Casino payouts can be rate-limited per member**, as an anti-exploit
   safeguard against a bug or glitch letting a balance grow abnormally fast.
@@ -139,7 +244,7 @@ changing and the schema is unchanged.
   like a redeem or rental ticket already was, instead of their raw Discord
   id.
 
-## 2.15.0-beta.1
+## 2.15.1b
 
 - **The bot now posts patch and update notes for eleven games**, one
   channel per game per guild: League of Legends, Valorant, Minecraft,
@@ -209,7 +314,7 @@ changing and the schema is unchanged.
   queue ran out. It used to sit alone in an empty channel until that
   unrelated timer happened to also be running.
 
-## 2.14.0-beta.1
+## 2.14.1b
 
 - **A word chain now knows Hungarian letters.** `sz`, `gy`, `ny`, `cs`, `ly`,
   `ty`, `zs`, `dz` and `dzs` are single letters to anyone playing, but the bot
@@ -264,7 +369,7 @@ changing and the schema is unchanged.
   enough to overflow Discord's own limits now says how many items or vouchers
   did not fit instead of failing to send at all.
 
-## 2.13.1-beta.1
+## 2.13.2b
 
 - **The Genshindle grid's headings line up again.** A column was removed from
   the game a while back but not from the heading row, so everything to the right
@@ -365,7 +470,7 @@ changing and the schema is unchanged.
   was empty rather than merely missing the new entry, while the vault list still
   showed the three built-in vaults.
 
-## 2.10.0-beta.1
+## 2.10.1b
 
 - **Your own vouchers and timed roles can be gacha rewards.** Make an item that
   grants an emoji, sticker or sound, or a role for N days, and put it in a banner.
@@ -385,7 +490,7 @@ changing and the schema is unchanged.
   guess almost never learned anything from it while it took up a column. Gone
   from the game and from the weekly update check.
 
-## 2.9.0-beta.1
+## 2.9.1b
 
 - **Switching a feature off hides its page again.** It briefly only dimmed it,
   which was a workaround for an older problem — hiding the shop page once took
@@ -446,7 +551,7 @@ changing and the schema is unchanged.
   it affected the 5⭐ chance. It never did — it only lifts a 3⭐ — and the text
   now says so.
 
-## 2.8.0-beta.1
+## 2.8.1b
 
 - **The shop has sections, and room to grow.** `/shop` asks which section first
   — Perks, Casino, Heist, Protection, Rentals — and then shows that section's
@@ -479,7 +584,7 @@ changing and the schema is unchanged.
 - A disabled item bought by name now says it is unavailable instead of saying
   you cannot afford it.
 
-## 2.7.0-beta.2
+## 2.7.2b
 
 - **The shop item editor follows the kind you pick.** Choosing "Vault" and
   still being asked which role to grant is fixed properly this time: the redraw
@@ -490,7 +595,7 @@ changing and the schema is unchanged.
   right ones but arrived empty — a vault opened reading "Nothing selected", and
   saving it wrote that back. All six kinds keep their stored values now.
 
-## 2.7.0-beta.1
+## 2.7.1b
 
 - **The five new casino items can be pulled at all now.** The lucky charm,
   stacked deck, marked card, metal detector and parachute were marked drawable
@@ -568,7 +673,7 @@ changing and the schema is unchanged.
   longer prints a line per character saying you need to supply nothing — which on
   a hundred-character roster buried the six that did.
 
-## 2.6.0-beta.1
+## 2.6.1b
 
 - **Four casino items, and the loaded die now works in roulette.** A stacked deck
   deals your blackjack hand twice and keeps the better one, a lucky charm spins
@@ -720,7 +825,7 @@ changing and the schema is unchanged.
   first existed, and Docker reads only the second — so a Docker build would have
   baked `.env` into an image layer.
 
-## 2.4.0-beta.1
+## 2.4.1b
 
 - **Five public betas shipped with a private heading on the front page.**
   `README.md` renders the three most recent changelog sections, and promotion
@@ -870,7 +975,7 @@ changing and the schema is unchanged.
   people's artwork and every public release shipped them. The bot's own avatar
   moved to the repository root so it still ships.
 
-## 2.1.0-beta.1 to 2.3.0-beta.1
+## 2.1.1b to 2.3.1b
 
 - These notes cover five public betas — `v2.1.0b1` through `v2.3.0b1` — as one
   block. The changelog was a single running section then and the publisher

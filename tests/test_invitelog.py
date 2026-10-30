@@ -181,5 +181,63 @@ class JoinListenerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("new", self.cog.snapshots[GUILD])
 
 
+class PrimeMissingTests(unittest.IsolatedAsyncioTestCase):
+    """A guild with the feature on always gets a snapshot to compare with.
+
+    This cog's `on_ready` runs alongside `main.py`'s, before the feature flags
+    load, and an unloaded flag reads as off; so the startup prime was skipped
+    and the first join after every restart was unknown (found live 2026-10-22).
+    """
+
+    def setUp(self):
+        self.module = invitelog()
+        self.guild = SimpleNamespace(
+            id=GUILD, features=[],
+            invites=AsyncMock(return_value=[SimpleNamespace(
+                code="abc", uses=11, max_uses=0, inviter=None)]),
+            vanity_invite=AsyncMock(return_value=None),
+        )
+        self.cog = self.module.InviteLog(MagicMock(guilds=[self.guild]))
+
+    async def tick(self):
+        await self.cog.prime_missing.coro(self.cog)
+
+    async def test_a_startup_before_the_flags_loaded_is_repaired_by_the_loop(self):
+        with patch.object(self.module, "is_enabled", return_value=False):
+            await self.cog.on_ready()
+        self.assertNotIn(GUILD, self.cog.snapshots)
+        with patch.object(self.module, "is_enabled", return_value=True):
+            await self.tick()
+        self.assertEqual(11, self.cog.snapshots[GUILD]["abc"].uses)
+
+    async def test_a_disabled_guild_costs_no_request(self):
+        with patch.object(self.module, "is_enabled", return_value=False):
+            await self.tick()
+        self.guild.invites.assert_not_awaited()
+        self.assertNotIn(GUILD, self.cog.snapshots)
+
+    async def test_a_primed_guild_costs_no_request(self):
+        self.cog.snapshots[GUILD] = {"abc": state(11)}
+        with patch.object(self.module, "is_enabled", return_value=True):
+            await self.tick()
+        self.guild.invites.assert_not_awaited()
+
+    async def test_one_guild_failing_does_not_stop_the_next(self):
+        broken = SimpleNamespace(id=GUILD + 1, features=[],
+                                 invites=AsyncMock(side_effect=RuntimeError("boom")),
+                                 vanity_invite=AsyncMock(return_value=None))
+        self.cog.bot.guilds = [broken, self.guild]
+        with patch.object(self.module, "is_enabled", return_value=True), \
+                self.assertLogs("PotatoBot.InviteLog", level="ERROR"):
+            await self.tick()
+        self.assertIn(GUILD, self.cog.snapshots)
+
+    def test_the_loop_has_an_error_handler(self):
+        # `Loop._error` is what `@loop.error` replaces; the default only logs,
+        # and a loop started in `cog_load` has no reconnect to revive it.
+        self.assertEqual("prime_missing_error",
+                         self.cog.prime_missing._error.__name__)
+
+
 if __name__ == "__main__":
     unittest.main()

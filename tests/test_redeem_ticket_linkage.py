@@ -412,7 +412,9 @@ class RedeemsPageActionsTests(unittest.TestCase):
         if not (Path(ROOT) / "node_modules" / "jsdom").is_dir():
             self.skipTest("jsdom is not installed; run `npm install`")
         script = Path(ROOT) / "tests" / "js" / "redeem_actions.js"
-        result = subprocess.run([node, str(script), ROOT],
+        # A zone off UTC, so a UTC timestamp shown raw cannot pass as local.
+        env = {**os.environ, "TZ": "Europe/Budapest"}
+        result = subprocess.run([node, str(script), ROOT], env=env,
                                 capture_output=True, text=True, timeout=120)
         self.assertEqual(0, result.returncode, f"{result.stdout}\n{result.stderr}")
 

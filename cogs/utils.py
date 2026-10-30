@@ -1,3 +1,9 @@
+"""Shared helpers every cog imports: settings accessors, `t()`, checks, member
+display, level roles, voice-reward rules and top-ranker coordination.
+
+The level curve, the voice-reward rule, the currency symbol's judgement and
+member display are bound by `docs/subsystems/economy.md`.
+"""
 import discord
 import re
 import asyncio
@@ -520,7 +526,8 @@ def level_milestones(configured) -> dict[int, object]:
 
 
 async def send_moderation_log(guild, embed, what: str = "a moderation record",
-                              skip_channel=None):
+                              skip_channel=None, *, content=None,
+                              allowed_mentions=None, file=None):
     """Post one embed to the guild's moderation log channel, if it has one.
 
     Three callers now — the word filter, the warn escalation alert and a staff
@@ -543,8 +550,17 @@ async def send_moderation_log(guild, embed, what: str = "a moderation record",
         return False
     if skip_channel is not None and getattr(skip_channel, "id", None) == channel.id:
         return True
+    # `content` and `allowed_mentions` are for a kick or ban announcement
+    # whose guild sent it to the log rather than a channel of its own.
+    extra = {}
+    if content is not None:
+        extra["content"] = content
+    if allowed_mentions is not None:
+        extra["allowed_mentions"] = allowed_mentions
+    if file is not None:
+        extra["file"] = file
     try:
-        await channel.send(embed=embed)
+        await channel.send(embed=embed, **extra)
     except discord.HTTPException:
         utility_logger.warning(
             "Could not post %s to the moderation log (guild_id=%s, channel_id=%s)",

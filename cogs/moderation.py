@@ -23,6 +23,7 @@ ROOT_DIR = os.path.dirname(COG_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
+from core.announcement_templates import record_moderator_action
 from core import database
 
 from core.bounded import BoundedValueMap
@@ -332,6 +333,9 @@ class Moderation(commands.Cog):
         except discord.HTTPException:
             pass  # Closed DMs are the member's choice.
 
+        # Discord credits the bot with the kick; the announcement names the
+        # moderator who asked.
+        record_moderator_action(ctx.guild.id, member.id, "kick", ctx.author.id)
         await member.kick(reason=reason)
     
         embed = discord.Embed(title=t("moderation.kick_embed_title"), color=discord.Color.orange())
@@ -361,6 +365,7 @@ class Moderation(commands.Cog):
         except discord.HTTPException:
             pass
 
+        record_moderator_action(ctx.guild.id, member.id, "ban", ctx.author.id)
         await member.ban(reason=reason)
     
         embed = discord.Embed(title=t("moderation.ban_embed_title"), color=discord.Color.red())

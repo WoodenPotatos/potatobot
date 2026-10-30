@@ -96,7 +96,13 @@ window.fetch = async (url) => {
     const u = String(url);
     if (u.includes('/locale')) {
         return ok({language: 'en', available: ['hu', 'en'],
-                   data: {dashboard: locale.dashboard}});
+                   data: {dashboard: locale.dashboard},
+                   server: {language: 'en', texts: {
+                       announcements: locale.announcements,
+                       managed_buttons: {rules: locale.admin.accept_rules_button,
+                                         ticket: locale.tickets.open_btn,
+                                         airlock: locale.admin.enter_server_button},
+                       shop_option_label: locale.shop.select_option_label}}});
     }
     // `/auth/status` answers at the *top level*, not under `data` — `api()`
     // returns the whole payload. Stubbed under `data`, `result.logged_in` was

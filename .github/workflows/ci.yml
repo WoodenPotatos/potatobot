@@ -63,12 +63,15 @@ jobs:
   # stale image tag, a missing dependency, a Containerfile step nobody
   # noticed break. This only builds -- it does not run the stack or push
   # anywhere -- but a build failure is still the majority of what actually
-  # rotted here before.
+  # rotted here before. Podman, because it is what the deployment builds with;
+  # `--format docker` keeps the HEALTHCHECK, which podman's default OCI format
+  # drops. Docker builds the same Containerfile with the same `.dockerignore`.
   container:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - run: docker build -f container/Containerfile -t potatobot:ci .
+      - run: podman --version
+      - run: podman build --format docker -f container/Containerfile -t potatobot:ci .
 
   # Separate from the Python matrix so the secret scan runs once rather than
   # three times, and so a Python failure cannot mask it or the reverse.

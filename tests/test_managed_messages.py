@@ -34,6 +34,22 @@ from core import settings_cache
 from core.feature_access import refresh_feature_cache
 
 
+class MarkdownPreviewTests(unittest.TestCase):
+    """The preview renders Discord's emphasis, including nested.
+
+    `**bold *and italic* inside**` printed its asterisks, and `2 * 3 * 4`
+    rendered italic. Driven through the real renderer in jsdom.
+    """
+
+    def test_emphasis_renders_as_discord_does(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        script = ROOT / "tests" / "js" / "markdown_render.js"
+        result = subprocess.run([node, str(script), str(ROOT)],
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, result.returncode, f"{result.stdout}\n{result.stderr}")
+
 class ManagedMessageRouteTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()

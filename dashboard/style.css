@@ -2037,3 +2037,96 @@ input[type="color"] { width: 100%; height: 38px; padding: 2px; cursor: pointer; 
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
+
+/* ---------------------------------------------------- member announcements */
+
+/* The placeholder cheat-sheet, live preview and test button under each event's
+   section. The preview draws text only: no operator URL is ever loaded. */
+.announcement-tools {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+}
+
+.announcement-placeholders {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.announcement-placeholder {
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-input);
+    color: var(--text-strong);
+}
+
+.announcement-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.announcement-preview-content {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* `--embed-color` is set per section from the colour field, like Discord's
+   own left bar; unset falls back to the accent. */
+.announcement-preview-embed {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: var(--space-3);
+    border-left: 4px solid var(--embed-color, var(--accent));
+    border-radius: var(--radius-sm);
+    background: var(--surface-input);
+}
+
+.announcement-preview-title { color: var(--text-strong); overflow-wrap: anywhere; }
+
+.announcement-preview-description {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.announcement-preview-meta {
+    font-size: .72rem;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+.announcement-tools > .btn { align-self: flex-start; }
+
+/* An editor that opens and closes like a sidebar group. The legend stays
+   visible when closed, and with it the section's unsaved marker. */
+.section-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    color: inherit;
+}
+
+.section-toggle .chevron { transition: transform .18s ease; }
+.section-toggle[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
+.form-section.collapsible.collapsed { padding-bottom: var(--space-2); }
+.form-section.collapsible.collapsed > :not(legend) { display: none; }
+
+/* A multi-line list setting: the rules editor's repeating block, one box per
+   item, with the value carried as JSON in a hidden text area. */
+.multiline-list-editor { display: flex; flex-direction: column; gap: var(--space-2); }
+.list-carrier { display: none; }

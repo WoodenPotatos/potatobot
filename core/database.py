@@ -59,6 +59,7 @@ READ_ONLY_OPERATIONS = {
     "get_five_star_history", "get_gacha_pity", "get_active_entitlements",
     "get_minigame_state",
     "get_lfg_post",
+    "get_expired_lfg_posts",
     "get_user_inventory",
     "get_user_vouchers",
     "get_guild_settings", "get_instance_settings", "get_schema_version",
@@ -5343,6 +5344,36 @@ def leave_lfg_post(guild_id: int, message_id: int, user_id: int):
         raise DatabaseOperationError("lfg leave failed") from exc
 
 
+def get_expired_lfg_posts(guild_id: int, older_than_hours: int) -> list[dict]:
+    """A guild's posts made more than `older_than_hours` ago, oldest first.
+
+    Read by the closing loop, which edits each message and then deletes the
+    row. `created_at` is written UTC-aware by `create_lfg_post`, so the
+    ISO strings compare in time order.
+    """
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(hours=max(1, int(older_than_hours)))).isoformat()
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT message_id, channel_id, host_id, game_role_id, game_text, "
+            "needed, joined_json, created_at FROM lfg_posts "
+            "WHERE guild_id = ? AND created_at < ? ORDER BY created_at",
+            (int(guild_id), cutoff),
+        ).fetchall()
+    posts = []
+    for row in rows:
+        try:
+            joined = json.loads(row[6])
+        except (TypeError, ValueError):
+            joined = []
+        posts.append({"message_id": row[0], "channel_id": row[1],
+                      "host_id": row[2], "game_role_id": row[3],
+                      "game_text": row[4], "needed": row[5],
+                      "joined": [int(uid) for uid in joined if isinstance(uid, int)],
+                      "created_at": row[7]})
+    return posts
+
+
 def delete_lfg_post(guild_id: int, message_id: int) -> bool:
     """Forget a post. True when a row was actually removed."""
     try:
@@ -7416,7 +7447,7 @@ def queue_control_action(guild_id: int, actor_id: int, action_type: str,
     # rather than being retried forever.
     if action_type not in {"publish_managed", "delete_managed", "erase_member",
                           "repair_channel_permission", "notify_redeem_fulfilled",
-                          "revoke_entitlement"}:
+                          "revoke_entitlement", "test_announcement"}:
         raise ValueError("unsupported control action")
     with get_connection() as conn:
         action_id = conn.execute(

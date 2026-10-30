@@ -1,13 +1,14 @@
 # What must never enter the image.
 #
-# This file exists twice, byte for byte: podman reads `.containerignore` and
-# Docker BuildKit reads only `.dockerignore`, and `compose.yaml` offers
-# `docker compose up -d` as an equivalent command. With only one of them present,
-# a build with the other tool does `COPY . .` over everything below — including
-# `.env`, which would bake the bot token, the Discord client secret and the
-# Twitch credentials into an image layer where a later `RUN rm` cannot reach
-# them. That is the failure mode that succeeds rather than erroring, so
-# `tests/test_configuration_security.py` asserts the two files stay identical.
+# The one ignore file for both tools. Docker reads only `.dockerignore`;
+# podman reads `.containerignore` first and falls back to this file when it is
+# absent (verified with podman 5.8.9, 2026-10-22). So there must be no
+# `.containerignore`: podman would prefer it, and a copy missing a line below
+# would `COPY . .` the `.env` — the bot token, the Discord client secret and
+# the Twitch credentials — into an image layer a later `RUN rm` cannot reach.
+# That is the failure that succeeds rather than erroring, so
+# `tests/test_configuration_security.py` asserts this file exists and the other
+# does not.
 #
 # The build does `COPY . .`, so anything left lying in a working tree would
 # otherwise be baked in — the same reason the publisher derives its snapshot

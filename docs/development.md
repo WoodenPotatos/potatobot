@@ -35,7 +35,7 @@ The dashboard is **load-bearing, not experimental**: it is the only way an opera
 | `backups/` | Untracked. Timestamped pre-migration database copies written by `initialize_database`; these are the rollback artefacts. |
 | `dashboard-reference/` | Untracked design screenshots for the dashboard layout. |
 
-In the private repository, `CLAUDE.md` carries the full annotated directory tree and the invariants a change has to preserve. Read it before touching the registries, the dashboard, or the schema.
+In the private repository, `CLAUDE.md` carries an annotated directory tree and the invariants a change has to preserve. Read it before touching the registries, the dashboard, or the schema.
 
 `todo.md` (private) is the only active backlog. Completed incident notes and retired TODO files remain available through Git history.
 
@@ -471,7 +471,7 @@ steps on their own. Never point either at the live file while the bot runs.
 | `everydle_drift.py` | Read-only drift report against upstream; exits 1 on drift and 2 when a source is unreachable. `--fixtures`, `--json`. |
 | `everydle_propose.py` | `draft -o patch.json` writes a reviewable patch; `apply patch.json [--dry-run]` applies it once no field is null. |
 | `offsite_backup.py` | One consistent database snapshot to an rclone remote, downloaded back and compared before pruning (`--retention-days`, default 30). Stdlib only. |
-| `bump_version.py` | The only writer of the version in `pyproject.toml`: `major`, `minor`, `patch` or `prerelease`, with `--channel`, `--set`, `--show` and `--dry-run`. |
+| `bump_version.py` | The only writer of the version in `pyproject.toml`: `major` (architecture), `minor` (schema migration) or `patch` (everything else), keeping the channel letter (`2.18.3a`); `--channel`, `--set`, `--show` and `--dry-run`. |
 | `update_readme.py` | Regenerates the three marked blocks in `README.md`; `--check` fails when they are stale. |
 | `publish_public.py` | Builds, verifies and publishes the sanitised public snapshot (section 12). |
 
@@ -487,7 +487,7 @@ For live performance recovery, validate at least:
 - a public command's private validation-error branch;
 - a modal-first command;
 - a persistent component;
-- join and leave announcements;
+- join, leave, kick and ban announcements (one message per removal, kick and ban from the audit log) and a boost announcement with the economy off;
 - a disabled command, component, listener, and scheduled loop;
 - voice reward batching and top-ranker reconciliation.
 

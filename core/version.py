@@ -29,15 +29,17 @@ CHANNEL_ALPHA = "alpha"
 CHANNEL_BETA = "beta"
 CHANNEL_STABLE = "stable"
 
-# PEP 440 spells a prerelease `2.1.0a4`, `2.1.0b2`, `2.1.0rc1`. A release
-# candidate is a beta as far as an operator is concerned: it is public, it is
-# not stable, and calling it a fourth channel would only be a channel nobody
-# subscribes to.
+# Since 2026-10-22 a version is `x.y.z` plus a channel letter and nothing
+# else: `2.18.3a` is an alpha build, the same code published is `2.18.3b`, and
+# a stable release is `2.18.3`. Every build moves z, so there is no serial.
+# PEP 440 accepts the bare letter and normalises it to `2.18.3a0`, which is
+# what an installed distribution reports, so the serial stays optional here;
+# a nonzero one is a version from before the change (`2.18.0a2`). A release
+# candidate is a beta as far as an operator is concerned.
 _PRERELEASE = re.compile(r"^(?P<release>\d+\.\d+\.\d+)"
-                         r"(?:(?P<kind>a|b|rc)(?P<serial>\d+))?$")
+                         r"(?:(?P<kind>a|b|rc)(?P<serial>\d+)?)?$")
 
 _KIND_CHANNEL = {"a": CHANNEL_ALPHA, "b": CHANNEL_BETA, "rc": CHANNEL_BETA}
-_KIND_LABEL = {"a": "alpha", "b": "beta", "rc": "rc"}
 
 # `parents[1]`, not `parent`: this module lives in `core/` and the manifest
 # sits at the repository root. Getting this wrong is silent -- the read
@@ -94,10 +96,11 @@ def channel_for(raw: str) -> str:
 
 
 def display_for(raw: str) -> str:
-    """A human-facing version: `2.1.0b2` reads as `2.1.0-beta.2`.
+    """A human-facing version: `2.18.3a0` and `2.18.3a` both read `2.18.3a`.
 
-    PEP 440 is what packaging tools need; it is not what an operator wants to
-    read in an embed or quote in a bug report.
+    The normalised `0` is PEP 440's, not the project's, so it is never shown.
+    A legacy nonzero serial is kept (`2.18.0a2`), because dropping it would
+    make two different old builds read the same.
     """
     match = _PRERELEASE.match(raw or "")
     if match is None:
@@ -105,7 +108,8 @@ def display_for(raw: str) -> str:
     kind = match.group("kind")
     if not kind:
         return match.group("release")
-    return f"{match.group('release')}-{_KIND_LABEL[kind]}.{int(match.group('serial'))}"
+    serial = int(match.group("serial") or 0)
+    return f"{match.group('release')}{kind}{serial if serial else ''}"
 
 
 def version_display() -> str:

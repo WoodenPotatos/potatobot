@@ -507,22 +507,33 @@ class Admin(commands.Cog):
     @discord.app_commands.default_permissions(administrator=True)
     @commands.has_permissions(administrator=True)
     async def testboost(self, ctx):
-        bonus_amount = 2000
-        await update_user_data(ctx.author, balance_change=bonus_amount)
-    
-        target_id = guild_setting_sync(ctx.guild.id, "booster_channel")
-        channel = self.bot.get_channel(target_id)
-    
-        if channel:
-            embed = discord.Embed(
-                title=t("admin.testboost_title"),
-                description=t("admin.testboost_desc", user=ctx.author.mention, amount=bonus_amount),
-                color=0xff73fa
-            )
-            await channel.send(embed=embed)
-            await ctx.send(t("admin.testboost_success", channel=channel.mention), ephemeral=True)
-        else:
-            await ctx.send(t("admin.testboost_channel_missing", channel_id=target_id), ephemeral=True)
+        """Preview the boost messages with the caller as the booster.
+
+        A preview only: it pays nothing and posts nothing in the guild. It used
+        to credit the caller 2,000 coins and post its own text, which was neither
+        the real message nor free.
+        """
+        # Resolved at call time: a module-level import of a cog goes stale once
+        # the cog-loading test (or `?reload`) replaces the module.
+        import cogs.announcements as announcements
+
+        guild = ctx.guild
+        events = ["boost"]
+        if announcements.event_enabled(guild.id, "boost_reward"):
+            events.append("boost_reward")
+        rendered = [
+            announcements.build_announcement(
+                event, ctx.author, guild, footer=t("announcements.test_footer"),
+                **announcements.sample_extras(event, guild, ctx.author))
+            for event in events
+        ]
+        contents = [item.content for item in rendered if item.content]
+        await ctx.send(
+            content="\n".join([t("admin.testboost_preview")] + contents),
+            embeds=[item.embed for item in rendered],
+            allowed_mentions=discord.AllowedMentions.none(),
+            ephemeral=True,
+        )
 
     @commands.hybrid_command(name="rent_start", description=t("general.cmd_rent_start"))
     @discord.app_commands.default_permissions(moderate_members=True)

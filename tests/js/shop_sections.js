@@ -56,7 +56,11 @@ const ok = (body) => ({ok: true, status: 200, text: async () => JSON.stringify(b
 window.fetch = async (url) => {
     const u = String(url);
     if (u.includes('/locale')) {
-        return ok({language: 'en', available: ['en'], data: {dashboard: locale.dashboard}});
+        // The route's real shape: the preview's label format is the bot's
+        // own string under `server`, not a dashboard copy of it.
+        return ok({language: 'en', available: ['en'], data: {dashboard: locale.dashboard},
+                   server: {language: 'en',
+                            texts: {shop_option_label: locale.shop.select_option_label}}});
     }
     if (u.includes('/auth/status')) {
         return ok({logged_in: true,

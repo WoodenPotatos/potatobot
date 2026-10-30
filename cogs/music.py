@@ -3,7 +3,9 @@ import itertools
 import logging
 import random
 import asyncio
+import queue
 import shlex
+import threading
 import time
 import yt_dlp
 import os
@@ -254,6 +256,124 @@ def song_from_entry(entry, requester):
         "requester": requester,
     }
 
+
+# Ten seconds of 20 ms Opus packets, about 160 KB at 128 kbit/s: longer than
+# ffmpeg's `-reconnect_delay_max 5` plus a fresh TLS handshake.
+MUSIC_READ_AHEAD_PACKETS = 500
+_END_OF_STREAM = object()
+
+
+class BufferedAudioSource(discord.AudioSource):
+    """Keeps a few seconds of packets read ahead of discord.py's player.
+
+    YouTube resets long-lived stream connections, and while ffmpeg reconnects
+    its `read()` blocks. discord.py's `AudioPlayer` paces packets against a
+    fixed start clock, so after a blocked read it is behind schedule and sends
+    the backlog with no delay until it catches up: a stall is heard twice, as
+    a gap and then as audio that sounds sped up (measured live 2026-10-22).
+    A producer thread draining the inner source into a bounded queue lets a
+    reconnect spend the buffer instead of stalling the player.
+
+    The queue is bounded, so a paused player stops the producer the same way
+    a full ffmpeg pipe already did.
+    """
+
+    def __init__(self, inner, max_packets=MUSIC_READ_AHEAD_PACKETS):
+        self.inner = inner
+        self._packets = queue.Queue(maxsize=max_packets)
+        self._stopped = threading.Event()
+        self._delivered = False
+        self._producer = threading.Thread(
+            target=self._produce, name="music-read-ahead", daemon=True
+        )
+        self._producer.start()
+
+    @property
+    def _current_error(self):
+        # The player reads this by `getattr` once `read()` returns empty, so
+        # an ffmpeg failure still reaches `play_next`'s `after` callback.
+        return getattr(self.inner, "_current_error", None)
+
+    def _put(self, item) -> bool:
+        while not self._stopped.is_set():
+            try:
+                self._packets.put(item, timeout=0.2)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    def _produce(self):
+        try:
+            while not self._stopped.is_set():
+                packet = self.inner.read()
+                if not packet or not self._put(packet):
+                    break
+        except Exception as exc:
+            # A skip or stop kills ffmpeg under this read; only a failure
+            # while still playing is worth a line.
+            if not self._stopped.is_set():
+                music_logger.warning(
+                    "Music read-ahead stopped (error=%s)", type(exc).__name__
+                )
+        finally:
+            self._put(_END_OF_STREAM)
+
+    def read(self) -> bytes:
+        # An empty buffer after playback started is the one stall this class
+        # cannot hide, so it is logged: a hiccup with no such line came from
+        # the sending side (the network to Discord), not from the stream.
+        # Before the first packet, ffmpeg is still starting; that is not one.
+        stalled_at = None
+        while True:
+            if self._stopped.is_set():
+                return b""
+            try:
+                packet = self._packets.get(timeout=0.2)
+                break
+            except queue.Empty:
+                if stalled_at is None and self._delivered:
+                    stalled_at = time.monotonic()
+                    music_logger.warning(
+                        "Music read-ahead ran empty; playback is waiting on the stream.")
+                continue
+        if stalled_at is not None:
+            music_logger.info("Music read-ahead recovered after %.1f s.",
+                              time.monotonic() - stalled_at)
+        if packet is _END_OF_STREAM:
+            self._stopped.set()
+            return b""
+        self._delivered = True
+        return packet
+
+    def is_opus(self) -> bool:
+        return self.inner.is_opus()
+
+    def cleanup(self):
+        self._stopped.set()
+        try:
+            self.inner.cleanup()
+        finally:
+            # Wake a producer blocked on a full queue; it re-checks the flag.
+            while True:
+                try:
+                    self._packets.get_nowait()
+                except queue.Empty:
+                    break
+
+
+async def announce_to_channel(interaction: discord.Interaction, message: str):
+    """Post a panel action's public result as an ordinary channel message.
+
+    A public reply to a panel button is attached to the panel message, and
+    `play_next` deletes that panel whenever the song changes, so the reply was
+    left pointing at nothing ("Message could not be loaded"). The click is
+    acknowledged without a visible reply, and the result is sent on its own.
+    """
+    await interaction.response.defer()
+    await interaction.channel.send(message)
+
+
 # Queue-index removal submitted from the persistent music panel.
 class MusicRemoveModal(discord.ui.Modal):
     def __init__(self):
@@ -283,7 +403,7 @@ class MusicRemoveModal(discord.ui.Modal):
                 return await interaction.response.send_message(t("music.invalid_queue_number"), ephemeral=True)
 
             removed_song = music_queues[guild_id].pop(num - 1)
-            await interaction.response.send_message(t("music.song_removed", title=removed_song['title']))
+            await announce_to_channel(interaction, t("music.song_removed", title=removed_song['title']))
         except ValueError:
             await interaction.response.send_message(t("music.invalid_number_format"), ephemeral=True)
 
@@ -317,10 +437,16 @@ class MusicSearchModal(discord.ui.Modal):
             guild = interaction.guild
             vc = guild.voice_client
             data = await extract_music_info(search_query)
-            if not data or not data.get('entries'):
+            # A search answers with `entries`; a pasted video link answers
+            # with the video itself, exactly as `/play` already handles.
+            if data and 'entries' in data:
+                entries = list(data['entries'] or [])
+                video = entries[0] if entries else None
+            else:
+                video = data
+            if not video:
                 return await interaction.followup.send(t("music.search_no_results"), ephemeral=True)
-            
-            video = data['entries'][0]
+
             song = song_from_entry(video, interaction.user.display_name)
             if song is None:
                 return await interaction.followup.send(
@@ -426,7 +552,7 @@ class MusicPanelView(discord.ui.View):
             return await interaction.response.send_message(t("music.nothing_to_skip"), ephemeral=True)
     
         vc.stop() 
-        await interaction.response.send_message(t("music.skipped"), ephemeral=False)
+        await announce_to_channel(interaction, t("music.skipped"))
 
     async def stop_leave(self, interaction: discord.Interaction):
         vc = interaction.guild.voice_client
@@ -511,7 +637,7 @@ class MusicPanelView(discord.ui.View):
             return await interaction.response.send_message(t("music.not_enough_for_shuffle"), ephemeral=True)
         
         random.shuffle(music_queues[guild_id])
-        await interaction.response.send_message(t("music.shuffled_success"))
+        await announce_to_channel(interaction, t("music.shuffled_success"))
 
     async def loop_btn(self, interaction: discord.Interaction):
         state = music_states.setdefault(interaction.guild.id, {'current': None, 'loop': 'off', 'start_time': 0})
@@ -526,7 +652,7 @@ class MusicPanelView(discord.ui.View):
             state['loop'] = 'off'
             msg = t("music.loop_off")
         
-        await interaction.response.send_message(msg)
+        await announce_to_channel(interaction, msg)
 
     async def remove_btn(self, interaction: discord.Interaction):
         await interaction.response.send_modal(MusicRemoveModal())
@@ -634,7 +760,9 @@ class Music(commands.Cog):
                 self.bot.loop.call_soon_threadsafe(self.play_next, guild, text_channel)
 
             vc.play(
-                discord.FFmpegOpusAudio(song['url'], **_ffmpeg_options_for(song)),
+                BufferedAudioSource(
+                    discord.FFmpegOpusAudio(song['url'], **_ffmpeg_options_for(song))
+                ),
                 after=handle_next,
             )
 

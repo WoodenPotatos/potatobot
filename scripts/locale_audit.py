@@ -316,12 +316,6 @@ def composed_key_families() -> dict:
         for _setting_key, menu_key in database.SEEDED_ROLE_MENUS
         for part in ("title", "desc", "updated")
     )
-    # The label a preview falls back to when an operator has set none, one per
-    # kind whose button the bot owns rather than the operator.
-    families["default button labels"] = [
-        f"dashboard.managed_default_button_{kind}"
-        for kind in ("rules", "ticket", "airlock")
-    ]
     families["appearance modes"] = [
         f"dashboard.themes.{mode}" for mode in ("system", "light", "dark")
     ]

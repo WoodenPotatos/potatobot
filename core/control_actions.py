@@ -213,6 +213,21 @@ async def execute_entitlement_revocation(bot, action) -> str | None:
     return None
 
 
+async def execute_test_announcement(guild, actor, action) -> str | None:
+    """Post one event's saved announcement with the operator as the member.
+
+    Refused while the event is switched off, so a test never posts something
+    the real event would not.
+    """
+    import cogs.announcements as announcements
+    from core.announcement_templates import ANNOUNCEMENT_EVENTS
+
+    event = action["payload"].get("event")
+    if event not in ANNOUNCEMENT_EVENTS or not announcements.event_enabled(guild.id, event):
+        return "feature_disabled_or_unsupported"
+    return await announcements.send_test_announcement(guild, actor, event)
+
+
 async def control_action_worker(bot):
     """Execute queued Discord publishes after live permission and feature checks."""
     next_prune = 0.0
@@ -274,6 +289,18 @@ async def control_action_worker(bot):
                     error_code = "permission_denied"
                 else:
                     error_code = await execute_entitlement_revocation(bot, action)
+                await database.run_write(
+                    database.finish_control_action, action["action_id"],
+                    error_code is None, error_code,
+                )
+                continue
+            if action["action_type"] == "test_announcement":
+                # The channel is the event's own setting, resolved when it runs,
+                # so it cannot share the preamble below either.
+                if not guild or not actor or not actor.guild_permissions.manage_guild:
+                    error_code = "permission_denied"
+                else:
+                    error_code = await execute_test_announcement(guild, actor, action)
                 await database.run_write(
                     database.finish_control_action, action["action_id"],
                     error_code is None, error_code,

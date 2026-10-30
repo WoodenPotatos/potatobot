@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, `deploy/` holds the systemd units and a rootless podman Quadlet unit, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.18.0-beta.2** &nbsp;·&nbsp; channel `beta`
+**Version 2.18.4b** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -68,6 +68,10 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Ever
   with a configurable channel and an optional role ping for each
 - An optional invite log naming who invited each new member, posted to the bot
   log channel or a separate one; it needs the Manage Server permission
+- Join, leave, kick, ban and boost messages each with their own switch,
+  channel and editable text (title, random variants, colour, image, plain text
+  with placeholders), a live preview and a test send on the dashboard; kicks
+  and bans are told apart from leaves through the audit log
 
 ## Requirements
 
@@ -175,11 +179,23 @@ matrices — is in [docs/development.md](docs/development.md).
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
-### 2.18.0-beta.2
+### 2.18.4b
 
-- **Corrected the 2.18.0-beta.1 notes.** They said the schema was unchanged, which is wrong: that release adds schema 25, as its first paragraph says.
+- **Join, leave and boost messages can be written by each server.** The dashboard has a new Announcements page. Every event has its own switch and channel, and its message can have a title, several text variants (one is picked at random), a colour, an image, and plain text above it. Placeholders such as `{user}`, `{server}` and `{member_count}` are filled in. A live preview shows the result, and "Send test" posts the saved message with you as the member. Anything left empty keeps the old text.
+- **Join, leave, kick and ban messages always say who it was.** They used to show only a mention, which Discord turns into a bare ID once the member has left. The messages now also give the display name, the username and the ID as plain text, and the new `{user_id}` placeholder lets your own templates do the same. The member's picture is now attached to the message instead of linked, so it no longer disappears when they change it or delete their account. It is not stored anywhere on the server.
+- **Settings pages list their fields in a sensible order.** Every page was sorted alphabetically by internal name, which is why the boost message's channel sat at the bottom instead of first. Fields now appear in the order they were designed in: channels first, and related fields together (for example each warning type's threshold, action and timeout side by side).
+- **Announcement variants each get their own box.** Instead of one box with a variant per line, every variant is now a multi-line box of its own, and "Add variant" adds another, the way the rules editor adds a section. A message can have up to five. The preview shows the variant you are editing, rendered with markdown, and the plain text above the embed is a multi-line box too.
+- **Message previews render nested formatting correctly.** Bold with italic inside (`**bold *and italic* inside**`) used to fall apart and show its asterisks, and `2 * 3 * 4` came out partly italic. Every preview now renders these as Discord does.
+- **The dashboard keeps its two languages apart.** Messages it shows you — saved, queued, done, errors — are now always in the dashboard's language; before, some arrived in the bot's language, so one action could answer in Hungarian and then English. Everything that previews what members will see in Discord — the announcement texts, the default buttons on panels, shop item names and the shop preview — is now always in the bot's language, even when the dashboard is set to another one.
+- **The Announcements page is easier to use.** Every message editor opens and closes like the sidebar groups and starts closed; the ones you open stay open next time. Empty boxes show the built-in text in grey, and the preview shows it filled in, so it is clear what each message says before you change anything.
+- **Kicks and bans are no longer announced as leaves.** A ban used to post a farewell *and* a ban message, and a kick looked like someone leaving. Now each produces one message of its own kind, with the moderator and reason. When the bot runs `/kick` or `/ban`, the moderator who ran it is named, not the bot. Kick and ban messages go to the moderation log unless they are given a channel of their own; **this moves ban messages out of the leave channel.** Telling a kick from a leave needs the View Audit Log permission.
+- …and 12 more, in [CHANGELOG.md](CHANGELOG.md).
 
-### 2.18.0-beta.1
+### 2.18.2b
+
+- **Corrected the 2.18.1b notes.** They said the schema was unchanged, which is wrong: that release adds schema 25, as its first paragraph says.
+
+### 2.18.1b
 
 - **An optional invite log shows who invited each new member.** Turn it on under Features ("Invite log"). It posts to the bot log channel, or to a channel of its own if you tick "Use a separate channel" under Administration → Logging and pick one. The bot needs the **Manage Server** permission, because Discord only lists a server's invites to members who have it. When the inviter cannot be told apart, for example when two people join at the same moment, the log says so instead of guessing. The post never pings anyone, and nothing is stored.
 - **Losing dashboard rights takes effect straight away.** When someone loses Administrator or Manage Server, leaves the server, or a role's permissions change, the dashboard re-checks with Discord on their next click. Before, this could take up to 30 seconds. Discord still decides who gets in, and the 30-second check stays as a backstop.
@@ -190,18 +206,6 @@ matrices — is in [docs/development.md](docs/development.md).
 - **A podman unit ships in `deploy/potatobot.container`**, for running the bot as a rootless container under systemd. It publishes the dashboard on loopback only and keeps new files private to the bot's account.
 - **The public snapshot must pass its own tests before it is published.** The publishing script now runs the whole test suite inside the snapshot it built, and refuses to publish on any failure.
 - …and 1 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.16.1-beta.1
-
-- **Roles the bot hands out are now screened for dangerous permissions.** Level roles, join autoroles and a faction leader's `/manage` used to grant whatever role was configured. A role carrying administrator or similar permissions is now skipped with a warning, so it can no longer be granted this way.
-- **The settings that grant roles or staff powers now need full administrator rights on the dashboard.** These are the staff roles, level roles, autoroles and factions. Manage Server is no longer enough to edit them.
-- **Moderation commands now follow rank.** - `/unwarn` and `/untimeout` refuse what `/warn` and `/timeout` refuse: nobody can clear the record of a member ranked at or above them, themselves included. - `/unwarn` also refuses to remove a warning issued by a moderator ranked at or above you. Administrators can still remove any warning. So can the issuer, and anyone can once the issuer has left the server. - `/minigame_reset` is staff-only.
-- **`/play` only uses YouTube.** A crafted link could previously reach yt-dlp's generic extractor.
-- **`?reload` and `?reloadconfig` answer only to the installation's host** (`ADMIN_DISCORD_ID`), not to every owner of the Discord application.
-- **Asset ids entered by staff are now checked.** In `/rent_start` and Mark Fulfilled, an id must name a real emoji, sticker or sound in the server. A grant whose asset id is malformed or already deleted now still expires, instead of being retried forever.
-- **Text from outside sources can no longer smuggle in links or pings.** - Song, stream, video and patch-note titles are shown as plain text. - Everydle win messages no longer ping whatever a member put in their display name.
-- **Smaller fixes:** - `/search` checks the party size before the post goes out. - The help menu answers only the options it offered. - Five dashboard fields now reject a malformed value with an error message instead of a server error. - Email alerts verify the mail server's certificate.
-- …and 2 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

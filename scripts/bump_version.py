@@ -1,26 +1,28 @@
 """Bump the version in `pyproject.toml`, which is the only place it lives.
 
-The scheme is `x.y.z` with an optional PEP 440 prerelease suffix, and the parts
+The scheme (since 2026-10-22) is `x.y.z` plus a channel letter, and the parts
 are tied to something objective rather than to how big a change felt:
 
-    x  a breaking change to configuration, the database schema, or a command's
-       name or arguments — anything an existing installation must react to.
-    y  a feature, or a schema migration. A migration is never a z: it changes
-       what a rollback means, and that is not a bugfix.
-    z  a fix that requires nothing of the operator.
+    x  an architectural change: a breaking change to configuration, the data
+       model, or a command's name or arguments.
+    y  a schema migration. A migration is never a z: it changes what a
+       rollback means.
+    z  everything else: a feature, a fix, a docs-only republish. Every build
+       moves z, which is why there is no prerelease serial any more.
 
-The private repository is the alpha line, so a normal bump here produces an
-alpha. The publish script converts the current alpha into the next beta for the
-public tree — the channel is derived from the artefact, so promoting is a real
-change to the version rather than a label somebody sets.
+The letter is the channel: `a` for the private alpha line, `b` for the public
+beta, none for stable. The same build keeps its number across channels, so
+`2.18.3a` publishes as `2.18.3b` and releases as `2.18.3`. The publish script
+does that swap; it refuses a number the public repository already carries.
 
 Every check runs before the file is touched, so a rejected bump leaves nothing
 half-written.
 
 Usage:
-    python scripts/bump_version.py major|minor|patch|prerelease [--channel alpha|beta|stable]
-    python scripts/bump_version.py prerelease        # 2.1.0a3 -> 2.1.0a4
-    python scripts/bump_version.py --set 2.1.0b1
+    python scripts/bump_version.py major|minor|patch [--channel alpha|beta|stable]
+    python scripts/bump_version.py patch             # 2.18.3a -> 2.18.4a
+    python scripts/bump_version.py minor             # 2.18.4a -> 2.19.0a
+    python scripts/bump_version.py --set 2.18.4b
     python scripts/bump_version.py --show
 """
 
@@ -42,8 +44,10 @@ PYPROJECT = ROOT / "pyproject.toml"
 VERSION_LINE = re.compile(r'^(?P<prefix>version\s*=\s*")(?P<value>[^"]+)(?P<suffix>")$',
                           re.MULTILINE)
 
+# The serial is optional so a version from before the change still parses;
+# nothing renders one any more.
 PARTS = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)"
-                   r"(?:(?P<kind>a|b|rc)(?P<serial>\d+))?$")
+                   r"(?:(?P<kind>a|b|rc)(?P<serial>\d+)?)?$")
 
 CHANNEL_KIND = {"alpha": "a", "beta": "b", "stable": None}
 
@@ -72,16 +76,14 @@ def parse(raw: str) -> dict:
 
 def render(parts: dict) -> str:
     base = f"{parts['major']}.{parts['minor']}.{parts['patch']}"
-    if parts["kind"] is None:
-        return base
-    return f"{base}{parts['kind']}{parts['serial']}"
+    return f"{base}{parts['kind']}" if parts["kind"] else base
 
 
 def sort_key(parts: dict) -> tuple:
     """Order two versions the way PEP 440 does.
 
     A prerelease sorts *before* its own release, which is what makes the
-    backwards check meaningful: 2.1.0a4 < 2.1.0b1 < 2.1.0rc1 < 2.1.0.
+    backwards check meaningful: 2.18.3a < 2.18.3b < 2.18.3 < 2.18.4a.
     """
     rank = {"a": 0, "b": 1, "rc": 2, None: 3}[parts["kind"]]
     return (parts["major"], parts["minor"], parts["patch"], rank,
@@ -89,18 +91,9 @@ def sort_key(parts: dict) -> tuple:
 
 
 def bump(current: dict, step: str, channel: str | None) -> dict:
+    """The next version: the channel letter is kept unless one is given."""
     parts = dict(current)
     kind = CHANNEL_KIND[channel] if channel else current["kind"]
-
-    if step == "prerelease":
-        if current["kind"] is None:
-            raise SystemExit(
-                f"{render(current)} is not a prerelease; bump major/minor/patch "
-                "or pass --channel to open one"
-            )
-        parts["kind"] = kind or current["kind"]
-        parts["serial"] = (current["serial"] or 0) + 1
-        return parts
 
     if step == "major":
         parts.update(major=current["major"] + 1, minor=0, patch=0)
@@ -108,9 +101,12 @@ def bump(current: dict, step: str, channel: str | None) -> dict:
         parts.update(minor=current["minor"] + 1, patch=0)
     elif step == "patch":
         parts.update(patch=current["patch"] + 1)
+    else:
+        # `prerelease` advanced the serial the 2026-10-22 scheme removed.
+        raise SystemExit(f"unknown step {step!r}: use major, minor or patch")
 
     parts["kind"] = kind
-    parts["serial"] = 1 if kind else None
+    parts["serial"] = None
     return parts
 
 
@@ -128,7 +124,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("step", nargs="?",
-                        choices=("major", "minor", "patch", "prerelease"))
+                        choices=("major", "minor", "patch"))
     parser.add_argument("--channel", choices=tuple(CHANNEL_KIND))
     parser.add_argument("--set", dest="explicit",
                         help="set an exact version instead of computing one")

@@ -69,6 +69,21 @@ DropCapability=all
 # no key of its own for this, so it goes through to `podman run` directly.
 PodmanArgs=--umask=0027
 
+# The host's timezone, as the bare-metal bot had. `core/clock.py` keeps
+# calendar days local ("played today" is the operator's midnight) and reads a
+# stored timestamp with no offset as local time; in a container's default UTC
+# the day turned at 02:00 CEST and those legacy values read two hours off
+# (seen on the cutover, 2026-10-22). `local` bind-mounts the host's
+# /etc/localtime, so the image needs no tzdata of its own.
+Timezone=local
+
+# A small init (catatonit) as PID 1, forwarding signals to the bot. Python as
+# PID 1 ignores SIGTERM, which Linux only delivers to PID 1 through a handler
+# it installed, so every stop waited out podman's 10 seconds and ended in
+# SIGKILL (seen on the cutover's first restart, 2026-10-22; measured 10.1 s
+# without, 0.17 s with). With it a stop is the SIGTERM the bare-metal unit sent.
+RunInit=true
+
 [Service]
 Restart=on-failure
 RestartSec=10s

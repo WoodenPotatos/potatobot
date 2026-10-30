@@ -373,6 +373,7 @@ class JavaScriptIsActuallyRunTests(unittest.TestCase):
     #: both directions: eight classes had drifted out of a hand-kept list by
     #: 2026-10-16, each free to skip forever without anything noticing.
     NODE_DRIVEN = {
+        "tests.test_announcements.AnnouncementToolsHarnessTests",
         "tests.test_dashboard_boot.ApiErrorRoutingTests",
         "tests.test_dashboard_boot.DashboardBootTests",
         "tests.test_dashboard_boot.StaleClientNoticeTests",
@@ -384,6 +385,7 @@ class JavaScriptIsActuallyRunTests(unittest.TestCase):
         "tests.test_item_creator.TemplateRoundTripTests",
         "tests.test_localization_policy.LocaleLookupTests",
         "tests.test_managed_messages.CreatorAcceptedByTheApiTests",
+        "tests.test_managed_messages.MarkdownPreviewTests",
         "tests.test_managed_messages.CreatorRoundTripTests",
         "tests.test_permission_audit.PermissionRepairButtonTests",
         "tests.test_redeem_ticket_linkage.RedeemsPageActionsTests",
@@ -426,6 +428,110 @@ class JavaScriptIsActuallyRunTests(unittest.TestCase):
         suite.run(result)
         self.assertEqual([], [str(case) for case, _ in result.skipped])
         self.assertEqual([], [str(case) for case, _ in result.errors + result.failures])
+
+
+class OperatorAndMemberLanguageTests(unittest.TestCase):
+    """The dashboard speaks two languages and must not confuse them.
+
+    What the operator reads — a saved, queued or refused message — follows the
+    dashboard's language. What members will read in Discord — a preview, a
+    default text, a built-in item name — follows the bot's `language` setting.
+    Server messages used to follow the bot's, so a toast said "queued" in
+    Hungarian and "done" in English one second apart, and the announcement
+    editor previewed a Hungarian server in English.
+    """
+
+    def setUp(self):
+        import time
+        from core import database, settings_cache
+        import dashboard_api
+        self.database, self.api, self.cache = database, dashboard_api, settings_cache
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "language.db")
+        database.initialize_database()
+        database.register_guild(123, "Test Guild")
+        settings_cache.invalidate()
+        # The bot speaks Hungarian; every assertion below reads English for the
+        # operator, so the two cannot coincide by accident.
+        self.assertEqual("hu", settings_cache.setting(None, "language"))
+        dashboard_api.app.config.update(TESTING=True)
+        self.client = dashboard_api.app.test_client()
+        self.original_admin_id = dashboard_api.ADMIN_ID
+        dashboard_api.ADMIN_ID = "42"
+        dashboard_api._rate_limit_events.clear()
+        with self.client.session_transaction() as session:
+            session.update({
+                "logged_in": True, "user_id": "42",
+                "display": {"username": "tester", "avatar": None},
+                "csrf_token": "csrf-token", "server_session_id": "server-session",
+                "authorized_guild_ids": ["123"], "authenticated_at": time.time(),
+            })
+        self.catalogs = {lang: json.loads((ROOT / "locales" / f"{lang}.json")
+                                          .read_text(encoding="utf-8"))
+                         for lang in ("hu", "en")}
+
+    def tearDown(self):
+        self.api.ADMIN_ID = self.original_admin_id
+        self.database.DB_PATH = self.original_path
+        self.cache.invalidate()
+        self.temp_dir.cleanup()
+
+    def post_test(self, event, **headers):
+        return self.client.post(f"/api/guilds/123/announcements/{event}/test", json={},
+                                headers={"X-CSRF-Token": "csrf-token", **headers})
+
+    def test_a_server_message_follows_the_dashboard_header(self):
+        queued = self.post_test("join", **{"X-Dashboard-Language": "en"})
+        self.assertEqual(self.catalogs["en"]["dashboard"]["action_queued"],
+                         queued.get_json()["message"])
+
+    def test_a_refusal_follows_the_dashboard_header(self):
+        refused = self.post_test("raid", **{"X-Dashboard-Language": "en"})
+        self.assertEqual(
+            self.catalogs["en"]["dashboard"]["errors"]["announcement_event_invalid"],
+            refused.get_json()["message"])
+
+    def test_a_request_without_the_header_uses_the_remembered_language(self):
+        """An OAuth navigation cannot carry a header."""
+        self.client.get("/api/locale?lang=en")
+        queued = self.post_test("join")
+        self.assertEqual(self.catalogs["en"]["dashboard"]["action_queued"],
+                         queued.get_json()["message"])
+
+    def test_an_unknown_language_falls_back_to_the_bots(self):
+        queued = self.post_test("join", **{"X-Dashboard-Language": "xx"})
+        self.assertEqual(self.catalogs["hu"]["dashboard"]["action_queued"],
+                         queued.get_json()["message"])
+
+    def test_preview_texts_are_in_the_bots_language_whatever_the_dashboard_is(self):
+        payload = self.client.get("/api/locale?lang=en").get_json()
+        self.assertEqual("en", payload["language"])
+        self.assertEqual("hu", payload["server"]["language"])
+        texts = payload["server"]["texts"]
+        self.assertEqual(self.catalogs["hu"]["announcements"]["join_title"],
+                         texts["announcements"]["join_title"])
+        self.assertEqual(self.catalogs["hu"]["admin"]["accept_rules_button"],
+                         texts["managed_buttons"]["rules"])
+        self.assertEqual(self.catalogs["hu"]["shop"]["select_option_label"],
+                         texts["shop_option_label"])
+        # And nothing but the dashboard namespace reaches the operator catalog.
+        self.assertEqual(["dashboard"], list(payload["data"]))
+
+    def test_built_in_item_names_are_in_the_bots_language(self):
+        """They are what `/shop` shows members."""
+        items = self.client.get("/api/guilds/123/items?lang=en",
+                                headers={"X-Dashboard-Language": "en"}).get_json()
+        lockpick = next(item for item in items["data"]
+                        if item["item_key"] == "lockpick")
+        self.assertEqual(self.catalogs["hu"]["shop"]["items"]["lockpick"]["name"],
+                         lockpick["name"])
+
+    def test_no_dashboard_copy_of_a_bot_string_remains(self):
+        """A copy follows the dashboard's language; the bot's own string does not."""
+        for key in ("managed_default_button_rules", "managed_default_button_ticket",
+                    "managed_default_button_airlock", "shop_preview_option_label"):
+            self.assertNotIn(key, self.catalogs["hu"]["dashboard"])
 
 
 class PickerDefinitionTests(unittest.TestCase):

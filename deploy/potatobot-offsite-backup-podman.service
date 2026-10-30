@@ -1,0 +1,62 @@
+# The offsite backup for a host where the bot runs as the rootless podman
+# container (`deploy/potatobot.container`, `docs/podman_runbook.md` step 10).
+# `potatobot-offsite-backup.service` stays the bare-metal variant.
+#
+# Install it under the bare-metal unit's name, so the existing
+# `potatobot-offsite-backup.timer` fires it unchanged:
+#   sudo install -m 0644 deploy/potatobot-offsite-backup-podman.service \
+#        /etc/systemd/system/potatobot-offsite-backup.service
+#   sudo systemctl daemon-reload
+#
+# What differs from the bare-metal unit, and why:
+#
+# `User=potatobot`: the account the container runs as. The bind-mounted data
+# directory is owned by it on the host (`keep-id` maps the image's uid 10001
+# onto it), so this unit reads the database as its owner and nobody else.
+#
+# `/usr/bin/python3` and a root-owned copy of the script in
+# `/usr/local/libexec/potatobot/`: the code tree's venv is not this account's,
+# and `scripts/offsite_backup.py` is stdlib-only. Re-install the copy when the
+# script changes; a deploy that rebuilds the image does not touch it.
+#
+# `ReadWritePaths=/var/lib/potatobot`: any connection to a WAL-mode database,
+# including `mode=ro`, writes the `-shm` sidecar to register as a reader (the
+# same reason as the bare-metal unit's `/opt/potatobot`).
+#
+# `ReadWritePaths=/home/potatobot/.config/rclone`: rclone rewrites its config
+# by temp file and rename, so the directory must be writable under
+# `ProtectHome=read-only`. The config carries the Drive refresh token and the
+# `gdrivecrypt:` passwords; it belongs to `potatobot` alone (`600`), so the
+# maintainer's login account no longer holds them.
+#
+# Read the result with:
+#   journalctl -u potatobot-offsite-backup --since '1 week ago'
+
+[Unit]
+Description=PotatoBot offsite database backup (podman host)
+Documentation=https://github.com/WoodenPotatos/potatobot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=potatobot
+Group=potatobot
+WorkingDirectory=/
+ExecStart=/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py /var/lib/potatobot/economy.db gdrivecrypt:
+SyslogIdentifier=potatobot-offsite-backup
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/potatobot
+ReadWritePaths=/home/potatobot/.config/rclone
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

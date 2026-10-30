@@ -1,8 +1,10 @@
 """Typed definitions used by bot gates, dashboard forms, and documentation."""
 
+import re
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any
+from urllib.parse import urlparse
 
 from core import item_catalog
 
@@ -169,6 +171,17 @@ class SettingDefinition:
     # reported it because every check asked only about the bot. Checked against
     # `@everyone`, which is the floor every member stands on.
     member_channel_permissions: tuple[str, ...] = ()
+    # What a free-text STRING must look like, beyond its length: one of
+    # `STRING_FORMATS`. An empty string always passes, because empty is how a
+    # template field says "use the shipped default". Declared rather than
+    # checked by the reader, because an embed colour or image URL Discord
+    # refuses fails the whole announcement after the member has already joined.
+    string_format: str | None = None
+    # Text that may span lines. A STRING renders as a text area; a STRING_LIST
+    # renders one text area per item with add and remove, the rules editor's
+    # repeating block, instead of one box split on newlines — which is what
+    # made a multi-line announcement variant impossible to write.
+    multiline: bool = False
 
     def public_dict(self) -> dict:
         data = asdict(self)
@@ -450,6 +463,32 @@ FEATURE_DEFINITIONS = {
                  permissions=("manage_messages", "read_message_history")),
         _feature("member_announcements", "community",
                  permissions=("send_messages", "embed_links")),
+        # One sub-toggle per event, rendered on the `member_announcements` page
+        # beside the editor for that event's message. Each depends on the
+        # master, so switching it off cascades. Kick and ban need the audit log:
+        # a kick is indistinguishable from a leave without it, and the
+        # moderator and reason of a ban are only recorded there.
+        _feature("announce_join", "community", parent="member_announcements",
+                 dependencies=("member_announcements",),
+                 permissions=("send_messages", "embed_links")),
+        _feature("announce_leave", "community", parent="member_announcements",
+                 dependencies=("member_announcements",),
+                 permissions=("send_messages", "embed_links")),
+        _feature("announce_kick", "community", parent="member_announcements",
+                 dependencies=("member_announcements",),
+                 permissions=("send_messages", "embed_links", "view_audit_log")),
+        _feature("announce_ban", "community", parent="member_announcements",
+                 dependencies=("member_announcements",),
+                 permissions=("send_messages", "embed_links", "view_audit_log")),
+        _feature("announce_boost", "community", parent="member_announcements",
+                 dependencies=("member_announcements",),
+                 permissions=("send_messages", "embed_links")),
+        # The *message* about the boost reward. The reward itself is economy's
+        # and is paid whether or not anybody announces it.
+        _feature("announce_boost_reward", "community",
+                 parent="member_announcements",
+                 dependencies=("member_announcements", "economy"),
+                 permissions=("send_messages", "embed_links")),
         # Off by default because it asks for Manage Server: Discord lists a
         # guild's invites, and so their use counts, only to a member holding it,
         # and the use counts are the only way to tell who invited a joiner.
@@ -540,7 +579,9 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
              edited_elsewhere: bool = False,
              requires_full_admin: bool = False,
              max_length: int | None = None,
-             max_items: int | None = None):
+             max_items: int | None = None,
+             string_format: str | None = None,
+             multiline: bool = False):
     return SettingDefinition(
         key=key,
         locale_key=f"dashboard.settings.{key}",
@@ -564,6 +605,8 @@ def _setting(key: str, category: str, page: str, value_type: SettingValueType,
         requires_full_admin=requires_full_admin,
         max_length=max_length,
         max_items=max_items,
+        string_format=string_format,
+        multiline=multiline,
     )
 
 
@@ -693,15 +736,37 @@ SETTING_DEFINITIONS = {
         # could not set at all.
         _setting("top_ranker_role", "community", "levels", SettingValueType.ROLE,
                  None, feature="levels", assignable_role=True),
-        _setting("join_channel", "community", "announcements", SettingValueType.CHANNEL,
-                 None, feature="member_announcements", channel_types=TEXT_CHANNEL_TYPES,
+        # One channel per announced event, each on its event's section of the
+        # Announcements page. The three original keys are kept as they were, so
+        # no stored row has to move. Kick and ban left unset post to the
+        # moderation log, and the boost reward left unset follows the boost.
+        _setting("join_channel", "member_announcements", "announce_join",
+                 SettingValueType.CHANNEL, None, feature="announce_join",
+                 channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
-        _setting("leave_channel", "community", "announcements", SettingValueType.CHANNEL,
-                 None, feature="member_announcements", channel_types=TEXT_CHANNEL_TYPES,
+        _setting("leave_channel", "member_announcements", "announce_leave",
+                 SettingValueType.CHANNEL, None, feature="announce_leave",
+                 channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
-        _setting("booster_channel", "community", "announcements", SettingValueType.CHANNEL,
-                 None, feature="member_announcements", channel_types=TEXT_CHANNEL_TYPES,
+        _setting("kick_channel", "member_announcements", "announce_kick",
+                 SettingValueType.CHANNEL, None, feature="announce_kick",
+                 channel_types=TEXT_CHANNEL_TYPES),
+        _setting("ban_channel", "member_announcements", "announce_ban",
+                 SettingValueType.CHANNEL, None, feature="announce_ban",
+                 channel_types=TEXT_CHANNEL_TYPES),
+        _setting("booster_channel", "member_announcements", "announce_boost",
+                 SettingValueType.CHANNEL, None, feature="announce_boost",
+                 channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
+        _setting("boost_reward_channel", "member_announcements",
+                 "announce_boost_reward", SettingValueType.CHANNEL, None,
+                 feature="announce_boost_reward",
+                 channel_types=TEXT_CHANNEL_TYPES),
+        # Was a literal 50000 in the boost listener. 0 pays nothing, which is
+        # how a guild turns the reward off without turning off the economy.
+        _setting("boost_reward_amount", "economy", "rewards",
+                 SettingValueType.INTEGER, 50000, feature="economy",
+                 minimum=0, maximum=1000000000),
         _setting("everydle_channel", "everydle", "everydle", SettingValueType.CHANNEL,
                  None, channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
@@ -848,6 +913,13 @@ SETTING_DEFINITIONS = {
                  None, feature="lfg",
                  channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
+        # Hours until a party post is closed: its embed stays, its buttons go.
+        # 0 never closes. Capped at a week, below `lfg_prune`'s eight days, so
+        # the row is still there to close. Owned by `lfg` for editing only:
+        # the closing loop ignores the flag, because a flag decides whether a
+        # post may be *made*, never whether an old one may end.
+        _setting("lfg_auto_close_hours", "lfg", "lfg", SettingValueType.INTEGER,
+                 24, feature="lfg", minimum=0, maximum=168),
         _setting("social_notification_channel", "community", "socials", SettingValueType.CHANNEL,
                  None, channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
@@ -1020,6 +1092,43 @@ for _activity_key, (_coin, _xp) in {
         SETTING_DEFINITIONS[definition.key] = definition
 
 
+# Six template settings per announced event, generated from the one table in
+# `core/announcement_templates.py` so the set cannot drift from what the
+# renderer reads. Every default is empty, which means "the shipped text": a
+# guild that never opens the editor keeps exactly the messages it had.
+from core.announcement_templates import (  # noqa: E402
+    ANNOUNCEMENT_EVENTS, EVENT_FEATURES, MAX_TEXT_VARIANTS, THUMBNAIL_CHOICES,
+    template_setting_key,
+)
+
+for _event in ANNOUNCEMENT_EVENTS:
+    _owner = EVENT_FEATURES[_event]
+    for _definition in (
+        _setting(template_setting_key(_event, "title"), "member_announcements",
+                 _owner, SettingValueType.STRING, "", feature=_owner,
+                 max_length=256),
+        # One box per variant, picked at random per announcement. 1000 rather
+        # than the 4096 an embed allows, because placeholders expand.
+        _setting(template_setting_key(_event, "texts"), "member_announcements",
+                 _owner, SettingValueType.STRING_LIST, [], feature=_owner,
+                 max_length=1000, max_items=MAX_TEXT_VARIANTS, multiline=True),
+        _setting(template_setting_key(_event, "content"), "member_announcements",
+                 _owner, SettingValueType.STRING, "", feature=_owner,
+                 max_length=500, multiline=True),
+        _setting(template_setting_key(_event, "color"), "member_announcements",
+                 _owner, SettingValueType.STRING, "", feature=_owner,
+                 max_length=7, string_format="hex_color"),
+        _setting(template_setting_key(_event, "image_url"), "member_announcements",
+                 _owner, SettingValueType.STRING, "", feature=_owner,
+                 max_length=512, string_format="https_url"),
+        _setting(template_setting_key(_event, "thumbnail"), "member_announcements",
+                 _owner, SettingValueType.STRING, "avatar", feature=_owner,
+                 choices=THUMBNAIL_CHOICES,
+                 choice_prefix="dashboard.announcement_thumbnails"),
+    ):
+        SETTING_DEFINITIONS[_definition.key] = _definition
+
+
 # Three settings per warn tag, generated from the one catalogue so the set
 # cannot drift from WARN_TAGS. A threshold of 0 means "never act", which is the
 # shipped answer for every tag: an upgrade must not start kicking people.
@@ -1063,6 +1172,30 @@ def _snowflake(value) -> int:
     return value
 
 
+def _is_hex_color(value: str) -> bool:
+    return bool(re.fullmatch(r"#[0-9a-fA-F]{6}", value))
+
+
+def _is_https_url(value: str) -> bool:
+    """An absolute https URL with a host and no whitespace.
+
+    Discord fetches an embed image itself and refuses anything else with a 400,
+    which would take the whole announcement down with it. The bot never fetches
+    the URL, so this is about shape, not about where it points.
+    """
+    if any(character.isspace() for character in value):
+        return False
+    parsed = urlparse(value)
+    return parsed.scheme == "https" and bool(parsed.netloc)
+
+
+_STRING_FORMATS = {
+    "hex_color": _is_hex_color,
+    "https_url": _is_https_url,
+}
+STRING_FORMATS = tuple(_STRING_FORMATS)
+
+
 def validate_setting_value(definition: SettingDefinition, value):
     kind = definition.value_type
     if kind is SettingValueType.BOOLEAN and not isinstance(value, bool):
@@ -1081,6 +1214,9 @@ def validate_setting_value(definition: SettingDefinition, value):
             raise ValueError("setting must be one of the allowed values")
         if definition.max_length is not None and len(value) > definition.max_length:
             raise ValueError("setting is too long")
+        if definition.string_format and value:
+            if not _STRING_FORMATS[definition.string_format](value):
+                raise ValueError("setting is not in the required format")
     if kind in {SettingValueType.CHANNEL, SettingValueType.ROLE}:
         value = None if value is None else _snowflake(value)
     if kind in {SettingValueType.CHANNEL_LIST, SettingValueType.ROLE_LIST}:

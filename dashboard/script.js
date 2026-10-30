@@ -20,6 +20,10 @@ let guildId = null;
 let featureState = {};
 let registry = {};
 let featureGroupOrder = [];
+let announcementPlaceholders = {};
+// The bot's own wording for what a preview shows, in the bot's language, which
+// is not the dashboard's: a preview shows what members will read.
+let serverTexts = {};
 let settings = {};
 // The banner currently being edited, and the guild's full banner list. A guild
 // may run several banners, so the page edits one at a time and the picker in
@@ -57,6 +61,7 @@ let account = null;
 
 const CATEGORY_ICONS = {
     community: 'ic-community',
+    member_announcements: 'ic-community',
     economy: 'ic-economy',
     games: 'ic-games',
     everydle: 'ic-games',
@@ -169,7 +174,15 @@ async function api(path, options = {}) {
     const controller = new AbortController();
     const expiry = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-        response = await fetch(`${API}${path}`, {...options, signal: controller.signal});
+        // The operator's language, so a server-side message (saved, queued,
+        // refused) reads in the same language as the page around it.
+        const languageHeader = activeLanguage
+            ? {'X-Dashboard-Language': activeLanguage} : {};
+        response = await fetch(`${API}${path}`, {
+            ...options,
+            headers: {...(options.headers || {}), ...languageHeader},
+            signal: controller.signal,
+        });
     } catch (error) {
         throw new ApiError(
             tr(error.name === 'AbortError'
@@ -583,6 +596,7 @@ async function loadLocale(language) {
     const query = language ? `?lang=${encodeURIComponent(language)}` : '';
     const result = await api(`/locale${query}`);
     locale = result.data;
+    serverTexts = result.server?.texts || {};
     languages = result.available || [];
     activeLanguage = result.language;
     document.documentElement.lang = result.language;
@@ -794,6 +808,7 @@ async function authenticate() {
     registry = registryData.data;
     featureGroupOrder = registryData.feature_group_order || [];
     supportedGames = registryData.supported_games || [];
+    announcementPlaceholders = registryData.announcement_placeholders || {};
     itemCatalog = catalogData.data;
     await loadGuild();
 }
@@ -1225,7 +1240,13 @@ async function saveFeature(key, input, revision) {
 /* --------------------------------------------------------------- settings */
 
 function visibleDefinitions(category) {
-    return Object.values(registry).filter((definition) => definition.category === category
+    // In the registry's declared order, never the payload's: the API's JSON
+    // arrives with its keys sorted, which is alphabetical, not readable.
+    return Object.values(registry)
+        // Finite fallback: `Infinity - Infinity` is NaN, which a sort cannot use.
+        .sort((left, right) => (left.order ?? Number.MAX_SAFE_INTEGER)
+            - (right.order ?? Number.MAX_SAFE_INTEGER))
+        .filter((definition) => definition.category === category
         // A setting the registry marks as edited elsewhere is real — stored,
         // validated, audited — but its editing surface is a better page. The
         // shop prices are the case: a price belongs beside its item, and having
@@ -1247,7 +1268,8 @@ function buildSettingField(definition) {
     // button and a remove button per row.
     const wrapsButton = ['channel', 'role', 'channel_list', 'role_list']
         .includes(definition.value_type)
-        || Boolean(JSON_ROW_SHAPES[definition.json_shape]);
+        || Boolean(JSON_ROW_SHAPES[definition.json_shape])
+        || (definition.value_type === 'string_list' && definition.multiline);
     const group = element(wrapsButton ? 'div' : 'label', 'input-group');
     if (['string_list', 'json', 'channel_list', 'role_list'].includes(definition.value_type)) {
         group.classList.add('wide');
@@ -1361,12 +1383,240 @@ function renderSettings(category) {
         host.appendChild(section);
     });
 
+    if (category === 'member_announcements') addAnnouncementTools(host);
+
     refreshWeightShares();
     refreshSettingsDirtyState();
     setSubtitle('dashboard.subtitle_settings', {count: definitions.length});
     // Deliberately not awaited: the diagnostic is an enhancement, and the form
     // must be usable before it answers — or if it never does.
     applyPermissionNotes();
+}
+
+/* ---------------------------------------------------- member announcements */
+
+// Each event's section is the registry's page `announce_<event>`, and its
+// template fields are `<event>_message_<field>`. The section is found by the
+// page, the fields by their key, so nothing here lists a setting a second time.
+const ANNOUNCEMENT_FIELDS = ['title', 'texts', 'content', 'color', 'image_url', 'thumbnail'];
+
+/** What the preview fills placeholders with. Illustrative: the bot renders the
+ *  real values, this only shows the shape of the message. */
+function announcementSampleValues() {
+    const guild = guilds.find((entry) => String(entry.id) === String(guildId));
+    const name = account?.username || tr('dashboard.announcement_sample_user');
+    const coin = settings.currency_emoji?.value ?? registry.currency_emoji?.default ?? '';
+    const amount = settings.boost_reward_amount?.value
+        ?? registry.boost_reward_amount?.default ?? 0;
+    return {
+        user: `@${name}`,
+        user_name: name,
+        display_name: name,
+        user_id: String(account?.id || '0'),
+        server: guild?.name || '',
+        member_count: '128',
+        account_age: tr('dashboard.announcement_sample_age'),
+        joined_ago: tr('dashboard.announcement_sample_age'),
+        moderator: tr('dashboard.announcement_sample_moderator'),
+        reason: tr('dashboard.announcement_sample_reason'),
+        boost_count: '7',
+        boost_tier: '2',
+        amount: String(amount),
+        coin,
+    };
+}
+
+/** A string the bot posts, in the bot's language, for a preview to show.
+ *  Missing renders as `[path]`, like `tr()`, and never throws. */
+function serverText(path) {
+    const value = String(path || '').split('.')
+        .reduce((node, part) => (node && typeof node === 'object' ? node[part] : undefined),
+            serverTexts);
+    return typeof value === 'string' && value ? value : `[${path}]`;
+}
+
+/** The same one-pass substitution the bot does: an unknown name stays as typed. */
+function fillPlaceholders(template, values) {
+    return template.replace(/\{([a-z_]+)\}/g, (match, name) => {
+        if (name === 'newline') return '\n';
+        return Object.prototype.hasOwnProperty.call(values, name) ? values[name] : match;
+    });
+}
+
+// Which event editors this browser left open. Per viewer and best-effort: a
+// private window or blocked storage simply starts every editor closed.
+const ANNOUNCEMENT_OPEN_KEY = 'potato.announcements.open';
+
+function openAnnouncementEditors() {
+    try {
+        const stored = JSON.parse(localStorage.getItem(ANNOUNCEMENT_OPEN_KEY) || '[]');
+        return new Set(Array.isArray(stored) ? stored : []);
+    } catch (error) {
+        return new Set();
+    }
+}
+
+function rememberAnnouncementEditor(page, open) {
+    const pages = openAnnouncementEditors();
+    if (open) pages.add(page); else pages.delete(page);
+    try {
+        localStorage.setItem(ANNOUNCEMENT_OPEN_KEY, JSON.stringify([...pages]));
+    } catch (error) {
+        // Storage refused: the editor still opens, it is just not remembered.
+    }
+}
+
+/** Turn a section's legend into an open/close button, like a sidebar group.
+ *  The legend keeps its unsaved marker, so a closed editor with edits in it
+ *  still says so. */
+function makeSectionCollapsible(section, open) {
+    const legend = section.querySelector(':scope > legend');
+    const toggle = element('button', 'section-toggle');
+    toggle.type = 'button';
+    toggle.append(icon('ic-chevron-down', 'ic ic-sm chevron'),
+        element('span', null, legend.firstChild?.textContent || ''));
+    legend.firstChild.replaceWith(toggle);
+    section.classList.add('collapsible');
+    const apply = (isOpen) => {
+        section.classList.toggle('collapsed', !isOpen);
+        toggle.setAttribute('aria-expanded', String(isOpen));
+    };
+    apply(open);
+    toggle.addEventListener('click', () => {
+        const isOpen = section.classList.contains('collapsed');
+        apply(isOpen);
+        rememberAnnouncementEditor(section.dataset.page, isOpen);
+    });
+}
+
+function addAnnouncementTools(host) {
+    const opened = openAnnouncementEditors();
+    host.querySelectorAll('fieldset.form-section[data-page^="announce_"]').forEach((section) => {
+        makeSectionCollapsible(section, opened.has(section.dataset.page));
+        const event = section.dataset.page.slice('announce_'.length);
+        const field = (name) => section.querySelector(
+            `[data-key="${event}_message_${name}"]`);
+        // Fields whose owner feature is off are not rendered at all.
+        if (!ANNOUNCEMENT_FIELDS.every((name) => field(name))) return;
+
+        // An empty box means "the shipped text", so it shows that text greyed
+        // rather than looking blank. Nothing is saved until someone types,
+        // which keeps an untouched guild on the shipped wording if it changes.
+        // The server's language, not the dashboard's: this is what members read.
+        const shippedTitle = serverText(`announcements.${event}_title`);
+        const shippedText = serverText(`announcements.${event}_desc`);
+        field('title').placeholder = shippedTitle;
+        // One box per variant. The first shows the shipped text, because an
+        // empty list is what sends it; a box added after that is a variant.
+        const variantBoxes = () => [...field('texts').querySelectorAll(
+            '.embed-block textarea')];
+        const labelBoxes = () => variantBoxes().forEach((box, index) => {
+            box.placeholder = index === 0
+                ? shippedText : tr('dashboard.multiline_list_text');
+        });
+        labelBoxes();
+        // The preview shows the variant being edited, so each can be checked.
+        let previewVariant = 0;
+        field('texts').addEventListener('focusin', (event) => {
+            const index = variantBoxes().indexOf(event.target);
+            if (index >= 0) {
+                previewVariant = index;
+                redraw();
+            }
+        });
+
+        const tools = element('div', 'announcement-tools');
+
+        const names = announcementPlaceholders[event] || [];
+        const legend = element('div', 'announcement-placeholders');
+        legend.appendChild(element('span', 'field-label',
+            tr('dashboard.announcement_placeholders')));
+        names.forEach((name) => legend.appendChild(
+            element('code', 'announcement-placeholder', `{${name}}`)));
+        tools.appendChild(legend);
+
+        const preview = element('div', 'announcement-preview');
+        tools.appendChild(preview);
+
+        const redraw = () => {
+            const values = announcementSampleValues();
+            preview.replaceChildren();
+            preview.appendChild(element('span', 'field-label',
+                tr('dashboard.announcement_preview')));
+            // Discord renders markdown in both, so the preview does too, with
+            // the builders' renderer rather than a second one.
+            const content = field('content').value.trim();
+            if (content) {
+                const node = renderMarkdownBody(fillPlaceholders(content, values));
+                node.classList.add('announcement-preview-content');
+                preview.appendChild(node);
+            }
+            const embed = element('div', 'announcement-preview-embed');
+            const color = field('color').value.trim();
+            if (/^#[0-9a-fA-F]{6}$/.test(color)) embed.style.setProperty('--embed-color', color);
+
+            const title = field('title').value.trim() || shippedTitle;
+            embed.appendChild(element('strong', 'announcement-preview-title',
+                fillPlaceholders(title, values)));
+
+            const variants = readSettingInput(
+                registry[`${event}_message_texts`], field('texts'));
+            const shown = Math.min(previewVariant, Math.max(variants.length - 1, 0));
+            const description = renderMarkdownBody(
+                fillPlaceholders(variants[shown] || shippedText, values));
+            description.classList.add('announcement-preview-description');
+            embed.appendChild(description);
+            if (variants.length > 1) {
+                embed.appendChild(element('small', 'announcement-preview-meta',
+                    format('dashboard.announcement_preview_variants',
+                        {n: shown + 1, count: variants.length})));
+            }
+            // The image itself is not drawn: the page's CSP admits Discord's own
+            // image hosts only, and an operator's URL is anywhere.
+            const image = field('image_url').value.trim();
+            if (image) {
+                embed.appendChild(element('small', 'announcement-preview-meta',
+                    format('dashboard.announcement_preview_image', {url: image})));
+            }
+            preview.appendChild(embed);
+        };
+        // Bound to each control, never delegated through the form.
+        ANNOUNCEMENT_FIELDS.forEach((name) => {
+            const control = field(name);
+            control.addEventListener('input', redraw);
+            control.addEventListener('change', redraw);
+        });
+        // A box added or removed needs its placeholder, after the redraw above.
+        field('texts').addEventListener('change', labelBoxes);
+        redraw();
+
+        const test = element('button', 'btn btn-outline btn-sm',
+            tr('dashboard.announcement_send_test'));
+        test.type = 'button';
+        test.addEventListener('click', async () => {
+            // The test posts the *saved* template, so unsaved edits would make
+            // it show something other than what is on screen.
+            const pending = collectSettingChanges(section);
+            if (pending === null || pending.length) {
+                toast(tr('dashboard.announcement_test_unsaved'), true);
+                return;
+            }
+            test.disabled = true;
+            try {
+                const queued = await api(
+                    `/guilds/${guildId}/announcements/${encodeURIComponent(event)}/test`,
+                    {method: 'POST', headers: headers(), body: JSON.stringify({})});
+                toast(queued.message);
+                await followAction(queued.data?.action_id);
+            } catch (error) {
+                handleApiError(error);
+            } finally {
+                test.disabled = false;
+            }
+        });
+        tools.appendChild(test);
+        section.appendChild(tools);
+    });
 }
 
 /** The permission diagnostic, indexed by the setting each finding is about.
@@ -2196,6 +2446,12 @@ function settingInput(definition, storedValue) {
         return jsonRowEditor(definition, value);
     }
 
+    // A list whose items may span lines gets one box per item, since splitting
+    // one box on newlines cannot hold an item that contains one.
+    if (definition.value_type === 'string_list' && definition.multiline) {
+        return multilineListEditor(definition, value);
+    }
+
     // A plain list of words is edited as one entry per line. It used to render
     // as a JSON textarea, so an empty list showed the two characters `[]` and it
     // was anybody's guess whether the brackets and the quotes were part of the
@@ -2227,6 +2483,13 @@ function settingInput(definition, storedValue) {
         return input;
     }
 
+    if (definition.value_type === 'string' && definition.multiline) {
+        const area = document.createElement('textarea');
+        if (definition.max_length) area.maxLength = definition.max_length;
+        area.value = value ?? '';
+        return area;
+    }
+
     const input = document.createElement('input');
     input.type = definition.value_type === 'integer' ? 'number' : 'text';
     if (definition.minimum !== null && definition.minimum !== undefined) input.min = definition.minimum;
@@ -2238,10 +2501,50 @@ function settingInput(definition, storedValue) {
     return input;
 }
 
+/** A STRING_LIST the registry declares `multiline`: one text area per item,
+ *  with add and remove, built by the rules editor's own repeating block.
+ *
+ *  A hidden carrier holds the list as JSON, so the save, the dirty check and a
+ *  form reset keep acting on one control, as with the other typed editors.
+ *  Empty boxes are dropped, exactly as blank lines were. The wording is the
+ *  announcement variants', the only such list today; a second list wanting
+ *  other words should get them declared rather than reuse these. */
+function multilineListEditor(definition, value) {
+    const node = element('div', 'multiline-list-editor');
+    const carrier = element('textarea', 'list-carrier hidden');
+    carrier.tabIndex = -1;
+    const repeat = managedRepeat({
+        name: definition.key, layout: 'block', limit: definition.max_items || 25,
+        addLabel: 'dashboard.multiline_list_add',
+        caption: 'dashboard.multiline_list_item',
+        fields: [{name: 'text', kind: 'multiline', required: true,
+                  max: definition.max_length || undefined,
+                  label: 'dashboard.multiline_list_text'}],
+    }, (Array.isArray(value) ? value : []).map((text) => ({text})));
+    const sync = () => {
+        carrier.value = JSON.stringify(repeat.read().map((row) => row.text));
+    };
+    sync();
+    // Typing reaches the carrier before it reaches the form's dirty check,
+    // because this listener sits between the two on the way up.
+    repeat.node.addEventListener('input', sync);
+    repeat.onChange(() => {
+        sync();
+        // Adding or removing a box types nothing, so say so: bubbling for the
+        // form's unsaved marker, and it lands on this control itself too.
+        node.dispatchEvent(new Event('change', {bubbles: true}));
+    });
+    node.append(carrier, repeat.node);
+    return node;
+}
+
 function readSettingInput(definition, field) {
     // Both typed editors wrap a real form control, and this is where that pays
     // off: everything downstream — the save, the dirty check, a form reset —
     // keeps acting on a control rather than on a widget.
+    if (field.classList?.contains('multiline-list-editor')) {
+        return JSON.parse(field.querySelector('.list-carrier').value);
+    }
     let input = field;
     if (field.classList?.contains('resource-picker')) {
         input = field.querySelector('.picker-carrier');
@@ -3414,7 +3717,7 @@ async function loadShopItems() {
     let payload;
     try {
         payload = await api(
-            `/guilds/${guildId}/items?lang=${encodeURIComponent(activeLanguage)}`);
+            `/guilds/${guildId}/items`);
     } catch (error) {
         handleApiError(error);
         itemsHost.replaceChildren(emptyState('dashboard.load_failed', 'ic-alert'));
@@ -3677,8 +3980,9 @@ function renderShopPreviewItems(items) {
  *  mirrors `cogs/shop.py`'s `t("shop.select_option_label", ...)`, truncated
  *  to the same bound the real Discord select enforces. */
 function shopPreviewOptionLabel(item) {
-    return format('dashboard.shop_preview_option_label',
-                  {name: item.name, price: item.price}).slice(0, SHOP_PREVIEW_LABEL_LIMIT);
+    return fillPlaceholders(serverText('shop_option_label'),
+                            {name: item.name, price: String(item.price)})
+        .slice(0, SHOP_PREVIEW_LABEL_LIMIT);
 }
 
 /** Add or remove a built-in from this guild's hidden list.
@@ -3940,7 +4244,8 @@ function formatRemaining(seconds) {
  *  from the member-erasure path, never reimplemented here. */
 async function revokeEntitlement(row, button) {
     const accepted = await confirmAction(
-        format('dashboard.entitlement_revoke_confirm', {user: row.user_id}));
+        format('dashboard.entitlement_revoke_confirm',
+               {user: nameWithId(row.user_name, row.user_id)}));
     if (!accepted) return;
     button.disabled = true;
     try {
@@ -3966,15 +4271,18 @@ function renderActiveEntitlements(host, rows) {
 
     rows.forEach((row) => {
         const line = element('tr');
-        line.appendChild(element('td', 'cell-mono', row.user_id));
+        line.appendChild(element('td', 'cell-mono', nameWithId(row.user_name, row.user_id)));
 
         // `role:<id>` is the only composite kind; everything else is a plain
         // name the locale family covers.
         const kind = row.kind.startsWith('role:') ? 'role' : row.kind;
         const grant = element('td');
         grant.appendChild(element('div', null, tr(`dashboard.grant_kinds.${kind}`)));
-        if (row.discord_item_id) {
-            grant.appendChild(element('div', 'cell-key', row.discord_item_id));
+        // A role carries its id in the key; an asset in `discord_item_id`.
+        const itemId = row.discord_item_id
+            || (row.kind.startsWith('role:') ? row.kind.slice(5) : null);
+        if (itemId) {
+            grant.appendChild(element('div', 'cell-key', nameWithId(row.item_name, itemId)));
         }
         if (row.missing_on_discord) {
             // Set by entitlement_cleanup's daily verification pass, never a
@@ -3991,13 +4299,15 @@ function renderActiveEntitlements(host, rows) {
             ? tr(`dashboard.source_${row.source_type}`)
             : tr('dashboard.source_none')));
         if (row.granted_by) {
-            source.appendChild(element('div', 'cell-key', row.granted_by));
+            source.appendChild(element('div', 'cell-key',
+                                       nameWithId(row.granted_by_name, row.granted_by)));
         }
         line.appendChild(source);
         line.appendChild(element('td', 'cell-mono',
                                  formatRemaining(row.remaining_seconds)));
         line.appendChild(element('td', 'cell-mono',
-                                 (row.expires_at || '').slice(0, 16).replace('T', ' ')));
+                                 // Stored in UTC; shown in the viewer's own zone.
+                                 isoToLocalInputValue(row.expires_at).replace('T', ' ')));
 
         const actionCell = element('td', 'cell-actions');
         const revoke = element('button', 'btn-icon danger', '');
@@ -4046,7 +4356,7 @@ function renderFulfillmentTable(host) {
         const row = element('tr');
         row.appendChild(element('td', 'cell-key', `#${item.request_id}`));
         row.appendChild(element('td', null, tr(`dashboard.item_asset_types.${item.asset_type}`)));
-        row.appendChild(element('td', 'cell-mono', String(item.user_id)));
+        row.appendChild(element('td', 'cell-mono', nameWithId(item.user_name, item.user_id)));
 
         const inputCell = element('td');
         const input = document.createElement('input');
@@ -5422,13 +5732,19 @@ async function deleteManaged(page, item, button) {
 const MARKDOWN_TOKEN_SOURCE =
     '\\\\(.)' +                                          // 1 escaped char
     '|`([^`]+)`' +                                       // 2 inline code
-    '|\\*\\*\\*([^*]+?)\\*\\*\\*' +                      // 3 bold + italic
-    '|\\*\\*([^*]+?)\\*\\*' +                            // 4 bold
-    '|__([^_]+?)__' +                                    // 5 underline
-    '|\\*([^*]+?)\\*' +                                  // 6 italic (*)
+    '|\\*\\*\\*(.+?)\\*\\*\\*(?!\\*)' +                   // 3 bold + italic
+    // Bold may hold italic and italic may hold bold, as in Discord:
+    // `**bold *and italic* inside**`. `[^*]` here forbade that, so the bold
+    // broke apart and the asterisks printed.
+    '|\\*\\*(.+?)\\*\\*(?!\\*)' +                          // 4 bold
+    '|__(.+?)__' +                                       // 5 underline
+    // Italic opens on a non-space and closes on a non-space not followed by
+    // another `*`, so `2 * 3 * 4` stays arithmetic and `*a **b** c*` keeps
+    // its bold inside rather than closing at the bold's first asterisk.
+    '|\\*(?![\\s*])((?:\\*\\*.+?\\*\\*|[^*])+?)(?<!\\s)\\*(?!\\*)' + // 6 italic (*)
     '|_([^_]+?)_' +                                      // 7 italic (_)
-    '|~~([^~]+?)~~' +                                    // 8 strikethrough
-    '|\\|\\|([^|]+?)\\|\\|' +                            // 9 spoiler
+    '|~~(.+?)~~' +                                       // 8 strikethrough
+    '|\\|\\|(.+?)\\|\\|' +                                // 9 spoiler
     '|\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)' +    // 10 link text, 11 link url
     '|<t:(-?\\d+)(?::([tTdDfFR]))?>' +                   // 12 ts seconds, 13 ts format
     '|<#(\\d+)>' +                                       // 14 channel id
@@ -5702,7 +6018,7 @@ function previewButtons(spec, values) {
     }
     if (spec.kind === 'rules' && !values.accept_button) return [];
     return [{
-        label: values.button_label || tr(`dashboard.managed_default_button_${spec.kind}`),
+        label: values.button_label || serverText(`managed_buttons.${spec.kind}`),
         style: spec.buttonStyle,
         emoji: spec.buttonEmoji,
     }];
@@ -6018,9 +6334,13 @@ async function loadChangelog() {
 // `name (id)` when the server could name the actor, the id alone when it could
 // not: someone who has left, an erased member's tombstone, or Discord being
 // unreachable. The id stays either way, because a name is not unique.
+function nameWithId(name, id) {
+    const text = String(id ?? '');
+    return name ? `${name} (${text})` : text;
+}
+
 function actorLabel(entry) {
-    const id = String(entry.actor_id ?? '');
-    return entry.actor_name ? `${entry.actor_name} (${id})` : id;
+    return nameWithId(entry.actor_name, entry.actor_id);
 }
 
 async function loadAudit() {

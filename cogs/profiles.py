@@ -1,3 +1,8 @@
+"""Profiles and leaderboards: wealth, levels, streaks and luck.
+
+What a profile may print, and why a member earns nothing in voice, are bound by
+`docs/subsystems/economy.md`.
+"""
 import discord
 import os
 import sys

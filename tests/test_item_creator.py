@@ -267,10 +267,18 @@ class ItemListEndpointTests(DashboardItemTestCase):
         self.assertFalse(builtin["loaded_die"]["editable"])
         self.assertEqual("shop_price_loaded_die", builtin["loaded_die"]["price_setting"])
 
-    def test_the_language_follows_the_request(self):
+    def test_the_language_follows_the_bot_not_the_request(self):
+        """A built-in name is what `/shop` shows members, so it is in the bot's
+        language. It followed the requested (dashboard) language until
+        2026-10-30, which previewed a Hungarian server's shop in English; this
+        test asserted that, and is restated rather than dropped."""
+        import json
         english = {item["item_key"]: item["name"] for item in self.get("en")["data"]}
         hungarian = {item["item_key"]: item["name"] for item in self.get("hu")["data"]}
-        self.assertNotEqual(english["loaded_die"], hungarian["loaded_die"])
+        self.assertEqual(english["loaded_die"], hungarian["loaded_die"])
+        catalog = json.loads((ROOT / "locales" / "hu.json").read_text(encoding="utf-8"))
+        self.assertEqual(catalog["shop"]["items"]["loaded_die"]["name"],
+                         hungarian["loaded_die"])
 
     def test_a_custom_item_carries_what_an_edit_needs(self):
         self.create_item({

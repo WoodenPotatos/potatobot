@@ -1,3 +1,10 @@
+"""Join provisioning and autoroles, and the chat and voice reward loops.
+
+Join, leave, kick, ban and boost announcements are `cogs/announcements.py`.
+
+Who a voice minute pays, and how XP turns into a level and a role, are bound by
+`docs/subsystems/economy.md`.
+"""
 import discord
 import asyncio
 import logging
@@ -245,31 +252,8 @@ class ServerEvents(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
-        if is_enabled(member.guild.id, "member_announcements"):
-            channel_id = guild_setting_sync(member.guild.id, "join_channel")
-            channel = member.guild.get_channel(channel_id) if channel_id else None
-            if channel is None:
-                event_logger.warning(
-                    "Join announcement channel is unavailable (guild_id=%s, channel_id=%s).",
-                    member.guild.id, channel_id,
-                )
-            else:
-                embed = discord.Embed(
-                    title=t("serverevents.join_title"),
-                    description=t("serverevents.join_desc", mention=member.mention),
-                    color=discord.Color.green(),
-                )
-                embed.set_thumbnail(
-                    url=member.avatar.url if member.avatar else member.default_avatar.url
-                )
-                try:
-                    await channel.send(embed=embed)
-                except (discord.Forbidden, discord.HTTPException) as exc:
-                    event_logger.error(
-                        "Join announcement failed (guild_id=%s, channel_id=%s, error=%s).",
-                        member.guild.id, channel.id, type(exc).__name__,
-                    )
-
+        # The join announcement is `cogs/announcements.py`'s; this listener only
+        # makes sure the member has an account and their autoroles.
         try:
             if not await database.run(database.user_exists, member.id):
                 await database.run(
@@ -314,81 +298,6 @@ class ServerEvents(commands.Cog):
                     "permission or sufficient role hierarchy.",
                     member.id,
                 )
-
-    @commands.Cog.listener()
-    async def on_member_remove(self, member):
-        if not is_enabled(member.guild.id, "member_announcements"):
-            return
-        channel_id = guild_setting_sync(member.guild.id, "leave_channel")
-        channel = member.guild.get_channel(channel_id) if channel_id else None
-        if channel is None:
-            event_logger.warning(
-                "Leave announcement channel is unavailable (guild_id=%s, channel_id=%s).",
-                member.guild.id, channel_id,
-            )
-            return
-        embed = discord.Embed(
-            title=t("serverevents.leave_title"),
-            description=t("serverevents.leave_desc", mention=member.mention),
-            color=discord.Color.red(),
-        )
-        embed.set_thumbnail(
-            url=member.avatar.url if member.avatar else member.default_avatar.url
-        )
-        try:
-            await channel.send(embed=embed)
-        except (discord.Forbidden, discord.HTTPException) as exc:
-            event_logger.error(
-                "Leave announcement failed (guild_id=%s, channel_id=%s, error=%s).",
-                member.guild.id, channel.id, type(exc).__name__,
-            )
-
-    @commands.Cog.listener()
-    async def on_member_ban(self, guild, user):
-        if not is_enabled(guild.id, "member_announcements"):
-            return
-        channel = self.bot.get_channel(
-            guild_setting_sync(guild.id, "leave_channel"))
-        if channel:
-            await asyncio.sleep(1)
-        
-            async for entry in guild.audit_logs(action=discord.AuditLogAction.ban, limit=1):
-                reason = entry.reason if entry.reason else t("serverevents.no_reason")
-                mod = entry.user
-            
-                embed = discord.Embed(title=t("serverevents.ban_title"), color=discord.Color.red())
-                embed.add_field(name=t("serverevents.ban_user"), value=user.name, inline=True)
-                embed.add_field(name=t("serverevents.ban_mod"), value=mod.name, inline=True)
-                embed.add_field(name=t("serverevents.ban_reason"), value=reason, inline=False)
-                await channel.send(embed=embed)
-
-    @commands.Cog.listener()
-    async def on_member_update(self, before, after):
-        if before.premium_since is None and after.premium_since is not None:
-            bonus_amount = 50000
-            reward_result = None
-            if is_enabled(after.guild.id, "economy"):
-                reward_result = await database.run_write(
-                    database.claim_periodic_reward,
-                    after.guild.id, after.id, "server_boost", bonus_amount, 30,
-                )
-                if reward_result is not None:
-                    await apply_database_result(after, reward_result)
-            if reward_result is None:
-                return
-        
-            channel = (
-                after.guild.get_channel(
-                    guild_setting_sync(after.guild.id, "booster_channel"))
-                if is_enabled(after.guild.id, "member_announcements") else None
-            )
-            if channel:
-                embed = discord.Embed(
-                    title=t("serverevents.booster_title"),
-                    description=t("serverevents.booster_desc", mention=after.mention, amount=bonus_amount),
-                    color=0xff73fa
-                )
-                await channel.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(ServerEvents(bot))

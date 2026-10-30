@@ -17,13 +17,14 @@ const script = fs.readFileSync(path.join(repo, 'dashboard/script.js'), 'utf8');
 const locale = JSON.parse(fs.readFileSync(path.join(repo, 'locales/en.json'), 'utf8'));
 
 const REQUEST = {
-    request_id: 7, voucher_id: 'v7', user_id: '1420070400000000001',
+    request_id: 7, voucher_id: 'v7', user_id: '1420070400000000001', user_name: 'alice',
     asset_type: 'sticker', status: 'open', created_at: '2026-01-01T00:00:00+00:00',
 };
 const ENTITLEMENT = {
     entitlement_id: 3, user_id: '1420070400000000002', kind: 'sticker',
     reward_key: null, source_type: 'gacha', discord_item_id: '555',
-    granted_by: null, expires_at: '2027-01-01T00:00:00+00:00',
+    // No `user_name`: a member the server could not name shows the id alone.
+    user_name: null, item_name: 'party_sticker', granted_by: null, granted_by_name: null, expires_at: '2027-01-01T00:00:00+00:00',
     remaining_seconds: 31536000, missing_on_discord: true,
 };
 
@@ -83,6 +84,19 @@ window.fetch = async (url, init) => {
 
     const entitlementRows = [...window.document.querySelectorAll('#active-entitlements tbody tr')];
     assert.strictEqual(entitlementRows.length, 1, 'the active entitlement must render one row');
+    // Names sit beside ids, never instead of them: a name is not unique.
+    const requestCells = [...fulfillmentRows[0].querySelectorAll('td')].map((c) => c.textContent);
+    assert.ok(requestCells.includes('alice (1420070400000000001)'), requestCells.join(' | '));
+    const entitlementText = entitlementRows[0].textContent;
+    assert.ok(entitlementText.includes('party_sticker (555)'), entitlementText);
+    const userCell = entitlementRows[0].querySelector('td').textContent;
+    assert.strictEqual(userCell, '1420070400000000002', 'an unnamed member shows the id alone');
+
+    // The runner sets TZ=Europe/Budapest: the stored UTC midnight must read as
+    // local time, not as the raw UTC prefix it was once sliced from.
+    assert.ok(entitlementText.includes('2027-01-01 01:00'), entitlementText);
+    assert.ok(!entitlementText.includes('2027-01-01 00:00'), entitlementText);
+
     const revokeButton = entitlementRows[0].querySelector('button.btn-icon.danger');
     assert.ok(revokeButton, 'the entitlement row has no revoke button');
 

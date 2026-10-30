@@ -42,7 +42,7 @@ services:
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.18.0a2
+    image: potatobot:2.18.4a
     restart: unless-stopped
     env_file: ../.env
     environment:
@@ -62,7 +62,7 @@ services:
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.18.0a2
+    image: potatobot:2.18.4a
     command: ["python", "dashboard_api.py"]
     restart: unless-stopped
     env_file: ../.env

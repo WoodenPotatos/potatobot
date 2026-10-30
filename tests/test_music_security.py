@@ -1,4 +1,6 @@
+import re
 import shlex
+import threading
 import time
 import types
 import unittest
@@ -249,11 +251,208 @@ class OpusSourceTests(unittest.TestCase):
                 "requester": "r", "http_headers": {"User-Agent": "ua"}}
         opus, played = self._play(song)
         opus.assert_called_once_with(song["url"], **music._ffmpeg_options_for(song))
-        self.assertEqual(played, [opus.return_value])
+        # The ffmpeg source reaches the player through the read-ahead buffer.
+        self.assertEqual(len(played), 1)
+        self.assertIsInstance(played[0], music.BufferedAudioSource)
+        self.assertIs(played[0].inner, opus.return_value)
+        played[0].cleanup()
         options = opus.call_args.kwargs
         self.assertIn("-protocol_whitelist http,https,tcp,tls,crypto", options["before_options"])
         self.assertIn("-nostdin", options["before_options"])
         self.assertIn("-headers", options["before_options"])
+
+
+class _FakeInnerSource:
+    """Yields `packets`, then `b''`; `gate` (if given) blocks every read.
+
+    `stall` (if given) blocks a read once the packets run out, standing in
+    for ffmpeg mid-reconnect.
+    """
+
+    def __init__(self, packets, gate=None, error=None, stall=None):
+        self._packets = list(packets)
+        self.gate = gate
+        self.error = error
+        self.stall = stall
+        self.cleaned = threading.Event()
+        self._current_error = None
+
+    def read(self):
+        if self.gate is not None:
+            self.gate.wait()
+        if self.cleaned.is_set():
+            raise ValueError("read of closed file")
+        if self._packets:
+            return self._packets.pop(0)
+        if self.stall is not None:
+            self.stall.wait()
+            if self.cleaned.is_set():
+                raise ValueError("read of closed file")
+            if self._packets:
+                return self._packets.pop(0)
+        if self.error is not None:
+            raise self.error
+        return b""
+
+    def is_opus(self):
+        return True
+
+    def cleanup(self):
+        self.cleaned.set()
+        for event in (self.gate, self.stall):
+            if event is not None:
+                event.set()
+
+
+class BufferedAudioSourceTests(unittest.TestCase):
+    """A stalled ffmpeg read must spend the buffer, not stall the player.
+
+    discord.py's player sends a stalled backlog with no delay once the read
+    returns, so a stall was heard as a gap and then as sped-up audio.
+    """
+
+    def _wait_for(self, predicate, timeout=2.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.01)
+        return predicate()
+
+    def test_every_packet_arrives_in_order_then_the_end(self):
+        packets = [bytes([n]) * 3 for n in range(1, 50)]
+        source = music.BufferedAudioSource(_FakeInnerSource(packets), max_packets=8)
+        self.addCleanup(source.cleanup)
+        self.assertTrue(source.is_opus())
+        received = [source.read() for _ in packets]
+        self.assertEqual(received, packets)
+        self.assertEqual(source.read(), b"")
+        self.assertEqual(source.read(), b"")
+
+    def test_buffered_packets_are_served_while_the_inner_read_is_stalled(self):
+        stall = threading.Event()
+        inner = _FakeInnerSource([b"a", b"b", b"c"], stall=stall)
+        source = music.BufferedAudioSource(inner, max_packets=8)
+        self.addCleanup(source.cleanup)
+        # Three packets buffered; the producer's next inner read is stalled.
+        self.assertTrue(self._wait_for(lambda: source._packets.qsize() == 3))
+        started = time.monotonic()
+        self.assertEqual([source.read() for _ in range(3)], [b"a", b"b", b"c"])
+        self.assertLess(time.monotonic() - started, 0.5)
+
+    def test_cleanup_cleans_the_inner_source_and_the_producer_exits(self):
+        gate = threading.Event()
+        inner = _FakeInnerSource([b"x"] * 100, gate=gate)
+        gate.set()
+        source = music.BufferedAudioSource(inner, max_packets=4)
+        # The producer is now blocked on a full queue.
+        self.assertTrue(self._wait_for(lambda: source._packets.full()))
+        source.cleanup()
+        self.assertTrue(inner.cleaned.is_set())
+        source._producer.join(timeout=2.0)
+        self.assertFalse(source._producer.is_alive())
+        self.assertEqual(source.read(), b"")
+
+    def test_a_stall_after_playback_started_is_logged_with_its_length(self):
+        stall = threading.Event()
+        inner = _FakeInnerSource([b"a"], stall=stall)
+        source = music.BufferedAudioSource(inner, max_packets=4)
+        self.addCleanup(source.cleanup)
+        self.assertEqual(source.read(), b"a")
+        threading.Timer(0.5, lambda: (inner._packets.append(b"b"), stall.set())).start()
+        with self.assertLogs("PotatoBot.Music", level="INFO") as logs:
+            self.assertEqual(source.read(), b"b")
+        messages = [record.getMessage() for record in logs.records]
+        self.assertEqual(1, sum("ran empty" in message for message in messages), messages)
+        self.assertEqual(1, sum("recovered after" in message for message in messages), messages)
+
+    def test_waiting_for_the_first_packet_is_not_a_stall(self):
+        gate = threading.Event()
+        inner = _FakeInnerSource([b"a"], gate=gate)
+        source = music.BufferedAudioSource(inner, max_packets=4)
+        self.addCleanup(source.cleanup)
+        threading.Timer(0.5, gate.set).start()
+        with self.assertNoLogs("PotatoBot.Music", level="INFO"):
+            self.assertEqual(source.read(), b"a")
+
+    def test_an_inner_read_error_ends_the_stream_and_forwards_the_error(self):
+        inner = _FakeInnerSource([b"a"], error=OSError("pipe"))
+        inner._current_error = OSError("ffmpeg exited")
+        with self.assertLogs("PotatoBot.Music", level="WARNING"):
+            source = music.BufferedAudioSource(inner, max_packets=4)
+            self.addCleanup(source.cleanup)
+            self.assertEqual(source.read(), b"a")
+            self.assertEqual(source.read(), b"")
+        self.assertIs(source._current_error, inner._current_error)
+
+
+class MusicSearchModalTests(unittest.IsolatedAsyncioTestCase):
+    """The panel's search box takes a pasted link as well as a search."""
+
+    VIDEO = {
+        "url": "https://media.example/audio", "title": "Bekopog",
+        "duration": 218, "extractor_key": "Youtube",
+        "webpage_url": "https://www.youtube.com/watch?v=LSY3iG895D0",
+    }
+
+    async def _submit(self, query, extracted):
+        sent = []
+
+        async def followup_send(message, **kwargs):
+            sent.append(message)
+
+        async def defer(**kwargs):
+            pass
+
+        async def extract(source):
+            return extracted
+
+        async def allowed(interaction, feature):
+            return True
+
+        guild = types.SimpleNamespace(
+            id=7171,
+            voice_client=types.SimpleNamespace(
+                is_playing=lambda: True, is_paused=lambda: False
+            ),
+        )
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(id=55, display_name="woody"),
+            guild=guild,
+            channel=types.SimpleNamespace(),
+            response=types.SimpleNamespace(defer=defer),
+            followup=types.SimpleNamespace(send=followup_send),
+        )
+        modal = music.MusicSearchModal()
+        modal.query = types.SimpleNamespace(value=query)
+        original = dict(music.music_queues)
+        self.addCleanup(lambda: (music.music_queues.clear(), music.music_queues.update(original)))
+        music.music_queues.pop(guild.id, None)
+        with patch.object(music, "require_interaction_feature", allowed), \
+                patch.object(music, "can_control_music", lambda *a: True), \
+                patch.object(music, "extract_music_info", extract):
+            await modal.on_submit(interaction)
+        return music.music_queues.get(guild.id, []), sent
+
+    async def test_a_pasted_video_link_is_queued(self):
+        queue, sent = await self._submit(
+            "https://www.youtube.com/watch?v=LSY3iG895D0", dict(self.VIDEO)
+        )
+        self.assertEqual([song["title"] for song in queue], ["Bekopog"])
+        self.assertEqual(sent, [music.t("music.added_to_queue", title="Bekopog")])
+
+    async def test_a_search_result_is_queued(self):
+        queue, sent = await self._submit(
+            "bekopog", {"entries": [dict(self.VIDEO)], "extractor_key": "YoutubeSearch"}
+        )
+        self.assertEqual([song["title"] for song in queue], ["Bekopog"])
+
+    async def test_a_search_with_no_results_says_so(self):
+        queue, sent = await self._submit(
+            "justvidman bekopog", {"entries": [], "extractor_key": "YoutubeSearch"}
+        )
+        self.assertEqual(queue, [])
+        self.assertEqual(sent, [music.t("music.search_no_results")])
 
 
 class _FakeVoiceClient:
@@ -407,3 +606,91 @@ class LeftAloneDisconnectTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PanelRepliesSurviveThePanelTests(unittest.IsolatedAsyncioTestCase):
+    """A panel action's public result must not be a reply to the panel.
+
+    `play_next` deletes the panel whenever the song changes, so a public reply
+    to a panel button was left pointing at a deleted message and Discord drew
+    "Message could not be loaded" (reported 2026-10-22, on skip).
+    """
+
+    PANEL_CLASSES = ("MusicPanelView", "MusicRemoveModal", "MusicSearchModal")
+
+    def test_no_panel_callback_replies_publicly(self):
+        import ast
+        import inspect
+
+        tree = ast.parse(inspect.getsource(music))
+        offenders = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.ClassDef) and node.name in self.PANEL_CLASSES):
+                continue
+            for call in ast.walk(node):
+                if not (isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Attribute)
+                        and call.func.attr == "send_message"):
+                    continue
+                private = any(
+                    keyword.arg == "ephemeral"
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True
+                    for keyword in call.keywords
+                )
+                if not private:
+                    offenders.append(f"{node.name}:{call.lineno}")
+        self.assertEqual(offenders, [], "use announce_to_channel for a public result")
+
+    async def test_skip_acknowledges_silently_and_announces_in_the_channel(self):
+        calls = []
+
+        async def defer(**kwargs):
+            calls.append(("defer", kwargs))
+
+        async def send_message(*args, **kwargs):
+            calls.append(("reply", args))
+
+        async def channel_send(message, **kwargs):
+            calls.append(("channel", message))
+
+        stopped = []
+        voice = types.SimpleNamespace(is_playing=lambda: True, stop=lambda: stopped.append(1))
+        interaction = types.SimpleNamespace(
+            guild=types.SimpleNamespace(id=1, voice_client=voice),
+            response=types.SimpleNamespace(defer=defer, send_message=send_message),
+            channel=types.SimpleNamespace(send=channel_send),
+        )
+        view = music.MusicPanelView.__new__(music.MusicPanelView)
+        await music.MusicPanelView.skip(view, interaction)
+        self.assertEqual(stopped, [1])
+        self.assertEqual(calls, [("defer", {}), ("channel", music.t("music.skipped"))])
+
+
+class VoiceDependenciesTests(unittest.TestCase):
+    """Voice needs PyNaCl and, since discord.py 2.7, `davey` (Discord's
+    end-to-end-encrypted voice). Without either, `VoiceClient.__init__` raises
+    `RuntimeError` and every `/join` and `/play` answers "could not connect".
+
+    `davey` was installed into the bare-metal venv by hand and never pinned,
+    so the container, which installs strictly from `requirements.lock`, had no
+    voice at all on the podman cutover (2026-10-22). The lock is asserted as
+    well as the import, because CI's environment is built from the lock and a
+    hand-installed package anywhere else hides the gap.
+    """
+
+    def test_discord_py_finds_both_voice_libraries(self):
+        import discord.voice_client
+        import discord.voice_state
+
+        self.assertTrue(discord.voice_client.has_nacl, "PyNaCl is not importable")
+        self.assertTrue(discord.voice_state.has_dave, "davey is not importable")
+
+    def test_both_are_pinned_in_the_lock_the_image_installs(self):
+        from pathlib import Path
+
+        lock = (Path(__file__).resolve().parents[1] / "requirements.lock").read_text(
+            encoding="utf-8")
+        for package in ("pynacl==", "davey=="):
+            with self.subTest(package=package):
+                self.assertRegex(lock, rf"(?m)^{re.escape(package)}")

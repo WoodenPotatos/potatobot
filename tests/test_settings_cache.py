@@ -543,6 +543,9 @@ class EverySettingHasAReaderTests(unittest.TestCase):
         "warn_threshold_", "warn_action_", "warn_timeout_minutes_",
         "work_tier_", "work_xp_",
         "patchbot_",                 # cogs/patchbot.py, by SUPPORTED_GAMES key
+        # cogs/announcements.py, by `template_setting_key(event, field)`
+        "join_message_", "leave_message_", "kick_message_", "ban_message_",
+        "boost_message_", "boost_reward_message_",
     )
 
     def test_every_setting_is_read_somewhere(self):
@@ -728,7 +731,9 @@ class NavigationReachabilityTests(unittest.TestCase):
         """The mirror image: a category nothing links to is unreachable too."""
         import re
 
-        linked = set(re.findall(r'data-category="([a-z]+)"', self.html))
+        # Underscores included: `member_announcements` is a category, and a
+        # pattern without them reported it unlinked while it was linked.
+        linked = set(re.findall(r'data-category="([a-z_]+)"', self.html))
         self.assertEqual(set(), self.categories - linked,
                          "a settings category with no sidebar entry")
 

@@ -26,11 +26,11 @@ import discord
 from cogs.utils import (
     available_languages,
     get_dashboard_locale_catalog,
-    t,
+    t as bot_t,
 )
 from dotenv import load_dotenv
-from flask import (Flask, g, jsonify, redirect, request, send_from_directory,
-                   session)
+from flask import (Flask, g, has_request_context, jsonify, redirect, request,
+                   send_from_directory, session)
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from core import version
@@ -38,6 +38,7 @@ from core.clock import parse_stored
 
 from core import database
 from core import managed_messages
+from core.announcement_templates import ANNOUNCEMENT_EVENTS, EVENT_PLACEHOLDERS
 from core.managed_messages import MANAGED_KIND_FEATURES
 from core import item_catalog
 from core.supported_games import SUPPORTED_GAME_KEYS
@@ -454,6 +455,59 @@ def index():
     return response
 
 
+# Two languages meet on this API and must not be confused. What the *operator*
+# reads — a saved, queued or refused message — is in the dashboard's language,
+# a per-browser preference. What a *member* will read in Discord — a preview, a
+# default text, a built-in item name — is in the bot's `language` setting.
+# Answering operator messages in the bot's language is what made a toast say
+# "queued" in Hungarian and "done" in English one second apart.
+
+DASHBOARD_LANGUAGE_HEADER = "X-Dashboard-Language"
+
+
+def dashboard_language() -> str | None:
+    """The language this request's operator reads, or None for the bot's.
+
+    The client sends it on every call. The session copy covers a browser
+    navigation, such as the OAuth callback, which cannot carry a header.
+    """
+    if not has_request_context():
+        return None
+    supported = available_languages()
+    for candidate in (request.headers.get(DASHBOARD_LANGUAGE_HEADER),
+                      session.get("dashboard_language")):
+        if candidate in supported:
+            return candidate
+    return None
+
+
+def t(path: str, **kwargs) -> str:
+    """Operator-facing text, in the dashboard's language.
+
+    Every `t()` in this module is a response to the operator. Text bound for
+    Discord goes through `bot_t`, which follows the `language` setting.
+    """
+    return bot_t(path, lang=dashboard_language(), **kwargs)
+
+
+def server_preview_texts(language: str) -> dict:
+    """The bot's own wording for what the dashboard previews, in the bot's language.
+
+    Served instead of a dashboard copy of each string, because a copy follows
+    the dashboard's language and so previewed a Hungarian server in English.
+    """
+    catalog = get_dashboard_locale_catalog(language)
+    return {
+        "announcements": catalog.get("announcements", {}),
+        "managed_buttons": {
+            "rules": bot_t("admin.accept_rules_button", lang=language),
+            "ticket": bot_t("tickets.open_btn", lang=language),
+            "airlock": bot_t("admin.enter_server_button", lang=language),
+        },
+        "shop_option_label": catalog.get("shop", {}).get("select_option_label", ""),
+    }
+
+
 @app.route("/api/locale")
 def locale_catalog():
     """Expose display text needed before a user authenticates.
@@ -464,18 +518,23 @@ def locale_catalog():
     """
     supported = available_languages()
     requested = request.args.get("lang", "")
-    language = requested if requested in supported else (
-        settings_cache.setting(None, "language")
-    )
-    # Only the dashboard namespace is served. The interface never reads outside
-    # it, including the feature and setting labels the registry supplies, so
-    # returning the whole catalogue only disclosed every bot command and
-    # moderation string to anyone who could reach the page.
+    server_language = settings_cache.setting(None, "language")
+    language = requested if requested in supported else server_language
+    if requested in supported:
+        # Remembered for the requests that cannot send the header.
+        session["dashboard_language"] = requested
+    # Only what the interface reads is served: the dashboard namespace in the
+    # operator's language, and under `server` the few bot strings the previews
+    # show, in the bot's language. Those are posted publicly in every guild
+    # that keeps them, so serving them discloses nothing. Returning the whole
+    # catalogue disclosed every bot command and moderation string.
     catalog = get_dashboard_locale_catalog(language)
     return jsonify({
         "language": language,
         "available": supported,
         "data": {"dashboard": catalog.get("dashboard", {})},
+        "server": {"language": server_language,
+                   "texts": server_preview_texts(server_language)},
     })
 
 
@@ -1345,6 +1404,87 @@ def _resolve_actor_names(guild_id: int, actor_ids) -> dict[str, str | None]:
     return names
 
 
+# The Redeems page names what a member was given as `name (id)` the same way:
+# looked up per page load, cached briefly, never stored, so a renamed emoji
+# shows its new name. The REST path covers the standalone dashboard.
+_ITEM_REST_PATHS = {"emoji": "emojis", "sticker": "stickers",
+                    "sound": "soundboard-sounds"}
+
+
+def _item_name_from_bot(guild_id: int, kind: str, item_id: int) -> str | None:
+    guild = _dashboard_bot.get_guild(guild_id) if _dashboard_bot else None
+    if guild is None:
+        return None
+    if kind == "emoji":
+        item = guild.get_emoji(item_id)
+    elif kind == "sticker":
+        item = discord.utils.get(guild.stickers, id=item_id)
+    elif kind == "sound":
+        item = guild.get_soundboard_sound(item_id)
+    elif kind == "role":
+        item = guild.get_role(item_id)
+    else:
+        return None
+    return str(item.name) if item is not None else None
+
+
+def _item_name_from_rest(guild_id: int, kind: str, item_id: int) -> str | None:
+    path = _ITEM_REST_PATHS.get(kind)
+    token = (os.getenv("DISCORD_TOKEN") or "").strip()
+    if path is None or not token:
+        return None
+    try:
+        response = requests.get(
+            f"{DISCORD_API_ENDPOINT}/guilds/{guild_id}/{path}/{item_id}",
+            headers={"Authorization": f"Bot {token}"}, timeout=5,
+        )
+        response.raise_for_status()
+        name = response.json().get("name")
+    except (requests.RequestException, ValueError, AttributeError):
+        return None
+    return str(name) if name else None
+
+
+def _resolve_item_names(guild_id: int, items) -> dict[tuple[str, str], str | None]:
+    """Names for `(kind, id)` pairs: emoji, sticker, sound or role.
+
+    The same bounds as `_resolve_actor_names`: the bot's cache first, at most
+    `MAX_ACTOR_LOOKUPS_PER_REQUEST` REST calls, and None rather than an error.
+    """
+    names: dict[tuple[str, str], str | None] = {}
+    lookups = 0
+    for kind, raw in dict.fromkeys((str(k), str(i)) for k, i in items):
+        if not raw.isdigit() or int(raw) <= 0:
+            names[(kind, raw)] = None
+            continue
+        key = f"item:{guild_id}:{kind}:{raw}"
+        cached = _actor_name_cache.get(key)
+        if cached is not None:
+            names[(kind, raw)] = cached["name"]
+            continue
+        name = _item_name_from_bot(guild_id, kind, int(raw))
+        if name is None:
+            if lookups >= MAX_ACTOR_LOOKUPS_PER_REQUEST:
+                names[(kind, raw)] = None
+                continue
+            lookups += 1
+            name = _item_name_from_rest(guild_id, kind, int(raw))
+        _actor_name_cache.put(key, {"name": name})
+        names[(kind, raw)] = name
+    return names
+
+
+def _entitlement_item(row: dict) -> tuple[str, str] | None:
+    """What a timed entitlement names on Discord: a role carries its id in
+    the key (`role:<id>`), an asset in `discord_item_id`."""
+    kind = str(row.get("kind") or "")
+    if kind.startswith("role:"):
+        return ("role", kind.split(":", 1)[1])
+    if kind in _ITEM_REST_PATHS and row.get("discord_item_id"):
+        return (kind, str(row["discord_item_id"]))
+    return None
+
+
 @app.route("/api/guilds/<int:guild_id>/discord-resources")
 def guild_discord_resources(guild_id):
     if not is_guild_authorized(guild_id):
@@ -1774,8 +1914,13 @@ def settings_registry():
     return jsonify({
         "status": "success",
         "data": {
-            key: definition.public_dict()
-            for key, definition in SETTING_DEFINITIONS.items()
+            # `order` is the definition's place in the registry. Flask sorts
+            # the keys of this object, so without it every page rendered
+            # alphabetically by key, which put `booster_channel` after the
+            # boost message's fields and a tag's warning threshold nowhere near
+            # its action. The registry's order is the one written to be read.
+            key: {**definition.public_dict(), "order": order}
+            for order, (key, definition) in enumerate(SETTING_DEFINITIONS.items())
             if not definition.sensitive
         },
         # The switcher groups features by the registry's declared group, so the
@@ -1787,6 +1932,11 @@ def settings_registry():
         # `dashboard.game_names.<key>` itself, exactly like feature_group_order
         # hands over keys rather than resolved labels.
         "supported_games": list(SUPPORTED_GAME_KEYS),
+        # Which placeholders each announcement can fill, so the editor's
+        # cheat-sheet and preview cannot list one the renderer does not.
+        "announcement_placeholders": {
+            event: list(EVENT_PLACEHOLDERS[event]) for event in ANNOUNCEMENT_EVENTS
+        },
     })
 
 
@@ -1921,9 +2071,9 @@ def guild_item_list(guild_id):
     """
     if not is_guild_authorized(guild_id):
         return unauthorized_response()
-    language = request.args.get("lang", "")
-    if language not in available_languages():
-        language = settings_cache.setting(None, "language")
+    # The bot's language, whatever the dashboard is set to: these are the names
+    # and sections a member sees in `/shop`, which is what this page shows.
+    language = settings_cache.setting(None, "language")
     catalog = get_dashboard_locale_catalog(language).get("shop", {})
     texts = catalog.get("items", {})
 
@@ -3070,10 +3220,12 @@ def _content_from_message(kind, message):
     # A label matching the shipped wording is stored as *absent*, so the panel
     # keeps following the language setting instead of being pinned to today's
     # translation of it.
+    # The bot's language, never the operator's: this compares against what the
+    # bot posted.
     default_label = {
-        "rules": lambda: t("admin.accept_rules_button"),
-        "ticket": lambda: t("tickets.open_btn"),
-        "airlock": lambda: t("admin.enter_server_button"),
+        "rules": lambda: bot_t("admin.accept_rules_button"),
+        "ticket": lambda: bot_t("tickets.open_btn"),
+        "airlock": lambda: bot_t("admin.enter_server_button"),
     }.get(kind)
     if label and default_label and label == default_label():
         label = None
@@ -3251,6 +3403,28 @@ def publish_guild_managed_message(guild_id, kind, menu_key):
         return invalid_request_response(error)
 
 
+@app.route("/api/guilds/<int:guild_id>/announcements/<event>/test", methods=["POST"])
+def test_guild_announcement(guild_id, event):
+    """Queue one event's *saved* announcement, posted with the operator as the member.
+
+    Through the outbox like every other Discord side effect, so a standalone
+    dashboard can offer it too. The worker re-checks the event's toggle and
+    resolves the channel when it runs.
+    """
+    if not is_guild_authorized(guild_id):
+        return unauthorized_response()
+    try:
+        if event not in ANNOUNCEMENT_EVENTS:
+            raise RequestValidationError("dashboard.errors.announcement_event_invalid")
+        require_exact_keys(require_json_object(), set())
+        action_id = database.queue_control_action(
+            guild_id, actor_id(), "test_announcement", {"event": event})
+        return jsonify({"status": "success", "message": t("dashboard.action_queued"),
+                        "data": {"action_id": action_id}}), 202
+    except ValueError as error:
+        return invalid_request_response(error)
+
+
 @app.route("/api/guilds/<int:guild_id>/actions/<int:action_id>")
 def guild_action_status(guild_id, action_id):
     """Report a queued publish's progress so the client can stop guessing.
@@ -3271,7 +3445,11 @@ def guild_action_status(guild_id, action_id):
 def guild_fulfillment(guild_id):
     if not is_guild_authorized(guild_id):
         return unauthorized_response()
-    return jsonify({"status": "success", "data": database.run_read_sync(database.get_fulfillment_requests, guild_id)})
+    data = database.run_read_sync(database.get_fulfillment_requests, guild_id)
+    names = _resolve_actor_names(guild_id, (row["user_id"] for row in data))
+    for row in data:
+        row["user_name"] = names.get(row["user_id"])
+    return jsonify({"status": "success", "data": data})
 
 
 @app.route("/api/guilds/<int:guild_id>/entitlements", methods=["GET"])
@@ -3320,6 +3498,17 @@ def guild_entitlements(guild_id):
             # status label.
             "missing_on_discord": row["discord_missing_since"] is not None,
         })
+    people = _resolve_actor_names(
+        guild_id, [row["user_id"] for row in data]
+        + [row["granted_by"] for row in data if row["granted_by"]])
+    items = _resolve_item_names(
+        guild_id, [item for item in map(_entitlement_item, data) if item])
+    for row in data:
+        row["user_name"] = people.get(row["user_id"])
+        row["granted_by_name"] = (people.get(row["granted_by"])
+                                  if row["granted_by"] else None)
+        item = _entitlement_item(row)
+        row["item_name"] = items.get(item) if item else None
     return jsonify({"status": "success", "data": data})
 
 

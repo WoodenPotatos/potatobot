@@ -6,8 +6,12 @@ the one they used. Listing a guild's invites needs Manage Server, which is why
 `invite_logging` ships off and declares that permission.
 
 Nothing is persisted. The snapshot lives in memory and is rebuilt from Discord
-whenever it is missing, so a restart costs at most one join reported as
-"could not be determined". Welcoming the member stays with
+whenever it is missing: at `on_ready` if the feature cache is loaded by then,
+and otherwise by `prime_missing` within a minute. Without that loop the first
+join after every restart was "could not be determined", because this cog's
+`on_ready` runs alongside `main.py`'s, before the flags it reads have loaded,
+and an unloaded flag reads as off (found live 2026-10-22). Welcoming the
+member stays with
 `cogs/serverevents.py`; this cog only writes to a log channel.
 """
 
@@ -16,9 +20,9 @@ import logging
 from dataclasses import dataclass
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
-from cogs.utils import BoundedValueMap, guild_setting_sync, t
+from cogs.utils import BoundedValueMap, guild_setting_sync, handle_loop_error, t
 from core.feature_access import is_enabled, maintenance_blocks
 
 invite_logger = logging.getLogger("PotatoBot.InviteLog")
@@ -92,6 +96,14 @@ class InviteLog(commands.Cog):
         self.snapshots = BoundedValueMap(max_entries=1024)
         self.locks = BoundedValueMap(max_entries=1024)
 
+    async def cog_load(self):
+        # Started here rather than in `__init__`, which has no running loop
+        # when a test builds the cog directly.
+        self.prime_missing.start()
+
+    async def cog_unload(self):
+        self.prime_missing.cancel()
+
     def _lock(self, guild_id: int) -> asyncio.Lock:
         lock = self.locks.get(guild_id)
         if lock is None:
@@ -138,6 +150,28 @@ class InviteLog(commands.Cog):
                 await self._prime(guild)
             except Exception:
                 invite_logger.exception("Invite snapshot failed (guild_id=%s).", guild.id)
+
+    @tasks.loop(seconds=60)
+    async def prime_missing(self):
+        # Only a guild with the feature on and no snapshot costs a request, so
+        # once every guild is primed this sends nothing.
+        for guild in self.bot.guilds:
+            if guild.id in self.snapshots:
+                continue
+            try:
+                await self._prime(guild)
+            except Exception:
+                invite_logger.exception("Invite snapshot failed (guild_id=%s).", guild.id)
+
+    @prime_missing.before_loop
+    async def before_prime_missing(self):
+        await self.bot.wait_until_ready()
+
+    @prime_missing.error
+    async def prime_missing_error(self, error):
+        await handle_loop_error(
+            self.bot, self.prime_missing, "invite_prime_missing", error, invite_logger,
+        )
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
