@@ -15,14 +15,14 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, `deploy/` holds the systemd units and a rootless podman Quadlet unit, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.19.26** &nbsp;·&nbsp; channel `stable`
+**Version 2.19.29** &nbsp;·&nbsp; channel `stable`
 
 Stable release.
 <!-- END GENERATED: version -->
 
+<!-- BEGIN GENERATED: body -->
 ## Quick start
 
-<!-- BEGIN GENERATED: install -->
 ```bash
 git clone https://github.com/WoodenPotatos/potatobot.git /opt/potatobot
 cd /opt/potatobot
@@ -34,17 +34,16 @@ POTATOBOT_DB_PATH=$PWD/economy.db ./venv/bin/python update_db.py
 ```
 
 Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Every setting lives in SQLite from the start and is editable from the dashboard once it is running. The full walkthrough — Discord application, intents, OAuth, HTTPS, systemd and the guild setup check — is in [docs/installation.md](docs/installation.md).
-<!-- END GENERATED: install -->
 
 ## Highlights
 
 - Hybrid prefix and slash commands with explicit public/private response policies
 - Atomic economy rewards, transfers, purchases, wagers, and crash-safe game settlement
 - Complete Hungarian and English localization of the bot, the dashboard and the
-  Everydle minigame data, with Hungarian as the source language (LoLdle's hard
-  mode is Hungarian-only so far)
+  Everydle minigame data, with Hungarian as the source language
 - SQLite WAL storage with ordered, in-place migrations and asynchronous read/write execution
-- Guild feature flags with dependency checks, audit revisions, and runtime cache refresh
+- 62 guild feature switches in eleven groups, with dependency checks,
+  audit revisions, and runtime cache refresh
 - Moderation, warnings, faction management, tickets, onboarding, role menus, and temporary voice channels
 - LoLdle, Valdle, DbDle and Genshindle daily puzzles; counting and word-chain
   channels
@@ -73,6 +72,9 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Ever
   channel and editable text (title, random variants, colour, image, plain text
   with placeholders), a live preview and a test send on the dashboard; kicks
   and bans are told apart from leaves through the audit log
+- A Privacy Policy and Terms of Service in English and Hungarian, linked from
+  `/version` and the dashboard's sign-in card, with a drift check in CI that
+  holds the policy to what the code stores, logs and sends
 
 ## Requirements
 
@@ -82,7 +84,7 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Ever
   container build. Nothing here is written for Windows or macOS.
 - Python 3.12, 3.13, or 3.14
 - A Discord application and bot token
-- Discord privileged Member and Message Content intents
+- Discord privileged Message Content and Server Members intents
 - FFmpeg for music playback
 - SQLite support (included with normal Python builds)
 - Optional Twitch API credentials for stream notifications
@@ -105,9 +107,9 @@ Important environment variables are documented in `.env.example`. In particular:
 - `POTATOBOT_LEGACY_GUILD_ID` identifies the original guild when a legacy private database is connected to multiple guilds.
 - Dashboard OAuth requires matching HTTPS values for `POTATOBOT_DASHBOARD_EXTERNAL_URL` and `DISCORD_REDIRECT_URI`, with the latter ending in `/api/callback`.
 
-The schema is at version 24. Prices, rewards, voice preferences, leaderboards, ranks, rental cleanup, `/work` responses and gacha banners are per guild, with `guild_id` 0 holding the installation default; installation-wide settings live in their own table with no guild dimension at all. Wallets are not: `users` is still keyed by Discord user ID alone, so the live economy is not multi-guild-safe yet and cooldowns are deliberately installation-wide. Per-guild wallets are planned for 3.0.0, and economies shared between guilds for 3.x. The dashboard has one host, `ADMIN_DISCORD_ID`; under the `self_hosted` profile each guild's owner, administrators and Manage Server holders can also manage that guild.
+The schema is at version 26. Prices, rewards, voice preferences, leaderboards, ranks, rental cleanup, `/work` responses and gacha banners are per guild, with `guild_id` 0 holding the installation default; installation-wide settings live in their own table with no guild dimension at all. Wallets are not: `users` is still keyed by Discord user ID alone, so the live economy is not multi-guild-safe yet and cooldowns are deliberately installation-wide. Per-guild wallets are planned for 3.0.0, and economies shared between guilds for 3.x. The dashboard has one host, `ADMIN_DISCORD_ID`; under the `self_hosted` profile each guild's owner, administrators and Manage Server holders can also manage that guild.
 
-Members can export their data with `/mydata` and erase it with `/deletemydata`; the host can erase on a member's behalf from the dashboard. Erasure keeps the economy row under an anonymous tombstone so installation totals never change silently. See `docs/privacy.md`.
+Members can export their data with `/mydata` and erase it with `/deletemydata`; the host can erase on a member's behalf from the dashboard. Erasure keeps the economy row under an anonymous tombstone so installation totals never change silently. See `docs/privacy.md` for the design and `docs/legal/` for the policy members read.
 
 ## Dashboard
 
@@ -166,23 +168,27 @@ matrices — is in [docs/development.md](docs/development.md).
 
 ## Documentation
 
-- [Installation and deployment guide](docs/installation.md)
-- [Setting up levels](docs/level_setup.md)
-- [Developer and operations guide](docs/development.md)
-- [Localization status and plan](docs/localization_status.md)
+- [Data inventory (record of processing)](docs/data_inventory.md)
+- [PotatoBot Developer and Operations Guide](docs/development.md)
 - [Keeping Everydle data current](docs/everydle_data_updates.md)
-- [Threat model](docs/threat_model.md)
+- [Installing PotatoBot](docs/installation.md)
+- [Setting up levels](docs/level_setup.md)
+- [Localization: state and rules](docs/localization_status.md)
+- [Patchbot data sources](docs/patchbot_data_sources.md)
 - [Privacy and data lifecycle](docs/privacy.md)
-- [Privacy Policy](docs/legal/PRIVACY.md) and [Terms of Service](docs/legal/TERMS.md)
-  for the maintainer's installations, with Hungarian translations beside them
-  and the [data inventory](docs/data_inventory.md) they summarise
-- [2.0 release checklist](docs/release_checklist.md)
+- [Release checklist](docs/release_checklist.md)
+- [PotatoBot threat model](docs/threat_model.md)
+- [Privacy Policy](docs/legal/PRIVACY.md) and [Terms of Service](docs/legal/TERMS.md), with Hungarian translations ([PRIVACY.hu.md](docs/legal/PRIVACY.hu.md), [TERMS.hu.md](docs/legal/TERMS.hu.md)) beside them
 - [Changelog](CHANGELOG.md)
 - [Localized minigame data format](data/README.md)
 
 ## Recent releases
 
-<!-- BEGIN GENERATED: changelog -->
+### 2.19.29
+
+- **A stable release channel exists.** The public repository now has a `stable` branch beside `beta`. A stable release is the last published beta copied with its letter stripped (`2.19.26b` becomes `2.19.26`, and `/version` reports the channel as stable), so the code is byte-identical to a beta that has already been out; betas keep landing on `beta`.
+- **The README below the introduction is generated from the code.** It said the schema was at version 24 (it is 26) and that LoLdle's hard mode was Hungarian-only (English has been complete since September), and the stable release shipped saying so. Only the maintainer's introduction is written by hand now; the version, the Python range, the intents, the schema version, the read-worker bounds, the gacha pity numbers, the game and feature counts, the documentation list and the recent releases are read from the code and the repository each time, and the build fails when the file disagrees.
+
 ### 2.19.26
 
 - **A Privacy Policy and Terms of Service now ship with the bot**, in `docs/legal/`, in English (binding) and Hungarian, written from a line-by-line inventory of every table, log line, Discord post and outbound network call the software makes (`docs/data_inventory.md`). They describe what is stored under a member's Discord id and for how long, what `/mydata` returns and `/deletemydata` keeps, which third parties receive anything (Discord, Cloudflare in front of the dashboard, encrypted nightly backups to Google Drive, a music search's text to YouTube), the dashboard's cookie, and the automatic moderation actions a server can configure. The operator's identity, the effective date and three deployment facts were filled in over the same day; both documents are in force from 2026-10-31 as version 1.0, and reach their public addresses with this release.
@@ -207,23 +213,11 @@ matrices — is in [docs/development.md](docs/development.md).
 - **Join and leave messages can show an image card.** Switch it on in the event's settings: the member's avatar and name, with a line of your own underneath, drawn on a background image. Upload any picture as the background (it is cropped to fit), or keep the built-in one. The card takes the message's big image spot, and the dashboard shows a live preview. If many people join at once, the bot sends the normal message instead of drawing a card for each of them.
 - …and 16 more, in [CHANGELOG.md](CHANGELOG.md).
 
-### 2.18.4b
-
-- **Join, leave and boost messages can be written by each server.** The dashboard has a new Announcements page. Every event has its own switch and channel, and its message can have a title, several text variants (one is picked at random), a colour, an image, and plain text above it. Placeholders such as `{user}`, `{server}` and `{member_count}` are filled in. A live preview shows the result, and "Send test" posts the saved message with you as the member. Anything left empty keeps the old text.
-- **Join, leave, kick and ban messages always say who it was.** They used to show only a mention, which Discord turns into a bare ID once the member has left. The messages now also give the display name, the username and the ID as plain text, and the new `{user_id}` placeholder lets your own templates do the same. The member's picture is now attached to the message instead of linked, so it no longer disappears when they change it or delete their account. It is not stored anywhere on the server.
-- **Settings pages list their fields in a sensible order.** Every page was sorted alphabetically by internal name, which is why the boost message's channel sat at the bottom instead of first. Fields now appear in the order they were designed in: channels first, and related fields together (for example each warning type's threshold, action and timeout side by side).
-- **Announcement variants each get their own box.** Instead of one box with a variant per line, every variant is now a multi-line box of its own, and "Add variant" adds another, the way the rules editor adds a section. A message can have up to five. The preview shows the variant you are editing, rendered with markdown, and the plain text above the embed is a multi-line box too.
-- **Message previews render nested formatting correctly.** Bold with italic inside (`**bold *and italic* inside**`) used to fall apart and show its asterisks, and `2 * 3 * 4` came out partly italic. Every preview now renders these as Discord does.
-- **The dashboard keeps its two languages apart.** Messages it shows you — saved, queued, done, errors — are now always in the dashboard's language; before, some arrived in the bot's language, so one action could answer in Hungarian and then English. Everything that previews what members will see in Discord — the announcement texts, the default buttons on panels, shop item names and the shop preview — is now always in the bot's language, even when the dashboard is set to another one.
-- **The Announcements page is easier to use.** Every message editor opens and closes like the sidebar groups and starts closed; the ones you open stay open next time. Empty boxes show the built-in text in grey, and the preview shows it filled in, so it is clear what each message says before you change anything.
-- **Kicks and bans are no longer announced as leaves.** A ban used to post a farewell *and* a ban message, and a kick looked like someone leaving. Now each produces one message of its own kind, with the moderator and reason. When the bot runs `/kick` or `/ban`, the moderator who ran it is named, not the bot. Kick and ban messages go to the moderation log unless they are given a channel of their own; **this moves ban messages out of the leave channel.** Telling a kick from a leave needs the View Audit Log permission.
-- …and 12 more, in [CHANGELOG.md](CHANGELOG.md).
-
 The full history is in [CHANGELOG.md](CHANGELOG.md).
-<!-- END GENERATED: changelog -->
 
 ## Development status
 
-PotatoBot is production-bound for one private deployment, so database compatibility and safe rollout take priority over rapid breaking changes. Remaining major work is guild-scoped wallets (3.0.0) and then shared economies between guilds (3.x), followed by rehearsing a managed deployment. Public releases are sanitised snapshots on the `beta` channel, with no history from the private development line.
+PotatoBot is production-bound for one private deployment, so database compatibility and safe rollout take priority over rapid breaking changes. Remaining major work is guild-scoped wallets (3.0.0) and then shared economies between guilds (3.x), followed by rehearsing a managed deployment. Public releases are sanitised snapshots with no history from the private development line: betas on the `beta` branch, and each stable release on the `stable` branch, which is the last beta copied with its letter stripped.
 
 New sanitized releases are licensed under AGPL-3.0-only; see [LICENSE](LICENSE).
+<!-- END GENERATED: body -->
