@@ -23,7 +23,6 @@ three resolvers rather than a value lookup.
 
 import asyncio
 import os
-import re
 import sys
 import tempfile
 import unittest

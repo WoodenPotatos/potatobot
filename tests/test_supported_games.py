@@ -53,5 +53,31 @@ class SupportedGameDisplayNameCoverageTests(unittest.TestCase):
                     )
 
 
+
+class GamesReaderTests(unittest.TestCase):
+    """The two answers the cogs take from `games` (schema 26)."""
+
+    ROWS = {
+        "lol": {"role": 11, "channel": 21, "lfg": True, "patch_channel": 31},
+        "valorant": {"role": 12, "channel": 22, "lfg": False, "patch_channel": None},
+        "Among Us": {"role": 13, "channel": 23, "lfg": True, "patch_channel": None},
+    }
+
+    def test_search_pings_the_role_of_an_lfg_game_in_this_channel(self):
+        from core.supported_games import lfg_role_for_channel
+        self.assertEqual(11, lfg_role_for_channel(self.ROWS, 21))
+        self.assertEqual(13, lfg_role_for_channel(self.ROWS, 23))
+        # A game with LFG off answers nothing, even in its own channel.
+        self.assertIsNone(lfg_role_for_channel(self.ROWS, 22))
+        self.assertIsNone(lfg_role_for_channel(None, 21))
+
+    def test_patch_notes_go_to_the_override_else_the_game_channel(self):
+        from core.supported_games import patch_target
+        self.assertEqual((31, 11), patch_target(self.ROWS, "lol"))
+        self.assertEqual((22, 12), patch_target(self.ROWS, "valorant"))
+        self.assertEqual((None, None), patch_target(self.ROWS, "cs2"))
+        self.assertEqual((None, None), patch_target({"lol": "broken"}, "lol"))
+
+
 if __name__ == "__main__":
     unittest.main()

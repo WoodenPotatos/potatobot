@@ -694,7 +694,6 @@ class LevelRoleTests(unittest.TestCase):
         same defect as a role id in a default, in a place the first test could
         not see.
         """
-        import json
         import re
         from pathlib import Path
 

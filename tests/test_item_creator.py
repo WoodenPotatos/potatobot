@@ -334,7 +334,6 @@ class ItemListEndpointTests(DashboardItemTestCase):
     def test_hiding_a_builtin_frees_a_slot_and_keeps_the_row_visible(self):
         """A hidden item must still be listed, or an operator could never find
         it to un-hide it."""
-        from core import item_catalog
 
         before = {entry["id"]: entry for entry in self.get()["categories"]}
         response = self.client.patch(

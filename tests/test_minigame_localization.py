@@ -143,7 +143,8 @@ class MinigameLocalizationTests(unittest.TestCase):
                         "decks": {"loldle_easy": ["Ahri"]},
                         "dailies": {
                             "loldle_easy": {
-                                "date": everydle.datetime.now().strftime("%Y-%m-%d"),
+                                # The cog's own "today", which is the clock's.
+                                "date": everydle.local_date(everydle.utc_now()).isoformat(),
                                 "answer": "Aatrox",
                             }
                         },

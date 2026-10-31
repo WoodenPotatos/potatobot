@@ -47,9 +47,11 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: python -m pip install --require-hashes --requirement requirements-dev.lock
       - run: python -m compileall -q . -x './\.git|./venv|./\.venv'
-      # Scoped to core/ only -- see the comment on [tool.mypy] in
+      # core/ and the entry points, not cogs/ -- see the comment on [tool.mypy] in
       # pyproject.toml for why cogs/ is out of scope for now.
       - run: python -m mypy
+      # Pyflakes and syntax errors only, from a clean baseline; see [tool.ruff].
+      - run: python -m ruff check .
       - run: python -m unittest discover -s tests -v
       # Exits non-zero only on a key something references but no catalog has,
       # which is the one class of localization finding that is a defect rather

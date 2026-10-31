@@ -530,6 +530,188 @@ class JoinTests(AnnouncementCogTestCase):
         self.assertFalse(sent["allowed_mentions"].everyone)
 
 
+class ReturningMemberTests(AnnouncementCogTestCase):
+    """The returning-member join message (2.19): its own fields, each falling
+    back to the join message's, chosen from what `serverevents` decided."""
+
+    settings = {"join_message_title": "Welcome {display_name}",
+                "join_message_texts": ["First time here"],
+                "rejoin_message_title": "Welcome back {display_name}"}
+
+    def arrive(self, guild, member, returning):
+        from cogs.utils import member_arrival
+        member_arrival(guild.id, member.id).set_result(returning)
+
+    async def test_a_returning_member_gets_the_rejoin_title_and_the_join_text(self):
+        guild = make_guild()
+        member = make_member(guild)
+        self.arrive(guild, member, True)
+        await self.cog.on_member_join(member)
+        sent = guild.channels[10].sent[0]["embed"]
+        self.assertEqual("Welcome back tester", sent.title)
+        # No rejoin text was written, so the join's text is used.
+        self.assertEqual("First time here", sent.description)
+
+    async def test_a_new_member_gets_the_join_message(self):
+        guild = make_guild()
+        member = make_member(guild)
+        self.arrive(guild, member, False)
+        await self.cog.on_member_join(member)
+        self.assertEqual("Welcome tester", guild.channels[10].sent[0]["embed"].title)
+
+    async def test_no_answer_in_time_is_a_new_member(self):
+        guild = make_guild()
+        with patch.object(self.module, "ARRIVAL_WAIT_SECONDS", 0.01):
+            await self.cog.on_member_join(make_member(guild))
+        self.assertEqual("Welcome tester", guild.channels[10].sent[0]["embed"].title)
+
+    async def test_the_answer_may_arrive_after_the_announcement_asks(self):
+        guild = make_guild()
+        member = make_member(guild)
+        join = asyncio.create_task(self.cog.on_member_join(member))
+        await asyncio.sleep(0)
+        self.arrive(guild, member, True)
+        await join
+        self.assertEqual("Welcome back tester", guild.channels[10].sent[0]["embed"].title)
+
+
+class WelcomeCardTests(AnnouncementCogTestCase):
+    """An image card takes the embed's image slot (2.19)."""
+
+    settings = {"join_message_card": True, "join_message_card_text": "Hi {server}"}
+
+    def setUp(self):
+        super().setUp()
+        self.module.card_renders.clear()
+        self.drawn = []
+
+        def draw(guild_id, event, avatar, name, line):
+            self.drawn.append((event, avatar, name, line))
+            return b"card-png"
+
+        self.draw_patch = patch.object(self.module, "_draw_card", draw)
+        self.draw_patch.start()
+
+    def tearDown(self):
+        self.draw_patch.stop()
+        super().tearDown()
+
+    async def test_the_card_is_the_embeds_image_and_replaces_the_thumbnail(self):
+        guild = make_guild()
+        await self.cog.on_member_join(make_member(guild))
+        sent = guild.channels[10].sent[0]
+        self.assertEqual("card.png", sent["file"].filename)
+        self.assertEqual("attachment://card.png", sent["embed"].image.url)
+        self.assertIsNone(sent["embed"].thumbnail.url)
+        # Plain text: an image cannot draw markdown escapes or a mention code.
+        self.assertEqual([("join", b"png-bytes", "tester", "Hi Test Guild")], self.drawn)
+
+    async def test_a_burst_of_joins_falls_back_to_the_plain_embed(self):
+        guild = make_guild()
+        for index in range(self.module.CARD_BURST_LIMIT + 2):
+            await self.cog.on_member_join(make_member(guild, member_id=100 + index))
+        files = [sent["file"].filename for sent in guild.channels[10].sent]
+        self.assertEqual(["card.png"] * self.module.CARD_BURST_LIMIT,
+                         files[:self.module.CARD_BURST_LIMIT])
+        # Past the limit the plain embed goes out, avatar thumbnail and all.
+        self.assertEqual(["avatar.png", "avatar.png"], files[self.module.CARD_BURST_LIMIT:])
+
+    async def test_a_card_that_cannot_be_drawn_still_posts_the_announcement(self):
+        def broken(*args):
+            raise OSError("disk")
+        guild = make_guild()
+        with patch.object(self.module, "_draw_card", broken):
+            await self.cog.on_member_join(make_member(guild))
+        sent = guild.channels[10].sent[0]
+        self.assertNotEqual("card.png", getattr(sent.get("file"), "filename", None))
+        self.assertIsNone(sent["embed"].image.url)
+
+    async def test_with_the_card_off_nothing_is_drawn(self):
+        self.values["join_message_card"] = False
+        guild = make_guild()
+        await self.cog.on_member_join(make_member(guild))
+        self.assertEqual([], self.drawn)
+        self.assertNotEqual("card.png", getattr(guild.channels[10].sent[0].get("file"),
+                                                "filename", None))
+
+
+class ReturningCardTests(WelcomeCardTests):
+    """The returning welcome's card: its own line and background, each falling
+    back to the join card's."""
+
+    settings = {"join_message_card": True, "join_message_card_text": "Hi {server}",
+                "rejoin_message_title": "Welcome back",
+                "rejoin_message_card_text": "Back at {server}"}
+
+    def setUp(self):
+        super().setUp()
+        # The inherited joins give no arrival answer; with a returning text
+        # set they would each wait out the real five seconds.
+        self.wait_patch = patch.object(self.module, "ARRIVAL_WAIT_SECONDS", 0.01)
+        self.wait_patch.start()
+
+    def tearDown(self):
+        self.wait_patch.stop()
+        super().tearDown()
+
+    async def join_as_returning(self):
+        from cogs.utils import member_arrival
+        guild = make_guild()
+        member = make_member(guild)
+        member_arrival(guild.id, member.id).set_result(True)
+        await self.cog.on_member_join(member)
+        return guild
+
+    async def test_a_returning_member_gets_the_returning_card(self):
+        await self.join_as_returning()
+        self.assertEqual([("rejoin", b"png-bytes", "tester", "Back at Test Guild")], self.drawn)
+
+    async def test_an_empty_returning_line_falls_back_to_the_join_line(self):
+        self.values["rejoin_message_card_text"] = ""
+        await self.join_as_returning()
+        self.assertEqual("Hi Test Guild", self.drawn[0][3])
+
+    # The parent's tests run here too, with the returning settings present:
+    # a new member must still get the join card.
+
+
+class ReturningTestSendTests(unittest.IsolatedAsyncioTestCase):
+    async def test_the_worker_hands_returning_through(self):
+        from core import control_actions
+        import cogs.announcements as announcements
+        sent = AsyncMock(return_value=None)
+        with patch.object(announcements, "event_enabled", lambda guild_id, event: True), \
+                patch.object(announcements, "send_test_announcement", sent):
+            await control_actions.execute_test_announcement(
+                SimpleNamespace(id=GUILD_ID), SimpleNamespace(id=1),
+                {"payload": {"event": "join", "returning": True}})
+        self.assertTrue(sent.await_args.kwargs["returning"])
+
+
+class NoRejoinTemplateTests(AnnouncementCogTestCase):
+    settings = {"join_message_title": "Welcome {display_name}"}
+
+    async def test_with_nothing_written_the_join_never_waits(self):
+        """A guild that wrote no returning message must not have every
+        welcome held up waiting for an answer it does not need."""
+        guild = make_guild()
+        with patch.object(self.module, "ARRIVAL_WAIT_SECONDS", 30):
+            await asyncio.wait_for(self.cog.on_member_join(make_member(guild)), 1)
+        self.assertEqual("Welcome tester", guild.channels[10].sent[0]["embed"].title)
+
+
+class MemberArrivalTests(unittest.IsolatedAsyncioTestCase):
+    async def test_both_listeners_share_one_answer_and_an_old_one_expires(self):
+        from cogs import utils
+        first = utils.member_arrival(1, 2)
+        self.assertIs(first, utils.member_arrival(1, 2))
+        first.set_result(True)
+        later = utils.time.monotonic() + utils.ARRIVAL_MAX_AGE_SECONDS + 1
+        with patch.object(utils.time, "monotonic", return_value=later):
+            self.assertIsNot(first, utils.member_arrival(1, 2),
+                             "a previous join's answer answered this one")
+
+
 class BoostTests(AnnouncementCogTestCase):
     disabled = frozenset({"economy"})
 
@@ -660,6 +842,18 @@ class TestSendRouteTests(unittest.TestCase):
         action = self.database.claim_control_action()
         self.assertEqual("test_announcement", action["action_type"])
         self.assertEqual({"event": "ban"}, action["payload"])
+
+    def test_the_returning_welcome_is_tested_as_join_marked_returning(self):
+        response = self.client.post(f"/api/guilds/{GUILD_ID}/announcements/join/test",
+                                    json={"returning": True}, headers=self.headers)
+        self.assertEqual(202, response.status_code)
+        self.assertEqual({"event": "join", "returning": True},
+                         self.database.claim_control_action()["payload"])
+        for event, body in (("kick", {"returning": True}), ("join", {"returning": "yes"})):
+            with self.subTest(event=event, body=body):
+                refused = self.client.post(f"/api/guilds/{GUILD_ID}/announcements/{event}/test",
+                                           json=body, headers=self.headers)
+                self.assertEqual(400, refused.status_code)
 
     def test_an_unknown_event_is_refused_before_the_queue(self):
         response = self.client.post(f"/api/guilds/{GUILD_ID}/announcements/raid/test",

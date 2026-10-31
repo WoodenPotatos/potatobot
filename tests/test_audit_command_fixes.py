@@ -148,12 +148,6 @@ class TwitchPollTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(cog._twitch_token)
 
 
-class MusicExecutorTests(unittest.TestCase):
-    def test_the_executor_outnumbers_the_semaphore(self):
-        import cogs.music
-        self.assertEqual(4, cogs.music.music_extract_executor._max_workers)
-
-
 class HostOnlyReloadTests(unittest.IsolatedAsyncioTestCase):
     """`?reload`/`?reloadconfig` mean the host, as everything else does.
 

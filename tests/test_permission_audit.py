@@ -103,6 +103,62 @@ def codes(report):
     return sorted(finding.code for finding in report.findings)
 
 
+class GameChannelAuditTests(unittest.TestCase):
+    """The channels inside `games` (schema 26).
+
+    The per-game patch channels were plain channel settings, audited like any
+    other; folding them into one JSON row would have stopped that silently.
+    """
+
+    PATCH, LFG, EXTRA = 1420070400000000021, 1420070400000000022, 1420070400000000023
+
+    def setUp(self):
+        bot_role = FakeRole(1, "PotatoBot", 10)
+        mute = permissions(view_channel=True)
+        self.guild = FakeGuild(FakeMember(permissions(), bot_role), channels=[
+            FakeChannel(self.PATCH, "patch", "text", mute),
+            FakeChannel(self.LFG, "lfg", "text", mute),
+            FakeChannel(self.EXTRA, "extra", "text", mute),
+        ])
+
+    def findings(self, games, features):
+        report = report_for(self.guild, features, {"games": games})
+        return {(finding.code, finding.feature, finding.channel_id)
+                for finding in report.findings if finding.subject == "games"}
+
+    def test_a_patch_channel_and_an_lfg_channel_are_both_checked(self):
+        found = self.findings(
+            {"lol": {"role": None, "channel": self.LFG, "lfg": True,
+                     "patch_channel": self.PATCH}},
+            {"lfg": True, "patchbot": True, "patchbot_lol": True})
+        self.assertIn(("channel_missing_permission", "patchbot_lol", self.PATCH), found)
+        self.assertIn(("channel_missing_permission", "lfg", self.LFG), found)
+
+    def test_an_unset_patch_channel_is_checked_as_the_game_channel(self):
+        found = self.findings(
+            {"lol": {"role": None, "channel": self.EXTRA, "lfg": False,
+                     "patch_channel": None}},
+            {"lfg": True, "patchbot": True, "patchbot_lol": True})
+        self.assertEqual({("channel_missing_permission", "patchbot_lol", self.EXTRA)},
+                         {item for item in found if item[0] == "channel_missing_permission"})
+
+    def test_switched_off_and_custom_games_are_not_problems(self):
+        found = self.findings(
+            {"lol": {"role": None, "channel": self.EXTRA, "lfg": True,
+                     "patch_channel": None},
+             "Among Us": {"role": None, "channel": self.LFG, "lfg": False,
+                          "patch_channel": None}},
+            {"lfg": False, "patchbot": True, "patchbot_lol": False})
+        self.assertEqual(set(), found)
+
+    def test_a_deleted_channel_is_reported_missing(self):
+        found = self.findings(
+            {"valorant": {"role": None, "channel": 1420070400000000099, "lfg": False,
+                          "patch_channel": None}},
+            {"patchbot": True, "patchbot_valorant": True})
+        self.assertIn(("channel_missing", "patchbot_valorant", 0), found)
+
+
 class PermissionAuditTests(unittest.TestCase):
     def setUp(self):
         self.bot_role = FakeRole(1, "PotatoBot", 10)

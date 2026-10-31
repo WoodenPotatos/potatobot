@@ -18,8 +18,7 @@ from core import database
 from core.minigame_data import load_or_disable
 
 from discord.ext import commands
-from datetime import datetime
-from core.clock import local_date, local_time, parse_stored, utc_now
+from core.clock import local_date, parse_stored, utc_now
 from cogs.utils import (apply_database_result, guild_setting_sync,
                         is_channel, t)
 from core.feature_access import require_interaction_feature

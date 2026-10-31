@@ -9,7 +9,6 @@ because that state had to live somewhere.
 Three properties matter, and the third is the one a persistent view gets wrong.
 """
 
-import json
 import os
 import sys
 import tempfile

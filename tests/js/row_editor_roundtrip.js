@@ -22,6 +22,8 @@ function editorOutput(shape, sent) {
         const unpacked = shape.unpack(entry);
         const columns = {};
         for (const spec of shape.columns) {
+            // Drawn in the row, but a feature switch rather than data.
+            if (spec.kind === 'feature') continue;
             const current = unpacked[spec.name];
             columns[spec.name] = spec.kind === 'role_list'
                 ? (current || []).map(String)
@@ -29,7 +31,8 @@ function editorOutput(shape, sent) {
                 : (current === undefined || current === null ? '' : String(current));
         }
         const incomplete = !entryKey
-            || shape.columns.some((spec) => spec.required && !columns[spec.name]);
+            || shape.columns.some((spec) => spec.required && !columns[spec.name])
+            || Boolean(shape.incomplete && shape.incomplete(columns));
         if (incomplete) continue;
         collected[entryKey] = shape.pack(columns);
     }

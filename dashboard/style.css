@@ -383,6 +383,54 @@ svg[hidden] { display: none; }
     background: var(--accent);
 }
 
+/* A page with sub-pages: the item, an expander beside it, and the children
+   indented under a guide line. Closed by default; `.open` shows them. */
+.nav-branch { display: flex; flex-direction: column; gap: 2px; }
+.nav-branch-row { display: flex; align-items: center; gap: 2px; }
+.nav-branch-row .nav-item { flex: 1; min-width: 0; }
+
+/* Drawn as a control, not a hint: the muted chrome text is translucent in the
+   light theme, and an expander in it could not be seen at all. The count says
+   how many sub-pages are under it. */
+.nav-expand {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: 0 0 auto;
+    height: 26px;
+    padding: 0 6px 0 8px;
+    border: 1px solid var(--border-chrome);
+    border-radius: 999px;
+    background: var(--surface-chrome-soft);
+    color: var(--accent);
+    font: inherit;
+    font-size: .72rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.nav-expand:hover { background: var(--surface-chrome-active); }
+.nav-expand[aria-expanded="true"] { background: var(--accent); border-color: var(--accent);
+    color: var(--surface-chrome); }
+.nav-expand-count { min-width: 1ch; text-align: center; }
+.nav-expand .chevron { transition: transform .18s ease; }
+.nav-expand[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
+.nav-group[data-collapsed="true"] .nav-expand { display: none; }
+
+.nav-children {
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    margin-left: var(--space-4);
+    padding-left: var(--space-2);
+    border-left: 2px solid var(--accent);
+}
+
+.nav-branch.open > .nav-children { display: flex; }
+.nav-item.nav-sub { padding-top: 7px; padding-bottom: 7px; font-size: .85rem; }
+/* The active bar sits on the guide line instead of the sidebar's edge. */
+.nav-item.nav-sub.active::before { left: calc(-1 * var(--space-2) - 2px); }
+
 /* ------------------------------------------- avatars, triggers and popovers */
 
 .avatar {
@@ -700,6 +748,35 @@ svg[hidden] { display: none; }
     font-size: 1.45rem; color: var(--text-strong); line-height: 1.1; }
 .stat-tile .st-label { font-size: .72rem; text-transform: uppercase;
     letter-spacing: .09em; color: var(--text-muted); font-weight: 600; }
+
+/* Overview: on a screen with room for it, the page fits the viewport and the
+   audit log and changelog each scroll inside their own half. */
+.content.page-fixed { height: 100vh; height: 100dvh; overflow: hidden; }
+.content.page-fixed .page-body { display: flex; flex-direction: column; min-height: 0; }
+.content.page-fixed #overview { flex: 1; min-height: 0; }
+
+.overview-split {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-5);
+    flex: 1;
+    min-height: 0;
+}
+
+.overview-panel { display: flex; flex-direction: column; min-height: 0; }
+.overview-panel .card-head { flex: 0 0 auto; }
+.panel-scroll { flex: 1; min-height: 0; overflow: auto; border-radius: var(--radius-md); }
+/* Half a screen is narrower than the table's usual minimum; let it wrap. */
+.panel-scroll table.data { min-width: 0; }
+.panel-scroll table.data thead th { position: sticky; top: 0; z-index: 1; }
+
+/* A narrow or short screen cannot share its height between two panels without
+   hiding one, so there the page scrolls as usual and each panel is capped. */
+@media (max-width: 900px), (max-height: 640px) {
+    .content.page-fixed { height: auto; overflow: visible; }
+    .overview-split { grid-template-columns: minmax(0, 1fr); }
+    .panel-scroll { max-height: 60vh; }
+}
 
 /* ------------------------------------------------------------------- tables */
 
@@ -1595,6 +1672,15 @@ input[type="color"] { width: 100%; height: 38px; padding: 2px; cursor: pointer; 
   align-items: center;
 }
 
+/* A shape with cells of different kinds (a toggle beside a picker) declares
+   its own columns rather than sharing the width equally. */
+.menu-row.templated { grid-template-columns: var(--row-template); }
+.menu-row .row-switch { justify-self: center; }
+.autosave-status { color: var(--text-muted); font-size: .8rem; margin-right: auto; }
+.autosave-status.error { color: var(--danger); }
+.row-game-name { font-weight: 600; color: var(--text-strong); padding: 0 var(--space-2); }
+.row-cell-none { color: var(--text-muted); text-align: center; }
+
 .menu-row .row-field.narrow {
   text-align: center;
 }
@@ -2105,26 +2191,31 @@ input[type="color"] { width: 100%; height: 38px; padding: 2px; cursor: pointer; 
 
 .announcement-tools > .btn { align-self: flex-start; }
 
-/* An editor that opens and closes like a sidebar group. The legend stays
-   visible when closed, and with it the section's unsaved marker. */
-.section-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: 0;
-    background: none;
-    border: 0;
-    cursor: pointer;
-    font: inherit;
-    letter-spacing: inherit;
-    text-transform: inherit;
-    color: inherit;
+/* An announcement block: fields on the left, the previews beside them and
+   kept in view, so editing never means scrolling away from what it changes. */
+.form-section.announcement-section {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+    column-gap: var(--space-5);
+    align-items: start;
+}
+.form-section.announcement-section > legend,
+.form-section.announcement-section > .field-hint { grid-column: 1 / -1; }
+.form-section.announcement-section > .announcement-tools {
+    position: sticky;
+    top: calc(var(--space-6) + 64px);
+    margin-top: 0;
+}
+@media (max-width: 1100px) {
+    .form-section.announcement-section { grid-template-columns: minmax(0, 1fr); }
+    .form-section.announcement-section > .announcement-tools { position: static; }
 }
 
-.section-toggle .chevron { transition: transform .18s ease; }
-.section-toggle[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
-.form-section.collapsible.collapsed { padding-bottom: var(--space-2); }
-.form-section.collapsible.collapsed > :not(legend) { display: none; }
+/* An image card's controls under its event's editor. */
+.card-tools { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-4); }
+.card-preview { width: 100%; max-width: 512px; aspect-ratio: 1024 / 320; border-radius: var(--radius-sm);
+    background: var(--surface-input); object-fit: cover; }
+.card-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
 /* A multi-line list setting: the rules editor's repeating block, one box per
    item, with the value carried as JSON in a hidden text area. */

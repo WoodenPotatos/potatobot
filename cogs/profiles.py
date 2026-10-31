@@ -17,8 +17,7 @@ if ROOT_DIR not in sys.path:
 from core import database
 
 from discord.ext import commands
-from datetime import datetime
-from core.clock import local_date, local_time, parse_stored, utc_now
+from core.clock import local_date, parse_stored, utc_now
 from cogs.utils import (display_member_name, guild_member_ids, is_channel,
                         voice_reward_block, t)
 from core.feature_access import is_enabled, require_interaction_feature

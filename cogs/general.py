@@ -14,6 +14,7 @@ from discord.ext import commands, tasks
 from core import database
 from cogs.utils import (BoundedCooldownMap, display_member_name,
                         guild_setting_sync, handle_loop_error, t)
+from core.supported_games import lfg_role_for_channel
 from core.version import REPOSITORY_URL, release_channel, version_display
 from core.feature_access import require_interaction_feature
 
@@ -34,6 +35,7 @@ def get_help_data():
                 t("general.usage_leaderboard"): t("general.cmd_leaderboard"),
                 t("general.usage_search"): t("general.cmd_search"),
                 t("general.usage_version"): t("general.cmd_version"),
+                t("general.usage_membercount"): t("general.cmd_membercount"),
                 t("general.usage_help"): t("general.cmd_help"),
                 t("general.usage_mydata"): t("general.cmd_mydata"),
                 t("general.usage_deletemydata"): t("general.cmd_deletemydata")
@@ -558,6 +560,37 @@ class General(commands.Cog):
 
         await ctx.send(embed=embed)
 
+    @commands.hybrid_command(name="membercount", description=t("general.cmd_membercount"))
+    async def membercount(self, ctx):
+        # A command rather than a locked "Members: N" channel, which costs a
+        # rename (rate-limited to two per ten minutes) on every join.
+        guild = ctx.guild
+        embed = discord.Embed(
+            title=t("general.membercount_title", guild=guild.name),
+            color=discord.Color.blurple())
+        embed.add_field(name=t("general.membercount_total"),
+                        value=str(guild.member_count or 0), inline=True)
+        # The split counts the member cache, which is complete only once the
+        # guild is chunked; before that it would undercount humans, so it is
+        # left out rather than shown wrong. Online counts would need the
+        # privileged presences intent, which this bot does not request.
+        if guild.chunked:
+            bots = sum(1 for member in guild.members if member.bot)
+            embed.add_field(name=t("general.membercount_humans"),
+                            value=str(len(guild.members) - bots), inline=True)
+            embed.add_field(name=t("general.membercount_bots"),
+                            value=str(bots), inline=True)
+        else:
+            embed.set_footer(text=t("general.membercount_partial"))
+        embed.add_field(name=t("general.membercount_boosts"),
+                        value=t("general.membercount_boosts_value",
+                                count=guild.premium_subscription_count or 0,
+                                tier=guild.premium_tier),
+                        inline=True)
+        if guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
+        await ctx.send(embed=embed)
+
     @commands.hybrid_command(name="search", description=t("general.cmd_search"))
     @commands.cooldown(1, 120, commands.BucketType.user)
     async def search(self, ctx, needed: int = 0, *, game: str = None):
@@ -568,13 +601,13 @@ class General(commands.Cog):
             return await ctx.send(
                 t("general.search_err_needed_range", limit=LFG_MAX_NEEDED),
                 ephemeral=True)
-        lfg_channels = guild_setting_sync(ctx.guild.id, "lfg_channels") or {}
+        role_id = lfg_role_for_channel(
+            guild_setting_sync(ctx.guild.id, "games"), ctx.channel.id)
         default_lfg = guild_setting_sync(ctx.guild.id, "lfg_default_channel")
         default_lfg_channel_id = str(default_lfg or "")
         channel_id_str = str(ctx.channel.id)
 
-        if channel_id_str in lfg_channels:
-            role_id = lfg_channels[channel_id_str]
+        if role_id is not None:
             role = ctx.guild.get_role(role_id)
 
             if not role:

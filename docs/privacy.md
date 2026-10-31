@@ -83,8 +83,10 @@ so no guild could retain data on another's behalf.
 
 ## Operators
 
-The host can act on a member's behalf from the dashboard's Privacy card
-(Audit page): entering a user id queues the same erasure for the bot to execute.
-This is host-only rather than guild-administrator, because erasure spans the whole
-installation. Erasure and retention records appear in the same card, and in the
-audit feed, so an operator can show what was retained.
+The host can act on a member's behalf from the dashboard's Privacy page
+(Administration): entering a user id queues the same erasure for the bot to
+execute. This is host-only rather than guild-administrator, because erasure spans
+the whole installation. Erasure and retention records appear on the same page,
+read through their own route so none falls out of the general feed's row limit,
+and in the audit feed, so an operator can show what was retained. The page
+carries no feature flag, so no switch can hide it.

@@ -1454,7 +1454,6 @@ class DashboardSecurityTests(unittest.TestCase):
     def test_one_guilds_price_edit_cannot_change_another_guilds_price(self):
         """Before schema 8 these tables had no guild dimension, so any guild's
         PATCH rewrote the whole installation's prices."""
-        from unittest.mock import patch
 
         database.register_guild(456, "Other Guild")
         # Calls the surviving half directly. The mirror wrapper that used to

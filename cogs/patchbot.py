@@ -33,6 +33,7 @@ if ROOT_DIR not in sys.path:
 from cogs.utils import guild_setting_sync, handle_loop_error, plain_markdown, t
 from core import database
 from core.feature_access import is_enabled
+from core.supported_games import patch_target
 
 patchbot_logger = logging.getLogger("PotatoBot.Patchbot")
 
@@ -353,7 +354,8 @@ class Patchbot(commands.Cog):
         # unlike socials.py, no separate first-sight branch is needed here.
         if not is_enabled(guild.id, GAME_FEATURE_KEYS[game_key]):
             return
-        channel_id = guild_setting_sync(guild.id, f"patchbot_{game_key}_channel")
+        channel_id, role_id = patch_target(
+            guild_setting_sync(guild.id, "games"), game_key)
         channel = guild.get_channel(channel_id) if channel_id else None
         if not channel:
             return
@@ -364,7 +366,6 @@ class Patchbot(commands.Cog):
         if already_announced == version:
             return
 
-        role_id = guild_setting_sync(guild.id, f"patchbot_{game_key}_role")
         embed = discord.Embed(
             title=t("patchbot.new_patch_title", game=t(f"dashboard.game_names.{game_key}")),
             description=t("patchbot.new_patch_desc", title=plain_markdown(title)),

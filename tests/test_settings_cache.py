@@ -279,7 +279,7 @@ class RoleMenuShapeTests(unittest.TestCase):
         for shape in (settings_registry.JSON_SHAPE_ITEM_VALUES,
                       settings_registry.JSON_SHAPE_ROLE_MENU,
                       settings_registry.JSON_SHAPE_LEVEL_ROLES,
-                      settings_registry.JSON_SHAPE_LFG_CHANNELS,
+                      settings_registry.JSON_SHAPE_GAMES,
                       settings_registry.JSON_SHAPE_FACTIONS):
             with self.subTest(shape=shape):
                 self.assertIn(shape, settings_registry._JSON_SHAPE_VALIDATORS)
@@ -301,7 +301,6 @@ class RoleMenuShapeTests(unittest.TestCase):
         page, the way `shop_price_*` is, which is why it is `edited_elsewhere`.
         The exemption is verified below rather than taken on trust.
         """
-        import re
         from core import settings_registry
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         rendered = set(re.findall(r"^    (\w+): \{$", source, re.MULTILINE))
@@ -341,24 +340,26 @@ class RoleMenuShapeTests(unittest.TestCase):
         other. Nested-entry shapes only: where the entry *is* the id there are no
         field names to agree about.
         """
-        import re
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         expected = {
             "role_menu": {"id", "emoji"},
             "factions": {"leader_role_id", "manageable_ids"},
+            "games": {"role", "channel", "lfg", "patch_channel"},
         }
         for shape, fields in expected.items():
             with self.subTest(shape=shape):
                 block = source[source.index(f"    {shape}: {{"):]
                 block = block[:block.index("\n    },")]
-                declared = set(re.findall(r"\{name: '(\w+)'", block))
+                # A `__` column is drawn in the row but is not data in the value
+                # (a game's patch notes switch is a feature).
+                declared = {name for name in re.findall(r"\{name: '(\w+)'", block)
+                            if not name.startswith("__")}
                 self.assertEqual(fields, declared)
 
     def test_a_shape_whose_entry_is_the_id_declares_one_column(self):
-        """`level_roles` and `lfg_channels` map straight to a single role."""
-        import re
+        """`level_roles` maps straight to a single role."""
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
-        for shape in ("level_roles", "lfg_channels"):
+        for shape in ("level_roles",):
             with self.subTest(shape=shape):
                 block = source[source.index(f"    {shape}: {{"):]
                 block = block[:block.index("\n    },")]
@@ -391,16 +392,42 @@ class LevelLadderShapeTests(unittest.TestCase):
                     validate_setting_value(self.definition, value)
 
 
-class LfgAndFactionShapeTests(unittest.TestCase):
-    def test_the_lfg_map_is_snowflakes_on_both_sides(self):
-        definition = SETTING_DEFINITIONS["lfg_channels"]
-        value = validate_setting_value(
-            definition, {"1420070400000000004": "1420070400000000005"})
-        self.assertEqual({"1420070400000000004": 1420070400000000005}, value)
-        for bad in ({"abc": 1}, {"1": "not an id"}, []):
-            with self.subTest(bad=bad):
+class GamesAndFactionShapeTests(unittest.TestCase):
+    def test_a_game_row_is_normalised_with_every_field(self):
+        definition = SETTING_DEFINITIONS["games"]
+        value = validate_setting_value(definition, {
+            " lol ": {"role": "1420070400000000005", "channel": "1420070400000000004",
+                      "lfg": True},
+            "Among Us": {"role": "1420070400000000006"},
+        })
+        self.assertEqual({
+            "lol": {"role": 1420070400000000005, "channel": 1420070400000000004,
+                    "lfg": True, "patch_channel": None},
+            "Among Us": {"role": 1420070400000000006, "channel": None,
+                         "lfg": False, "patch_channel": None},
+        }, value)
+
+    def test_a_malformed_game_list_is_refused(self):
+        definition = SETTING_DEFINITIONS["games"]
+        channel, role = "1420070400000000004", "1420070400000000005"
+        for value, why in (
+            ([], "a list rather than a map"),
+            ({"": {}}, "a blank name"),
+            ({"a" * 61: {}}, "a name past the limit"),
+            ({"x": {"extra": 1}}, "an unknown field"),
+            ({"x": {"lfg": "yes"}}, "an LFG flag that is not a boolean"),
+            ({"x": {"lfg": True, "channel": channel}}, "LFG with no role to ping"),
+            ({"x": {"lfg": True, "role": role}}, "LFG with no channel"),
+            ({"x": {"lfg": True, "role": role, "channel": channel},
+              "y": {"lfg": True, "role": role, "channel": channel}},
+             "two LFG games in one channel"),
+            ({"Custom": {"patch_channel": channel}}, "patch notes for a custom game"),
+            ({"x": {"role": "not an id"}}, "a role that is not a snowflake"),
+            ({str(n): {} for n in range(51)}, "more games than the limit"),
+        ):
+            with self.subTest(why=why):
                 with self.assertRaises((ValueError, TypeError)):
-                    validate_setting_value(definition, bad)
+                    validate_setting_value(definition, value)
 
     def test_a_faction_is_a_leader_plus_the_roles_it_manages(self):
         definition = SETTING_DEFINITIONS["factions"]
@@ -430,7 +457,6 @@ class LfgAndFactionShapeTests(unittest.TestCase):
         import dashboard_api
         cases = {
             "level_roles": ({"5": 1420070400000000002}, "1420070400000000002"),
-            "lfg_channels": ({"1": 1420070400000000005}, "1420070400000000005"),
         }
         for key, (value, expected) in cases.items():
             with self.subTest(key=key):
@@ -438,6 +464,13 @@ class LfgAndFactionShapeTests(unittest.TestCase):
                     SETTING_DEFINITIONS[key], value)
                 self.assertEqual(expected, list(wired.values())[0])
                 self.assertGreater(int(expected), 2 ** 53)
+        # Three ids one level down, in each of the fields that can hold one.
+        wired = dashboard_api._wire_value(SETTING_DEFINITIONS["games"], {"lol": {
+            "role": 1420070400000000005, "channel": 1420070400000000004,
+            "lfg": True, "patch_channel": 1420070400000000003}})
+        self.assertEqual({"role": "1420070400000000005", "channel": "1420070400000000004",
+                          "lfg": True, "patch_channel": "1420070400000000003"},
+                         wired["lol"])
         wired = dashboard_api._wire_value(
             SETTING_DEFINITIONS["factions"],
             {"a": {"leader_role_id": 1420070400000000006,
@@ -542,10 +575,11 @@ class EverySettingHasAReaderTests(unittest.TestCase):
         "reward_",                  # database.get_reward, by activity
         "warn_threshold_", "warn_action_", "warn_timeout_minutes_",
         "work_tier_", "work_xp_",
-        "patchbot_",                 # cogs/patchbot.py, by SUPPORTED_GAMES key
         # cogs/announcements.py, by `template_setting_key(event, field)`
         "join_message_", "leave_message_", "kick_message_", "ban_message_",
         "boost_message_", "boost_reward_message_",
+        # cogs/announcements.py, by `rejoin_setting_key(field)`
+        "rejoin_message_",
     )
 
     def test_every_setting_is_read_somewhere(self):
@@ -621,7 +655,10 @@ class RowEditorReportsCleanTests(unittest.TestCase):
         stored = {
             "role_menu": {"LoL": {"id": 1420070400000000001, "emoji": "x"}},
             "level_roles": {"5": 1420070400000000002},
-            "lfg_channels": {"1420070400000000003": 1420070400000000004},
+            "games": {"lol": {"role": 1420070400000000003, "channel": 1420070400000000004,
+                              "lfg": True, "patch_channel": None},
+                      "Among Us": {"role": None, "channel": 1420070400000000004,
+                                   "lfg": False, "patch_channel": None}},
             "factions": {"alpha": {"leader_role_id": 1420070400000000005,
                                    "manageable_ids": [1420070400000000006,
                                                       1420070400000000002]}},
@@ -664,10 +701,12 @@ class RowEditorReportsCleanTests(unittest.TestCase):
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         spec = source[source.index("const JSON_ROW_SHAPES = {"):]
         spec = spec[:spec.index("\n};")]
-        # One per shape: the role a menu grants, the role a level grants, the
-        # role an LFG channel pings, the role that leads a faction, the weight
-        # a wheel segment carries.
-        self.assertEqual(5, spec.count("required: true"))
+        # One per shape that has one: the role a menu grants, the role a level
+        # grants, the role that leads a faction, the weight a wheel segment
+        # carries. A game row's channel and role are required only together
+        # with LFG, which its `incomplete` rule says instead.
+        self.assertEqual(4, spec.count("required: true"))
+        self.assertIn("incomplete: (columns) =>", spec)
 
 
 class NavigationReachabilityTests(unittest.TestCase):
@@ -686,7 +725,6 @@ class NavigationReachabilityTests(unittest.TestCase):
                            for definition in SETTING_DEFINITIONS.values()}
 
     def test_a_page_owning_a_section_is_not_gated_on_settings(self):
-        import re
 
         offenders = []
         for page, category in re.findall(
@@ -716,7 +754,6 @@ class NavigationReachabilityTests(unittest.TestCase):
         settings behind it stay reachable so a family can be configured before
         it is enabled.
         """
-        import re
 
         for family in ("casino", "minigames", "everydle"):
             pattern = (r'data-feature="([a-z_]+)"\s+data-page="'
@@ -728,19 +765,40 @@ class NavigationReachabilityTests(unittest.TestCase):
             self.assertIn(family, settings_registry.FEATURE_DEFINITIONS)
 
     def test_every_settings_category_has_a_nav_entry(self):
-        """The mirror image: a category nothing links to is unreachable too."""
-        import re
+        """The mirror image: a category nothing links to is unreachable too.
 
+        Restated when Community split up: a category whose every setting is
+        `edited_elsewhere` (`tickets`) has no form to reach — its settings are
+        edited on their own page, which the next test pins — so only a
+        category with something to render needs a sidebar entry.
+        """
+
+        rendered = {definition.category
+                    for definition in SETTING_DEFINITIONS.values()
+                    if not definition.edited_elsewhere}
         # Underscores included: `member_announcements` is a category, and a
         # pattern without them reported it unlinked while it was linked.
         linked = set(re.findall(r'data-category="([a-z_]+)"', self.html))
-        self.assertEqual(set(), self.categories - linked,
+        self.assertEqual(set(), rendered - linked,
                          "a settings category with no sidebar entry")
+
+    def test_every_setting_edited_elsewhere_is_rendered_by_a_page(self):
+        """The other half: a setting kept off every form must be drawn by name
+        somewhere, or nothing can edit it."""
+        script = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
+        for key, definition in SETTING_DEFINITIONS.items():
+            if not definition.edited_elsewhere:
+                continue
+            with self.subTest(setting=key):
+                # A built-in item's price is reached through the item's own
+                # `price_setting`, which the API sends with the shop list.
+                self.assertTrue(f"'{key}'" in script or key.startswith("shop_price_"),
+                                "edited elsewhere, but no page names it")
 
     #: Pages that clear an obligation a member has already paid for. These are
     #: the ones the original incident was really about, and the only ones that
     #: must be reachable whatever is switched off.
-    OBLIGATION_PAGES = {"redeems", "audit"}
+    OBLIGATION_PAGES = {"redeems", "privacy"}
 
     def test_a_page_that_clears_an_obligation_is_never_feature_gated(self):
         """The rule that survived, restated once the behaviour changed.
@@ -760,7 +818,6 @@ class NavigationReachabilityTests(unittest.TestCase):
         all.** Everything else coming back with its feature is a deliberate
         trade.
         """
-        import re
 
         for page in self.OBLIGATION_PAGES:
             with self.subTest(page=page):
@@ -791,7 +848,6 @@ class NavigationReachabilityTests(unittest.TestCase):
     def test_the_off_notice_names_a_real_locale_family(self):
         """The notice is the only thing telling an operator the feature is off."""
         import json
-        import re
 
         script = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         self.assertIn("dashboard.feature_off_notice", script)
@@ -877,14 +933,12 @@ class StartupWiringTests(unittest.TestCase):
 
     def test_the_premise_holds(self):
         """A pattern that matches nothing would pass whatever the markup said."""
-        import re
         self.assertGreater(
             len(re.findall(r"getElementById\('([a-z0-9-]+)'\)\.", self.script)), 5)
 
     def test_every_directly_dereferenced_element_exists(self):
         """Only the unguarded ones. `const x = getElementById(...)` followed by a
         null check is a deliberate optional element and stays allowed."""
-        import re
 
         # An id the client creates itself counts: the gacha banner name field is
         # built in `renderGachaBannerBar` rather than written in the markup.

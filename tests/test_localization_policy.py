@@ -379,6 +379,7 @@ class JavaScriptIsActuallyRunTests(unittest.TestCase):
         "tests.test_dashboard_boot.StaleClientNoticeTests",
         "tests.test_deployment_and_features.FeatureCascadePromptTests",
         "tests.test_gacha.FeaturedChanceFormulaTests",
+        "tests.test_games_page.GamesPageHarnessTests",
         "tests.test_item_creator.CustomRewardPoolFreshnessTests",
         "tests.test_item_creator.ItemConfigWireFormatTests",
         "tests.test_item_creator.TemplateFieldsFollowTheChoiceTests",

@@ -18,11 +18,10 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from core import database
-from core import item_catalog
 
 from discord.ext import commands
-from datetime import datetime, timedelta
-from core.clock import local_date, local_time, parse_stored, utc_now
+from datetime import timedelta
+from core.clock import local_time, parse_stored, utc_now
 from cogs.utils import (
     BoundedCooldownMap, apply_database_result, currency_emoji, currency_plain,
     guild_setting_sync, is_channel, is_premium, item_mechanic_value, t,

@@ -40,6 +40,20 @@ class DashboardBootTests(unittest.TestCase):
         # The premise: a run that opened nothing would also exit zero.
         self.assertGreaterEqual(result.stdout.count("ok "), 15, result.stdout)
 
+    def test_the_sidebar_tree_opens_remembers_and_hides_with_its_parent(self):
+        """Sub-pages under a branch: see `tests/js/nav_branches.js`."""
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        if not (ROOT / "node_modules" / "jsdom").is_dir():
+            self.skipTest("jsdom is not installed; run `npm install`")
+        result = subprocess.run(
+            [node, str(ROOT / "tests" / "js" / "nav_branches.js"), str(ROOT)],
+            capture_output=True, text=True, cwd=str(ROOT), timeout=120,
+        )
+        self.assertEqual(0, result.returncode, f"{result.stdout}\n{result.stderr}")
+        self.assertGreaterEqual(result.stdout.count("ok "), 11, result.stdout)
+
 
 class StaleClientNoticeTests(unittest.TestCase):
     """A tab left open across a deploy must say so.

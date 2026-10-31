@@ -15,8 +15,8 @@ from core import database
 from core import permission_audit
 from core.managed_messages import render_managed_message
 from discord.ext import commands
-from datetime import datetime, timedelta
-from core.clock import local_date, local_time, parse_stored, utc_now
+from datetime import timedelta
+from core.clock import utc_now
 from cogs.utils import (
     BoundedCooldownMap, apply_admin_level_change, can_self_assign_role,
     currency_emoji, guild_setting_sync, guild_settings_sync, is_staff,
@@ -344,7 +344,7 @@ class Admin(commands.Cog):
                     await asyncio.sleep(0.5)
                 except discord.Forbidden:
                     error_count += 1
-                except Exception as e:
+                except Exception:
                     error_count += 1
 
         embed = discord.Embed(

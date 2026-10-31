@@ -27,8 +27,7 @@ from core import database
 from core.bounded import BoundedCooldownMap, BoundedValueMap  # noqa: F401
 
 from discord.ext import commands
-from datetime import datetime
-from core.clock import local_date, local_time, parse_stored, utc_now
+from core.clock import local_date, parse_stored, utc_now
 
 utility_logger = logging.getLogger("PotatoBot.Utils")
 TOP_RANKER_DEBOUNCE_SECONDS = 30
@@ -291,6 +290,31 @@ def item_mechanic_value(guild_id, item_key):
     overrides = guild_setting_sync(guild_id, "shop_item_values")
     return item_catalog.mechanic_value(
         item_key, overrides if isinstance(overrides, dict) else {})
+
+
+# Whether a joining member is returning, decided once by `serverevents` (which
+# creates the account in the same join) and awaited by the join announcement.
+# Both listeners run concurrently, so asking `user_exists` from the
+# announcement could see the account this very join had just created.
+member_arrivals = BoundedValueMap(max_entries=1024)
+# Both listeners of one join ask within moments of each other; an older record
+# is a previous join of the same member and must not answer for this one.
+ARRIVAL_MAX_AGE_SECONDS = 60
+
+
+def member_arrival(guild_id: int, user_id: int) -> asyncio.Future:
+    """The one future for this join, whichever listener asks first."""
+    key = (guild_id, user_id)
+    loop = asyncio.get_running_loop()
+    held = member_arrivals.get(key)
+    if held is not None:
+        future, created = held
+        if (future.get_loop() is loop
+                and time.monotonic() - created < ARRIVAL_MAX_AGE_SECONDS):
+            return future
+    future = loop.create_future()
+    member_arrivals[key] = (future, time.monotonic())
+    return future
 
 
 def guild_setting_sync(guild_id: int, key: str):

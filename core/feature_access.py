@@ -45,6 +45,7 @@ def _command(feature_key: str | None, response: ResponsePolicy = ResponsePolicy.
 COMMAND_POLICIES = {
     "help": _command("general", ResponsePolicy.PRIVATE),
     "version": _command("general"),
+    "membercount": _command("general"),
     "search": _command("lfg"),
     "profile": _command("profiles"),
     "leaderboard": _command("profiles"),

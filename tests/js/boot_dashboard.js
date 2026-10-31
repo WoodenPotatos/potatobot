@@ -50,7 +50,7 @@ const AUDIT = [
     {audit_id: 4, action: 'setting.update', target_key: 'language',
      actor_id: GUILD, created_at: '2026-08-27T03:59:30+00:00',
      old_value: 'hu', new_value: 'en'},
-    // The two the privacy card pulls out of the feed into its own table.
+    // The two the Privacy page's own route returns (`PRIVACY` below).
     {audit_id: 5, action: 'user.erase', target_key: '-1',
      actor_id: GUILD, created_at: '2026-08-25T09:00:00+00:00',
      old_value: null, new_value: {retained_rows: {users: 1}}},
@@ -58,6 +58,17 @@ const AUDIT = [
      actor_id: GUILD, created_at: '2026-08-24T09:00:00+00:00',
      old_value: null, new_value: 7},
 ];
+
+/* What `/privacy/records` answers: the server filters the feed in SQL. */
+const PRIVACY = AUDIT.filter((entry) => entry.action.startsWith('user.'));
+
+/* One release, so the overview's changelog panel runs its row renderer. */
+const CHANGELOG = [{version: '2.18.5a', label: null,
+                    entries: ['**New** `/membercount` *command*, see '
+                              + '[the notes](https://example.test/notes).']}];
+
+/* Set by a check that needs one overview panel's route to fail. */
+let changelogFails = false;
 
 /* The shop's shelves, so the grouped table is what the harness draws. Without
  * them the page takes its ungrouped fallback and the grouping never runs. */
@@ -150,8 +161,18 @@ window.fetch = async (url) => {
         return ok({status: 'success', data: ITEMS, categories: SECTIONS,
                    custom_count: 1});
     }
+    if (u.includes('/privacy/records')) {
+        return ok({status: 'success', data: PRIVACY});
+    }
     if (u.includes('/audit')) {
         return ok({status: 'success', data: AUDIT});
+    }
+    if (u.includes('/changelog')) {
+        if (changelogFails) {
+            return {ok: false, status: 503,
+                    text: async () => JSON.stringify({status: 'error', message: 'down'})};
+        }
+        return ok({status: 'success', data: CHANGELOG});
     }
     return ok({status: 'success', data: []});
 };
@@ -204,7 +225,7 @@ window.eval(script);
     // An actor is `name (id)` when the server named it and the bare id when it
     // did not. Asserted rather than trusted: a missing name renders as nothing
     // and would look exactly like the feature never existing.
-    await window.eval('showPage("audit")');
+    await window.eval('showPage("overview")');
     await new Promise((resolve) => setTimeout(resolve, 40));
     const actors = [...window.document.querySelectorAll('#audit-list tbody tr')]
         .map((row) => row.lastElementChild.textContent);
@@ -215,5 +236,44 @@ window.eval(script);
         console.log(`FAIL  audit actors rendered as ${JSON.stringify(actors)}`);
         failed = true;
     }
+
+    const check = (condition, label) => {
+        console.log(`${condition ? 'ok   ' : 'FAIL '} ${label}`);
+        if (!condition) failed = true;
+    };
+    const doc = window.document;
+    check(doc.querySelector('.content').classList.contains('page-fixed'),
+          'overview fixes the page height');
+    check(doc.querySelectorAll('#changelog-list .changelog-release').length === 1,
+          'overview renders the changelog panel');
+    const note = doc.querySelector('#changelog-list .changelog-entries li');
+    check(Boolean(note?.querySelector('.preview-strong')
+                  && note.querySelector('.preview-inline-code')
+                  && note.querySelector('.preview-em')
+                  && note.querySelector('a[href="https://example.test/notes"]'))
+          && !note.textContent.includes('**'),
+          'release notes render their markdown');
+    check(!doc.querySelector('.nav-item[data-page="audit"], .nav-item[data-page="changelog"]'),
+          'audit and changelog have no pages of their own');
+
+    // One panel failing must not blank the other.
+    changelogFails = true;
+    await window.eval('showPage("overview")');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    changelogFails = false;
+    check(doc.querySelectorAll('#audit-list tbody tr').length === AUDIT.length,
+          'the audit panel survives a failed changelog');
+    check(doc.querySelectorAll('#changelog-list .changelog-release').length === 0
+          && doc.querySelector('#changelog-list').textContent.trim() !== '',
+          'the failed changelog panel says so');
+
+    await window.eval('showPage("privacy")');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    check(!doc.querySelector('.content').classList.contains('page-fixed'),
+          'leaving overview releases the page height');
+    check(doc.querySelectorAll('#privacy-list tbody tr').length === PRIVACY.length,
+          'privacy lists its records from its own route');
+    check(!doc.getElementById('erasure-form').classList.contains('hidden'),
+          'the host sees the erasure form');
     process.exit(failed ? 1 : 0);
 })();

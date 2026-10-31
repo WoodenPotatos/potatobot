@@ -6,6 +6,127 @@ stable. A build keeps its number across channels, so `2.18.3a` publishes as
 2026-10-22 by adding the old beta serial to z (`2.18.0-beta.1` is `2.18.1b`);
 the public repository's git tags keep their original names.
 
+## 2.19.17b
+
+- **Music logs when a song starts and where in it a gap fell.** "Ran empty"
+  now says how many seconds into the song it happened, and each song logs how
+  long it waited and how much it had buffered, so whether gaps cluster at the
+  start (which a larger reserve would fix) can be read off the log.
+- **Queueing songs no longer makes you wait.** The music panel's search and
+  `/play` each had a 15-second cooldown, so queueing a second song meant
+  waiting it out. Now there is no timer: each person can have one lookup
+  running at a time, and the next one can start as soon as it finishes.
+- **A song now builds a short reserve before it starts**, about half a second
+  of audio, so the start of a song no longer runs dry for a moment while the
+  stream gets going.
+- **Songs no longer start with a sped-up blip.** While a song was still
+  loading, the player counted the wait as falling behind and then played the
+  first half second or so too fast to catch up. It now plays silence on time
+  while the song loads, so it starts at normal speed. A stream that runs short
+  mid-song is now a short gap instead of a gap followed by a rush.
+- **Music logs when its player falls behind.** A gap followed by a sped-up
+  rush can come from the stream, from the bot being busy, or from the network
+  to Discord. The log now says which of the first two it was, so the next one
+  can be traced instead of guessed at.
+- **The dashboard's and the bot's main files are now type-checked in CI**,
+  as the shared core already was, and a linter (ruff) now catches unused
+  imports, undefined names and the like everywhere. Its 57 findings and
+  mypy's six were all fixed; no behaviour changed.
+- **The container is locked down further.** Its root filesystem is now
+  read-only, so the bot cannot change its own code, and files it creates are
+  readable only by its own account, however the container is started
+  (started through compose, it would have written the database readable by
+  every account on the host).
+- **Join and leave messages can show an image card.** Switch it on in the
+  event's settings: the member's avatar and name, with a line of your own
+  underneath, drawn on a background image. Upload any picture as the
+  background (it is cropped to fit), or keep the built-in one. The card takes
+  the message's big image spot, and the dashboard shows a live preview. If
+  many people join at once, the bot sends the normal message instead of
+  drawing a card for each of them.
+- **A stuck music search can no longer pile up inside the bot.** Each
+  YouTube lookup now runs as a small separate process that is stopped
+  outright after 20 seconds. Before, a lookup that hung (for example on a
+  slow DNS answer) kept running in the background until the bot restarted.
+  The lookup process also never sees the bot's token.
+- **A member who comes back can get a different welcome.** The Join page
+  has two blocks, "New member" and "Returning member" (someone the bot has
+  seen before), each with its own title, text variants, plain text, card
+  line, preview and Send test. Anything left empty in the returning block
+  uses the new member's, so nothing changes until you write one. The
+  returning welcome's image card can have its own background too.
+- **Announcement pages show their previews beside the fields**, so you no
+  longer scroll away from what you are changing. On a narrow screen they
+  stack as before.
+- **Title fields say that Discord ignores formatting there.** Bold or
+  italics in an embed's title show as raw symbols in Discord, unlike in its
+  text. The rules, embed and announcement title fields now say so.
+- **Deleting a posted message no longer needs Manage Messages.** Removing a
+  role menu, rules panel or other managed message from the dashboard was
+  refused unless the bot had that permission, though Discord lets the bot
+  delete its own messages without it.
+- **Release notes on the Overview are formatted.** Bold, italics, `code`
+  and web links in the notes now show as formatting instead of raw symbols,
+  using the same renderer as the message previews.
+- **Settings save themselves.** There is no Save button any more: a switch,
+  a channel or role picker, or a checkbox saves the moment you change it, and
+  a text or number box saves when you stop typing for a moment or leave it.
+  The line under the form says when everything is saved. If a value is
+  refused, you are told why and the field goes back to what is saved. A game
+  row that is not finished yet (LFG on but no role) waits until it is,
+  instead of being saved half-done.
+- **LFG and patch notes are set up together, one game at a time.** The new
+  Game channels page, at the top of Games, has one row per game: its role,
+  its channel, whether `/search` works there, and its patch notes switch and
+  channel. The role is pinged by both. Patch notes go to the game's channel
+  unless you pick another. Add a supported game from the list, or a custom
+  game by name (custom games have LFG only). The "other games" channel and
+  the post timeout stay below the list. Your existing setup is converted
+  when the bot starts: an LFG channel joins the game that pings the same
+  role, and any other becomes "Game 1", "Game 2"… for you to rename. The
+  dashboard's permission check now also covers LFG game channels.
+  **This build migrates the database (schema 26)**, so the bot makes a
+  backup first; going back to an older build needs that backup.
+- **New `/membercount` command.** It shows how many members the server has,
+  split into humans and bots, plus the number of boosts and the boost level.
+  Right after the bot restarts, while Discord is still sending the member
+  list, it shows only the total and says the split is still loading, rather
+  than a wrong number.
+- **Each announcement has its own page.** In the menu, Announcements opens
+  into a list of its enabled events (Join, Leave, Kick…), each with its own
+  short page. The main Announcements page keeps the on/off switches. A
+  sub-page appears only while its switch is on.
+- **The dashboard keeps working when Discord's channel and role lists cannot
+  be loaded.** A failure there used to stop the whole page from loading its
+  switches, which made sub-pages and sub-toggles vanish. Now it shows a
+  warning and everything else loads; channel and role pickers keep what is
+  already saved.
+- **Menu items with sub-pages are easy to spot.** They have a coloured button
+  showing how many sub-pages they hold; it fills in while open, and opening
+  the parent page opens its sub-pages too.
+- **The dashboard's menu is reorganised.** The old Community page held
+  levels, tickets, temporary voice, onboarding and Twitch/YouTube in one long
+  form; each now has its own page. Builders sit under the feature they belong
+  to: Rules panel and Entry gate under Onboarding, Responses under Work, and
+  the ticket panel is now simply Tickets. A page with sub-pages has a small
+  arrow beside it to open or close them; your browser remembers which ones
+  you opened, and the page you are on is always shown.
+- **The dashboard's Overview shows recent changes and the changelog side by
+  side.** The empty space under the tiles now holds the audit log on one side
+  and the release notes on the other. On a large screen the page itself stays
+  still and each half scrolls on its own; on a phone they stack. The separate
+  Audit and Changelog pages are gone.
+- **Privacy has its own page under Administration.** Member data erasure and
+  the list of past erasures moved there from the Audit page. The list used to
+  be picked out of the latest 100 audit entries, so an older erasure could
+  drop off it; it is now read on its own and shows every one.
+- **The invite log no longer names the wrong inviter in one rare case.** If a
+  moderator deleted an invite that had one use left, the next member who
+  joined through Server Discovery or a bot's add link was credited to that
+  invite. Now an invite that disappeared counts as used only when Discord
+  deleted it within two seconds of the join; otherwise the log says the
+  inviter could not be determined.
+
 ## 2.18.4b
 
 - **Join, leave and boost messages can be written by each server.** The

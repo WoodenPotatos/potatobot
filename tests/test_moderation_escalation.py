@@ -292,7 +292,7 @@ class EscalationTests(unittest.IsolatedAsyncioTestCase):
                                   ("ban", "ban")):
             with self.subTest(action=action):
                 applied, member = await self._run({
-                    "warn_threshold_spam": 3, f"warn_action_spam": action,
+                    "warn_threshold_spam": 3, "warn_action_spam": action,
                     "warn_timeout_minutes_spam": 15,
                     "moderation_log_channel": 1})
                 self.assertEqual(action, applied)
@@ -599,7 +599,6 @@ class WarnDestinationTests(unittest.TestCase):
         If a caller went back to resolving the channel itself, asserting the
         helper call would still pass while the destination could differ.
         """
-        import cogs.utils
 
         moderation = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
         self.assertNotIn("moderation_log_channel", moderation,

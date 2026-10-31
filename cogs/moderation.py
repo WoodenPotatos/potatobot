@@ -28,8 +28,8 @@ from core import database
 
 from core.bounded import BoundedValueMap
 from discord.ext import commands
-from datetime import datetime, timedelta
-from core.clock import local_date, local_time, parse_stored, utc_now
+from datetime import timedelta
+from core.clock import local_time, parse_stored, utc_now
 from core.feature_access import is_enabled, maintenance_blocks
 from core.settings_registry import WARN_DEFAULT_TAG, WARN_TAGS
 from cogs.utils import (can_self_assign_role, is_staff, is_higher_than,

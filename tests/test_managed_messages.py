@@ -732,6 +732,44 @@ console.log(JSON.stringify(out));
                                  response.get_json())
 
 
+class ManagedDeleteTests(unittest.IsolatedAsyncioTestCase):
+    """Removing a deleted row's message, which is always the bot's own."""
+
+    BOT = 1420070400000000031
+
+    def channel(self, author_id, manage_messages=False, delete=None):
+        self.message = SimpleNamespace(author=SimpleNamespace(id=author_id),
+                                       delete=delete or AsyncMock())
+        me = SimpleNamespace(id=self.BOT)
+        return SimpleNamespace(
+            guild=SimpleNamespace(me=me),
+            fetch_message=AsyncMock(return_value=self.message),
+            permissions_for=lambda member: discord.Permissions(
+                manage_messages=manage_messages))
+
+    def action(self):
+        return {"payload": {"message_id": "1420070400000000032"}}
+
+    async def test_the_bots_own_message_needs_no_manage_messages(self):
+        """Discord lets an author delete its own message; refusing without the
+        permission refused a delete Discord would have allowed."""
+        channel = self.channel(self.BOT, manage_messages=False)
+        self.assertIsNone(await control_actions.execute_managed_delete(channel, self.action()))
+        self.message.delete.assert_awaited_once()
+
+    async def test_someone_elses_message_is_never_deleted(self):
+        channel = self.channel(1420070400000000033, manage_messages=True)
+        self.assertEqual("bot_permission_denied",
+                         await control_actions.execute_managed_delete(channel, self.action()))
+        self.message.delete.assert_not_awaited()
+
+    async def test_a_discord_refusal_is_reported_not_raised(self):
+        refused = AsyncMock(side_effect=discord.Forbidden(MagicMock(status=403), "no"))
+        channel = self.channel(self.BOT, delete=refused)
+        self.assertEqual("bot_permission_denied",
+                         await control_actions.execute_managed_delete(channel, self.action()))
+
+
 class AdoptTests(unittest.TestCase):
     """Taking over a message the bot already posted.
 

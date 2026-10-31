@@ -1,5 +1,4 @@
 import discord
-import itertools
 import logging
 import random
 import asyncio
@@ -7,10 +6,11 @@ import queue
 import shlex
 import threading
 import time
-import yt_dlp
+import json
+import re
+from pathlib import Path
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import unquote, urlparse, urlunparse
 
 # Resolve repository imports independently of the process working directory.
@@ -21,9 +21,10 @@ if ROOT_DIR not in sys.path:
 
 from core import database
 
-from discord.ext import commands, tasks
+from discord.ext import commands
+from discord.opus import OPUS_SILENCE
 from datetime import timedelta
-from cogs.utils import BoundedCooldownMap, handle_loop_error, plain_markdown, t
+from cogs.utils import BoundedCooldownMap, plain_markdown, t
 from core.feature_access import is_enabled, require_interaction_feature
 
 music_logger = logging.getLogger("PotatoBot.Music")
@@ -33,35 +34,33 @@ music_timers = {}
 music_states = {}
 last_panels = {}
 music_interaction_times = BoundedCooldownMap()
-music_search_times = BoundedCooldownMap()
 music_search_active = set()
 MUSIC_QUEUE_LIMIT = 100
 MUSIC_PLAYLIST_LIMIT = 25
 MUSIC_MAX_DURATION = 3 * 60 * 60
 MUSIC_EXTRACT_TIMEOUT = 20
-# Four workers for a semaphore of two: `extract_music_info` releases its slot
-# when `wait_for` times out, but the `yt_dlp` thread underneath runs on, so a
-# stuck extraction kept a worker and the next request queued behind it inside
-# the executor. Two spare workers mean two stuck jobs before anyone waits.
-music_extract_executor = ThreadPoolExecutor(
-    max_workers=4, thread_name_prefix="music-extract"
-)
+# Two lookups at a time, each a process of its own (`core/music_extract.py`):
+# a lookup on a thread could wedge on a hanging DNS resolution, which yt-dlp's
+# `socket_timeout` does not cover, and a thread cannot be stopped, only
+# abandoned. A process is killed when the timeout passes, so nothing leaks and
+# no watchdog has to swap out a pool (route C, 2.19).
 music_extract_slots = asyncio.Semaphore(2)
+MUSIC_EXTRACT_SCRIPT = Path(__file__).resolve().parents[1] / "core" / "music_extract.py"
+# What the lookup process inherits. Never the whole environment: that holds
+# the bot token and the database path, and yt-dlp needs neither.
+MUSIC_EXTRACT_ENV_KEYS = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TZ",
+                          "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE")
 
-# A thread that has actually started `_extract_music_info` cannot be stopped
-# from outside: `wait_for` timing out only stops *awaiting* it, and
-# `yt_dlp`'s own `socket_timeout` does not cover `socket.getaddrinfo` — a
-# hanging DNS resolver, the same failure family as the two DNS incidents in
-# `docs/lessons.md`, can wedge a call indefinitely regardless of that option.
-# So this does not kill the stuck thread; it notices one has run far past any
-# real extraction's length and replaces the whole pool, abandoning the wedged
-# thread(s) rather than waiting on them forever. `music_extract_job_started`
-# tracks in-flight jobs (monotonic start time per job id) for exactly that
-# check; both the write in `extract_music_info` and the read in
-# `reap_wedged_extraction_workers` run on the event loop thread.
-MUSIC_EXTRACT_WEDGE_SECONDS = 300
-music_extract_job_started = BoundedCooldownMap(max_age=3600, max_entries=64)
-_extract_job_ids = itertools.count()
+
+class MusicExtractionError(Exception):
+    """A lookup process failed; carries only the exception's kind, never text."""
+
+
+def error_kind(exc: BaseException) -> str:
+    """What a log may say about a failed lookup: the kind, never the text,
+    which can carry the member's search. For a lookup process that failed,
+    the kind it reported (`DownloadError`, …) rather than this wrapper's."""
+    return str(exc) if isinstance(exc, MusicExtractionError) else type(exc).__name__
 
 
 def can_control_music(member, guild):
@@ -105,6 +104,8 @@ ytdl_format_options = {
     'retries': 2,
     'fragment_retries': 2,
     'ignoreconfig': True,
+    # No cache: the container's home is read-only, and a lookup needs none.
+    'cachedir': False,
     'extractor_args': {'youtube': {'player_client': ['android']}},
     # Only YouTube's own extractors are loaded. A URL none of them claims --
     # a trailing-dot or upper-case host, a `..` path -- would otherwise fall
@@ -181,54 +182,34 @@ def _youtube_input(value: str) -> str:
     return f"ytsearch1:{value}"
 
 
-def _extract_music_info(source: str):
-    # yt-dlp instances are intentionally not shared across worker threads.
-    with yt_dlp.YoutubeDL(dict(ytdl_format_options)) as extractor:
-        return extractor.extract_info(source, download=False)
-
-
 async def extract_music_info(source: str):
-    loop = asyncio.get_running_loop()
-    job_id = next(_extract_job_ids)
+    """Look `source` up in a killable process and return yt-dlp's info dict."""
+    request = json.dumps({"source": source, "options": ytdl_format_options}).encode()
+    env = {key: os.environ[key] for key in MUSIC_EXTRACT_ENV_KEYS if key in os.environ}
     async with music_extract_slots:
-        music_extract_job_started[job_id] = time.monotonic()
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-I", str(MUSIC_EXTRACT_SCRIPT),
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE, env=env,
+        )
         try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(
-                    music_extract_executor, _extract_music_info, source
-                ),
-                timeout=MUSIC_EXTRACT_TIMEOUT,
-            )
-        finally:
-            music_extract_job_started.pop(job_id, None)
-
-
-def reap_wedged_extraction_pool() -> int:
-    """Replace the extraction pool if a job has run far past the timeout.
-
-    Returns the number of jobs abandoned with the old pool, so the caller can
-    decide whether to log. A job still tracked here has already made
-    `wait_for` give up once (`MUSIC_EXTRACT_TIMEOUT`), so reaching
-    `MUSIC_EXTRACT_WEDGE_SECONDS` means it was never going to finish rather
-    than merely being slow.
-    """
-    global music_extract_executor
-    if not music_extract_job_started:
-        return 0
-    oldest = min(music_extract_job_started.values())
-    if time.monotonic() - oldest < MUSIC_EXTRACT_WEDGE_SECONDS:
-        return 0
-    stuck = len(music_extract_job_started)
-    old_executor = music_extract_executor
-    music_extract_executor = ThreadPoolExecutor(
-        max_workers=4, thread_name_prefix="music-extract"
-    )
-    # The stuck thread(s) cannot be stopped, only abandoned; shutting down
-    # without waiting lets this call return immediately instead of blocking
-    # on the very thread that will not finish.
-    old_executor.shutdown(wait=False, cancel_futures=True)
-    music_extract_job_started.clear()
-    return stuck
+            output, error = await asyncio.wait_for(
+                process.communicate(request), timeout=MUSIC_EXTRACT_TIMEOUT)
+        except BaseException:
+            # A timeout, or the command being cancelled: either way the lookup
+            # is no longer wanted, and unlike a thread it can actually stop.
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+            raise
+    if process.returncode != 0:
+        # Only a bare exception name is believed. Anything else on stderr
+        # (yt-dlp's own error lines name the video or the search) is dropped.
+        lines = error.decode("utf-8", "replace").strip().splitlines()
+        kind = lines[-1].strip() if lines else ""
+        raise MusicExtractionError(kind if re.fullmatch(r"[A-Za-z_]\w{0,79}", kind)
+                                   else "unknown")
+    return json.loads(output)
 
 
 def song_from_entry(entry, requester):
@@ -260,6 +241,27 @@ def song_from_entry(entry, requester):
 # Ten seconds of 20 ms Opus packets, about 160 KB at 128 kbit/s: longer than
 # ffmpeg's `-reconnect_delay_max 5` plus a fresh TLS handshake.
 MUSIC_READ_AHEAD_PACKETS = 500
+# The player asks for a packet every 20 ms. A gap this long between two asks
+# means the player itself was held up, which is heard as a gap and then a rush
+# even with the buffer full (2026-10-31); longer than the ceiling is a pause.
+MUSIC_PLAYER_LATE_SECONDS = 0.25
+MUSIC_PLAYER_PAUSE_SECONDS = 15
+# How long a read waits for a packet before handing the player a silent frame
+# instead: one frame's length, so the player stays on its schedule.
+MUSIC_FRAME_WAIT_SECONDS = 0.02
+# A stream that has produced nothing after this long is given up on, so the
+# queue moves on rather than playing silence for ever.
+MUSIC_START_GIVE_UP_SECONDS = 30
+# A song starts once this much is buffered (about half a second), not on its
+# first packet: started on the first one, the buffer had nothing in reserve
+# and ran empty for a frame at the start of nearly every song (2026-10-31).
+MUSIC_START_RESERVE_PACKETS = 25
+# ...but a stream that has some audio and stalls before the reserve fills
+# starts with what it has after this long, rather than waiting it out.
+MUSIC_START_RESERVE_MAX_SECONDS = 2
+# One Opus packet is 20 ms of audio, which turns packets played into a
+# position in the song for the log.
+MUSIC_PACKET_SECONDS = 0.02
 _END_OF_STREAM = object()
 
 
@@ -283,6 +285,10 @@ class BufferedAudioSource(discord.AudioSource):
         self._packets = queue.Queue(maxsize=max_packets)
         self._stopped = threading.Event()
         self._delivered = False
+        self._played = 0
+        self._last_read = None
+        self._stalled_at = None
+        self._created = time.monotonic()
         self._producer = threading.Thread(
             target=self._produce, name="music-read-ahead", daemon=True
         )
@@ -320,30 +326,74 @@ class BufferedAudioSource(discord.AudioSource):
             self._put(_END_OF_STREAM)
 
     def read(self) -> bytes:
-        # An empty buffer after playback started is the one stall this class
-        # cannot hide, so it is logged: a hiccup with no such line came from
-        # the sending side (the network to Discord), not from the stream.
-        # Before the first packet, ffmpeg is still starting; that is not one.
-        stalled_at = None
-        while True:
-            if self._stopped.is_set():
+        # discord.py's player starts its clock before its first read and paces
+        # every packet against it, so any wait inside `read()` -- ffmpeg still
+        # connecting at the start of a song, or the stream running short later
+        # -- is counted as lateness and paid back by sending the backlog with
+        # no delay: heard as a gap and then a rush (2026-10-31, measured at the
+        # start of songs). So a read never waits longer than one frame; with
+        # nothing to play it hands back a silent frame, on time, and the player
+        # never falls behind.
+        #
+        # What is left leaves its own line: "ran empty" is the stream running
+        # short mid-song (heard as a gap, now without the rush); "asked late"
+        # is the player itself held up (the process busy elsewhere, which this
+        # cannot prevent); a hiccup with neither is the network to Discord.
+        now = time.monotonic()
+        if self._delivered and self._last_read is not None:
+            gap = now - self._last_read
+            if MUSIC_PLAYER_LATE_SECONDS < gap < MUSIC_PLAYER_PAUSE_SECONDS:
+                music_logger.warning(
+                    "Music player asked late (gap_ms=%d); the buffer was not the cause.",
+                    round(gap * 1000))
+        if self._stopped.is_set():
+            return b""
+        if (not self._delivered
+                and self._packets.qsize() < MUSIC_START_RESERVE_PACKETS
+                and self._producer.is_alive()
+                and not (self._packets.qsize()
+                         and now - self._created > MUSIC_START_RESERVE_MAX_SECONDS)):
+            # Still building the reserve: silence on time, as below. A short
+            # song or a finished producer starts with whatever it has.
+            if now - self._created > MUSIC_START_GIVE_UP_SECONDS:
+                music_logger.warning("Music stream never started; moving on.")
+                self._stopped.set()
                 return b""
-            try:
-                packet = self._packets.get(timeout=0.2)
-                break
-            except queue.Empty:
-                if stalled_at is None and self._delivered:
-                    stalled_at = time.monotonic()
-                    music_logger.warning(
-                        "Music read-ahead ran empty; playback is waiting on the stream.")
-                continue
-        if stalled_at is not None:
+            self._last_read = time.monotonic()
+            time.sleep(MUSIC_FRAME_WAIT_SECONDS)
+            return OPUS_SILENCE
+        try:
+            packet = self._packets.get(timeout=MUSIC_FRAME_WAIT_SECONDS)
+        except queue.Empty:
+            if not self._delivered and now - self._created > MUSIC_START_GIVE_UP_SECONDS:
+                music_logger.warning("Music stream never started; moving on.")
+                self._stopped.set()
+                return b""
+            # Before the first packet, ffmpeg is still starting; that is not a stall.
+            if self._delivered and self._stalled_at is None:
+                self._stalled_at = now
+                music_logger.warning(
+                    "Music read-ahead ran empty at %.1f s into the song; "
+                    "playback is waiting on the stream.",
+                    self._played * MUSIC_PACKET_SECONDS)
+            self._last_read = time.monotonic()
+            return OPUS_SILENCE
+        if self._stalled_at is not None:
             music_logger.info("Music read-ahead recovered after %.1f s.",
-                              time.monotonic() - stalled_at)
+                              time.monotonic() - self._stalled_at)
+            self._stalled_at = None
         if packet is _END_OF_STREAM:
             self._stopped.set()
             return b""
+        if not self._delivered:
+            # Where a later "ran empty" falls (the start or anywhere) decides
+            # whether a larger start reserve would help.
+            music_logger.info("Music started (waited_ms=%d, reserve_packets=%d)",
+                              round((now - self._created) * 1000),
+                              self._packets.qsize() + 1)
         self._delivered = True
+        self._played += 1
+        self._last_read = time.monotonic()
         return packet
 
     def is_opus(self) -> bool:
@@ -459,7 +509,7 @@ class MusicSearchModal(discord.ui.Modal):
         except Exception as exc:
             music_logger.warning(
                 "Music search failed (user_id=%s, error=%s)",
-                interaction.user.id, type(exc).__name__,
+                interaction.user.id, error_kind(exc),
             )
             return await interaction.followup.send(
                 t("music.search_failed"), ephemeral=True
@@ -579,14 +629,11 @@ class MusicPanelView(discord.ui.View):
     async def search_btn(self, interaction: discord.Interaction):
         if not interaction.guild.voice_client:
             return await interaction.response.send_message(t("music.use_join_first"), ephemeral=True)
-        now = time.monotonic()
-        retry_after = 15 - (now - music_search_times.get(interaction.user.id, 0))
-        if retry_after > 0:
-            return await interaction.response.send_message(
-                t("utils.command_cooldown", seconds=int(retry_after) + 1),
-                ephemeral=True,
-            )
-        music_search_times[interaction.user.id] = now
+        # No timer between searches (maintainer, 2026-10-31): a 15 s cooldown
+        # meant waiting ~10 s after a song was already queued to add the next.
+        # What bounds it instead: one lookup per person at a time (the modal's
+        # `music_search_active`), two for the whole bot, the 100-song queue,
+        # and the panel's own 3 s guard on every button.
         await interaction.response.send_modal(MusicSearchModal())
 
     async def now_playing(self, interaction: discord.Interaction):
@@ -664,11 +711,6 @@ class Music(commands.Cog):
         self.bot.add_view(MusicPanelView())
 
     @commands.Cog.listener()
-    async def on_ready(self):
-        if not self.extraction_watchdog.is_running():
-            self.extraction_watchdog.start()
-
-    @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
         # Only a real member actually leaving the bot's own channel matters
         # here -- a mute/deafen toggle fires this same event with an
@@ -700,28 +742,6 @@ class Music(commands.Cog):
                 await panel.channel.send(t("music.left_channel_empty"))
             except Exception:
                 pass
-
-    def cog_unload(self):
-        if self.extraction_watchdog.is_running():
-            self.extraction_watchdog.cancel()
-
-    @tasks.loop(seconds=60)
-    async def extraction_watchdog(self):
-        stuck = reap_wedged_extraction_pool()
-        if stuck:
-            music_logger.warning(
-                "Recycled the music extraction pool: %d job(s) had run past "
-                "%ds (wedge ceiling %ds) and were abandoned rather than "
-                "stopped.",
-                stuck, MUSIC_EXTRACT_TIMEOUT, MUSIC_EXTRACT_WEDGE_SECONDS,
-            )
-
-    @extraction_watchdog.error
-    async def extraction_watchdog_error(self, error):
-        await handle_loop_error(
-            self.bot, self.extraction_watchdog, "extraction_watchdog", error,
-            music_logger,
-        )
 
     async def require_same_voice(self, ctx):
         if can_control_music(ctx.author, ctx.guild):
@@ -957,7 +977,7 @@ class Music(commands.Cog):
             await ctx.send(t("music.bot_not_in_vc"), ephemeral=True)
 
     @commands.hybrid_command(name="play", description=t("general.cmd_play"))
-    @commands.cooldown(1, 15, commands.BucketType.user)
+    # One lookup per person at a time, no timer: see `search_btn`.
     @commands.max_concurrency(1, commands.BucketType.user, wait=False)
     async def play(self, ctx, *, search: str):
         if not ctx.author.voice:
@@ -1015,7 +1035,7 @@ class Music(commands.Cog):
         except Exception as exc:
             music_logger.warning(
                 "Music extraction failed (guild_id=%s, user_id=%s, error=%s)",
-                ctx.guild.id, ctx.author.id, type(exc).__name__,
+                ctx.guild.id, ctx.author.id, error_kind(exc),
             )
             return await ctx.send(t("music.search_failed"), ephemeral=True)
 

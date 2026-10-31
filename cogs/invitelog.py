@@ -5,6 +5,12 @@ counts and compare them when a member joins: the invite whose count went up is
 the one they used. Listing a guild's invites needs Manage Server, which is why
 `invite_logging` ships off and declares that permission.
 
+A spent invite is credited only when Discord's delete for it arrives within
+`DELETE_WINDOW_SECONDS` of the join, either side. Without that, an invite a
+moderator deleted with one use left at any time since the last snapshot was
+credited with the next join that no invite explains — a Discovery or OAuth
+join — naming the wrong inviter.
+
 Nothing is persisted. The snapshot lives in memory and is rebuilt from Discord
 whenever it is missing: at `on_ready` if the feature cache is loaded by then,
 and otherwise by `prime_missing` within a minute. Without that loop the first
@@ -18,6 +24,7 @@ member stays with
 import asyncio
 import logging
 from dataclasses import dataclass
+from time import monotonic
 
 import discord
 from discord.ext import commands, tasks
@@ -30,6 +37,10 @@ invite_logger = logging.getLogger("PotatoBot.InviteLog")
 # The vanity link has no invite code of its own in the list `guild.invites()`
 # returns, so it is held under a key no real code can take.
 VANITY = "\0vanity"
+
+# How far apart an invite's delete and a join may be for the join to have spent
+# that invite. Discord sends the two events close together but in either order.
+DELETE_WINDOW_SECONDS = 2.0
 
 
 @dataclass(frozen=True)
@@ -49,13 +60,24 @@ class Attribution:
 UNKNOWN = Attribution("unknown")
 
 
+def spent_codes(before: dict[str, InviteState],
+                after: dict[str, InviteState]) -> list[str]:
+    """Invites gone since `before` that were one use from their limit."""
+    return [code for code, state in before.items()
+            if code not in after and code != VANITY
+            and state.max_uses and state.uses + 1 >= state.max_uses]
+
+
 def attribute_join(before: dict[str, InviteState] | None,
-                   after: dict[str, InviteState] | None) -> Attribution:
+                   after: dict[str, InviteState] | None,
+                   *, deleted: frozenset[str] | set[str]) -> Attribution:
     """Which invite a join used, from the use counts either side of it.
 
     Exactly one count that went up is an answer. None that went up, and exactly
-    one invite gone that was one use from its limit, is also an answer: Discord
-    deletes an invite the moment its last use is spent. Anything else — two
+    one invite gone that was one use from its limit *and deleted around the
+    join* (`deleted`), is also an answer: Discord deletes an invite the moment
+    its last use is spent. One gone without such a delete was removed by
+    someone, not spent. Anything else — two
     joins racing between snapshots, a join through Discovery or an OAuth add,
     no snapshot to compare with — is `unknown`, never a guess, because naming
     the wrong inviter is worse than naming none.
@@ -69,10 +91,8 @@ def attribute_join(before: dict[str, InviteState] | None,
         return Attribution("vanity") if code == VANITY else Attribution("invite", code)
     if increased:
         return UNKNOWN
-    spent = [code for code, state in before.items()
-             if code not in after and code != VANITY
-             and state.max_uses and state.uses + 1 >= state.max_uses]
-    if len(spent) == 1:
+    spent = spent_codes(before, after)
+    if len(spent) == 1 and spent[0] in deleted:
         return Attribution("invite", spent[0])
     return UNKNOWN
 
@@ -95,6 +115,8 @@ class InviteLog(commands.Cog):
         self.bot = bot
         self.snapshots = BoundedValueMap(max_entries=1024)
         self.locks = BoundedValueMap(max_entries=1024)
+        # (guild_id, code) -> monotonic time of the invite's delete event.
+        self.deletions = BoundedValueMap(max_entries=1024)
 
     async def cog_load(self):
         # Started here rather than in `__init__`, which has no running loop
@@ -195,6 +217,23 @@ class InviteLog(commands.Cog):
                                                 invite.inviter)
 
     @commands.Cog.listener()
+    async def on_invite_delete(self, invite):
+        # Recorded, never applied to the snapshot (see `on_invite_create`): the
+        # time is what tells a spent invite from one a moderator removed.
+        guild = invite.guild
+        if guild is None or not is_enabled(guild.id, "invite_logging"):
+            return
+        self.deletions[(guild.id, invite.code)] = monotonic()
+
+    def _deleted_near(self, guild_id: int, codes, joined_at: float) -> set[str]:
+        return {code for code in codes
+                if (deleted_at := self.deletions.get((guild_id, code))) is not None
+                and abs(deleted_at - joined_at) <= DELETE_WINDOW_SECONDS}
+
+    async def _wait(self, seconds: float):
+        await asyncio.sleep(seconds)
+
+    @commands.Cog.listener()
     async def on_member_join(self, member):
         # Broad on purpose: an exception escaping a listener is logged by
         # discord.py and nothing else, but this one must never be the reason a
@@ -205,6 +244,7 @@ class InviteLog(commands.Cog):
             invite_logger.exception("Invite log failed (guild_id=%s).", member.guild.id)
 
     async def _log_join(self, member):
+        joined_at = monotonic()
         guild = member.guild
         # Bots arrive through OAuth, never through an invite.
         if member.bot or not is_enabled(guild.id, "invite_logging"):
@@ -224,7 +264,16 @@ class InviteLog(commands.Cog):
             after = await self._fetch(guild)
             if after is not None:
                 self.snapshots[guild.id] = after
-        attribution = attribute_join(before, after)
+        spent = spent_codes(before, after) if before and after else []
+        deleted = self._deleted_near(guild.id, spent, joined_at)
+        if len(spent) == 1 and not deleted:
+            # The delete for an invite this join spent may still be on its way.
+            # Only this rare path waits, and only out the rest of the window.
+            remaining = DELETE_WINDOW_SECONDS - (monotonic() - joined_at)
+            if remaining > 0:
+                await self._wait(remaining)
+            deleted = self._deleted_near(guild.id, spent, joined_at)
+        attribution = attribute_join(before, after, deleted=deleted)
 
         embed = discord.Embed(title=t("invitelog.title"), color=discord.Color.blurple())
         embed.set_thumbnail(url=member.display_avatar.url)

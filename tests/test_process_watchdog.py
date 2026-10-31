@@ -13,7 +13,6 @@ watching, and a process that never exits is invisible to a service manager.
 """
 
 import faulthandler
-import importlib
 import os
 import signal
 import sys

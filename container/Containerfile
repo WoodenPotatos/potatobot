@@ -4,10 +4,10 @@
 # image started with a different command, which is what lets the two run as
 # separate supervised services against one shared database volume.
 #
-# Build (from the repository root):  podman build -t potatobot:2.18.4a -f container/Containerfile .
-# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.18.4a
+# Build (from the repository root):  podman build -t potatobot:2.19.17a -f container/Containerfile .
+# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.19.17a
 # Panel:  podman run --env-file .env -v potatobot-data:/data -p 127.0.0.1:5000:5000 \
-#             potatobot:2.18.4a python dashboard_api.py
+#             potatobot:2.19.17a python dashboard_api.py
 
 # Pinned by digest, not tag: `3.13-slim` is a moving name, and an image that
 # changes under the same tag is a supply-chain change nobody reviewed.
@@ -58,4 +58,10 @@ USER potatobot
 HEALTHCHECK --interval=60s --timeout=10s --start-period=20s --retries=3 \
     CMD python -c "import os, sqlite3; sqlite3.connect('file:' + os.environ['POTATOBOT_DB_PATH'] + '?mode=ro', uri=True).execute('PRAGMA user_version')"
 
+# Files the process creates are owner and group only. The Quadlet unit passes
+# `--umask=0027`, but compose has no portable key for it, so a compose-run bot
+# would inherit 0022 and write a world-readable database; setting it here
+# covers every way the image is started. `exec` makes the command PID 1
+# itself, so it still receives the stop signal directly.
+ENTRYPOINT ["/bin/sh", "-c", "umask 0027 && exec \"$@\"", "--"]
 CMD ["python", "main.py"]

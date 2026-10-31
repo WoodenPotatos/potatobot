@@ -346,14 +346,23 @@ def _collect_stored_setting_ids(guild_ids) -> tuple[dict, dict]:
 
 
 class DevRole:
-    """Enough of `discord.Role` for the resource list and the permission audit."""
+    """Enough of `discord.Role` for the resource list and the permission audit.
+
+    Every attribute the real code reads must be here: the resource list grew
+    `color`, this did not, and every page load's resource fetch raised — which
+    aborted `loadGuild` and left the dashboard running with no feature state.
+    `LocalDashboardStandInTests` drives both readers through these classes.
+    """
 
     def __init__(self, role_id, name, position, managed=False, default=False):
+        import discord
+
         self.id = role_id
         self.name = name
         self.position = position
         self.managed = managed
         self._default = default
+        self.color = self.colour = discord.Colour.default()
 
     def is_default(self):
         return self._default
@@ -387,6 +396,9 @@ class DevMember:
 
 class DevGuild:
     def __init__(self, guild_id, name, channels, roles, me):
+        # Like Discord's, `@everyone` shares the guild's id and sits at the bottom.
+        self.default_role = DevRole(guild_id, "@everyone", 0, default=True)
+        roles = [self.default_role, *roles]
         self.id = guild_id
         self.name = name
         self.icon = None
@@ -402,6 +414,10 @@ class DevGuild:
     def get_role(self, role_id):
         return self._roles.get(role_id)
 
+    def get_member(self, _user_id):
+        # No members are cached here; `DevBot.get_user` answers for the host.
+        return None
+
 
 class DevBot:
     def __init__(self, guilds):
@@ -409,6 +425,12 @@ class DevBot:
 
     def get_guild(self, guild_id):
         return self._guilds.get(int(guild_id))
+
+    def get_user(self, user_id):
+        """The signed-in host is the only user here, so the audit feed can
+        name the changes made locally."""
+        from types import SimpleNamespace
+        return SimpleNamespace(name="local-dev") if str(user_id) == LOCAL_HOST_ID else None
 
 
 def build_dev_bot(guild_ids):

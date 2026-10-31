@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "potatobot"
-version = "2.18.4b"
+version = "2.19.17b"
 description = "A Hungarian-first Discord community bot and control plane"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
@@ -15,6 +15,9 @@ dependencies = [
   "discord.py==2.7.1",
   "defusedxml==0.7.1",
   "Flask==3.1.3",
+  # Image welcome cards (2.19). 13.0: pip-audit flags 12.3.0 (CVE-2026-96778,
+  # GHSA-78g4-xqwv-q3g8), both fixed here.
+  "Pillow==13.0.0",
   "PyNaCl==1.6.2",
   "python-dotenv==1.2.3",
   "requests==2.34.2",
@@ -29,6 +32,8 @@ dev = [
   "bandit==1.9.4",
   "mypy==2.3.1",
   "pip-audit==2.10.1",
+  # 0.17.1 rather than 0.17.3: the newest release at least two weeks old.
+  "ruff==0.17.1",
 ]
 
 [tool.setuptools]
@@ -42,8 +47,20 @@ packages = ["core"]
 exclude_dirs = ["tests", "venv", ".venv"]
 skips = ["B101"]
 
+[tool.ruff]
+# A linter for real defects, with no formatter (decided 2026-10-30, ahead of
+# the PostgreSQL port). Pyflakes and syntax errors only: an undefined or
+# shadowed name, an import nothing uses, a variable never read. The baseline
+# was 57 findings, every one fixed rather than ignored. Style rules are not a
+# step to take reactively; add one only with its whole-codebase fix.
+target-version = "py312"
+extend-exclude = ["graphify-out", "dashboard-reference", ".local-dev", "node_modules"]
+
+[tool.ruff.lint]
+select = ["F", "E9"]
+
 [tool.mypy]
-# Scoped to core/ only, deliberately: cogs/ trades in discord.py's own
+# Scoped to core/ and the entry points, not cogs/, deliberately: cogs/ trades in discord.py's own
 # object-union types (`interaction.channel`, `member.guild`, ...), whose
 # stubs are broad enough that checking it produces noise dominated by
 # discord.py's own typing model rather than real findings -- confirmed by
@@ -51,7 +68,9 @@ skips = ["B101"]
 # this project's own data layer and is where a wrong type has actually
 # reached production before (docs/lessons.md; the clock and snowflake-wire
 # rules in CLAUDE.md both trace back to exactly this class of bug).
-files = ["core"]
+# The two entry points that carry real logic joined on 2026-10-30, ahead of
+# the PostgreSQL port: six findings, all fixed, none a discord.py-stub artefact.
+files = ["core", "dashboard_api.py", "main.py"]
 python_version = "3.12"
 ignore_missing_imports = true
 # core/ imports cogs.utils for one late import (see settings_cache.py); this

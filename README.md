@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, `deploy/` holds the systemd units and a rootless podman Quadlet unit, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.18.4b** &nbsp;·&nbsp; channel `beta`
+**Version 2.19.17b** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -55,7 +55,8 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Ever
 - Typed, categorized guild dashboard with feature-aware navigation, safe Discord
   selectors, audit history, gacha/banner controls, content builders, and safe shop templates
 - Every guild setting editable from the dashboard, with a ten-minute idle
-  timeout, a permission diagnostic, and the release changelog on their own pages
+  timeout, a permission diagnostic, and an overview showing recent changes beside
+  the release changelog
 - Toggleable Potato Gacha in its own cog with several named banners per guild,
   explicit one/ten-pull choices, every-tenth-pull 4-star guarantee, persistent
   100-pull hard pity, configurable soft pity after pull 75, fixed-reserve vaults,
@@ -179,6 +180,18 @@ matrices — is in [docs/development.md](docs/development.md).
 ## Recent releases
 
 <!-- BEGIN GENERATED: changelog -->
+### 2.19.17b
+
+- **Music logs when a song starts and where in it a gap fell.** "Ran empty" now says how many seconds into the song it happened, and each song logs how long it waited and how much it had buffered, so whether gaps cluster at the start (which a larger reserve would fix) can be read off the log.
+- **Queueing songs no longer makes you wait.** The music panel's search and `/play` each had a 15-second cooldown, so queueing a second song meant waiting it out. Now there is no timer: each person can have one lookup running at a time, and the next one can start as soon as it finishes.
+- **A song now builds a short reserve before it starts**, about half a second of audio, so the start of a song no longer runs dry for a moment while the stream gets going.
+- **Songs no longer start with a sped-up blip.** While a song was still loading, the player counted the wait as falling behind and then played the first half second or so too fast to catch up. It now plays silence on time while the song loads, so it starts at normal speed. A stream that runs short mid-song is now a short gap instead of a gap followed by a rush.
+- **Music logs when its player falls behind.** A gap followed by a sped-up rush can come from the stream, from the bot being busy, or from the network to Discord. The log now says which of the first two it was, so the next one can be traced instead of guessed at.
+- **The dashboard's and the bot's main files are now type-checked in CI**, as the shared core already was, and a linter (ruff) now catches unused imports, undefined names and the like everywhere. Its 57 findings and mypy's six were all fixed; no behaviour changed.
+- **The container is locked down further.** Its root filesystem is now read-only, so the bot cannot change its own code, and files it creates are readable only by its own account, however the container is started (started through compose, it would have written the database readable by every account on the host).
+- **Join and leave messages can show an image card.** Switch it on in the event's settings: the member's avatar and name, with a line of your own underneath, drawn on a background image. Upload any picture as the background (it is cropped to fit), or keep the built-in one. The card takes the message's big image spot, and the dashboard shows a live preview. If many people join at once, the bot sends the normal message instead of drawing a card for each of them.
+- …and 16 more, in [CHANGELOG.md](CHANGELOG.md).
+
 ### 2.18.4b
 
 - **Join, leave and boost messages can be written by each server.** The dashboard has a new Announcements page. Every event has its own switch and channel, and its message can have a title, several text variants (one is picked at random), a colour, an image, and plain text above it. Placeholders such as `{user}`, `{server}` and `{member_count}` are filled in. A live preview shows the result, and "Send test" posts the saved message with you as the member. Anything left empty keeps the old text.
@@ -194,18 +207,6 @@ matrices — is in [docs/development.md](docs/development.md).
 ### 2.18.2b
 
 - **Corrected the 2.18.1b notes.** They said the schema was unchanged, which is wrong: that release adds schema 25, as its first paragraph says.
-
-### 2.18.1b
-
-- **An optional invite log shows who invited each new member.** Turn it on under Features ("Invite log"). It posts to the bot log channel, or to a channel of its own if you tick "Use a separate channel" under Administration → Logging and pick one. The bot needs the **Manage Server** permission, because Discord only lists a server's invites to members who have it. When the inviter cannot be told apart, for example when two people join at the same moment, the log says so instead of guessing. The post never pings anyone, and nothing is stored.
-- **Losing dashboard rights takes effect straight away.** When someone loses Administrator or Manage Server, leaves the server, or a role's permissions change, the dashboard re-checks with Discord on their next click. Before, this could take up to 30 seconds. Discord still decides who gets in, and the 30-second check stays as a backstop.
-- **The audit log names who made each change**, as `name (id)` instead of a bare Discord id. Names are looked up when the page loads and are never stored. If a name cannot be found, the id is shown on its own.
-- **Security updates for two dependencies.** aiohttp, the HTTP library discord.py uses to talk to Discord, moves to 3.14.4 for eight published vulnerabilities, and certifi moves to 2026.10.19 for one. Reinstall from `requirements.lock` with `--require-hashes`; the container image picks them up on its next build.
-- **Dashboard actions now run when the bot and the dashboard are separate services.** In the two-service layout (`container/compose.yaml`), posting or updating a message, deleting one, repairing a channel permission, notifying a redeem ticket and erasing a member were queued but never carried out. The bot now processes that queue whether or not it also serves the dashboard. A single-process installation was not affected.
-- **Music uses less of the bot's CPU.** ffmpeg now encodes the audio for Discord itself, so the bot process no longer runs the encoder for every server that is playing.
-- **A podman unit ships in `deploy/potatobot.container`**, for running the bot as a rootless container under systemd. It publishes the dashboard on loopback only and keeps new files private to the bot's account.
-- **The public snapshot must pass its own tests before it is published.** The publishing script now runs the whole test suite inside the snapshot it built, and refuses to publish on any failure.
-- …and 1 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 <!-- END GENERATED: changelog -->

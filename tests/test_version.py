@@ -312,7 +312,6 @@ class CoinArgumentTests(unittest.TestCase):
 
     def test_no_call_site_passes_coin(self):
         import re
-        from pathlib import Path
 
         pattern = re.compile(r"\bt\(\s*[\"'][^\"']+[\"'][^)]*\bcoin\s*=")
         offenders = []

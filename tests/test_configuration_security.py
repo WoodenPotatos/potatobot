@@ -114,12 +114,46 @@ class LocalDevelopmentDashboardTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_the_stand_ins_satisfy_the_real_readers(self):
+        """The stand-in bot is read by production code, so it drifts silently.
+
+        The resource list grew a role `color`, the permission audit a
+        `guild.default_role` and the audit feed a `guild.get_member`; the
+        stand-ins had none of them, so every local page
+        load's resource fetch raised, `loadGuild` aborted, and the dashboard ran
+        with no feature state — no sub-toggles, no generated sub-pages — which
+        read as a broken feature rather than a broken harness.
+        """
+        import os
+        import tempfile
+        import dashboard_api
+        from core import database, permission_audit
+
+        script = self.load_script()
+        guild_id = 1420070400000000001
+        original_path, original_bot = database.DB_PATH, dashboard_api._dashboard_bot
+        with tempfile.TemporaryDirectory() as directory:
+            database.DB_PATH = os.path.join(directory, "standin.db")
+            try:
+                database.initialize_database()
+                dashboard_api._dashboard_bot = script.build_dev_bot([guild_id])
+                resources = dashboard_api._resources_from_bot_cache(guild_id)
+                self.assertTrue(resources["roles"], "the premise: roles are listed")
+                guild = dashboard_api._dashboard_bot.get_guild(guild_id)
+                permission_audit.build_report(guild, {}, {})
+                # The audit feed names each change's author through the bot.
+                self.assertEqual("local-dev", dashboard_api._actor_name_from_bot(
+                    guild_id, int(script.LOCAL_HOST_ID)))
+                self.assertIsNone(dashboard_api._actor_name_from_bot(guild_id, 7))
+            finally:
+                database.DB_PATH = original_path
+                dashboard_api._dashboard_bot = original_bot
+
     def test_it_refuses_to_serve_a_real_database_in_place(self):
         """`copy_database` reuses an existing target, so `--db economy.db`
         migrated and served the real file with OAuth bypassed."""
         import os
         import tempfile
-        from unittest.mock import patch
         script = self.load_script()
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source.db"
@@ -534,7 +568,6 @@ class ConfigurationSecurityTests(unittest.TestCase):
     def test_the_generated_session_secret_follows_the_database(self):
         import stat
         import tempfile
-        from unittest.mock import patch
         import dashboard_api
         from core import database
         with tempfile.TemporaryDirectory() as directory, \
@@ -609,9 +642,11 @@ class RepositoryLayoutTests(unittest.TestCase):
         "control_actions.py",
         "database.py", "deployment.py",
         "feature_access.py", "item_catalog.py", "logging_setup.py",
-        "managed_messages.py", "minigame_data.py", "permission_audit.py",
+        "managed_messages.py", "minigame_data.py", "music_extract.py",
+        "permission_audit.py",
         "settings_cache.py", "settings_registry.py", "support_tickets.py",
-        "supported_games.py", "version.py", "wordchain_dictionary.py",
+        "supported_games.py", "version.py", "welcome_card.py",
+        "wordchain_dictionary.py",
     }
 
     def test_the_shared_modules_live_in_core(self):
@@ -753,6 +788,27 @@ class QuadletUnitTests(unittest.TestCase):
 
     def test_new_files_are_not_world_readable(self):
         self.assertIn("--umask=0027", self.values("PodmanArgs"))
+
+    def test_the_image_sets_the_umask_for_every_way_it_is_started(self):
+        """Compose has no umask key, and a run without the Quadlet's
+        `--umask` wrote the database 0644 (measured 2026-10-30, the same image
+        with its entrypoint bypassed); the image's own entrypoint closes that."""
+        containerfile = (ROOT / "container" / "Containerfile").read_text(encoding="utf-8")
+        entrypoint = re.search(r"^ENTRYPOINT (.+)$", containerfile, re.MULTILINE)
+        self.assertIsNotNone(entrypoint)
+        self.assertIn("umask 0027", entrypoint.group(1))
+        self.assertIn('exec \\"$@\\"', entrypoint.group(1))
+        compose = (ROOT / "container" / "compose.yaml").read_text(encoding="utf-8")
+        self.assertNotIn("entrypoint:", compose, "an override would drop the umask")
+
+    def test_the_root_filesystem_is_read_only(self):
+        """Every write goes to /data; the code is not the process's to change.
+        Podman adds the /tmp tmpfs itself; docker does not, so compose says so."""
+        self.assertEqual(["true"], self.values("ReadOnly"))
+        compose = (ROOT / "container" / "compose.yaml").read_text(encoding="utf-8")
+        hardening = compose[compose.index("x-hardening:"):compose.index("services:")]
+        self.assertIn("read_only: true", hardening)
+        self.assertRegex(hardening, r"tmpfs:\s*\n\s*- /tmp")
 
     def test_secrets_come_from_a_file_outside_the_image(self):
         self.assertEqual(["/etc/potatobot/potatobot.env"], self.values("EnvironmentFile"))

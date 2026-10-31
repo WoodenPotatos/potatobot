@@ -32,8 +32,8 @@ def state(uses, max_uses=0, inviter=None):
 
 class AttributeJoinTests(unittest.TestCase):
 
-    def attribution(self, before, after):
-        return invitelog().attribute_join(before, after)
+    def attribution(self, before, after, deleted=frozenset()):
+        return invitelog().attribute_join(before, after, deleted=deleted)
 
     def test_the_one_invite_whose_count_rose_is_the_answer(self):
         result = self.attribution({"abc": state(3), "xyz": state(1)},
@@ -58,8 +58,14 @@ class AttributeJoinTests(unittest.TestCase):
     def test_an_invite_spent_to_its_limit_is_the_answer(self):
         """Discord deletes an invite the moment its last use is spent."""
         result = self.attribution({"once": state(0, max_uses=1), "abc": state(5)},
-                                  {"abc": state(5)})
+                                  {"abc": state(5)}, deleted={"once"})
         self.assertEqual(("invite", "once"), (result.kind, result.code))
+
+    def test_an_invite_at_its_limit_gone_with_no_delete_near_the_join_is_unknown(self):
+        """A moderator removed it earlier; the join came through something else."""
+        result = self.attribution({"once": state(0, max_uses=1), "abc": state(5)},
+                                  {"abc": state(5)})
+        self.assertEqual("unknown", result.kind)
 
     def test_an_invite_gone_short_of_its_limit_was_deleted_not_used(self):
         result = self.attribution({"tens": state(2, max_uses=10)}, {})
@@ -179,6 +185,92 @@ class JoinListenerTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.module, "is_enabled", return_value=True):
             await self.cog.on_invite_create(invite)
         self.assertIn("new", self.cog.snapshots[GUILD])
+
+
+class SpentInviteTimingTests(unittest.IsolatedAsyncioTestCase):
+    """The one misattribution: an invite a moderator deleted with one use left,
+    then a join no invite explains (Discovery, an OAuth add). Only a delete
+    within `DELETE_WINDOW_SECONDS` of the join, in either order, counts as the
+    join spending it."""
+
+    def setUp(self):
+        self.module = invitelog()
+        self.inviter = SimpleNamespace(id=INVITER, name="hostuser",
+                                       mention=f"<@{INVITER}>")
+        self.channel = SimpleNamespace(id=LOG, send=AsyncMock())
+        self.guild = SimpleNamespace(
+            id=GUILD, features=[],
+            get_channel=lambda cid: self.channel if cid == LOG else None,
+            # "once" is gone: spent, or deleted by someone.
+            invites=AsyncMock(return_value=[SimpleNamespace(
+                code="abc", uses=5, max_uses=0, inviter=None)]),
+            vanity_invite=AsyncMock(return_value=None),
+        )
+        self.member = SimpleNamespace(
+            id=MEMBER, name="newmember", mention=f"<@{MEMBER}>", bot=False,
+            guild=self.guild, display_avatar=SimpleNamespace(url="https://cdn/x.png"),
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+        self.cog = self.module.InviteLog(MagicMock())
+        self.cog.snapshots[GUILD] = {"once": state(0, max_uses=1, inviter=self.inviter),
+                                     "abc": state(5)}
+        self.now = 1000.0
+        self.cog._wait = AsyncMock()
+
+    def delete(self):
+        return self.cog.on_invite_delete(SimpleNamespace(guild=self.guild, code="once"))
+
+    async def join(self):
+        settings = {"bot_log_channel": LOG}
+        with patch.object(self.module, "is_enabled", return_value=True), \
+                patch.object(self.module, "maintenance_blocks", return_value=False), \
+                patch.object(self.module, "guild_setting_sync",
+                             side_effect=lambda guild_id, key: settings.get(key)), \
+                patch.object(self.module, "monotonic", side_effect=lambda: self.now):
+            await self.cog.on_member_join(self.member)
+        return {field.value for field in
+                self.channel.send.await_args.kwargs["embed"].fields}
+
+    async def record_delete_at(self, when):
+        with patch.object(self.module, "is_enabled", return_value=True), \
+                patch.object(self.module, "monotonic", return_value=when):
+            await self.delete()
+
+    def credited(self, values):
+        return any("hostuser" in value for value in values)
+
+    async def test_a_delete_just_before_the_join_credits_the_spent_invite(self):
+        await self.record_delete_at(self.now - 0.5)
+        self.assertTrue(self.credited(await self.join()))
+        self.cog._wait.assert_not_awaited()
+
+    async def test_a_delete_arriving_just_after_the_join_credits_it(self):
+        async def delete_arrives(seconds):
+            await self.record_delete_at(self.now + 0.3)
+        self.cog._wait.side_effect = delete_arrives
+        self.assertTrue(self.credited(await self.join()))
+        self.cog._wait.assert_awaited_once()
+
+    async def test_a_moderator_delete_long_before_the_join_is_not_credited(self):
+        await self.record_delete_at(self.now - 30)
+        values = await self.join()
+        self.assertFalse(self.credited(values))
+        self.assertIn(self.module.t("invitelog.unknown"), values)
+
+    async def test_no_delete_at_all_is_unknown_after_waiting_out_the_window(self):
+        values = await self.join()
+        self.assertFalse(self.credited(values))
+        self.cog._wait.assert_awaited_once()
+
+    async def test_an_ordinary_join_never_waits(self):
+        self.cog.snapshots[GUILD] = {"abc": state(4)}
+        await self.join()
+        self.cog._wait.assert_not_awaited()
+
+    async def test_a_delete_while_disabled_is_not_recorded(self):
+        with patch.object(self.module, "is_enabled", return_value=False):
+            await self.delete()
+        self.assertEqual({}, dict(self.cog.deletions))
 
 
 class PrimeMissingTests(unittest.IsolatedAsyncioTestCase):

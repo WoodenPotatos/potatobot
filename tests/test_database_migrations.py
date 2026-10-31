@@ -1684,7 +1684,8 @@ class Schema25AccessInvalidationTests(unittest.TestCase):
     def test_a_clean_database_has_the_table(self):
         database.initialize_database()
         with closing(sqlite3.connect(database.DB_PATH)) as conn:
-            self.assertEqual(25, conn.execute("PRAGMA user_version").fetchone()[0])
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
             columns = [row[1] for row in conn.execute(
                 "PRAGMA table_info(dashboard_access_invalidations)")]
         self.assertEqual(["invalidation_id", "guild_id", "user_id", "created_at"],
@@ -1736,3 +1737,121 @@ class Schema25AccessInvalidationTests(unittest.TestCase):
         database.record_access_invalidations([(1, 8)])
         self.assertEqual(["8"], [row["user_id"] for row in
                                  database.get_access_invalidations_since(0)])
+
+
+class Schema26GamesTests(unittest.TestCase):
+    """Schema 26: `lfg_channels` and the per-game patch settings fold into one
+    `games` row per guild. No DDL; gated on the guild having no `games` row,
+    and the old rows are left where they were."""
+
+    GUILD = 1420070400000000001
+    LOL_CHANNEL, LOL_ROLE = 1420070400000000002, 1420070400000000003
+    PATCH_CHANNEL = 1420070400000000004
+    OTHER_CHANNEL, OTHER_ROLE = 1420070400000000005, 1420070400000000006
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DB_PATH
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.initialize_database()
+        database.register_guild(self.GUILD, "Guild")
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _store(self, key, value):
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute(
+                "INSERT INTO guild_settings (guild_id, setting_key, value_json, "
+                "revision, updated_at) VALUES (?, ?, ?, 1, 'then')",
+                (self.GUILD, key, json.dumps(value)))
+            conn.commit()
+
+    def _games(self):
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            row = conn.execute(
+                "SELECT value_json FROM guild_settings "
+                "WHERE guild_id = ? AND setting_key = 'games'", (self.GUILD,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def _downgrade_and_upgrade(self):
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("PRAGMA user_version = 25")
+            conn.commit()
+        database.initialize_database()
+
+    def test_a_clean_database_is_at_26_with_no_games_row(self):
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            self.assertEqual(26, database.LATEST_SCHEMA_VERSION)
+            self.assertEqual(database.LATEST_SCHEMA_VERSION,
+                             conn.execute("PRAGMA user_version").fetchone()[0])
+        self.assertIsNone(self._games())
+
+    def test_an_lfg_pair_joins_the_game_whose_role_it_shares(self):
+        self._store("patchbot_lol_channel", self.PATCH_CHANNEL)
+        self._store("patchbot_lol_role", self.LOL_ROLE)
+        self._store("lfg_channels", {str(self.LOL_CHANNEL): self.LOL_ROLE,
+                                     str(self.OTHER_CHANNEL): self.OTHER_ROLE})
+        self._downgrade_and_upgrade()
+        self.assertEqual({
+            # The LFG channel becomes the game channel; the different patch
+            # channel survives as the override, so nothing moves on Discord.
+            "lol": {"role": self.LOL_ROLE, "channel": self.LOL_CHANNEL,
+                    "lfg": True, "patch_channel": self.PATCH_CHANNEL},
+            "Game 1": {"role": self.OTHER_ROLE, "channel": self.OTHER_CHANNEL,
+                       "lfg": True, "patch_channel": None},
+        }, self._games())
+
+    def test_a_patch_game_without_lfg_keeps_its_channel_as_the_game_channel(self):
+        self._store("patchbot_valorant_channel", self.PATCH_CHANNEL)
+        self._downgrade_and_upgrade()
+        self.assertEqual({"valorant": {"role": None, "channel": self.PATCH_CHANNEL,
+                                       "lfg": False, "patch_channel": None}},
+                         self._games())
+
+    def test_the_result_is_what_the_validator_would_store(self):
+        """A seeded row the dashboard would refuse would be unsaveable."""
+        from core.settings_registry import SETTING_DEFINITIONS, validate_setting_value
+        self._store("patchbot_lol_channel", self.PATCH_CHANNEL)
+        self._store("lfg_channels", {str(self.LOL_CHANNEL): self.LOL_ROLE})
+        self._downgrade_and_upgrade()
+        seeded = self._games()
+        self.assertEqual(seeded, validate_setting_value(
+            SETTING_DEFINITIONS["games"], seeded))
+
+    def test_re_running_changes_nothing_and_a_saved_list_is_kept(self):
+        self._store("lfg_channels", {str(self.OTHER_CHANNEL): self.OTHER_ROLE})
+        self._downgrade_and_upgrade()
+        first = self._games()
+        # The seeding runs on every start, not only across a version change,
+        # which is what makes an interrupted upgrade repair itself.
+        database.initialize_database()
+        self.assertEqual(first, self._games())
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            conn.execute("UPDATE guild_settings SET value_json = '{}' "
+                         "WHERE setting_key = 'games'")
+            conn.commit()
+        database.initialize_database()
+        self.assertEqual({}, self._games(), "a guild's own save must not be reseeded")
+
+    def test_the_old_rows_and_everything_else_survive(self):
+        self._store("lfg_channels", {str(self.OTHER_CHANNEL): self.OTHER_ROLE})
+        self._store("patchbot_lol_role", self.LOL_ROLE)
+        database.create_new_user(7, "2026-01-01T00:00:00+00:00")
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            before = conn.execute("SELECT * FROM guild_settings ORDER BY 1, 2").fetchall()
+            users = conn.execute("SELECT * FROM users").fetchall()
+        self._downgrade_and_upgrade()
+        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+            after = conn.execute("SELECT * FROM guild_settings "
+                                 "WHERE setting_key != 'games' ORDER BY 1, 2").fetchall()
+            self.assertEqual(users, conn.execute("SELECT * FROM users").fetchall())
+        self.assertEqual(before, after)
+
+    def test_a_malformed_old_row_is_skipped_not_fatal(self):
+        self._store("lfg_channels", ["not", "a", "map"])
+        self._store("patchbot_lol_channel", "garbage")
+        self._downgrade_and_upgrade()
+        self.assertIsNone(self._games())
+

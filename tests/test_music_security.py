@@ -1,91 +1,152 @@
+import asyncio
+import json
 import re
 import shlex
 import threading
 import time
 import types
 import unittest
-from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 from cogs import music
 
 
-class ExtractionPoolReapTests(unittest.TestCase):
-    """A wedged extraction thread cannot be stopped, only abandoned.
+class ExtractionProcessTests(unittest.IsolatedAsyncioTestCase):
+    """Route C (2.19): each lookup is a process, and a process can be killed.
 
-    `wait_for` timing out does not kill the underlying `yt_dlp` thread, and its
-    own `socket_timeout` does not cover a hanging DNS resolution — so the pool
-    has to notice a job that has run far past any real extraction's length and
-    replace itself, rather than leaving every worker eventually stuck.
+    A lookup on a thread that wedged (a hanging DNS resolution is outside
+    yt-dlp's `socket_timeout`) could only be abandoned. These drive real
+    processes through stand-in scripts in place of `core/music_extract.py`.
     """
 
     def setUp(self):
-        self.original_executor = music.music_extract_executor
-        self.original_jobs = dict(music.music_extract_job_started)
-        music.music_extract_job_started.clear()
+        import tempfile
+        self.directory = tempfile.TemporaryDirectory()
+        self.processes = []
+        self.original_spawn = music.asyncio.create_subprocess_exec
+
+        async def spawn(*args, **kwargs):
+            process = await self.original_spawn(*args, **kwargs)
+            self.processes.append(process)
+            return process
+
+        self.spawn_patch = patch.object(music.asyncio, "create_subprocess_exec", spawn)
+        self.spawn_patch.start()
 
     def tearDown(self):
-        music.music_extract_executor.shutdown(wait=False, cancel_futures=True)
-        music.music_extract_executor = self.original_executor
-        music.music_extract_job_started.clear()
-        music.music_extract_job_started.update(self.original_jobs)
+        self.spawn_patch.stop()
+        self.directory.cleanup()
 
-    def test_a_recent_job_is_left_alone(self):
-        music.music_extract_job_started[1] = time.monotonic()
-        self.assertEqual(music.reap_wedged_extraction_pool(), 0)
-        self.assertIs(music.music_extract_executor, self.original_executor)
-        self.assertIn(1, music.music_extract_job_started)
+    def script(self, body):
+        from pathlib import Path
+        path = Path(self.directory.name) / "child.py"
+        path.write_text("import json, os, sys, time\n" + body, encoding="utf-8")
+        return patch.object(music, "MUSIC_EXTRACT_SCRIPT", path)
 
-    def test_no_in_flight_jobs_is_a_no_op(self):
-        self.assertEqual(music.reap_wedged_extraction_pool(), 0)
-        self.assertIs(music.music_extract_executor, self.original_executor)
-
-    def test_a_job_past_the_wedge_ceiling_gets_the_pool_replaced(self):
-        music.music_extract_job_started[1] = (
-            time.monotonic() - music.MUSIC_EXTRACT_WEDGE_SECONDS - 1
-        )
-        music.music_extract_job_started[2] = time.monotonic()
-
-        stuck = music.reap_wedged_extraction_pool()
-
-        self.assertEqual(stuck, 2)
-        self.assertIsNot(music.music_extract_executor, self.original_executor)
-        self.assertEqual(music.music_extract_job_started, {})
-        # The new pool is a working one, not a stand-in.
-        self.assertIsInstance(music.music_extract_executor, ThreadPoolExecutor)
-        self.assertEqual(
-            music.music_extract_executor.submit(lambda: 1 + 1).result(timeout=5), 2
-        )
-
-
-class ExtractionJobTrackingTests(unittest.IsolatedAsyncioTestCase):
-    """`extract_music_info` must not leak a tracked job on the ordinary path."""
-
-    async def test_a_successful_call_leaves_no_tracked_job_behind(self):
-        original = music._extract_music_info
-        music._extract_music_info = lambda source: {"title": source}
-        try:
+    async def test_a_lookup_returns_what_the_process_answers(self):
+        with self.script("request = json.load(sys.stdin)\n"
+                         "json.dump({'title': request['source'], "
+                         "'format': request['options']['format']}, sys.stdout)\n"):
             result = await music.extract_music_info("https://youtu.be/test")
-        finally:
-            music._extract_music_info = original
-        self.assertEqual(result, {"title": "https://youtu.be/test"})
-        self.assertEqual(music.music_extract_job_started, {})
+        self.assertEqual({"title": "https://youtu.be/test",
+                          "format": music.ytdl_format_options["format"]}, result)
 
-    async def test_a_timed_out_call_still_stops_tracking_the_job(self):
-        """`wait_for` giving up must not leave the job "in flight" forever --
-        that bookkeeping leak is exactly what would make every future call
-        look wedged to `reap_wedged_extraction_pool`."""
-        original_timeout = music.MUSIC_EXTRACT_TIMEOUT
-        original_extract = music._extract_music_info
-        music.MUSIC_EXTRACT_TIMEOUT = 0.01
-        music._extract_music_info = lambda source: time.sleep(0.2) or {}
-        try:
+    async def test_a_hung_lookup_is_killed_at_the_timeout(self):
+        with self.script("time.sleep(60)\n"), \
+                patch.object(music, "MUSIC_EXTRACT_TIMEOUT", 0.5):
             with self.assertRaises(TimeoutError):
                 await music.extract_music_info("https://youtu.be/test")
-        finally:
-            music.MUSIC_EXTRACT_TIMEOUT = original_timeout
-            music._extract_music_info = original_extract
-        self.assertEqual(music.music_extract_job_started, {})
+        self.assertIsNotNone(self.processes[0].returncode,
+                             "the timed-out lookup is still running")
+
+    async def test_a_cancelled_lookup_is_killed(self):
+        with self.script("time.sleep(60)\n"):
+            task = asyncio.create_task(music.extract_music_info("https://youtu.be/test"))
+            while not self.processes:
+                await asyncio.sleep(0.01)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertIsNotNone(self.processes[0].returncode)
+
+    async def test_the_process_never_sees_the_bot_token(self):
+        with self.script("json.dump(sorted(os.environ), sys.stdout)\n"), \
+                patch.dict(music.os.environ, {"DISCORD_TOKEN": "x", "POTATOBOT_DB_PATH": "y"}):
+            seen = await music.extract_music_info("https://youtu.be/test")
+        self.assertNotIn("DISCORD_TOKEN", seen)
+        self.assertNotIn("POTATOBOT_DB_PATH", seen)
+        self.assertTrue(set(seen) <= set(music.MUSIC_EXTRACT_ENV_KEYS), seen)
+
+    async def test_a_failure_reports_its_kind_and_not_its_text(self):
+        with self.script("sys.stderr.write('DownloadError'); sys.exit(1)\n"):
+            with self.assertRaises(music.MusicExtractionError) as caught:
+                await music.extract_music_info("ytsearch1:secret song")
+        self.assertEqual("DownloadError", music.error_kind(caught.exception))
+        self.assertEqual("TimeoutError", music.error_kind(TimeoutError()))
+
+    async def test_stray_stderr_never_becomes_the_kind(self):
+        """Found against YouTube: yt-dlp's own error line reached stderr
+        carrying the video id, which for a search is the member's text."""
+        with self.script("sys.stderr.write('ERROR: [youtube] secret song: unavailable');"
+                         " sys.exit(1)\n"):
+            with self.assertRaises(music.MusicExtractionError) as caught:
+                await music.extract_music_info("ytsearch1:secret song")
+        self.assertEqual("unknown", music.error_kind(caught.exception))
+
+
+class ExtractionChildTests(unittest.TestCase):
+    """`core/music_extract.py` itself, against a stand-in yt-dlp."""
+
+    def run_child(self, extractor_class, request):
+        import io
+        import sys
+        from core import music_extract
+        fake = types.SimpleNamespace(YoutubeDL=extractor_class)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.dict(sys.modules, {"yt_dlp": fake}), \
+                patch.object(sys, "stdin", io.StringIO(json.dumps(request))), \
+                patch.object(sys, "stdout", stdout), patch.object(sys, "stderr", stderr):
+            code = music_extract.main()
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_the_answer_is_sanitised_and_the_options_are_used(self):
+        seen = {}
+
+        class Extractor:
+            def __init__(self, options):
+                seen["options"] = options
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def extract_info(self, source, download):
+                seen["source"], seen["download"] = source, download
+                return {"title": "song", "entries": iter([{"id": 1}])}
+
+            def sanitize_info(self, info):
+                return {**info, "entries": list(info["entries"])}
+
+        code, out, _ = self.run_child(Extractor, {"source": "ytsearch1:x",
+                                                  "options": {"quiet": True}})
+        self.assertEqual(0, code)
+        self.assertEqual({"title": "song", "entries": [{"id": 1}]}, json.loads(out))
+        logger = seen["options"].pop("logger")
+        self.assertEqual({"quiet": True}, seen["options"])
+        # yt-dlp prints errors even when quiet, naming the search; the child
+        # hands it a logger that says nothing.
+        self.assertIsNone(logger.error("ERROR: [youtube] the member's search"))
+        self.assertEqual(("ytsearch1:x", False), (seen["source"], seen["download"]))
+
+    def test_a_failure_writes_only_the_kind(self):
+        class Extractor:
+            def __init__(self, options):
+                raise ValueError("ytsearch1:the member's private search")
+
+        code, out, err = self.run_child(Extractor, {"source": "x", "options": {}})
+        self.assertEqual((1, "", "ValueError"), (code, out, err))
 
 
 class MusicInputSecurityTests(unittest.TestCase):
@@ -311,6 +372,64 @@ class BufferedAudioSourceTests(unittest.TestCase):
     returns, so a stall was heard as a gap and then as sped-up audio.
     """
 
+    def setUp(self):
+        # These check pacing, stalls and order; the start-of-song reserve has
+        # tests of its own, so here a song starts on its first packet.
+        patcher = patch.object(music, "MUSIC_START_RESERVE_PACKETS", 1)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_song_starts_once_its_reserve_is_buffered(self):
+        """Started on the first packet, the buffer had nothing in reserve and
+        ran empty for a frame at the start of nearly every song."""
+        gate = threading.Event()
+        packets = [bytes([n % 250 + 1]) for n in range(40)]
+        inner = _FakeInnerSource(packets, gate=gate)
+        with patch.object(music, "MUSIC_START_RESERVE_PACKETS", 25):
+            source = music.BufferedAudioSource(inner, max_packets=64)
+            self.addCleanup(source.cleanup)
+            self.assertEqual(music.OPUS_SILENCE, source.read())
+            gate.set()
+            self.assertTrue(self._wait_for(lambda: source._packets.qsize() >= 25))
+            with self.assertNoLogs("PotatoBot.Music", level="WARNING"):
+                received = [self._next_audio(source) for _ in packets]
+        self.assertEqual(packets, received)
+
+    def test_the_start_is_logged_once_with_its_wait_and_reserve(self):
+        inner = _FakeInnerSource([b"a", b"b", b"c"])
+        source = music.BufferedAudioSource(inner, max_packets=8)
+        self.addCleanup(source.cleanup)
+        self.assertTrue(self._wait_for(lambda: source._packets.qsize() == 4))
+        with self.assertLogs("PotatoBot.Music", level="INFO") as logs:
+            for packet in (b"a", b"b", b"c"):
+                self.assertEqual(packet, source.read())
+        started = [line for line in logs.output if "Music started" in line]
+        self.assertEqual(1, len(started), logs.output)
+        self.assertIn("reserve_packets=4", started[0])
+
+    def test_a_stream_stalled_before_its_reserve_starts_with_what_it_has(self):
+        stall = threading.Event()
+        inner = _FakeInnerSource([b"a", b"b"], stall=stall)
+        self.addCleanup(stall.set)
+        with patch.object(music, "MUSIC_START_RESERVE_PACKETS", 25):
+            source = music.BufferedAudioSource(inner, max_packets=64)
+            self.addCleanup(source.cleanup)
+            self.assertTrue(self._wait_for(lambda: source._packets.qsize() == 2))
+            self.assertEqual(music.OPUS_SILENCE, source.read())
+            source._created -= music.MUSIC_START_RESERVE_MAX_SECONDS + 1
+            self.assertEqual(b"a", source.read())
+
+    @staticmethod
+    def _next_audio(source, timeout=2.0):
+        """The next real packet, skipping the silent frames a read hands the
+        player while it has nothing to play yet."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            packet = source.read()
+            if packet != music.OPUS_SILENCE:
+                return packet
+        raise AssertionError("no audio arrived")
+
     def _wait_for(self, predicate, timeout=2.0):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -324,7 +443,7 @@ class BufferedAudioSourceTests(unittest.TestCase):
         source = music.BufferedAudioSource(_FakeInnerSource(packets), max_packets=8)
         self.addCleanup(source.cleanup)
         self.assertTrue(source.is_opus())
-        received = [source.read() for _ in packets]
+        received = [self._next_audio(source) for _ in packets]
         self.assertEqual(received, packets)
         self.assertEqual(source.read(), b"")
         self.assertEqual(source.read(), b"")
@@ -353,27 +472,104 @@ class BufferedAudioSourceTests(unittest.TestCase):
         self.assertFalse(source._producer.is_alive())
         self.assertEqual(source.read(), b"")
 
-    def test_a_stall_after_playback_started_is_logged_with_its_length(self):
+    def test_a_late_ask_by_the_player_is_logged_and_a_pause_is_not(self):
+        """A gap then a rush with the buffer full (2026-10-31) means the player
+        was held up, not the stream; this is the line that tells them apart."""
+        source = music.BufferedAudioSource(
+            _FakeInnerSource([b"x"] * 10), max_packets=16)
+        self.addCleanup(source.cleanup)
+        self.assertTrue(self._wait_for(lambda: source._packets.qsize() >= 5))
+        clock = [100.0]
+        with patch.object(music.time, "monotonic", lambda: clock[0]), \
+                self.assertLogs(music.music_logger, "WARNING") as logged:
+            source.read()                     # the first packet: nothing to compare
+            clock[0] += 0.02
+            source.read()                     # on time
+            clock[0] += 0.6
+            source.read()                     # late: logged
+            clock[0] += 60
+            source.read()                     # a pause: not logged
+            music.music_logger.warning("end of test")
+        late = [line for line in logged.output if "asked late" in line]
+        self.assertEqual(1, len(late), logged.output)
+        self.assertIn("gap_ms=600", late[0])
+
+    def test_a_stall_is_silence_on_time_logged_once_with_its_length(self):
+        """A read that waited made discord.py's player fall behind and then
+        rush the backlog; silence keeps it on schedule (2026-10-31)."""
         stall = threading.Event()
         inner = _FakeInnerSource([b"a"], stall=stall)
         source = music.BufferedAudioSource(inner, max_packets=4)
         self.addCleanup(source.cleanup)
-        self.assertEqual(source.read(), b"a")
-        threading.Timer(0.5, lambda: (inner._packets.append(b"b"), stall.set())).start()
+        self.assertEqual(self._next_audio(source), b"a")
         with self.assertLogs("PotatoBot.Music", level="INFO") as logs:
-            self.assertEqual(source.read(), b"b")
+            for _ in range(5):
+                started = time.monotonic()
+                self.assertEqual(music.OPUS_SILENCE, source.read())
+                self.assertLess(time.monotonic() - started, 0.1,
+                                "a read waited longer than a frame")
+            inner._packets.append(b"b")
+            stall.set()
+            self.assertEqual(self._next_audio(source), b"b")
         messages = [record.getMessage() for record in logs.records]
         self.assertEqual(1, sum("ran empty" in message for message in messages), messages)
         self.assertEqual(1, sum("recovered after" in message for message in messages), messages)
+        self.assertIn("ran empty at 0.0 s into the song", " ".join(messages))
 
-    def test_waiting_for_the_first_packet_is_not_a_stall(self):
+    def test_the_start_of_a_song_is_silence_not_a_stall_and_not_a_wait(self):
+        """ffmpeg still connecting is where the start-of-song rush came from:
+        the player counted the wait for the first packet as lateness."""
         gate = threading.Event()
         inner = _FakeInnerSource([b"a"], gate=gate)
         source = music.BufferedAudioSource(inner, max_packets=4)
         self.addCleanup(source.cleanup)
+        with self.assertLogs("PotatoBot.Music", level="INFO") as logs:
+            started = time.monotonic()
+            self.assertEqual(music.OPUS_SILENCE, source.read())
+            self.assertLess(time.monotonic() - started, 0.1)
+            gate.set()
+            self.assertEqual(self._next_audio(source), b"a")
+        # The start is announced, never reported as a stall.
+        self.assertEqual(["Music started"],
+                         [record.getMessage().split(" (")[0] for record in logs.records])
+
+    def test_discord_pys_own_player_does_not_rush_after_a_slow_start(self):
+        """End to end, with discord.py's real `AudioPlayer` and a client that
+        records send times. With ffmpeg taking half a second to start, a read
+        that waited sent ~24 packets back to back (half a second of audio at
+        once, the start-of-song rush heard on 2026-10-31); silence on time
+        sends none early."""
+        from discord.player import AudioPlayer
+
+        gate = threading.Event()
+        source = music.BufferedAudioSource(_FakeInnerSource([b"x"] * 80, gate=gate),
+                                           max_packets=100)
+        sent = []
+        client = types.SimpleNamespace(
+            send_audio_packet=lambda data, encode=True: sent.append(
+                (time.perf_counter(), data)),
+            is_connected=lambda: True, wait_until_connected=lambda timeout: True)
+        player = AudioPlayer(source, client)
+        player._speak = lambda state: None
         threading.Timer(0.5, gate.set).start()
-        with self.assertNoLogs("PotatoBot.Music", level="INFO"):
-            self.assertEqual(source.read(), b"a")
+        player.start()
+        player.join(timeout=10)
+        audio = [moment for moment, data in sent if data == b"x"]
+        self.assertEqual(80, len(audio))
+        back_to_back = sum(1 for earlier, later in zip(audio, audio[1:])
+                           if later - earlier < 0.005)
+        self.assertLessEqual(back_to_back, 2, "the player rushed a backlog")
+
+    def test_a_stream_that_never_starts_is_given_up(self):
+        gate = threading.Event()
+        inner = _FakeInnerSource([b"a"], gate=gate)
+        source = music.BufferedAudioSource(inner, max_packets=4)
+        self.addCleanup(source.cleanup)
+        self.addCleanup(gate.set)
+        source._created -= music.MUSIC_START_GIVE_UP_SECONDS + 1
+        with self.assertLogs("PotatoBot.Music", level="WARNING"):
+            self.assertEqual(b"", source.read())
+        self.assertEqual(b"", source.read())
 
     def test_an_inner_read_error_ends_the_stream_and_forwards_the_error(self):
         inner = _FakeInnerSource([b"a"], error=OSError("pipe"))
@@ -381,9 +577,39 @@ class BufferedAudioSourceTests(unittest.TestCase):
         with self.assertLogs("PotatoBot.Music", level="WARNING"):
             source = music.BufferedAudioSource(inner, max_packets=4)
             self.addCleanup(source.cleanup)
-            self.assertEqual(source.read(), b"a")
-            self.assertEqual(source.read(), b"")
+            self.assertEqual(self._next_audio(source), b"a")
+            self.assertEqual(self._next_audio(source), b"")
         self.assertIs(source._current_error, inner._current_error)
+
+
+class SearchWithoutTimerTests(unittest.IsolatedAsyncioTestCase):
+    """Queuing songs back to back (2026-10-31): the search button opens the
+    box every time; a second lookup at once is what is refused, not a second
+    search a few seconds later."""
+
+    async def test_two_searches_in_a_row_both_open_the_box(self):
+        opened = []
+        interaction = types.SimpleNamespace(
+            guild=types.SimpleNamespace(voice_client=object()),
+            user=types.SimpleNamespace(id=4242),
+            response=types.SimpleNamespace(
+                send_modal=lambda modal: _record(opened, modal),
+                send_message=lambda *a, **k: _record(opened, "refused")))
+        view = music.MusicPanelView()
+        await view.search_btn(interaction)
+        await view.search_btn(interaction)
+        self.assertEqual(2, len(opened))
+        self.assertTrue(all(isinstance(item, music.MusicSearchModal) for item in opened))
+
+    def test_play_has_no_timer_but_one_at_a_time(self):
+        command = music.Music.play
+        self.assertIsNone(command._buckets._cooldown, "a timer came back on /play")
+        self.assertIsNotNone(command._max_concurrency)
+        self.assertEqual(1, command._max_concurrency.number)
+
+
+async def _record(collected, item):
+    collected.append(item)
 
 
 class MusicSearchModalTests(unittest.IsolatedAsyncioTestCase):

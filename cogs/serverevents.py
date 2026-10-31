@@ -6,7 +6,6 @@ Who a voice minute pays, and how XP turns into a level and a role, are bound by
 `docs/subsystems/economy.md`.
 """
 import discord
-import asyncio
 import logging
 import os
 import sys
@@ -22,12 +21,12 @@ from core import database
 from core.feature_access import is_enabled
 
 from discord.ext import commands, tasks
-from datetime import datetime, timedelta
 from core.clock import local_date, local_time, parse_stored, utc_now
 from cogs.utils import (BoundedCooldownMap, BoundedValueMap,
                         apply_database_result, can_self_assign_role,
                         guild_setting_sync,
                         handle_loop_error, is_premium, mark_top_ranker_dirty,
+                        member_arrival,
                         update_user_data, voice_reward_block, t)
 
 event_logger = logging.getLogger("PotatoBot.ServerEvents")
@@ -254,8 +253,11 @@ class ServerEvents(commands.Cog):
     async def on_member_join(self, member):
         # The join announcement is `cogs/announcements.py`'s; this listener only
         # makes sure the member has an account and their autoroles.
+        arrival = member_arrival(member.guild.id, member.id)
+        returning = False
         try:
-            if not await database.run(database.user_exists, member.id):
+            returning = await database.run(database.user_exists, member.id)
+            if not returning:
                 await database.run(
                     database.create_new_user, member.id, utc_now().isoformat()
                 )
@@ -267,6 +269,10 @@ class ServerEvents(commands.Cog):
                 "Member account provisioning failed (guild_id=%s, user_id=%s).",
                 member.guild.id, member.id,
             )
+        finally:
+            # Unknown counts as new: the plain welcome is never wrong.
+            if not arrival.done():
+                arrival.set_result(bool(returning))
 
         autorole_ids = (
             guild_setting_sync(member.guild.id, "autoroles")

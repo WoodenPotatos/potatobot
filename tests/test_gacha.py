@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -1652,7 +1651,7 @@ class AssetPresenceVerificationTests(unittest.IsolatedAsyncioTestCase):
         from unittest.mock import AsyncMock, MagicMock
         from cogs.gacha import Gacha
 
-        entitlement_id = self._grant()
+        self._grant()
         guild = MagicMock()
         guild.id = self.GUILD
         guild.fetch_sticker = AsyncMock(

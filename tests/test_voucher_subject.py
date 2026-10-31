@@ -17,7 +17,6 @@ premium has always been a *voucher* rather than a reward the pull hands over, an
 it is why a custom role is one too rather than a new reward kind.
 """
 
-import json
 import os
 import sys
 import tempfile

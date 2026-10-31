@@ -168,13 +168,6 @@ def _audit_features(guild, feature_states, report: PermissionReport) -> None:
             ))
 
 
-def _bot_requirements(definition, channel) -> tuple[str, ...]:
-    """What the bot needs here: the setting's own declaration, else the kind."""
-    if definition.bot_channel_permissions:
-        return definition.bot_channel_permissions
-    return CHANNEL_KIND_REQUIREMENTS.get(str(channel.type), ())
-
-
 def _member_reference(guild, settings):
     """Who "a member" is in this guild, for the member half of the audit.
 
@@ -255,44 +248,91 @@ def _audit_channels(guild, feature_states, settings, report: PermissionReport) -
         if owner and not _feature_is_enabled(feature_states, owner):
             continue
         for channel_id in _setting_ids(settings, key):
-            channel = guild.get_channel(channel_id)
-            if channel is None:
-                report.findings.append(Finding(
-                    code="channel_missing",
-                    severity=SEVERITY_DEGRADED,
-                    subject=key,
-                    feature=owner or "",
-                    identifier=str(channel_id),
-                ))
-                continue
+            _check_channel(guild, report, member_reference, channel_id,
+                           subject=key, feature=owner or "",
+                           bot_permissions=definition.bot_channel_permissions,
+                           member_permissions=definition.member_channel_permissions)
+    _audit_game_channels(guild, feature_states, settings, member_reference, report)
 
-            required = _bot_requirements(definition, channel)
-            if required:
-                missing = _missing(channel.permissions_for(guild.me), required)
-                if missing:
-                    report.findings.append(Finding(
-                        code="channel_missing_permission",
-                        severity=SEVERITY_BLOCKING,
-                        subject=key,
-                        feature=owner or "",
-                        identifier=channel.name,
-                        permissions=missing,
-                        channel_id=channel.id,
-                    ))
 
-            member_missing = _missing_for_members(
-                guild, channel, member_reference,
-                definition.member_channel_permissions)
-            if member_missing:
-                report.findings.append(Finding(
-                    code="channel_member_missing_permission",
-                    severity=SEVERITY_DEGRADED,
-                    subject=key,
-                    feature=owner or "",
-                    identifier=channel.name,
-                    permissions=member_missing,
-                    channel_id=channel.id,
-                ))
+# What a patch-notes channel asks of members, as `patchbot_<game>_channel`
+# declared before schema 26 folded it into `games`.
+PATCH_CHANNEL_MEMBER_PERMISSIONS = ("view_channel",)
+
+
+def _audit_game_channels(guild, feature_states, settings, member_reference,
+                         report: PermissionReport) -> None:
+    """The channels inside `games`, which no plain channel setting names.
+
+    Each per-game patch channel was a channel setting until schema 26, so
+    folding them into one JSON row would otherwise have stopped them being
+    checked at all. An LFG channel is held to what `lfg_default_channel`
+    declares, being the same `/search` in a different room — which also makes
+    this the first time an LFG game channel is audited.
+    """
+    games = settings.get("games")
+    if not isinstance(games, dict):
+        return
+    lfg = SETTING_DEFINITIONS.get("lfg_default_channel")
+    lfg_on = _feature_is_enabled(feature_states, "lfg")
+    for game, row in games.items():
+        if not isinstance(row, dict):
+            continue
+        if lfg_on and row.get("lfg") and row.get("channel"):
+            _check_channel(guild, report, member_reference, row["channel"],
+                           subject="games", feature="lfg",
+                           bot_permissions=lfg.bot_channel_permissions if lfg else (),
+                           member_permissions=lfg.member_channel_permissions if lfg else ())
+        feature = f"patchbot_{game}"
+        target = row.get("patch_channel") or row.get("channel")
+        if (target and feature in FEATURE_DEFINITIONS
+                and _feature_is_enabled(feature_states, feature)):
+            _check_channel(guild, report, member_reference, target,
+                           subject="games", feature=feature, bot_permissions=(),
+                           member_permissions=PATCH_CHANNEL_MEMBER_PERMISSIONS)
+
+
+def _check_channel(guild, report: PermissionReport, member_reference, channel_id,
+                   *, subject: str, feature: str, bot_permissions,
+                   member_permissions) -> None:
+    """One configured channel: present, usable by the bot, usable by members."""
+    channel = guild.get_channel(channel_id)
+    if channel is None:
+        report.findings.append(Finding(
+            code="channel_missing",
+            severity=SEVERITY_DEGRADED,
+            subject=subject,
+            feature=feature,
+            identifier=str(channel_id),
+        ))
+        return
+
+    required = bot_permissions or CHANNEL_KIND_REQUIREMENTS.get(str(channel.type), ())
+    if required:
+        missing = _missing(channel.permissions_for(guild.me), required)
+        if missing:
+            report.findings.append(Finding(
+                code="channel_missing_permission",
+                severity=SEVERITY_BLOCKING,
+                subject=subject,
+                feature=feature,
+                identifier=channel.name,
+                permissions=missing,
+                channel_id=channel.id,
+            ))
+
+    member_missing = _missing_for_members(
+        guild, channel, member_reference, member_permissions)
+    if member_missing:
+        report.findings.append(Finding(
+            code="channel_member_missing_permission",
+            severity=SEVERITY_DEGRADED,
+            subject=subject,
+            feature=feature,
+            identifier=channel.name,
+            permissions=member_missing,
+            channel_id=channel.id,
+        ))
 
 
 def _audit_roles(guild, feature_states, settings, report: PermissionReport) -> None:

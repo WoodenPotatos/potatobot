@@ -328,6 +328,24 @@ class PrivacyWorkflowTests(unittest.TestCase):
         self.assertEqual(entries[0]["target_key"],
                          f"tombstone:{receipt['tombstone_id']}")
 
+    def test_an_erasure_stays_listed_after_more_than_a_feed_of_later_changes(self):
+        """The Privacy page once filtered the general feed's last 100 rows, so
+        an erasure followed by 100 setting changes silently left its list."""
+        receipt = database.anonymize_user(7, actor_id=8, guild_id=111)
+        with database.get_connection() as conn:
+            for index in range(150):
+                database.write_settings_audit(
+                    conn, 111, 8, "setting.update", f"key_{index}", None, index)
+            conn.commit()
+        self.assertNotIn("user.erase",
+                         {entry["action"] for entry in database.get_settings_audit(111)})
+        records = database.get_privacy_audit(111)
+        self.assertEqual(["user.erase"], [entry["action"] for entry in records])
+        self.assertEqual(f"tombstone:{receipt['tombstone_id']}", records[0]["target_key"])
+
+    def test_privacy_records_are_classified_read_only(self):
+        self.assertIn("get_privacy_audit", database.READ_ONLY_OPERATIONS)
+
     def test_an_earlier_warning_deletion_payload_is_scrubbed(self):
         """remove_warning embeds the subject's id and the staff reason text."""
         warning_id = database.get_warnings(7, 111)[0][0]

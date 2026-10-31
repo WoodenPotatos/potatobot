@@ -85,6 +85,30 @@ def template_setting_key(event: str, field: str) -> str:
     return f"{event}_message_{field}"
 
 
+# A returning member's join message (2.19): its own title, texts and content,
+# each falling back to the join message's when empty, so a guild that writes
+# nothing here keeps one welcome. "Returning" means the installation has seen
+# them before (`users`), not this guild: accepted while 2.x is single-guild.
+REJOIN_FIELDS = ("title", "texts", "content")
+
+
+def rejoin_setting_key(field: str) -> str:
+    return f"rejoin_message_{field}"
+
+
+def rejoin_overrides(stored: dict) -> dict:
+    """The rejoin fields that are set, by template field, to lay over the join's."""
+    overrides: dict[str, str | list] = {}
+    for field in REJOIN_FIELDS:
+        value = stored.get(field)
+        if isinstance(value, str) and value.strip():
+            overrides[field] = value
+        elif isinstance(value, list) and any(
+                isinstance(line, str) and line.strip() for line in value):
+            overrides[field] = value
+    return overrides
+
+
 def substitute(template: str, values: dict[str, str]) -> str:
     """Fill `{name}` placeholders in one pass, from a whitelist of strings.
 
@@ -111,6 +135,25 @@ def _clean(text: str) -> str:
 
 def _relative(moment) -> str:
     return f"<t:{int(moment.timestamp())}:R>" if moment else "?"
+
+
+def card_values(member, guild) -> dict[str, str]:
+    """The placeholders an image card can fill, as plain text.
+
+    Not `placeholder_values`: those are escaped for Discord's markdown, which
+    on an image draws its backslashes, and `{user}` is a mention code that only
+    Discord turns into a name. The timestamp placeholders are left out, so
+    they stay as typed, as any placeholder an event cannot fill does.
+    """
+    display_name = getattr(member, "display_name", None) or member.name
+    return {
+        "user": display_name,
+        "user_name": member.name,
+        "display_name": display_name,
+        "user_id": str(member.id),
+        "server": guild.name,
+        "member_count": str(guild.member_count or 0),
+    }
 
 
 def placeholder_values(member, guild, *, moderator=None, reason=None,
@@ -151,6 +194,11 @@ class Announcement:
     # image to the message rather than linking it, because a linked avatar
     # disappears once the member changes it or deletes their account.
     avatar: object = None
+    # The line under the member's name on an image card, when this event's
+    # card is on; None means no card. The poster draws it.
+    card_line: str | None = None
+    # Which stored background the card draws on (`welcome_card.CARD_BACKGROUNDS`).
+    card_background: str | None = None
 
 
 def _text(value) -> str:

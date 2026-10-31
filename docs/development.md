@@ -146,7 +146,6 @@ Background behavior includes:
 - Twitch and YouTube checks every five minutes;
 - patch-note checks every 45 minutes, one fetch per game for every guild;
 - voice reward batching every minute;
-- the music extraction watchdog every minute;
 - daily inactivity scanning, LFG pruning and the privacy retention sweep;
 - daily rental and entitlement cleanup, which no feature flag may stop;
 - member join/leave, ban, boost, chat activity, and voice-state listeners;

@@ -6,13 +6,13 @@ Rules that bind changes here: docs/subsystems/dashboard.md
 import logging
 import asyncio
 import base64
+import binascii
 import concurrent.futures
 import copy
 import hashlib
 import os
 import hmac
 import re
-import json
 import secrets
 import sqlite3
 import threading
@@ -38,14 +38,15 @@ from core.clock import parse_stored
 
 from core import database
 from core import managed_messages
-from core.announcement_templates import ANNOUNCEMENT_EVENTS, EVENT_PLACEHOLDERS
-from core.managed_messages import MANAGED_KIND_FEATURES
+from core import welcome_card
+from core.announcement_templates import (ANNOUNCEMENT_EVENTS, EVENT_PLACEHOLDERS,
+                                         substitute, template_setting_key)
 from core import item_catalog
 from core.supported_games import SUPPORTED_GAME_KEYS
 from core import permission_audit
 from core import settings_cache
 from core.deployment import settings as deployment_settings
-from core.feature_access import is_enabled, update_cached_features
+from core.feature_access import update_cached_features
 # Imported by name, not as a module: a route below is called
 # `settings_registry` and would shadow it.
 from core.settings_registry import (FEATURE_GROUP_ORDER, SETTING_DEFINITIONS,
@@ -116,7 +117,9 @@ def _load_session_secret() -> str:
 # loopback address, which collapses all rate limiting onto one identity. Only the
 # configured number of hops is honoured so a client cannot forge the header.
 if deployment_settings.trusted_proxy_hops:
-    app.wsgi_app = ProxyFix(
+    # Flask's documented way to add WSGI middleware; mypy reads `wsgi_app` as
+    # a method and cannot tell an instance attribute replacing it is intended.
+    app.wsgi_app = ProxyFix(  # type: ignore[method-assign]
         app.wsgi_app,
         x_for=deployment_settings.trusted_proxy_hops,
         x_proto=deployment_settings.trusted_proxy_hops,
@@ -164,9 +167,11 @@ DISCORD_API_ENDPOINT = "https://discord.com/api/v10"
 DISCORD_PERMISSION_ADMINISTRATOR = 1 << 3
 DISCORD_PERMISSION_MANAGE_GUILD = 1 << 5
 _rate_limit_lock = threading.Lock()
-_rate_limit_events = defaultdict(deque)
+# (bucket, identity) -> monotonic times of recent requests.
+_rate_limit_events: defaultdict[tuple[str, str], deque[float]] = defaultdict(deque)
 _oauth_token_lock = threading.Lock()
-_oauth_tokens = {}
+# session id -> {"access_token", "refresh_token", "expires_at"}.
+_oauth_tokens: dict[str, dict] = {}
 _dashboard_bot = None
 
 # A burst of saves should not mean a blocking Discord call each; the window is
@@ -186,7 +191,8 @@ class TtlCache:
     """
 
     def __init__(self, ttl: float, max_entries: int):
-        self._entries = {}
+        # key -> (stored at, value)
+        self._entries: dict[str, tuple[float, object]] = {}
         self._lock = threading.Lock()
         self.ttl = ttl
         self.max_entries = max_entries
@@ -1799,7 +1805,8 @@ def require_json_object():
     return payload
 
 
-def require_exact_keys(payload: dict, keys: set, optional: set = frozenset()):
+def require_exact_keys(payload: dict, keys: set[str] | frozenset[str],
+                       optional: set[str] | frozenset[str] = frozenset()):
     """Reject a body that omits a required field or carries an unknown one.
 
     `optional` exists so a route can grow a field without every existing client
@@ -2415,6 +2422,17 @@ def guild_audit(guild_id):
     if not is_guild_authorized(guild_id):
         return unauthorized_response()
     entries = database.run_read_sync(database.get_settings_audit, guild_id)
+    names = _resolve_actor_names(guild_id, (entry["actor_id"] for entry in entries))
+    for entry in entries:
+        entry["actor_name"] = names.get(entry["actor_id"])
+    return jsonify({"status": "success", "data": entries})
+
+
+@app.route("/api/guilds/<int:guild_id>/privacy/records")
+def guild_privacy_records(guild_id):
+    if not is_guild_authorized(guild_id):
+        return unauthorized_response()
+    entries = database.run_read_sync(database.get_privacy_audit, guild_id)
     names = _resolve_actor_names(guild_id, (entry["actor_id"] for entry in entries))
     for entry in entries:
         entry["actor_name"] = names.get(entry["actor_id"])
@@ -3416,13 +3434,99 @@ def test_guild_announcement(guild_id, event):
     try:
         if event not in ANNOUNCEMENT_EVENTS:
             raise RequestValidationError("dashboard.errors.announcement_event_invalid")
-        require_exact_keys(require_json_object(), set())
+        payload = require_json_object()
+        require_exact_keys(payload, set(), optional={"returning"})
+        returning = payload.get("returning", False)
+        if not isinstance(returning, bool) or (returning and event != "join"):
+            raise RequestValidationError("dashboard.errors.announcement_event_invalid")
         action_id = database.queue_control_action(
-            guild_id, actor_id(), "test_announcement", {"event": event})
+            guild_id, actor_id(), "test_announcement",
+            {"event": event, **({"returning": True} if returning else {})})
         return jsonify({"status": "success", "message": t("dashboard.action_queued"),
                         "data": {"action_id": action_id}}), 202
     except ValueError as error:
         return invalid_request_response(error)
+
+
+@app.route("/api/guilds/<int:guild_id>/announcements/<event>/card-background",
+           methods=["GET", "POST", "DELETE"])
+def guild_card_background(guild_id, event):
+    """An image card's uploaded background: whether there is one, store, remove.
+
+    The browser scales the image to the card before sending it, which is what
+    keeps it under `MAX_CONTENT_LENGTH`; it is still checked and re-encoded
+    here (`welcome_card.normalise_background`), so what is stored is pixels
+    this installation drew, never the uploaded file.
+    """
+    if not is_guild_authorized(guild_id):
+        return unauthorized_response()
+    try:
+        if event not in welcome_card.CARD_BACKGROUNDS:
+            raise RequestValidationError("dashboard.errors.announcement_event_invalid")
+        if request.method == "GET":
+            return jsonify({"status": "success", "data": {
+                "exists": welcome_card.background_path(guild_id, event).is_file()}})
+        if request.method == "DELETE":
+            if welcome_card.delete_background(guild_id, event):
+                database.record_settings_audit(guild_id, actor_id(),
+                                               "card_background.delete", event, True, False)
+            return jsonify({"status": "success",
+                            "message": t("dashboard.card_background_removed")})
+        payload = require_json_object()
+        require_exact_keys(payload, {"image"})
+        if not isinstance(payload["image"], str):
+            raise RequestValidationError("dashboard.errors.card_image_unreadable")
+        try:
+            raw = base64.b64decode(payload["image"], validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise RequestValidationError("dashboard.errors.card_image_unreadable") from exc
+        try:
+            png = welcome_card.normalise_background(raw)
+        except welcome_card.CardImageError as exc:
+            raise RequestValidationError(f"dashboard.errors.{exc.reason}") from exc
+        welcome_card.save_background(guild_id, event, png)
+        database.record_settings_audit(guild_id, actor_id(),
+                                       "card_background.update", event, None, True)
+        return jsonify({"status": "success", "message": t("dashboard.card_background_saved")})
+    except ValueError as error:
+        return invalid_request_response(error)
+    except OSError:
+        return internal_error_response("card background")
+
+
+@app.route("/api/guilds/<int:guild_id>/announcements/<event>/card-preview")
+def guild_card_preview(guild_id, event):
+    """The card as the bot would draw it now, from the saved settings, with
+    the operator standing in for the member and an initial for the avatar
+    (the dashboard has no reason to fetch anyone's avatar). The shipped line
+    is member text, so it follows the bot's language, not the dashboard's."""
+    if not is_guild_authorized(guild_id):
+        return unauthorized_response()
+    if event not in welcome_card.CARD_BACKGROUNDS:
+        return jsonify({"status": "error",
+                        "message": t("dashboard.errors.announcement_event_invalid")}), 400
+    guilds = database.run_read_sync(database.get_active_guilds, [guild_id])
+    server = guilds[0]["name"] if guilds else ""
+    live = _dashboard_bot.get_guild(guild_id) if _dashboard_bot else None
+    name = (session.get("display") or {}).get("username") or "member"
+    values = {"user": name, "user_name": name, "display_name": name,
+              "user_id": str(session.get("user_id", "")), "server": server,
+              "member_count": str(getattr(live, "member_count", None) or "?")}
+    # The returning card's line falls back to the join card's, as the bot's does.
+    keys = (["rejoin_message_card_text", "join_message_card_text"] if event == "rejoin"
+            else [template_setting_key(event, "card_text")])
+    written = next((value for value in (
+        (settings_cache.setting(guild_id, key) or "").strip() for key in keys) if value), "")
+    line = (substitute(written, values) if written else bot_t(
+        f"announcements.{event}_card_line",
+        lang=settings_cache.setting(None, "language"), **values))
+    try:
+        png = welcome_card.render_card(
+            welcome_card.load_background(guild_id, event), None, name, line)
+    except OSError:
+        return internal_error_response("card preview")
+    return app.response_class(png, mimetype="image/png",
+                              headers={"Cache-Control": "no-store"})
 
 
 @app.route("/api/guilds/<int:guild_id>/actions/<int:action_id>")

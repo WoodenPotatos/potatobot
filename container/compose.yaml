@@ -28,13 +28,19 @@ name: potatobot
 
 # The container-native subset of deploy/potatobot.service's ~20 systemd
 # sandboxing directives -- compose cannot express most of them (there is no
-# equivalent of SystemCallFilter or ProtectKernelTunables), but these three
-# are real and the process already needs no more than this bare-metal.
+# equivalent of SystemCallFilter or ProtectKernelTunables), but these are
+# real and the process already needs no more than this bare-metal. The umask
+# is the image's own entrypoint, since compose has no key for it.
 x-hardening: &hardening
   security_opt:
     - "no-new-privileges:true"
   cap_drop:
     - "ALL"
+  # Every write goes to /data; /tmp is a tmpfs because docker, unlike podman,
+  # adds none on its own. Trialled 2026-10-30 (deploy/potatobot.container).
+  read_only: true
+  tmpfs:
+    - /tmp
 
 services:
   bot:
@@ -42,7 +48,7 @@ services:
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.18.4a
+    image: potatobot:2.19.17a
     restart: unless-stopped
     env_file: ../.env
     environment:
@@ -62,7 +68,7 @@ services:
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.18.4a
+    image: potatobot:2.19.17a
     command: ["python", "dashboard_api.py"]
     restart: unless-stopped
     env_file: ../.env

@@ -154,7 +154,7 @@ async def load_cogs():
             try:
                 await bot.load_extension(f'cogs.{filename[:-3]}')
                 bot_logger.info("Loaded extension: %s", filename)
-            except Exception as e:
+            except Exception:
                 bot_logger.exception("Failed to load extension: %s", filename)
 
 async def refresh_feature_caches():
@@ -320,8 +320,10 @@ def start_process_watchdog():
     )
 
 
-# Load extensions before the gateway connection is established.
-bot.setup_hook = load_cogs
+# Load extensions before the gateway connection is established. Assigning the
+# hook is discord.py's documented alternative to subclassing the bot; mypy
+# reads `setup_hook` as a method and cannot tell this is intended.
+bot.setup_hook = load_cogs  # type: ignore[method-assign]
 
 @bot.event
 async def on_ready():

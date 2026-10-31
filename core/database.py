@@ -65,7 +65,7 @@ READ_ONLY_OPERATIONS = {
     "get_guild_settings", "get_instance_settings", "get_schema_version",
     "list_managed_messages", "get_managed_message",
     "get_settings_revision",
-    "get_settings_audit", "get_shop_item_definitions",
+    "get_settings_audit", "get_privacy_audit", "get_shop_item_definitions",
     "list_dashboard_documents", "get_control_action",
     "get_fulfillment_requests",
     "get_expired_entitlements",
@@ -170,7 +170,7 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_survivor", "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 25
+LATEST_SCHEMA_VERSION = 26
 
 # The largest amount any single balance change, stake or transfer may carry.
 # Far above any real balance, and far below 2**63: an amount past that reaches
@@ -1453,6 +1453,97 @@ def seed_role_menus_from_settings(conn) -> int:
     return seeded
 
 
+def seed_games_from_settings(conn) -> int:
+    """Schema 26: fold LFG's channel map and the per-game patch settings into
+    one `games` row per guild, once.
+
+    Before this, a game was three unrelated things: a `{channel: role}` pair in
+    `lfg_channels` with no game named, and `patchbot_<game>_channel` and
+    `_role` for each supported game. The maintainer chose one row per game
+    (2026-10-30), with one role for both pings.
+
+    - Each supported game with a stored patch channel or role becomes a row
+      under its key, LFG off.
+    - Each LFG pair joins the supported row whose role it shares, when exactly
+      one does: LFG on, the LFG channel becomes the game channel, and a
+      different patch channel is kept as the row's override. Anything else
+      becomes a custom row, `Game 1`, `Game 2`…, since nothing stored names it;
+      the operator renames it.
+
+    Gated on the guild having no `games` row, so re-running is a no-op and a
+    guild that already saved one keeps it. The old rows are left in place, as
+    the role-menu seeding left its settings: nothing reads them any more, and a
+    rollback to a build that does still finds them.
+    """
+    from core.supported_games import SUPPORTED_GAME_KEYS
+
+    source_keys = ["lfg_channels"] + [
+        f"patchbot_{game}_{part}" for game in SUPPORTED_GAME_KEYS
+        for part in ("channel", "role")]
+    placeholders = ", ".join("?" for _ in source_keys)
+    guild_ids = [row[0] for row in conn.execute(
+        f"SELECT DISTINCT guild_id FROM guild_settings "
+        f"WHERE setting_key IN ({placeholders})", source_keys)]
+    timestamp = utc_now().isoformat()
+    seeded = 0
+    for guild_id in guild_ids:
+        if conn.execute(
+                "SELECT 1 FROM guild_settings WHERE guild_id = ? AND setting_key = 'games'",
+                (guild_id,)).fetchone():
+            continue
+        stored = {}
+        for key, value_json in conn.execute(
+                f"SELECT setting_key, value_json FROM guild_settings "
+                f"WHERE guild_id = ? AND setting_key IN ({placeholders})",
+                (guild_id, *source_keys)):
+            try:
+                stored[key] = json.loads(value_json)
+            except (TypeError, ValueError):
+                continue
+
+        def snowflake(value):
+            try:
+                return int(value) if value not in (None, "", 0, "0") else None
+            except (TypeError, ValueError):
+                return None
+
+        games = {}
+        for game in SUPPORTED_GAME_KEYS:
+            channel = snowflake(stored.get(f"patchbot_{game}_channel"))
+            role = snowflake(stored.get(f"patchbot_{game}_role"))
+            if channel or role:
+                games[game] = {"role": role, "channel": channel, "lfg": False,
+                               "patch_channel": None}
+        pairs = stored.get("lfg_channels")
+        custom = 0
+        for channel_key, role_value in (pairs.items() if isinstance(pairs, dict) else ()):
+            channel, role = snowflake(channel_key), snowflake(role_value)
+            if channel is None:
+                continue
+            matches = [game for game, row in games.items()
+                       if role is not None and row["role"] == role and not row["lfg"]]
+            if len(matches) == 1:
+                row = games[matches[0]]
+                if row["channel"] not in (None, channel):
+                    row["patch_channel"] = row["channel"]
+                row["channel"], row["lfg"] = channel, role is not None
+                continue
+            custom += 1
+            while f"Game {custom}" in games:
+                custom += 1
+            games[f"Game {custom}"] = {"role": role, "channel": channel,
+                                       "lfg": role is not None, "patch_channel": None}
+        if not games:
+            continue
+        conn.execute(
+            "INSERT INTO guild_settings "
+            "(guild_id, setting_key, value_json, revision, updated_by, updated_at) "
+            "VALUES (?, 'games', ?, 1, NULL, ?)",
+            (guild_id, json.dumps(games), timestamp))
+        seeded += 1
+    return seeded
+
+
 def _promote_instance_settings(conn) -> int:
     """Move a setting now declared instance-wide out of `guild_settings`.
 
@@ -1593,6 +1684,10 @@ def initialize_database():
             if menus:
                 db_logger.info("Seeded %s role menu(s) into managed_messages.",
                                menus)
+            games = seed_games_from_settings(conn)
+            if games:
+                db_logger.info("Folded LFG and patch-notes settings into "
+                               "one game list for %s guild(s).", games)
             moved = _promote_instance_settings(conn)
             if moved:
                 db_logger.info(
@@ -2848,6 +2943,7 @@ def get_feature_states(guild_id: int) -> dict[str, dict]:
             "locale_key": definition.locale_key,
             "group": definition.group,
             "parent": definition.parent,
+            "child_pages": definition.child_pages,
             "value_type": definition.value_type.__name__,
             "sensitive": definition.sensitive,
             "required_discord_permissions": list(
@@ -4494,18 +4590,37 @@ def get_settings_revision() -> int:
     return int(row[0]) if row and row[0] is not None else 0
 
 
-def get_settings_audit(guild_id: int, limit: int = 100) -> list[dict]:
+def _audit_rows(guild_id: int, limit: int, actions: tuple[str, ...] = ()) -> list[dict]:
     limit = max(1, min(int(limit), 500))
+    action_filter = (
+        f" AND action IN ({', '.join('?' for _ in actions)})" if actions else "")
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT audit_id, actor_id, action, target_key, old_value_json, "
-            "new_value_json, created_at FROM settings_audit WHERE guild_id = ? "
-            "ORDER BY audit_id DESC LIMIT ?", (int(guild_id), limit)
+            "new_value_json, created_at FROM settings_audit WHERE guild_id = ?"
+            + action_filter + " ORDER BY audit_id DESC LIMIT ?",
+            (int(guild_id), *actions, limit)
         ).fetchall()
     return [{"audit_id": row[0], "actor_id": str(row[1]), "action": row[2],
              "target_key": row[3], "old_value": json.loads(row[4]) if row[4] else None,
              "new_value": json.loads(row[5]) if row[5] else None, "created_at": row[6]}
             for row in rows]
+
+
+def get_settings_audit(guild_id: int, limit: int = 100) -> list[dict]:
+    return _audit_rows(guild_id, limit)
+
+
+PRIVACY_AUDIT_ACTIONS = ("user.erase", "user.retention_sweep")
+
+
+def get_privacy_audit(guild_id: int, limit: int = 500) -> list[dict]:
+    """Erasure and retention records only, filtered in SQL.
+
+    The dashboard once picked these out of the last 100 rows of the whole feed,
+    so an erasure older than 100 setting changes silently left its list.
+    """
+    return _audit_rows(guild_id, limit, PRIVACY_AUDIT_ACTIONS)
 
 
 # Long enough that a dashboard process down for a while still sees what it

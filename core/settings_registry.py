@@ -81,6 +81,12 @@ class FeatureDefinition:
     # children render on is the parent's key.** So `parent="everydle"` renders on
     # the `everydle` category page. One name instead of two that can disagree.
     parent: str | None = None
+    # Whether each child that owns settings also gets a sub-page of its own,
+    # under this feature in the sidebar (Announcements ▸ Join, Leave, …). The
+    # parent's page then keeps the switches and whatever no child owns. Declared,
+    # not derived from having children: the casino's games own almost nothing,
+    # and a sub-page per game would be a list of empty pages.
+    child_pages: bool = False
 
 
 @dataclass(frozen=True)
@@ -197,7 +203,8 @@ class SettingDefinition:
 
 def _feature(key: str, group: str, *, dependencies: tuple[str, ...] = (),
              default: bool = True, parent: str | None = None,
-             permissions: tuple[str, ...] = ()) -> FeatureDefinition:
+             permissions: tuple[str, ...] = (),
+             child_pages: bool = False) -> FeatureDefinition:
     return FeatureDefinition(
         key=key,
         locale_key=f"dashboard.features.{key}",
@@ -206,6 +213,7 @@ def _feature(key: str, group: str, *, dependencies: tuple[str, ...] = (),
         group=group,
         parent=parent,
         required_discord_permissions=permissions,
+        child_pages=child_pages,
     )
 
 
@@ -222,7 +230,11 @@ def _feature(key: str, group: str, *, dependencies: tuple[str, ...] = (),
 # from the dashboard" true rather than "editable as JSON in the dashboard".
 JSON_SHAPE_ROLE_MENU = "role_menu"        # {label: {"id": role, "emoji": str}}
 JSON_SHAPE_LEVEL_ROLES = "level_roles"    # {level: role}
-JSON_SHAPE_LFG_CHANNELS = "lfg_channels"  # {channel: role}
+#: `{game: {role, channel, lfg, patch_channel}}` — one row per game, holding
+#: what LFG and patch notes used to keep apart (`lfg_channels` and two settings
+#: per supported game, until schema 26). The key is a `SUPPORTED_GAME_KEYS`
+#: entry, which is what patch notes exist for, or a custom game's name.
+JSON_SHAPE_GAMES = "games"
 JSON_SHAPE_FACTIONS = "factions"          # {key: {leader_role_id, manageable_ids}}
 
 # Discord allows 25 components per message and a role menu is one message, so
@@ -247,7 +259,7 @@ JSON_SHAPE_WHEEL_SEGMENTS = "wheel_segments"
 JSON_SHAPE_SNOWFLAKE_FIELDS = {
     JSON_SHAPE_ROLE_MENU: ("id",),
     JSON_SHAPE_LEVEL_ROLES: None,          # the value is the id itself
-    JSON_SHAPE_LFG_CHANNELS: None,
+    JSON_SHAPE_GAMES: ("role", "channel", "patch_channel"),
     JSON_SHAPE_FACTIONS: ("leader_role_id", "manageable_ids"),
     # Declared as holding no snowflake rather than omitted: `wire_json_shape`
     # treats an absent shape as "nothing to transform", which is the same
@@ -263,6 +275,8 @@ JSON_SHAPE_SNOWFLAKE_FIELDS = {
 JSON_SHAPE_ENTRY_FIELDS: dict[str, dict[str, object]] = {
     JSON_SHAPE_ROLE_MENU: {"id": None, "emoji": ""},
     JSON_SHAPE_FACTIONS: {"leader_role_id": None, "manageable_ids": []},
+    JSON_SHAPE_GAMES: {"role": None, "channel": None, "lfg": False,
+                       "patch_channel": None},
 }
 
 
@@ -462,7 +476,7 @@ FEATURE_DEFINITIONS = {
                  dependencies=("moderation",),
                  permissions=("manage_messages", "read_message_history")),
         _feature("member_announcements", "community",
-                 permissions=("send_messages", "embed_links")),
+                 permissions=("send_messages", "embed_links"), child_pages=True),
         # One sub-toggle per event, rendered on the `member_announcements` page
         # beside the editor for that event's message. Each depends on the
         # master, so switching it off cascades. Kick and ban need the audit log:
@@ -505,48 +519,50 @@ FEATURE_DEFINITIONS = {
         # per-game rows would otherwise fill the Features page. This is a pure
         # notification feature with no economy interaction, so it depends on
         # nothing.
+        # One page, not sub-pages (maintainer, 2026-10-30): the game list grows,
+        # and a sub-page per game turned the sidebar into a scroll again.
         _feature("patchbot", "patchbot"),
-        _feature("patchbot_lol", "patchbot", parent="patchbot",
+        _feature("patchbot_lol", "patchbot", parent="games",
                  dependencies=("patchbot",),
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
-        _feature("patchbot_valorant", "patchbot", parent="patchbot",
+        _feature("patchbot_valorant", "patchbot", parent="games",
                  dependencies=("patchbot",),
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
-        _feature("patchbot_minecraft", "patchbot", parent="patchbot",
+        _feature("patchbot_minecraft", "patchbot", parent="games",
                  dependencies=("patchbot",),
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
-        _feature("patchbot_phasmophobia", "patchbot", parent="patchbot",
+        _feature("patchbot_phasmophobia", "patchbot", parent="games",
                  dependencies=("patchbot",),
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
-        _feature("patchbot_dbd", "patchbot", parent="patchbot",
+        _feature("patchbot_dbd", "patchbot", parent="games",
                  dependencies=("patchbot",),
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
-        _feature("patchbot_genshin", "patchbot", parent="patchbot",
+        _feature("patchbot_genshin", "patchbot", parent="games",
                  dependencies=("patchbot",),
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
-        _feature("patchbot_cs2", "patchbot", parent="patchbot",
+        _feature("patchbot_cs2", "patchbot", parent="games",
                  dependencies=("patchbot",),
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
-        _feature("patchbot_r6", "patchbot", parent="patchbot",
+        _feature("patchbot_r6", "patchbot", parent="games",
                  dependencies=("patchbot",),
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
-        _feature("patchbot_hsr", "patchbot", parent="patchbot",
+        _feature("patchbot_hsr", "patchbot", parent="games",
                  dependencies=("patchbot",),
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
-        _feature("patchbot_wuwa", "patchbot", parent="patchbot",
+        _feature("patchbot_wuwa", "patchbot", parent="games",
                  dependencies=("patchbot",),
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
-        _feature("patchbot_zzz", "patchbot", parent="patchbot",
+        _feature("patchbot_zzz", "patchbot", parent="games",
                  dependencies=("patchbot",),
                  permissions=("send_messages", "embed_links",
                               "mention_everyone")),
@@ -728,13 +744,13 @@ SETTING_DEFINITIONS = {
         _setting("casino_rate_limit_alert_channel", "casino", "casino",
                  SettingValueType.CHANNEL, None, feature="casino_rate_limit",
                  channel_types=TEXT_CHANNEL_TYPES),
-        _setting("levels_channels", "community", "levels", SettingValueType.CHANNEL_LIST,
+        _setting("levels_channels", "levels", "levels", SettingValueType.CHANNEL_LIST,
                  [], feature="levels", channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
         # The per-guild `No. 1` role. It resolved only through a config.json key
         # that nothing could write, so it was the one role a dashboard operator
         # could not set at all.
-        _setting("top_ranker_role", "community", "levels", SettingValueType.ROLE,
+        _setting("top_ranker_role", "levels", "levels", SettingValueType.ROLE,
                  None, feature="levels", assignable_role=True),
         # One channel per announced event, each on its event's section of the
         # Announcements page. The three original keys are kept as they were, so
@@ -774,7 +790,7 @@ SETTING_DEFINITIONS = {
         # `edited_elsewhere`: these render on the Ticket Launcher page instead
         # of here, beside the panel they configure, not the generic Community
         # settings wall.
-        _setting("ticket_category", "community", "tickets", SettingValueType.CHANNEL,
+        _setting("ticket_category", "tickets", "tickets", SettingValueType.CHANNEL,
                  None, feature="tickets", channel_types=CATEGORY_CHANNEL_TYPES,
                  bot_permissions=('view_channel', 'manage_channels', 'manage_roles', 'attach_files', 'read_message_history'),
                  edited_elsewhere=True),
@@ -782,7 +798,7 @@ SETTING_DEFINITIONS = {
         # dashboard-access bar (Manage Server) must not be able to repoint the
         # ticket log channel at something they themselves can read -- see
         # `dashboard_api.is_full_admin_session`.
-        _setting("ticket_logs", "community", "tickets", SettingValueType.CHANNEL,
+        _setting("ticket_logs", "tickets", "tickets", SettingValueType.CHANNEL,
                  None, feature="tickets", channel_types=TEXT_CHANNEL_TYPES,
                  bot_permissions=('view_channel', 'send_messages', 'embed_links', 'attach_files'),
                  edited_elsewhere=True, requires_full_admin=True),
@@ -798,7 +814,7 @@ SETTING_DEFINITIONS = {
         _setting("invite_log_channel", "administration", "logging", SettingValueType.CHANNEL,
                  None, feature="invite_logging", channel_types=TEXT_CHANNEL_TYPES,
                  bot_permissions=('view_channel', 'send_messages', 'embed_links')),
-        _setting("temporary_voice_lobbies", "community", "voice", SettingValueType.CHANNEL_LIST,
+        _setting("temporary_voice_lobbies", "temporary_voice", "voice", SettingValueType.CHANNEL_LIST,
                  [], feature="temporary_voice", channel_types=VOICE_CHANNEL_TYPES,
                  bot_permissions=('view_channel', 'connect', 'manage_channels', 'manage_roles', 'move_members')),
         # `requires_full_admin` on the four settings that decide which role a
@@ -819,15 +835,15 @@ SETTING_DEFINITIONS = {
         # this same page.
         _setting("premium_role", "economy", "premium", SettingValueType.ROLE,
                  None, feature="economy", assignable_role=True),
-        _setting("member_role", "community", "onboarding", SettingValueType.ROLE,
+        _setting("member_role", "onboarding", "onboarding", SettingValueType.ROLE,
                  None, feature="onboarding", assignable_role=True),
         # `edited_elsewhere`: renders on the Entry Gate page instead, beside
         # the airlock panel it gates -- unlike `member_role`/`autoroles`
         # below, which stay here since they are general-purpose and must not
         # be gated behind the entry-gate system a guild may not even use.
-        _setting("onboarding_role", "community", "onboarding", SettingValueType.ROLE,
+        _setting("onboarding_role", "onboarding", "onboarding", SettingValueType.ROLE,
                  None, feature="onboarding", assignable_role=True, edited_elsewhere=True),
-        _setting("autoroles", "community", "onboarding", SettingValueType.ROLE_LIST,
+        _setting("autoroles", "onboarding", "onboarding", SettingValueType.ROLE_LIST,
                  [], feature="onboarding", assignable_role=True,
                  requires_full_admin=True),
         _setting("ignored_users", "moderation", "inactivity", SettingValueType.STRING_LIST,
@@ -885,7 +901,7 @@ SETTING_DEFINITIONS = {
         # shipped one guild's snowflakes — the same leak the `/work` responses
         # had. A role id cannot be guessed for somebody else's guild, so there is
         # no honest default; `docs/level_setup.md` documents the ladder instead.
-        _setting("level_roles", "community", "levels", SettingValueType.JSON,
+        _setting("level_roles", "levels", "levels", SettingValueType.JSON,
                  {}, feature="levels", json_shape=JSON_SHAPE_LEVEL_ROLES,
                  requires_full_admin=True),
         # The three role menus were settings here until schema 12. A guild may
@@ -903,13 +919,18 @@ SETTING_DEFINITIONS = {
         # category that priced nothing and owned nothing else — the prices are
         # all shop item prices under Economy, and the casino category owns no
         # settings at all.
-        _setting("lfg_channels", "lfg", "lfg", SettingValueType.JSON,
-                 {}, feature="lfg", json_shape=JSON_SHAPE_LFG_CHANNELS),
+        # One row per game: its role, its channel, whether `/search` works
+        # there, and where its patch notes go (the game channel unless set).
+        # Owned by no feature: LFG and patch notes both read it, and a setting's
+        # owner must be a feature every reader requires. A row's patch notes
+        # switch is the existing `patchbot_<game>` feature, not a field.
+        _setting("games", "games", "games", SettingValueType.JSON,
+                 {}, json_shape=JSON_SHAPE_GAMES),
         # The LFG channel with no role attached: `/search` has always had this
         # second branch, and this only names it for what it is. It also picks up
         # `feature="lfg"`, which it lacked while `lfg_channels` had it — an
         # asymmetry that left it configurable while LFG was switched off.
-        _setting("lfg_default_channel", "lfg", "lfg", SettingValueType.CHANNEL,
+        _setting("lfg_default_channel", "games", "lfg", SettingValueType.CHANNEL,
                  None, feature="lfg",
                  channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),
@@ -918,110 +939,50 @@ SETTING_DEFINITIONS = {
         # the row is still there to close. Owned by `lfg` for editing only:
         # the closing loop ignores the flag, because a flag decides whether a
         # post may be *made*, never whether an old one may end.
-        _setting("lfg_auto_close_hours", "lfg", "lfg", SettingValueType.INTEGER,
+        _setting("lfg_auto_close_hours", "games", "lfg", SettingValueType.INTEGER,
                  24, feature="lfg", minimum=0, maximum=168),
-        _setting("social_notification_channel", "community", "socials", SettingValueType.CHANNEL,
+        _setting("social_notification_channel", "socials", "socials", SettingValueType.CHANNEL,
                  None, channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel',)),
-        _setting("twitch_role", "community", "socials", SettingValueType.ROLE,
+        _setting("twitch_role", "socials", "socials", SettingValueType.ROLE,
                  None, feature="social_twitch"),
-        _setting("youtube_role", "community", "socials", SettingValueType.ROLE,
+        _setting("youtube_role", "socials", "socials", SettingValueType.ROLE,
                  None, feature="social_youtube"),
-        _setting("twitch_streamers", "community", "socials", SettingValueType.STRING_LIST,
+        _setting("twitch_streamers", "socials", "socials", SettingValueType.STRING_LIST,
                  [], feature="social_twitch", max_length=25, max_items=100),
         # Read by the YouTube RSS loop and registered nowhere, so it was a key
         # the code looked for and no operator could set — not in the dashboard
         # and not in the file. Registering it is what makes the feature reachable.
-        _setting("youtube_channels", "community", "socials",
+        _setting("youtube_channels", "socials", "socials",
                  SettingValueType.STRING_LIST, [], feature="social_youtube",
                  max_length=64, max_items=100),
-        # One channel and one optional role per watched game. A channel is
-        # required for that game's announcements to have anywhere to go; the
-        # role is recognition-only (pinged, never granted), which is exactly
-        # what lets an operator point it at a role a game role-menu already
-        # created — no code coupling, just the same role id in two settings.
-        _setting("patchbot_lol_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
-                 None, feature="patchbot_lol", channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel',)),
-        _setting("patchbot_lol_role", "patchbot", "patchbot", SettingValueType.ROLE,
-                 None, feature="patchbot_lol"),
-        _setting("patchbot_valorant_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
-                 None, feature="patchbot_valorant", channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel',)),
-        _setting("patchbot_valorant_role", "patchbot", "patchbot", SettingValueType.ROLE,
-                 None, feature="patchbot_valorant"),
-        _setting("patchbot_minecraft_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
-                 None, feature="patchbot_minecraft", channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel',)),
-        _setting("patchbot_minecraft_role", "patchbot", "patchbot", SettingValueType.ROLE,
-                 None, feature="patchbot_minecraft"),
-        _setting("patchbot_phasmophobia_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
-                 None, feature="patchbot_phasmophobia", channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel',)),
-        _setting("patchbot_phasmophobia_role", "patchbot", "patchbot", SettingValueType.ROLE,
-                 None, feature="patchbot_phasmophobia"),
-        _setting("patchbot_dbd_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
-                 None, feature="patchbot_dbd", channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel',)),
-        _setting("patchbot_dbd_role", "patchbot", "patchbot", SettingValueType.ROLE,
-                 None, feature="patchbot_dbd"),
-        _setting("patchbot_genshin_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
-                 None, feature="patchbot_genshin", channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel',)),
-        _setting("patchbot_genshin_role", "patchbot", "patchbot", SettingValueType.ROLE,
-                 None, feature="patchbot_genshin"),
-        _setting("patchbot_cs2_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
-                 None, feature="patchbot_cs2", channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel',)),
-        _setting("patchbot_cs2_role", "patchbot", "patchbot", SettingValueType.ROLE,
-                 None, feature="patchbot_cs2"),
-        _setting("patchbot_r6_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
-                 None, feature="patchbot_r6", channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel',)),
-        _setting("patchbot_r6_role", "patchbot", "patchbot", SettingValueType.ROLE,
-                 None, feature="patchbot_r6"),
-        _setting("patchbot_hsr_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
-                 None, feature="patchbot_hsr", channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel',)),
-        _setting("patchbot_hsr_role", "patchbot", "patchbot", SettingValueType.ROLE,
-                 None, feature="patchbot_hsr"),
-        _setting("patchbot_wuwa_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
-                 None, feature="patchbot_wuwa", channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel',)),
-        _setting("patchbot_wuwa_role", "patchbot", "patchbot", SettingValueType.ROLE,
-                 None, feature="patchbot_wuwa"),
-        _setting("patchbot_zzz_channel", "patchbot", "patchbot", SettingValueType.CHANNEL,
-                 None, feature="patchbot_zzz", channel_types=TEXT_CHANNEL_TYPES,
-                 member_permissions=('view_channel',)),
-        _setting("patchbot_zzz_role", "patchbot", "patchbot", SettingValueType.ROLE,
-                 None, feature="patchbot_zzz"),
         # `/work` outcome rarity and payouts. The three tier weights are drawn
         # against each other, so the shipped 998/1/1 reproduces the previous
         # hard-coded one-in-a-thousand chances exactly.
-        _setting("work_tier_normal_weight", "economy", "work",
+        _setting("work_tier_normal_weight", "work", "work",
                  SettingValueType.INTEGER, 998, feature="economy",
                  minimum=0, maximum=1000000),
-        _setting("work_tier_free_weight", "economy", "work",
+        _setting("work_tier_free_weight", "work", "work",
                  SettingValueType.INTEGER, 1, feature="economy",
                  minimum=0, maximum=1000000),
-        _setting("work_tier_high_weight", "economy", "work",
+        _setting("work_tier_high_weight", "work", "work",
                  SettingValueType.INTEGER, 1, feature="economy",
                  minimum=0, maximum=1000000),
-        _setting("work_payout_min", "economy", "work", SettingValueType.INTEGER,
+        _setting("work_payout_min", "work", "work", SettingValueType.INTEGER,
                  500, feature="economy", minimum=0, maximum=1000000000),
-        _setting("work_payout_max", "economy", "work", SettingValueType.INTEGER,
+        _setting("work_payout_max", "work", "work", SettingValueType.INTEGER,
                  3000, feature="economy", minimum=0, maximum=1000000000),
-        _setting("work_high_payout_min", "economy", "work",
+        _setting("work_high_payout_min", "work", "work",
                  SettingValueType.INTEGER, 10000, feature="economy",
                  minimum=0, maximum=1000000000),
-        _setting("work_high_payout_max", "economy", "work",
+        _setting("work_high_payout_max", "work", "work",
                  SettingValueType.INTEGER, 30000, feature="economy",
                  minimum=0, maximum=1000000000),
-        _setting("work_xp_normal", "economy", "work", SettingValueType.INTEGER,
+        _setting("work_xp_normal", "work", "work", SettingValueType.INTEGER,
                  25, feature="economy", minimum=0, maximum=1000000),
-        _setting("work_xp_free", "economy", "work", SettingValueType.INTEGER,
+        _setting("work_xp_free", "work", "work", SettingValueType.INTEGER,
                  50, feature="economy", minimum=0, maximum=1000000),
-        _setting("work_xp_high", "economy", "work", SettingValueType.INTEGER,
+        _setting("work_xp_high", "work", "work", SettingValueType.INTEGER,
                  5, feature="economy", minimum=0, maximum=1000000),
     )
 }
@@ -1127,6 +1088,44 @@ for _event in ANNOUNCEMENT_EVENTS:
                  choice_prefix="dashboard.announcement_thumbnails"),
     ):
         SETTING_DEFINITIONS[_definition.key] = _definition
+
+
+# An image card per event that may carry one (`core.welcome_card.CARD_EVENTS`):
+# a switch, off until chosen, and the line under the member's name, empty
+# meaning the shipped line. While on, the card takes the embed's image slot.
+from core.welcome_card import CARD_EVENTS  # noqa: E402
+
+for _event in CARD_EVENTS:
+    _owner = EVENT_FEATURES[_event]
+    for _definition in (
+        _setting(template_setting_key(_event, "card"), "member_announcements",
+                 _owner, SettingValueType.BOOLEAN, False, feature=_owner),
+        _setting(template_setting_key(_event, "card_text"), "member_announcements",
+                 _owner, SettingValueType.STRING, "", feature=_owner,
+                 max_length=120),
+    ):
+        SETTING_DEFINITIONS[_definition.key] = _definition
+
+
+# The returning-member variant of the join message: on the join page, owned
+# by the join switch, every default empty so nothing changes until written.
+from core.announcement_templates import rejoin_setting_key  # noqa: E402
+
+# Its own section (`announce_rejoin`) on the join page, so the two welcomes
+# read as two blocks rather than one form with three extra fields.
+for _definition in (
+    _setting(rejoin_setting_key("title"), "member_announcements", "announce_rejoin",
+             SettingValueType.STRING, "", feature="announce_join", max_length=256),
+    _setting(rejoin_setting_key("texts"), "member_announcements", "announce_rejoin",
+             SettingValueType.STRING_LIST, [], feature="announce_join",
+             max_length=1000, max_items=MAX_TEXT_VARIANTS, multiline=True),
+    _setting(rejoin_setting_key("content"), "member_announcements", "announce_rejoin",
+             SettingValueType.STRING, "", feature="announce_join",
+             max_length=500, multiline=True),
+    _setting(rejoin_setting_key("card_text"), "member_announcements", "announce_rejoin",
+             SettingValueType.STRING, "", feature="announce_join", max_length=120),
+):
+    SETTING_DEFINITIONS[_definition.key] = _definition
 
 
 # Three settings per warn tag, generated from the one catalogue so the set
@@ -1335,11 +1334,50 @@ def _validated_wheel_segments(value):
     return normalised
 
 
-def _validated_lfg_channels(value):
-    """{channel: role}. Both halves are snowflakes."""
+GAMES_LIMIT = 50
+GAME_NAME_LIMIT = 60
+
+
+def _validated_games(value):
+    """{game: {role, channel, lfg, patch_channel}}.
+
+    The key is a supported game, or a custom game's name. Refused rather than
+    guessed at, because `/search` and patch notes both act on what this says:
+    an LFG row needs a channel to answer in and a role to ping; two LFG rows
+    may not share a channel, or `/search` would have to pick one; and only a
+    supported game has patch notes to send anywhere.
+    """
+    from core.supported_games import SUPPORTED_GAME_KEYS
+
+    entries = _shaped_map(value, "the game list")
+    if len(entries) > GAMES_LIMIT:
+        raise ValueError(f"at most {GAMES_LIMIT} games")
     normalised = {}
-    for channel, role in _shaped_map(value, "the LFG map").items():
-        normalised[str(_snowflake(channel))] = _snowflake(role)
+    lfg_channels = set()
+    for key, entry in entries.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("every game needs a name")
+        name = key.strip()
+        if len(name) > GAME_NAME_LIMIT:
+            raise ValueError(f"a game name is at most {GAME_NAME_LIMIT} characters")
+        if not isinstance(entry, dict) or set(entry) - set(
+                JSON_SHAPE_ENTRY_FIELDS[JSON_SHAPE_GAMES]):
+            raise ValueError(
+                "a game holds only 'role', 'channel', 'lfg' and 'patch_channel'")
+        row = {**JSON_SHAPE_ENTRY_FIELDS[JSON_SHAPE_GAMES], **entry}
+        if not isinstance(row["lfg"], bool):
+            raise ValueError("'lfg' must be true or false")
+        for field in ("role", "channel", "patch_channel"):
+            row[field] = None if row[field] in (None, "") else _snowflake(row[field])
+        if row["lfg"]:
+            if row["channel"] is None or row["role"] is None:
+                raise ValueError("a game with LFG on needs a channel and a role")
+            if row["channel"] in lfg_channels:
+                raise ValueError("two games with LFG on cannot share a channel")
+            lfg_channels.add(row["channel"])
+        if row["patch_channel"] is not None and name not in SUPPORTED_GAME_KEYS:
+            raise ValueError("only a supported game has patch notes")
+        normalised[name] = row
     return normalised
 
 
@@ -1443,7 +1481,7 @@ def _validated_item_values(value):
 _JSON_SHAPE_VALIDATORS = {
     JSON_SHAPE_ROLE_MENU: _validated_role_menu,
     JSON_SHAPE_LEVEL_ROLES: _validated_level_roles,
-    JSON_SHAPE_LFG_CHANNELS: _validated_lfg_channels,
+    JSON_SHAPE_GAMES: _validated_games,
     JSON_SHAPE_FACTIONS: _validated_factions,
     JSON_SHAPE_ITEM_VALUES: _validated_item_values,
     JSON_SHAPE_WHEEL_SEGMENTS: _validated_wheel_segments,

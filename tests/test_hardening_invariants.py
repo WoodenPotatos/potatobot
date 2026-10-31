@@ -9,7 +9,6 @@ lifetime. Each test here pins one of those behaviours.
 import ast
 import asyncio
 import builtins
-import json
 import os
 import symtable
 import tempfile

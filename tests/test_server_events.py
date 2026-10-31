@@ -6,9 +6,6 @@ from unittest.mock import patch
 from cogs.utils import is_premium, voice_reward_block
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class VoiceRewardRuleTests(unittest.TestCase):
     """Who a minute in voice pays, and why it does not.
@@ -153,3 +150,47 @@ class AutoroleScreeningTests(unittest.IsolatedAsyncioTestCase):
         ):
             await cog.on_member_join(member)
         self.assertEqual([501], granted)
+
+
+class ArrivalVerdictTests(unittest.IsolatedAsyncioTestCase):
+    """`serverevents` decides once whether a joining member is returning, and
+    the join announcement reads that answer instead of racing it."""
+
+    async def join(self, exists):
+        import cogs.serverevents
+        import cogs.utils as utils
+        from core import database
+
+        guild = SimpleNamespace(id=1420070400000000041, get_role=lambda role_id: None)
+        member = SimpleNamespace(id=1420070400000000042, guild=guild)
+        cog = cogs.serverevents.ServerEvents(SimpleNamespace())
+        globals_ = cog.on_member_join.__func__.__globals__
+
+        async def database_run(function, *args, **kwargs):
+            if isinstance(exists, Exception):
+                raise exists
+            return exists if function is database.user_exists else None
+
+        with (
+            patch.dict(globals_, {"is_enabled": lambda guild_id, key: False}),
+            patch.object(globals_["database"], "run", side_effect=database_run),
+        ):
+            await cog.on_member_join(member)
+        return utils.member_arrival(guild.id, member.id)
+
+    async def test_a_known_member_is_returning(self):
+        self.assertTrue((await self.join(True)).result())
+
+    async def test_a_new_member_is_not(self):
+        self.assertFalse((await self.join(False)).result())
+
+    async def test_a_database_failure_still_answers_new(self):
+        """An unanswered join would hold the announcement for its timeout."""
+        from core import database
+        arrival = await self.join(database.DatabaseOperationError("down"))
+        self.assertTrue(arrival.done())
+        self.assertFalse(arrival.result())
+
+
+if __name__ == "__main__":
+    unittest.main()

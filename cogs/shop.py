@@ -21,11 +21,11 @@ from core import database
 from core.feature_access import is_enabled, maintenance_blocks, require_interaction_feature
 from core.support_tickets import open_ticket
 from core import item_catalog
-from core.item_catalog import SELECT_OPTION_LIMIT, SHOP_ITEMS, ItemEffect
+from core.item_catalog import SELECT_OPTION_LIMIT, ItemEffect
 
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
-from core.clock import local_date, local_time, parse_stored, utc_now
+from core.clock import parse_stored, utc_now
 from cogs.tickets import TicketControl
 from cogs.utils import (can_self_assign_role, currency_emoji,
                         currency_select_emoji, guild_setting_sync,

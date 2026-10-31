@@ -60,7 +60,11 @@ let guilds = [];
 let account = null;
 
 const CATEGORY_ICONS = {
-    community: 'ic-community',
+    levels: 'ic-levels',
+    onboarding: 'ic-onboarding',
+    temporary_voice: 'ic-ch-voice',
+    socials: 'ic-socials',
+    work: 'ic-work',
     member_announcements: 'ic-community',
     economy: 'ic-economy',
     games: 'ic-games',
@@ -637,6 +641,12 @@ function bindShell() {
         button.addEventListener('click', () => { showPage(button.dataset.page); });
     });
 
+    document.querySelectorAll('.nav-expand').forEach(bindExpander);
+    const remembered = openBranches();
+    document.querySelectorAll('.nav-branch').forEach((branch) => {
+        setBranchOpen(branch, remembered.has(branch.dataset.branch));
+    });
+
     document.querySelectorAll('[data-toggle-group]').forEach((button) => {
         button.addEventListener('click', () => {
             const group = button.closest('.nav-group');
@@ -653,18 +663,9 @@ function bindShell() {
     popover(document.getElementById('account-trigger'), buildAccountMenu);
     popover(document.getElementById('guild-trigger'), buildGuildMenu);
 
-    const settingsForm = document.getElementById('settings-form');
-    settingsForm.addEventListener('submit', saveSettings);
-    settingsForm.addEventListener('reset', (event) => {
-        event.preventDefault();
-        renderSettings(activePage);
-    });
-    // Delegated, because the inputs are rebuilt on every render. `input` covers
-    // typing and `change` covers the selectors and checkboxes.
-    settingsForm.addEventListener('input', refreshSettingsDirtyState);
-    settingsForm.addEventListener('change', refreshSettingsDirtyState);
-    wireInlineSettingsForm('ticket-settings-form', 'ticket-settings-grid');
-    wireInlineSettingsForm('entry-gate-settings-form', 'entry-gate-settings-grid');
+    wireAutoSaveForm('settings-form', 'settings-grid', refreshSettingsDirtyState);
+    wireAutoSaveForm('ticket-settings-form', 'ticket-settings-grid');
+    wireAutoSaveForm('entry-gate-settings-form', 'entry-gate-settings-grid');
     document.getElementById('gacha-form').addEventListener('submit', saveGacha);
     document.getElementById('gacha-banner-form').addEventListener('submit', createGachaBanner);
     document.getElementById('work-response-form').addEventListener('submit', createWorkResponse);
@@ -843,7 +844,16 @@ async function loadGuild() {
             api(`/guilds/${guildId}/features`),
             api(`/guilds/${guildId}/settings`),
             api(`/guilds/${guildId}/gacha`),
-            api(`/guilds/${guildId}/discord-resources`),
+            // Optional, unlike the three above: the lists only feed the pickers,
+            // which keep a stored id they cannot name. Failing the whole load on
+            // them left the page with no feature state at all — no sub-toggles,
+            // no sub-pages, every announcement editor on one page. A session
+            // that ended is still handled as one.
+            api(`/guilds/${guildId}/discord-resources`).catch((error) => {
+                if (error instanceof ApiError && [401, 403].includes(error.status)) throw error;
+                toast(tr('dashboard.resources_unavailable'), true);
+                return {data: {channels: [], roles: []}};
+            }),
         ]);
         featureState = features.data;
         settings = settingData.data;
@@ -871,11 +881,112 @@ async function loadGuild() {
         return;
     }
     renderFeatures();
+    syncGeneratedBranches();
     updateNavigation();
     await showPage(activePage);
 }
 
 /* ------------------------------------------------------------- navigation */
+
+/* ------------------------------------------------------------ nav branches */
+
+// A branch is a page with sub-pages under it (Onboarding ▸ Rules panel, Entry
+// gate). Which ones this browser left open is per viewer and best-effort:
+// blocked storage starts every branch closed.
+const NAV_OPEN_KEY = 'potato.nav.open';
+
+function openBranches() {
+    try {
+        const stored = JSON.parse(localStorage.getItem(NAV_OPEN_KEY) || '[]');
+        return new Set(Array.isArray(stored) ? stored : []);
+    } catch (error) {
+        return new Set();
+    }
+}
+
+function rememberBranch(name, open) {
+    const names = openBranches();
+    if (open) names.add(name); else names.delete(name);
+    try {
+        localStorage.setItem(NAV_OPEN_KEY, JSON.stringify([...names]));
+    } catch (error) {
+        // Storage refused: the branch still opens, it is just not remembered.
+    }
+}
+
+function bindExpander(button) {
+    button.addEventListener('click', () => {
+        const branch = button.closest('.nav-branch');
+        setBranchOpen(branch, !branch.classList.contains('open'));
+        rememberBranch(branch.dataset.branch, branch.classList.contains('open'));
+    });
+}
+
+/** The children of `parent` that get a sub-page: only when the parent declares
+ *  `child_pages`, and only a child owning a setting, in the registry's order. */
+function childPageOwners(parent) {
+    if (!featureState[parent]?.child_pages) return [];
+    const firstOrder = (child) => Math.min(...Object.values(registry)
+        .filter((definition) => definition.owner_feature === child)
+        .map((definition) => definition.order ?? Number.MAX_SAFE_INTEGER));
+    return childFeaturesOf(parent)
+        .map(([key]) => key)
+        .filter((key) => Object.values(registry)
+            .some((definition) => definition.owner_feature === key))
+        .sort((left, right) => firstOrder(left) - firstOrder(right));
+}
+
+/** Turn a `child_pages` feature's nav item into a branch and (re)list its
+ *  sub-pages. Run on every guild load, so it rebuilds rather than appends. */
+function syncGeneratedBranches() {
+    Object.entries(featureState).forEach(([key, state]) => {
+        if (!state.child_pages) return;
+        const item = document.querySelector(`#nav-links .nav-item[data-page="${key}"]`);
+        if (!item) return;
+        let branch = item.closest('.nav-branch');
+        if (!branch) {
+            branch = element('div', 'nav-branch');
+            branch.dataset.branch = key;
+            const row = element('div', 'nav-branch-row');
+            const expander = element('button', 'nav-expand');
+            expander.type = 'button';
+            expander.setAttribute('aria-controls', `nav-children-${key}`);
+            expander.setAttribute('aria-label', tr('dashboard.nav_expand'));
+            expander.append(element('span', 'nav-expand-count'),
+                icon('ic-chevron-down', 'ic ic-sm chevron'));
+            bindExpander(expander);
+            const list = element('div', 'nav-children');
+            list.id = `nav-children-${key}`;
+            item.replaceWith(branch);
+            row.append(item, expander);
+            branch.append(row, list);
+            setBranchOpen(branch, openBranches().has(key));
+        }
+        const symbol = item.querySelector('use')?.getAttribute('href')?.slice(1) || 'ic-chevron-right';
+        branch.querySelector('.nav-children').replaceChildren(...childPageOwners(key).map((child) => {
+            const sub = element('button', 'nav-item nav-sub');
+            sub.type = 'button';
+            sub.dataset.feature = child;
+            sub.dataset.page = `${key}:${child}`;
+            sub.append(icon(symbol), element('span', null, tr(featureState[child].locale_key)));
+            sub.addEventListener('click', () => { showPage(sub.dataset.page); });
+            return sub;
+        }));
+    });
+}
+
+function setBranchOpen(branch, open) {
+    branch.classList.toggle('open', open);
+    branch.querySelector('.nav-expand')?.setAttribute('aria-expanded', String(open));
+}
+
+/** The nav item a sub-page hangs under, or null for a top-level item. */
+function branchParentItem(item) {
+    const children = item.closest('.nav-children');
+    return children
+        ? children.closest('.nav-branch').querySelector('.nav-branch-row > .nav-item')
+        : null;
+}
 
 /** A category page stays visible while any of its settings is still owned by an
  *  enabled feature; only pages with a dedicated owner follow that flag directly. */
@@ -899,6 +1010,10 @@ function updateNavigation() {
     // `data-feature`, so the queue that clears an obligation is reachable
     // whatever is switched off. The consequence that remains is deliberate — a
     // feature's editor page comes back when the feature does.
+    //
+    // A sub-page follows its parent as a third condition of the same decision.
+    // Document order puts every parent before its children, so the parent's
+    // state is already decided when a child reads it.
     document.querySelectorAll('.nav-item').forEach((button) => {
         const feature = button.dataset.feature;
         const category = button.dataset.category;
@@ -906,7 +1021,18 @@ function updateNavigation() {
             && featureState[feature]?.enabled === false;
         const emptyCategory = Boolean(category)
             && !categoryHasVisibleSettings(category);
-        button.classList.toggle('hidden', featureOff || emptyCategory);
+        const parentHidden = Boolean(branchParentItem(button)?.classList.contains('hidden'));
+        button.classList.toggle('hidden', featureOff || emptyCategory || parentHidden);
+    });
+
+    // An expander with nothing visible under it would open onto nothing. One
+    // with something says how much, so a branch reads as one at a glance.
+    document.querySelectorAll('.nav-branch').forEach((branch) => {
+        const visibleChildren = [...branch.querySelectorAll('.nav-children > .nav-item')]
+            .filter((item) => !item.classList.contains('hidden')).length;
+        const expander = branch.querySelector('.nav-expand');
+        expander.classList.toggle('hidden', visibleChildren === 0);
+        expander.querySelector('.nav-expand-count').textContent = String(visibleChildren);
     });
 
     document.querySelectorAll('.nav-group').forEach((group) => {
@@ -916,9 +1042,14 @@ function updateNavigation() {
         if (header) header.classList.toggle('hidden', !anyVisible);
     });
 
-    // Never leave the operator looking at a page they just turned off.
+    // Never leave the operator looking at a page they just turned off. A hidden
+    // sub-page falls back to its parent while that is still there.
     const current = document.querySelector(`.nav-item[data-page="${activePage}"]`);
-    if (current && current.classList.contains('hidden')) activePage = 'overview';
+    if (current && current.classList.contains('hidden')) {
+        const parent = branchParentItem(current);
+        activePage = parent && !parent.classList.contains('hidden')
+            ? parent.dataset.page : 'overview';
+    }
 }
 
 /** Say so when the page you are on configures a switched-off feature. */
@@ -948,14 +1079,26 @@ async function showPage(page) {
         node.classList.toggle('active', active);
         if (active) node.setAttribute('aria-current', 'page');
         else node.removeAttribute('aria-current');
+        // Open the branch holding the page, so the active item is never
+        // inside a closed one, and the branch a parent page heads, so its
+        // sub-pages show the moment it is visited. Not remembered: the
+        // operator did not ask.
+        if (active && node.closest('.nav-branch')) setBranchOpen(node.closest('.nav-branch'), true);
     });
 
     // Reset the shared header slots before rendering, so a page is free to fill
     // its own subtitle and actions without them being wiped afterwards.
-    document.getElementById('page-title').textContent = tr(`dashboard.title_${page.replaceAll('-', '_')}`);
+    // A generated sub-page (`member_announcements:announce_join`) is titled by
+    // its feature; every other page has a title key of its own.
+    const [, subPage] = page.split(':');
+    document.getElementById('page-title').textContent = subPage
+        ? tr(featureState[subPage]?.locale_key)
+        : tr(`dashboard.title_${page.replaceAll('-', '_')}`);
     document.getElementById('page-subtitle').textContent = '';
     document.getElementById('page-actions').replaceChildren();
     document.getElementById('sidebar').classList.remove('open');
+    // Overview fits the viewport and scrolls inside its two panels instead.
+    document.querySelector('.content').classList.toggle('page-fixed', page === 'overview');
 
     const direct = document.getElementById(page);
     if (direct) direct.classList.remove('hidden');
@@ -972,18 +1115,15 @@ async function showPage(page) {
     if (page === 'redeems') await loadRedeems();
     if (page === 'ticket-launcher') {
         renderInlineSettingsCard('ticket-settings-grid', ['ticket_category', 'ticket_logs']);
-        refreshInlineSettingsDirtyState('ticket-settings-grid', 'ticket-settings-form');
         applyPermissionNotes();
     }
     if (page === 'entry-gate') {
         renderInlineSettingsCard('entry-gate-settings-grid', ['onboarding_role']);
-        refreshInlineSettingsDirtyState('entry-gate-settings-grid', 'entry-gate-settings-form');
         applyPermissionNotes();
     }
     if (MANAGED_PAGES[page]) await loadManaged(page);
-    if (page === 'audit') await loadAudit();
+    if (page === 'privacy') await loadPrivacy();
     if (page === 'permissions') await loadPermissionReport();
-    if (page === 'changelog') await loadChangelog();
 }
 
 function setSubtitle(path, values) {
@@ -1006,9 +1146,8 @@ async function renderOverview() {
 
     [
         {page: 'features', labelKey: 'dashboard.nav_features', symbol: 'ic-features'},
-        {page: 'community', labelKey: 'dashboard.nav_community', symbol: 'ic-community'},
-        {page: 'audit', labelKey: 'dashboard.nav_audit', symbol: 'ic-audit'},
         {page: 'permissions', labelKey: 'dashboard.nav_permissions', symbol: 'ic-shield-check'},
+        {page: 'privacy', labelKey: 'dashboard.nav_privacy', symbol: 'ic-privacy'},
     ].forEach((entry) => {
         const button = element('button', 'quick-action');
         button.type = 'button';
@@ -1021,6 +1160,9 @@ async function renderOverview() {
 
     const stats = document.getElementById('overview-stats');
     renderSkeleton(stats, 3);
+    // Each panel loads and fails on its own, so one cannot blank the other,
+    // and neither holds up the tiles.
+    const panels = Promise.all([loadAudit(), loadChangelog()]);
 
     // Both extra lists come from endpoints the shop and content pages already use.
     // Drafts used to be counted here; there are none any more, so this reports
@@ -1072,6 +1214,7 @@ async function renderOverview() {
     });
 
     setSubtitle('dashboard.subtitle_overview', {enabled, total: featureEntries.length});
+    await panels;
 }
 
 /* --------------------------------------------------------------- features */
@@ -1210,6 +1353,8 @@ function dependentFeatures(key) {
 
 async function saveFeature(key, input, revision) {
     const enabling = input.checked;
+    // A switch reloads the page; a field still waiting to save goes first.
+    await flushAutoSaves();
     if (!enabling) {
         const dependents = dependentFeatures(key);
         if (dependents.length) {
@@ -1322,14 +1467,26 @@ function buildSettingField(definition) {
     return group;
 }
 
-function renderSettings(category) {
-    document.getElementById('settings-heading').textContent = tr(`dashboard.category_${category}`);
+function renderSettings(page) {
+    // `<category>:<child>` is a sub-page: that child's own switch and the
+    // settings it owns. Its parent's page keeps every switch and whatever no
+    // sub-paged child owns, so no setting is drawn on two pages.
+    const [category, owner] = page.split(':');
+    document.getElementById('settings-heading').textContent = owner
+        ? tr(featureState[owner]?.locale_key) : tr(`dashboard.category_${category}`);
     const host = document.getElementById('settings-grid');
     host.replaceChildren();
+    const subPaged = new Set(childPageOwners(category));
 
     // The master's own sub-toggles come first: they decide whether the settings
     // below them do anything at all.
-    const children = childFeaturesOf(category);
+    // A switch a row editor on this page draws inside its own row (a game's
+    // patch notes) is not drawn again above the form.
+    const coveredByRows = (featureKey) => visibleDefinitions(category).some(
+        (definition) => (JSON_ROW_SHAPES[definition.json_shape]?.columns || []).some(
+            (spec) => spec.kind === 'feature' && spec.covers(featureKey)));
+    const children = childFeaturesOf(category)
+        .filter(([key]) => (!owner || key === owner) && !coveredByRows(key));
     if (children.length) {
         const section = element('fieldset', 'form-section');
         section.appendChild(element('legend', null, tr('dashboard.sub_features')));
@@ -1340,7 +1497,9 @@ function renderSettings(category) {
         host.appendChild(section);
     }
 
-    const definitions = visibleDefinitions(category);
+    const definitions = visibleDefinitions(category).filter((definition) => (owner
+        ? definition.owner_feature === owner
+        : !subPaged.has(definition.owner_feature)));
     if (!definitions.length) {
         if (!children.length) {
             host.appendChild(emptyState('dashboard.no_settings',
@@ -1377,7 +1536,15 @@ function renderSettings(category) {
         section.appendChild(legend);
         const grid = element('div', 'form-grid');
 
-        entries.forEach((definition) => grid.appendChild(buildSettingField(definition)));
+        entries.forEach((definition) => {
+            const field = buildSettingField(definition);
+            // A section holding one field named like the section would print
+            // the same word twice, one under the other (Games / Games).
+            if (entries.length === 1 && tr(definition.locale_key) === tr(`dashboard.pages.${page}`)) {
+                field.querySelector(':scope > .field-label')?.classList.add('hidden');
+            }
+            grid.appendChild(field);
+        });
 
         section.appendChild(grid);
         host.appendChild(section);
@@ -1443,68 +1610,38 @@ function fillPlaceholders(template, values) {
     });
 }
 
-// Which event editors this browser left open. Per viewer and best-effort: a
-// private window or blocked storage simply starts every editor closed.
-const ANNOUNCEMENT_OPEN_KEY = 'potato.announcements.open';
-
-function openAnnouncementEditors() {
-    try {
-        const stored = JSON.parse(localStorage.getItem(ANNOUNCEMENT_OPEN_KEY) || '[]');
-        return new Set(Array.isArray(stored) ? stored : []);
-    } catch (error) {
-        return new Set();
-    }
-}
-
-function rememberAnnouncementEditor(page, open) {
-    const pages = openAnnouncementEditors();
-    if (open) pages.add(page); else pages.delete(page);
-    try {
-        localStorage.setItem(ANNOUNCEMENT_OPEN_KEY, JSON.stringify([...pages]));
-    } catch (error) {
-        // Storage refused: the editor still opens, it is just not remembered.
-    }
-}
-
-/** Turn a section's legend into an open/close button, like a sidebar group.
- *  The legend keeps its unsaved marker, so a closed editor with edits in it
- *  still says so. */
-function makeSectionCollapsible(section, open) {
-    const legend = section.querySelector(':scope > legend');
-    const toggle = element('button', 'section-toggle');
-    toggle.type = 'button';
-    toggle.append(icon('ic-chevron-down', 'ic ic-sm chevron'),
-        element('span', null, legend.firstChild?.textContent || ''));
-    legend.firstChild.replaceWith(toggle);
-    section.classList.add('collapsible');
-    const apply = (isOpen) => {
-        section.classList.toggle('collapsed', !isOpen);
-        toggle.setAttribute('aria-expanded', String(isOpen));
-    };
-    apply(open);
-    toggle.addEventListener('click', () => {
-        const isOpen = section.classList.contains('collapsed');
-        apply(isOpen);
-        rememberAnnouncementEditor(section.dataset.page, isOpen);
-    });
-}
-
 function addAnnouncementTools(host) {
-    const opened = openAnnouncementEditors();
     host.querySelectorAll('fieldset.form-section[data-page^="announce_"]').forEach((section) => {
-        makeSectionCollapsible(section, opened.has(section.dataset.page));
-        const event = section.dataset.page.slice('announce_'.length);
-        const field = (name) => section.querySelector(
-            `[data-key="${event}_message_${name}"]`);
+        // `announce_rejoin` is the join's returning-member block: its own
+        // title, texts, content and card line, everything else the new
+        // member block's, and each empty field falls back to that block's.
+        const key = section.dataset.page.slice('announce_'.length);
+        const returning = key === 'rejoin';
+        const event = returning ? 'join' : key;
+        const joinField = (name) => host.querySelector(`[data-key="join_message_${name}"]`);
+        const field = (name) => section.querySelector(`[data-key="${key}_message_${name}"]`)
+            || (returning ? joinField(name) : null);
         // Fields whose owner feature is off are not rendered at all.
         if (!ANNOUNCEMENT_FIELDS.every((name) => field(name))) return;
+        section.classList.add('announcement-section');
+        if (returning) {
+            const note = fieldHint('announce_rejoin');
+            if (note) section.querySelector(':scope > legend').after(note);
+        }
 
         // An empty box means "the shipped text", so it shows that text greyed
         // rather than looking blank. Nothing is saved until someone types,
         // which keeps an untouched guild on the shipped wording if it changes.
         // The server's language, not the dashboard's: this is what members read.
-        const shippedTitle = serverText(`announcements.${event}_title`);
-        const shippedText = serverText(`announcements.${event}_desc`);
+        // For the returning block, the new member's own text comes first.
+        const joinVariants = () => (returning
+            ? readSettingInput(registry.join_message_texts, joinField('texts')) : []);
+        const shippedTitleFor = () => (returning && joinField('title').value.trim())
+            || serverText(`announcements.${event}_title`);
+        const shippedTextFor = () => joinVariants()[0]
+            || serverText(`announcements.${event}_desc`);
+        let shippedTitle = shippedTitleFor();
+        let shippedText = shippedTextFor();
         field('title').placeholder = shippedTitle;
         // One box per variant. The first shows the shipped text, because an
         // empty list is what sends it; a box added after that is a variant.
@@ -1540,6 +1677,13 @@ function addAnnouncementTools(host) {
 
         const redraw = () => {
             const values = announcementSampleValues();
+            if (returning) {
+                // The new member block may have changed what an empty field means.
+                shippedTitle = shippedTitleFor();
+                shippedText = shippedTextFor();
+                field('title').placeholder = shippedTitle;
+                labelBoxes();
+            }
             preview.replaceChildren();
             preview.appendChild(element('span', 'field-label',
                 tr('dashboard.announcement_preview')));
@@ -1560,7 +1704,7 @@ function addAnnouncementTools(host) {
                 fillPlaceholders(title, values)));
 
             const variants = readSettingInput(
-                registry[`${event}_message_texts`], field('texts'));
+                registry[`${key}_message_texts`], field('texts'));
             const shown = Math.min(previewVariant, Math.max(variants.length - 1, 0));
             const description = renderMarkdownBody(
                 fillPlaceholders(variants[shown] || shippedText, values));
@@ -1580,9 +1724,12 @@ function addAnnouncementTools(host) {
             }
             preview.appendChild(embed);
         };
-        // Bound to each control, never delegated through the form.
-        ANNOUNCEMENT_FIELDS.forEach((name) => {
-            const control = field(name);
+        // Bound to each control, never delegated through the form. The
+        // returning block also follows the new member's title and texts,
+        // which are what its empty fields mean.
+        const followed = ANNOUNCEMENT_FIELDS.map(field).concat(
+            returning ? [joinField('title'), joinField('texts')] : []);
+        new Set(followed).forEach((control) => {
             control.addEventListener('input', redraw);
             control.addEventListener('change', redraw);
         });
@@ -1605,7 +1752,8 @@ function addAnnouncementTools(host) {
             try {
                 const queued = await api(
                     `/guilds/${guildId}/announcements/${encodeURIComponent(event)}/test`,
-                    {method: 'POST', headers: headers(), body: JSON.stringify({})});
+                    {method: 'POST', headers: headers(),
+                     body: JSON.stringify(returning ? {returning: true} : {})});
                 toast(queued.message);
                 await followAction(queued.data?.action_id);
             } catch (error) {
@@ -1615,9 +1763,150 @@ function addAnnouncementTools(host) {
             }
         });
         tools.appendChild(test);
+        if (CARD_EVENTS.includes(event)) tools.appendChild(cardTools(host, key, event));
         section.appendChild(tools);
     });
 }
+
+/* ------------------------------------------------------------ image cards */
+
+// The events with an image card, as `core.welcome_card.CARD_EVENTS`, and the
+// card's size, as `CARD_SIZE`: the browser scales an upload to it so the
+// request stays under the server's 1 MB cap. The server still re-checks it.
+const CARD_EVENTS = ['join', 'leave'];
+const CARD_WIDTH = 1024;
+const CARD_HEIGHT = 320;
+
+/** An image file scaled to fill the card and centre-cropped, as base64 JPEG. */
+function scaleToCard(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error);
+        reader.onload = () => {
+            const image = new Image();
+            image.onerror = () => reject(new Error('unreadable image'));
+            image.onload = () => {
+                const scale = Math.max(CARD_WIDTH / image.naturalWidth,
+                                       CARD_HEIGHT / image.naturalHeight);
+                const width = image.naturalWidth * scale;
+                const height = image.naturalHeight * scale;
+                const canvas = document.createElement('canvas');
+                canvas.width = CARD_WIDTH;
+                canvas.height = CARD_HEIGHT;
+                canvas.getContext('2d').drawImage(image, (CARD_WIDTH - width) / 2,
+                                                  (CARD_HEIGHT - height) / 2, width, height);
+                resolve(canvas.toDataURL('image/jpeg', 0.9).split(',')[1]);
+            };
+            image.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+/** One card's controls: preview, upload, back to the default. `card` is the
+ *  background it draws on (`join`, `rejoin`, `leave`); `event` owns the switch,
+ *  so the returning welcome's card follows the join's. Shown only while that
+ *  switch is on; the preview is the server's drawing of what is saved, so it
+ *  refreshes after each autosave of a card field. */
+function cardTools(host, card, event) {
+    const base = `/guilds/${guildId}/announcements/${encodeURIComponent(card)}`;
+    const box = element('div', 'card-tools');
+    box.appendChild(element('span', 'field-label', tr('dashboard.card_preview')));
+    const preview = element('img', 'card-preview');
+    preview.alt = tr('dashboard.card_preview');
+    box.appendChild(preview);
+    let version = 0;
+    const refresh = () => {
+        version += 1;
+        preview.src = `${API}${base}/card-preview?v=${version}`;
+    };
+
+    const actions = element('div', 'card-actions');
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = 'image/png,image/jpeg,image/webp,image/gif';
+    picker.className = 'card-file';
+    picker.hidden = true;
+    const upload = element('button', 'btn btn-outline btn-sm', tr('dashboard.card_background_upload'));
+    upload.type = 'button';
+    upload.addEventListener('click', () => picker.click());
+    const reset = element('button', 'btn btn-ghost btn-sm', tr('dashboard.card_background_remove'));
+    reset.type = 'button';
+
+    const syncReset = async () => {
+        try {
+            reset.disabled = !(await api(`${base}/card-background`)).data.exists;
+        } catch (error) {
+            reset.disabled = false;
+        }
+    };
+    picker.addEventListener('change', async () => {
+        const file = picker.files && picker.files[0];
+        picker.value = '';
+        if (!file) return;
+        upload.disabled = true;
+        try {
+            const image = await scaleToCard(file);
+            const result = await api(`${base}/card-background`, {
+                method: 'POST', headers: headers(), body: JSON.stringify({image}),
+            });
+            toast(result.message);
+            reset.disabled = false;
+            refresh();
+        } catch (error) {
+            if (error instanceof ApiError) handleApiError(error);
+            else toast(tr('dashboard.errors.card_image_unreadable'), true);
+        } finally {
+            upload.disabled = false;
+        }
+    });
+    reset.addEventListener('click', async () => {
+        reset.disabled = true;
+        try {
+            toast((await api(`${base}/card-background`,
+                             {method: 'DELETE', headers: headers()})).message);
+            refresh();
+        } catch (error) {
+            handleApiError(error);
+            reset.disabled = false;
+        }
+    });
+    actions.append(upload, reset, picker);
+    box.appendChild(actions);
+    box.appendChild(element('small', 'field-hint', tr('dashboard.card_background_hint')));
+
+    // Visible while the switch is on; the switch saves at once, so this
+    // follows the box rather than the saved value.
+    const toggle = host.querySelector(`[data-key="${event}_message_card"]`);
+    const show = () => {
+        const on = Boolean(toggle?.checked);
+        box.classList.toggle('hidden', !on);
+        if (on && !preview.src) {
+            refresh();
+            syncReset();
+        }
+    };
+    toggle?.addEventListener('change', show);
+    // The keys whose save changes this drawing: the switch, and every card
+    // line this card can fall back through.
+    box.dataset.keys = (card === 'rejoin'
+        ? ['join_message_card', 'join_message_card_text', 'rejoin_message_card_text']
+        : [`${event}_message_card`, `${event}_message_card_text`]).join(' ');
+    cardRefreshers.set(box, refresh);
+    show();
+    return box;
+}
+
+// One listener for the page's life, not one per render: each card box on the
+// page is found when a save lands, and a box no longer drawn is not.
+const cardRefreshers = new WeakMap();
+document.addEventListener('settings-saved', (saved) => {
+    const keys = saved.detail || [];
+    document.querySelectorAll('.card-tools').forEach((box) => {
+        const watched = (box.dataset.keys || '').split(' ');
+        if (keys.some((key) => watched.includes(key))) cardRefreshers.get(box)?.();
+    });
+});
 
 /** The permission diagnostic, indexed by the setting each finding is about.
  *
@@ -1707,6 +1996,7 @@ function collectSettingChanges(container = document.getElementById('settings-gri
         // Only dirty fields are submitted, so one edit does not bump every
         // revision in the category or write an audit row per untouched setting.
         return [...container.querySelectorAll('[data-key]')]
+            .filter((input) => input.dataset.unfinished !== 'true')
             .map((input) => {
                 const key = input.dataset.key;
                 return {
@@ -1729,22 +2019,13 @@ function collectSettingChanges(container = document.getElementById('settings-gri
     }
 }
 
-/** Show what is unsaved: a count on the apply button and a pill per section.
- *  A JSON field mid-edit cannot be parsed, so the count is unknown rather than
- *  zero — reporting zero there would disable the only way to save. */
+/** Show what is not saved yet: a pill per section, until its autosave lands.
+ *  A JSON field mid-edit cannot be parsed, so nothing is marked rather than
+ *  everything. */
 function refreshSettingsDirtyState() {
     refreshWeightShares();
-    const form = document.getElementById('settings-form');
-    const submit = form.querySelector('button[type="submit"]');
-    const reset = form.querySelector('button[type="reset"]');
     const changes = collectSettingChanges();
     const dirtyKeys = new Set((changes || []).map((change) => change.key));
-
-    submit.textContent = changes && changes.length
-        ? format('dashboard.save_settings_count', {count: changes.length})
-        : tr('dashboard.save_settings');
-    submit.disabled = changes !== null && changes.length === 0;
-    reset.disabled = submit.disabled;
 
     document.querySelectorAll('#settings-grid .form-section').forEach((section) => {
         const dirty = [...section.querySelectorAll('[data-key]')]
@@ -1880,18 +2161,47 @@ const JSON_ROW_SHAPES = {
         unpack: (entry) => ({role: entry}),
         pack: (columns) => columns.role,
     },
-    lfg_channels: {
-        // A team-finding post goes in a text channel, so the picker is narrowed
-        // the way every other channel selector is. Presentational only, as
-        // `channel_types` always is: deciding a channel's kind needs live
-        // Discord state and a save must not start failing while Discord is
-        // unreachable.
-        key: {kind: 'channel', label: 'dashboard.lfg_channel',
-              channelTypes: ['text', 'news']},
-        columns: [{name: 'role', kind: 'role', label: 'dashboard.lfg_role',
-                   required: true}],
-        unpack: (entry) => ({role: entry}),
-        pack: (columns) => columns.role,
+    games: {
+        // One row per game (schema 26): what LFG and patch notes kept apart.
+        // A supported game's key is fixed and named for it; a custom game's
+        // key is its name. Two cells are not data in this value: the patch
+        // notes switch is the game's own `patchbot_<key>` feature, saved at
+        // once like any switch, and the patch channel exists only for a
+        // supported game. Neither picker is required on its own: an LFG row
+        // needs both, which `incomplete` says rather than `required`.
+        key: {kind: 'game', label: 'dashboard.games_game'},
+        columns: [
+            {name: 'role', kind: 'role', label: 'dashboard.games_role'},
+            {name: 'channel', kind: 'channel', label: 'dashboard.games_channel',
+             channelTypes: ['text', 'news']},
+            {name: '__patch', kind: 'feature', label: 'dashboard.games_patch',
+             feature: (key) => `patchbot_${key}`,
+             covers: (featureKey) => featureKey.startsWith('patchbot_')},
+            {name: 'patch_channel', kind: 'channel', supportedOnly: true,
+             label: 'dashboard.games_patch_channel', channelTypes: ['text', 'news']},
+            {name: 'lfg', kind: 'toggle', label: 'dashboard.games_lfg'},
+        ],
+        // Fixed widths for the switch columns, never `auto`: every row is its
+        // own grid, so an `auto` column sized itself per row and a custom
+        // game's "—" (narrower than a switch) shifted the rest of its row.
+        template: 'minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr) 72px '
+            + 'minmax(0, 1fr) 56px 34px',
+        addLabel: 'dashboard.games_add_custom',
+        unpack: (entry) => ({
+            role: entry?.role ?? null,
+            channel: entry?.channel ?? null,
+            patch_channel: entry?.patch_channel ?? null,
+            lfg: entry?.lfg === true,
+        }),
+        // A cell reads back as a string or a boolean depending on its kind.
+        pack: (columns) => ({
+            role: columns.role || null,
+            channel: columns.channel || null,
+            lfg: columns.lfg === true || columns.lfg === 'true',
+            patch_channel: columns.patch_channel || null,
+        }),
+        incomplete: (columns) => (columns.lfg === true || columns.lfg === 'true')
+            && (!columns.role || !columns.channel),
     },
     factions: {
         key: {kind: 'text', label: 'dashboard.faction_key'},
@@ -1979,6 +2289,10 @@ function jsonRowEditor(definition, value) {
     // the moment it has a value, and a picker never had one at all.
     const head = element('div', 'menu-row menu-head');
     head.style.setProperty('--row-columns', String(shape.columns.length + 1));
+    if (shape.template) {
+        head.classList.add('templated');
+        head.style.setProperty('--row-template', shape.template);
+    }
     head.appendChild(element('span', null, tr(shape.key.label)));
     shape.columns.forEach((spec) => head.appendChild(element('span', null, tr(spec.label))));
     head.appendChild(element('span', 'menu-head-spacer'));
@@ -1990,8 +2304,56 @@ function jsonRowEditor(definition, value) {
     const summaryNode = shape.summary ? element('div', 'row-editor-summary total-readout') : null;
     if (summaryNode) wrapper.appendChild(summaryNode);
 
-    /** One field, by kind. A picker field returns the ids it holds. */
-    const field = (spec, current) => {
+    const isSupportedGame = (key) => (supportedGames || []).includes(key);
+
+    /** One field, by kind. A picker field returns the ids it holds. `rowKey`
+     *  is the row's own key, for the cells that depend on which game it is. */
+    const field = (spec, current, rowKey) => {
+        if (spec.kind === 'game') {
+            // A supported game is named for it and cannot be retyped: the key
+            // is what patch notes are addressed by. A custom game's name is text.
+            if (isSupportedGame(current)) {
+                const label = element('span', 'row-game-name',
+                    tr(`dashboard.game_names.${current}`));
+                label.dataset.value = current;
+                return label;
+            }
+        }
+        if (spec.supportedOnly && !isSupportedGame(rowKey)) {
+            const none = element('span', 'row-cell-none', '—');
+            none.dataset.value = '';
+            return none;
+        }
+        if (spec.kind === 'feature') {
+            const featureKey = spec.feature(rowKey);
+            const state = featureState[featureKey];
+            if (!state) return element('span', 'row-cell-none', '—');
+            // Saved at once, and the page reloads after; `saveFeature` saves
+            // the pending row first, so a game added a moment ago keeps it.
+            const blocked = (state.dependencies || []).some(
+                (dependency) => featureState[dependency]?.enabled === false);
+            const wrap = element('label', 'switch row-switch');
+            wrap.title = tr(spec.label);
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = state.enabled;
+            input.disabled = blocked && !state.enabled;
+            input.dataset.feature = featureKey;
+            input.addEventListener('change', () => saveFeature(featureKey, input, state.revision));
+            wrap.append(input, element('span', 'track'));
+            return wrap;
+        }
+        if (spec.kind === 'toggle') {
+            const wrap = element('label', 'switch row-switch');
+            wrap.title = tr(spec.label);
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = current === true || current === 'true';
+            input.dataset.column = spec.name;
+            wrap.append(input, element('span', 'track'));
+            wrap.dataset.column = spec.name;
+            return wrap;
+        }
         if (spec.kind === 'role' || spec.kind === 'channel'
                 || spec.kind === 'role_list') {
             const valueType = spec.kind === 'role_list' ? 'role_list' : spec.kind;
@@ -2020,6 +2382,10 @@ function jsonRowEditor(definition, value) {
     };
 
     const readField = (node, spec) => {
+        if (node && 'value' in node.dataset && !node.querySelector?.('.picker-carrier')) {
+            return node.dataset.value;
+        }
+        if (spec.kind === 'toggle') return node.querySelector('input').checked;
         if (spec.kind === 'role' || spec.kind === 'channel') {
             const carrierNode = node.querySelector('.picker-carrier');
             return [...carrierNode.selectedOptions].map((o) => o.value)[0] || '';
@@ -2038,11 +2404,13 @@ function jsonRowEditor(definition, value) {
 
     const serialise = () => {
         const collected = {};
+        let unfinished = false;
         rows.querySelectorAll('.menu-row').forEach((row) => {
             const keyNode = row.querySelector('[data-column="__key"]');
             const key = readField(keyNode, shape.key);
             const columns = {};
             shape.columns.forEach((spec) => {
+                if (spec.kind === 'feature') return;
                 columns[spec.name] = readField(
                     row.querySelector(`[data-column="${spec.name}"]`), spec);
             });
@@ -2053,12 +2421,19 @@ function jsonRowEditor(definition, value) {
             // category fail to save while the section stayed marked unsaved.
             // The row is flagged instead, so it is visibly the thing to finish.
             const incomplete = !key
-                || shape.columns.some((spec) => spec.required && !columns[spec.name]);
-            row.classList.toggle('menu-row-incomplete', incomplete && !isBlankRow(key, columns));
+                || shape.columns.some((spec) => spec.required && !columns[spec.name])
+                || Boolean(shape.incomplete?.(columns));
+            const flagged = incomplete && !isBlankRow(key, columns);
+            row.classList.toggle('menu-row-incomplete', flagged);
+            unfinished ||= flagged;
             if (incomplete) return;
             collected[key] = shape.pack(columns);
         });
         carrier.value = JSON.stringify(collected);
+        // A half-filled row is left out of the value, so saving now would
+        // delete a stored entry the operator is still editing. The setting
+        // waits until the row is finished (or emptied) instead.
+        wrapper.dataset.unfinished = String(unfinished);
         // Dispatched from the carrier, because the dirty-state listener is
         // bound to the real control.
         carrier.dispatchEvent(new Event('change', {bubbles: true}));
@@ -2080,6 +2455,10 @@ function jsonRowEditor(definition, value) {
     const addRow = (key, entry) => {
         const row = element('div', 'menu-row');
         row.style.setProperty('--row-columns', String(shape.columns.length + 1));
+        if (shape.template) {
+            row.classList.add('templated');
+            row.style.setProperty('--row-template', shape.template);
+        }
 
         const keyNode = field({...shape.key, name: '__key'}, key);
         keyNode.dataset.column = '__key';
@@ -2088,13 +2467,17 @@ function jsonRowEditor(definition, value) {
         const columns = shape.unpack(entry);
         shape.columns.forEach((spec) => {
             const current = columns[spec.name];
-            row.appendChild(field(
+            const cell = field(
                 spec,
                 spec.kind === 'role_list'
                     ? (current || []).map(String)
-                    : (current !== undefined && current !== null
-                        && String(current) !== '0' ? String(current) : null),
-            ));
+                    : (spec.kind === 'toggle' ? current
+                        : (current !== undefined && current !== null
+                            && String(current) !== '0' ? String(current) : null)),
+                key,
+            );
+            cell.dataset.column = spec.name;
+            row.appendChild(cell);
         });
 
         const remove = element('button', 'menu-remove');
@@ -2104,8 +2487,10 @@ function jsonRowEditor(definition, value) {
         remove.addEventListener('click', () => { row.remove(); serialise(); });
         row.appendChild(remove);
 
-        row.querySelectorAll('input').forEach(
-            (input) => input.addEventListener('input', serialise));
+        row.querySelectorAll('input:not([data-feature])').forEach((input) => {
+            input.addEventListener('input', serialise);
+            input.addEventListener('change', serialise);
+        });
         row.querySelectorAll('.picker-carrier').forEach(
             (node) => node.addEventListener('change', serialise));
 
@@ -2118,7 +2503,7 @@ function jsonRowEditor(definition, value) {
     const add = element('button', 'menu-add btn btn-ghost btn-sm');
     add.type = 'button';
     add.appendChild(icon('ic-plus', 'ic ic-sm'));
-    add.appendChild(document.createTextNode(tr('dashboard.role_menu_add')));
+    add.appendChild(document.createTextNode(tr(shape.addLabel || 'dashboard.role_menu_add')));
     add.addEventListener('click', () => {
         const row = addRow('', null);
         const first = row.querySelector('input, button');
@@ -2126,35 +2511,20 @@ function jsonRowEditor(definition, value) {
     });
     wrapper.appendChild(add);
 
-    // LFG is the one shape a game name means something for: a channel and a
-    // role, one pair per game, by convention. Picking a game here writes
-    // nothing on its own -- it only best-effort matches an existing channel
-    // and role by name and hands them to addRow as its usual initial values,
-    // exactly as if the operator had picked them in the pickers themselves.
-    if (definition.json_shape === 'lfg_channels') {
-        // A game already has a row once its channel or role reads back its
-        // name -- the same name match the picker itself uses to fill a row,
-        // reversed. No stored "game" field exists per row to compare against
-        // directly.
-        const isGameAdded = (key, label) => {
-            const needle = label.toLowerCase();
-            return [...rows.querySelectorAll('.menu-row')].some((row) => {
-                const channelId = readField(
-                    row.querySelector('[data-column="__key"]'), shape.key);
-                const roleId = readField(
-                    row.querySelector('[data-column="role"]'), shape.columns[0]);
-                const channel = resources.channels.find((c) => String(c.id) === channelId);
-                const role = resources.roles.find((r) => String(r.id) === roleId);
-                return [channel?.name, role?.name].some(
-                    (name) => name && name.toLowerCase().includes(needle));
-            });
-        };
-        const quickPick = gameQuickPick((label) => {
+    // Adding a supported game: its key is the game, and a channel and role
+    // whose names match are suggested, exactly as if the operator had picked
+    // them. A game already in the list is not offered twice.
+    if (definition.json_shape === 'games') {
+        const isGameAdded = (gameKey) => [...rows.querySelectorAll('.menu-row')].some(
+            (row) => row.querySelector('[data-column="__key"]')?.dataset.value === gameKey);
+        const quickPick = gameQuickPick((label, gameKey) => {
             const textChannels = resources.channels.filter(
                 (channel) => channel.type === 'text' || channel.type === 'news');
-            const channelId = matchResourceByName(textChannels, label);
-            const roleId = matchResourceByName(resources.roles, label);
-            addRow(channelId || '', roleId || null);
+            addRow(gameKey, {
+                channel: matchResourceByName(textChannels, label) || null,
+                role: matchResourceByName(resources.roles, label) || null,
+                lfg: false,
+            });
             serialise();
         }, isGameAdded);
         wrapper.appendChild(quickPick);
@@ -2573,35 +2943,111 @@ function readSettingInput(definition, field) {
 /** `container` defaults to the category settings grid, exactly as
  *  `collectSettingChanges` does -- an `edited_elsewhere` setting's own card
  *  passes its own grid so the two forms save independently. */
-async function saveSettings(event, container = document.getElementById('settings-grid')) {
-    event.preventDefault();
-    const submit = event.target.querySelector('button[type="submit"]');
+/* --------------------------------------------------------------- autosave */
+
+// Every settings field saves on change (maintainer, 2026-10-30): a switch,
+// picker or checkbox at once, typing after a pause or when the box is left.
+// One PATCH per pause, carrying only what differs, so each save is its own
+// audit row and an untouched setting's revision never moves.
+const AUTOSAVE_TYPING_MS = 800;
+const autoSaves = new Map();
+
+/** Changes that are a click save at once; anything typed waits for a pause,
+ *  including a row editor's hidden carrier, which changes on every keystroke. */
+function isInstantChange(event) {
+    const target = event.target;
+    return event.type === 'change' && (target.type === 'checkbox'
+        || target.classList?.contains('picker-carrier') || target.tagName === 'SELECT');
+}
+
+function wireAutoSaveForm(formId, gridId, refresh) {
+    const form = document.getElementById(formId);
+    if (!form) return;
+    const grid = () => document.getElementById(gridId);
+    const update = refresh || (() => {});
+    // Delegated, because the inputs are rebuilt on every render.
+    form.addEventListener('input', () => { update(); scheduleAutoSave(grid(), AUTOSAVE_TYPING_MS); });
+    form.addEventListener('change', (event) => {
+        update();
+        scheduleAutoSave(grid(), isInstantChange(event) ? 0 : AUTOSAVE_TYPING_MS);
+    });
+    // Enter in a text box submits the form; that means "save it now".
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        autoSave(grid());
+    });
+}
+
+function autoSaveStatus(container, key) {
+    const node = container?.closest('form')?.querySelector('.autosave-status');
+    if (!node) return;
+    node.textContent = key ? tr(key) : '';
+    node.classList.toggle('error', key === 'dashboard.autosave_failed');
+}
+
+function scheduleAutoSave(container, delay) {
+    if (!container) return;
+    const state = autoSaves.get(container) || {};
+    clearTimeout(state.timer);
+    state.timer = setTimeout(() => { autoSave(container); }, delay);
+    autoSaves.set(container, state);
+}
+
+/** Save whatever in `container` differs from the server, once at a time per
+ *  container; a change made while a save is in flight is saved after it. */
+async function autoSave(container) {
+    if (!container) return;
+    const state = autoSaves.get(container) || {};
+    autoSaves.set(container, state);
+    clearTimeout(state.timer);
+    if (state.running) {
+        state.again = true;
+        return state.running;
+    }
     const changes = collectSettingChanges(container);
-
-    if (changes === null) {
-        toast(tr('dashboard.invalid_json'), true);
-        return;
+    // `null` is a JSON value mid-edit: nothing sensible to send yet.
+    if (!changes || !changes.length) return;
+    autoSaveStatus(container, 'dashboard.autosave_saving');
+    state.running = (async () => {
+        try {
+            const result = await api(`/guilds/${guildId}/settings`, {
+                method: 'PATCH',
+                headers: headers(),
+                body: JSON.stringify({changes}),
+            });
+            // The response is wired like the GET, so it re-seeds the copy the
+            // next comparison is made against. No re-render: focus stays put.
+            Object.assign(settings, result.data || {});
+            autoSaveStatus(container, 'dashboard.autosave_saved');
+            // For views drawn from what is saved (a card preview), not the form.
+            document.dispatchEvent(new CustomEvent('settings-saved', {
+                detail: changes.map((change) => change.key)}));
+            refreshSettingsDirtyState();
+        } catch (error) {
+            autoSaveStatus(container, 'dashboard.autosave_failed');
+            handleApiError(error);
+            if (error instanceof ApiError && error.status === 409) {
+                // Someone else saved first: take theirs.
+                await loadGuild();
+            } else if (!(error instanceof ApiError && error.status === 401)) {
+                // Refused: the form goes back to what is saved, so it never
+                // shows a value the bot is not using.
+                await showPage(activePage);
+            }
+        }
+    })();
+    await state.running;
+    state.running = null;
+    if (state.again) {
+        state.again = false;
+        await autoSave(container);
     }
+}
 
-    if (!changes.length) {
-        toast(tr('dashboard.nothing_changed'));
-        return;
-    }
-
-    submit.disabled = true;
-    try {
-        const result = await api(`/guilds/${guildId}/settings`, {
-            method: 'PATCH',
-            headers: headers(),
-            body: JSON.stringify({changes}),
-        });
-        toast(result.message);
-        await loadGuild();
-    } catch (error) {
-        handleApiError(error);
-    } finally {
-        submit.disabled = false;
-    }
+/** Save everything pending now, before something reloads the page. */
+async function flushAutoSaves() {
+    await Promise.all([...autoSaves.keys()].filter((container) => container.isConnected)
+        .map((container) => autoSave(container)));
 }
 
 /** An `edited_elsewhere` setting's own small card -- `ticket_category`/
@@ -2618,34 +3064,6 @@ function renderInlineSettingsCard(gridId, keys) {
         if (!definition) return;
         host.appendChild(buildSettingField(definition));
     });
-}
-
-/** The same unsaved-count/disable behavior `refreshSettingsDirtyState` gives
- *  the category settings form, scoped to one inline settings card. No
- *  per-section pill: a card this small has only the one section. */
-function refreshInlineSettingsDirtyState(gridId, formId) {
-    const form = document.getElementById(formId);
-    const grid = document.getElementById(gridId);
-    if (!form || !grid) return;
-    const submit = form.querySelector('button[type="submit"]');
-    const changes = collectSettingChanges(grid);
-    submit.textContent = changes && changes.length
-        ? format('dashboard.save_settings_count', {count: changes.length})
-        : tr('dashboard.save_settings');
-    submit.disabled = changes !== null && changes.length === 0;
-}
-
-/** Wires one inline settings card's form to the shared save path and to its
- *  own dirty-state refresh, exactly once at startup -- the same delegation
- *  `settingsForm` uses for the category settings page, so a picker added to
- *  the card later is covered without adding a second listener for it. */
-function wireInlineSettingsForm(formId, gridId) {
-    const form = document.getElementById(formId);
-    if (!form) return;
-    const refresh = () => refreshInlineSettingsDirtyState(gridId, formId);
-    form.addEventListener('input', refresh);
-    form.addEventListener('change', refresh);
-    form.addEventListener('submit', (event) => saveSettings(event, document.getElementById(gridId)));
 }
 
 /* ------------------------------------------------------------------ gacha */
@@ -4778,7 +5196,10 @@ const MANAGED_FIELDS = {
     channel: {kind: 'channel', label: 'dashboard.managed_channel',
               localeKey: 'dashboard.managed_channel',
               channelTypes: ['text', 'news'], hint: 'managed_channel'},
-    title: {kind: 'text', label: 'dashboard.managed_title', max: 256},
+    // Discord shows an embed title as plain text (confirmed by the maintainer
+    // on a posted rules panel, 2026-10-30), so the previews do too and say so.
+    title: {kind: 'text', label: 'dashboard.managed_title', max: 256,
+            hint: 'embed_title_plain'},
     body: {kind: 'multiline', label: 'dashboard.managed_body', max: 4096,
            wide: true, hint: 'managed_body'},
     accept_button: {kind: 'checkbox', label: 'dashboard.managed_accept_button',
@@ -4816,7 +5237,7 @@ const MANAGED_KINDS = {
             caption: 'dashboard.managed_embed_index',
             fields: [
                 {name: 'title', kind: 'text', max: 256,
-                 label: 'dashboard.managed_section_title'},
+                 label: 'dashboard.managed_section_title', hint: 'embed_title_plain'},
                 {name: 'body', kind: 'multiline', max: 4096, required: true,
                  label: 'dashboard.managed_section_body'},
             ],
@@ -4904,7 +5325,7 @@ const MANAGED_KINDS = {
             caption: 'dashboard.managed_embed_index',
             fields: [
                 {name: 'title', kind: 'text', max: 256,
-                 label: 'dashboard.managed_section_title'},
+                 label: 'dashboard.managed_section_title', hint: 'embed_title_plain'},
                 {name: 'body', kind: 'multiline', max: 4096, required: true,
                  label: 'dashboard.managed_section_body'},
             ],
@@ -5529,7 +5950,7 @@ function gameQuickPick(onPick, isAdded) {
     select.addEventListener('change', () => {
         const chosen = supportedGameOptions().find((g) => g.key === select.value);
         select.value = '';
-        if (chosen) onPick(chosen.label);
+        if (chosen) onPick(chosen.label, chosen.key);
     });
     return select;
 }
@@ -6078,13 +6499,29 @@ function relativeTime(isoTimestamp) {
     return tr('dashboard.relative_now');
 }
 
-// Erasure and retention records are audit rows like any other, so they need no
-// route of their own; they are simply pulled out of the feed into their own card.
-const PRIVACY_ACTIONS = ['user.erase', 'user.retention_sweep'];
-
-function renderPrivacyRecords(entries) {
+// Erasure and retention records are audit rows, but they have a route of their
+// own that filters in SQL: picked out of the general feed, an erasure older than
+// its last 100 rows silently left this list.
+async function loadPrivacy() {
     const host = document.getElementById('privacy-list');
-    const records = entries.filter((entry) => PRIVACY_ACTIONS.includes(entry.action));
+    renderSkeleton(host, 3);
+    // Hidden rather than merely rejected: erasure is installation-wide, so a
+    // guild administrator has no route to it however many guilds they manage.
+    document.getElementById('erasure-form').classList.toggle('hidden', !isHost);
+    let records;
+    try {
+        records = (await api(`/guilds/${guildId}/privacy/records`)).data;
+    } catch (error) {
+        handleApiError(error);
+        host.replaceChildren(emptyState('dashboard.load_failed', 'ic-alert'));
+        return;
+    }
+    renderPrivacyRecords(records);
+    setSubtitle('dashboard.subtitle_privacy', {count: records.length});
+}
+
+function renderPrivacyRecords(records) {
+    const host = document.getElementById('privacy-list');
 
     const node = table([
         'dashboard.column_when', 'dashboard.column_action',
@@ -6311,7 +6748,6 @@ async function loadChangelog() {
     host.replaceChildren();
     if (!releases.length) {
         host.appendChild(emptyState('dashboard.changelog_empty', 'ic-changelog'));
-        setSubtitle('dashboard.subtitle_changelog', {count: 0});
         return;
     }
 
@@ -6323,12 +6759,25 @@ async function loadChangelog() {
         section.appendChild(head);
 
         const list = element('ul', 'changelog-entries');
-        release.entries.forEach((entry) => list.appendChild(element('li', null, entry)));
+        release.entries.forEach((entry) => list.appendChild(changelogEntry(entry)));
         section.appendChild(list);
         host.appendChild(section);
     });
+}
 
-    setSubtitle('dashboard.subtitle_changelog', {count: releases.length});
+/** One release note, with its markdown (bold, italics, `code`, links)
+ *  through the previews' own renderer, which builds nodes and never parses
+ *  markup. Only an http(s) link becomes one, so the changelog's relative
+ *  links stay text rather than breaking. A throw falls back to plain text. */
+function changelogEntry(text) {
+    const item = element('li');
+    try {
+        appendInlineMarkdown(item, text);
+    } catch (error) {
+        console.error('[changelog] markdown render failed', error);
+        item.replaceChildren(document.createTextNode(text));
+    }
+    return item;
 }
 
 // `name (id)` when the server could name the actor, the id alone when it could
@@ -6343,12 +6792,10 @@ function actorLabel(entry) {
     return nameWithId(entry.actor_name, entry.actor_id);
 }
 
+/** The overview's left panel. Its subtitle slot belongs to the overview. */
 async function loadAudit() {
     const host = document.getElementById('audit-list');
     renderSkeleton(host, 4);
-    // Hidden rather than merely rejected: erasure is installation-wide, so a
-    // guild administrator has no route to it however many guilds they manage.
-    document.getElementById('erasure-form').classList.toggle('hidden', !isHost);
 
     let entries;
     try {
@@ -6356,14 +6803,8 @@ async function loadAudit() {
     } catch (error) {
         handleApiError(error);
         host.replaceChildren(emptyState('dashboard.load_failed', 'ic-alert'));
-        document.getElementById('privacy-list').replaceChildren(
-            emptyState('dashboard.load_failed', 'ic-alert')
-        );
         return;
     }
-    renderPrivacyRecords(entries);
-
-    setSubtitle('dashboard.subtitle_audit', {count: entries.length});
 
     const node = table([
         'dashboard.column_when', 'dashboard.column_action',

@@ -63,6 +63,13 @@ PublishPort=127.0.0.1:5000:5000
 # The container-native hardening subset compose.yaml already ships.
 NoNewPrivileges=true
 DropCapability=all
+# The root filesystem is read-only: the code cannot be rewritten by the process
+# running it, and every write already goes to /data. Trialled on the image
+# 2026-10-30: migration, dashboard, logging, an image card and a YouTube lookup
+# all ran; podman's default `--read-only-tmpfs` gives /tmp, /var/tmp and /run.
+# Voice playback was not trialled (it needs the live token): if a song fails
+# after a deploy, this line is the first thing to remove.
+ReadOnly=true
 # What `UMask=0027` is to deploy/potatobot.service: without it the container
 # inherits 0022 and the database, every migration backup and the session
 # secret land 0644 on the host's bind mount. Measured 2026-10-16. Quadlet has

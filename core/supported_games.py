@@ -28,3 +28,29 @@ SUPPORTED_GAME_KEYS = (
     "wuwa",
     "zzz",
 )
+
+
+# Readers of the `games` setting (schema 26), here because both cogs need the
+# same answer and neither may import the other. A stored row is already
+# validated, but these still tolerate a malformed one: they run inside
+# `/search` and the patch-notes loop, where a raise is a silent failure.
+
+def lfg_role_for_channel(games, channel_id: int) -> int | None:
+    """The role `/search` pings in this channel, or None if it is no game's."""
+    for row in (games or {}).values():
+        if (isinstance(row, dict) and row.get("lfg")
+                and row.get("channel") == channel_id and row.get("role")):
+            return row["role"]
+    return None
+
+
+def patch_target(games, game_key: str) -> tuple[int | None, int | None]:
+    """`(channel, role)` for a supported game's patch notes.
+
+    The channel is the row's own patch channel, else the game channel — the
+    patch channel exists to override, so an unset one follows the game.
+    """
+    row = (games or {}).get(game_key)
+    if not isinstance(row, dict):
+        return None, None
+    return row.get("patch_channel") or row.get("channel"), row.get("role")

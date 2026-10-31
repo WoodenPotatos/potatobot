@@ -134,9 +134,16 @@ async def execute_managed_delete(channel, action):
         message = await channel.fetch_message(int(payload["message_id"]))
     except discord.NotFound:
         return None  # Already gone, which is the outcome that was asked for.
-    if not channel.permissions_for(channel.guild.me).manage_messages:
+    # Only ever the bot's own message, which Discord lets its author delete
+    # without Manage Messages: requiring it here refused a delete Discord would
+    # have allowed (2026-10-30). Adoption accepts only the bot's own message, so
+    # anything else is a row that should not exist, and is left alone.
+    if message.author.id != channel.guild.me.id:
         return "bot_permission_denied"
-    await message.delete()
+    try:
+        await message.delete()
+    except discord.Forbidden:
+        return "bot_permission_denied"
     return None
 
 
@@ -225,7 +232,8 @@ async def execute_test_announcement(guild, actor, action) -> str | None:
     event = action["payload"].get("event")
     if event not in ANNOUNCEMENT_EVENTS or not announcements.event_enabled(guild.id, event):
         return "feature_disabled_or_unsupported"
-    return await announcements.send_test_announcement(guild, actor, event)
+    return await announcements.send_test_announcement(
+        guild, actor, event, returning=action["payload"].get("returning") is True)
 
 
 async def control_action_worker(bot):

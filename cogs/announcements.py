@@ -17,6 +17,7 @@ Rules that bind changes here: docs/subsystems/announcements.md
 """
 
 import asyncio
+import dataclasses
 import io
 import logging
 import time
@@ -26,17 +27,24 @@ from discord.ext import commands
 
 from cogs.utils import (BoundedCooldownMap, BoundedValueMap,
                         apply_database_result, currency_emoji,
-                        guild_setting_sync, send_moderation_log, t)
+                        guild_setting_sync, member_arrival, send_moderation_log, t)
 from core import database
 from core.announcement_templates import (EVENT_CHANNEL_SETTINGS, EVENT_FEATURES,
-                                         TEMPLATE_FIELDS, Announcement,
-                                         announcement_mentions,
+                                         REJOIN_FIELDS, TEMPLATE_FIELDS, Announcement,
+                                         announcement_mentions, card_values,
                                          placeholder_values,
                                          render_announcement,
+                                         rejoin_overrides, rejoin_setting_key,
+                                         substitute,
                                          take_moderator_action,
                                          template_setting_key)
+
+# How long the join announcement waits for `serverevents` to say whether the
+# member is returning, before welcoming them as new.
+ARRIVAL_WAIT_SECONDS = 5
 from core.clock import utc_now
 from core.feature_access import is_enabled
+from core.welcome_card import CARD_EVENTS, load_background, render_card
 
 announcement_logger = logging.getLogger("PotatoBot.Announcements")
 
@@ -82,12 +90,32 @@ def event_enabled(guild_id: int, event: str) -> bool:
     return is_enabled(guild_id, EVENT_FEATURES[event])
 
 
+def rejoin_template(guild_id: int) -> dict:
+    """The returning-member fields this guild has written, possibly none."""
+    return rejoin_overrides({field: guild_setting_sync(guild_id, rejoin_setting_key(field))
+                             for field in REJOIN_FIELDS})
+
+
 def build_announcement(event: str, member, guild, *, footer: str | None = None,
-                       **extra) -> Announcement:
+                       returning: bool = False, **extra) -> Announcement:
     """Render one event for one member from the guild's stored template."""
     values = placeholder_values(member, guild, coin=currency_emoji(), **extra)
     stored = {field: guild_setting_sync(guild.id, template_setting_key(event, field))
               for field in TEMPLATE_FIELDS}
+    if event == "join" and returning:
+        stored.update(rejoin_template(guild.id))
+    card_line = None
+    card = "rejoin" if event == "join" and returning else event
+    if event in CARD_EVENTS and guild_setting_sync(guild.id, template_setting_key(event, "card")):
+        plain = card_values(member, guild)
+        # The returning card's line falls back to the join card's, as each of
+        # its message fields does; then to the shipped line for that card.
+        keys = ([rejoin_setting_key("card_text")] if card == "rejoin" else []) + [
+            template_setting_key(event, "card_text")]
+        written = next((value for value in (
+            (guild_setting_sync(guild.id, key) or "").strip() for key in keys) if value), "")
+        card_line = (substitute(written, plain) if written
+                     else t(f"announcements.{card}_card_line", **plain))
     announcement = render_announcement(
         event, stored, values,
         # The shipped text is trusted and goes through `t()`'s own `format`.
@@ -97,6 +125,9 @@ def build_announcement(event: str, member, guild, *, footer: str | None = None,
     )
     if footer:
         announcement.embed.set_footer(text=footer)
+    if card_line is not None:
+        announcement = dataclasses.replace(announcement, card_line=card_line,
+                                           card_background=card)
     return announcement
 
 
@@ -109,6 +140,21 @@ def announcement_channel_id(guild_id: int, event: str):
     return channel_id
 
 
+async def avatar_bytes(avatar) -> bytes | None:
+    """The avatar's PNG bytes, or None when Discord will not give them."""
+    if avatar is None:
+        return None
+    try:
+        async with _avatar_downloads:
+            return await asyncio.wait_for(
+                avatar.replace(size=AVATAR_SIZE, format="png").read(),
+                AVATAR_FETCH_SECONDS)
+    except (asyncio.TimeoutError, discord.DiscordException, ValueError) as exc:
+        announcement_logger.warning(
+            "Avatar fetch failed, linking instead (error=%s).", type(exc).__name__)
+        return None
+
+
 async def avatar_file(avatar) -> discord.File | None:
     """The avatar as an attachment, or None to keep the plain link.
 
@@ -116,18 +162,53 @@ async def avatar_file(avatar) -> discord.File | None:
     changing their avatar or deleting their account, which a link does not.
     Read into memory only; Discord stores the copy with the message.
     """
-    if avatar is None:
+    data = await avatar_bytes(avatar)
+    return None if data is None else discord.File(io.BytesIO(data), filename=AVATAR_FILENAME)
+
+
+# At most this many cards per guild in `CARD_BURST_SECONDS`; past it the plain
+# embed is sent, so a raid of joins cannot queue a render per joiner.
+CARD_BURST_LIMIT = 5
+CARD_BURST_SECONDS = 60
+CARD_FILENAME = "card.png"
+card_renders = BoundedValueMap(max_entries=1024)
+
+
+def card_allowed(guild_id: int) -> bool:
+    now = time.monotonic()
+    recent = [moment for moment in card_renders.get(guild_id, ())
+              if now - moment < CARD_BURST_SECONDS]
+    if len(recent) >= CARD_BURST_LIMIT:
+        card_renders[guild_id] = recent
+        return False
+    card_renders[guild_id] = recent + [now]
+    return True
+
+
+def _draw_card(guild_id: int, event: str, avatar: bytes | None,
+               name: str, line: str) -> bytes:
+    """Load the background and draw, off the event loop: both block."""
+    return render_card(load_background(guild_id, event), avatar, name, line)
+
+
+async def card_file(guild, event: str, member, line: str) -> discord.File | None:
+    """The card as an attachment, or None to send the plain embed instead."""
+    if not card_allowed(guild.id):
+        announcement_logger.info(
+            "Card skipped for a burst of %s events (guild_id=%s).", event, guild.id)
         return None
+    avatar = await avatar_bytes(getattr(member, "display_avatar", None))
+    name = getattr(member, "display_name", None) or getattr(member, "name", "")
     try:
-        async with _avatar_downloads:
-            data = await asyncio.wait_for(
-                avatar.replace(size=AVATAR_SIZE, format="png").read(),
-                AVATAR_FETCH_SECONDS)
-    except (asyncio.TimeoutError, discord.DiscordException, ValueError) as exc:
-        announcement_logger.warning(
-            "Avatar fetch failed, linking instead (error=%s).", type(exc).__name__)
+        data = await asyncio.get_running_loop().run_in_executor(
+            None, _draw_card, guild.id, event, avatar, name, line)
+    except Exception as exc:
+        # A card that cannot be drawn must never cost the announcement itself.
+        announcement_logger.error(
+            "Card render failed (guild_id=%s, event=%s, error=%s).",
+            guild.id, event, type(exc).__name__)
         return None
-    return discord.File(io.BytesIO(data), filename=AVATAR_FILENAME)
+    return discord.File(io.BytesIO(data), filename=CARD_FILENAME)
 
 
 async def post_announcement(guild, event: str, member,
@@ -150,11 +231,20 @@ async def post_announcement(guild, event: str, member,
         return False
     # Fetched only once a destination is known, so an unset channel costs
     # no download.
-    attachment = await avatar_file(announcement.avatar)
     extra = {}
-    if attachment is not None:
-        announcement.embed.set_thumbnail(url=f"attachment://{AVATAR_FILENAME}")
-        extra["file"] = attachment
+    card = (await card_file(guild, announcement.card_background or event, member,
+                            announcement.card_line)
+            if announcement.card_line is not None else None)
+    if card is not None:
+        # The card shows the avatar already, and takes the embed's image slot.
+        announcement.embed.set_image(url=f"attachment://{CARD_FILENAME}")
+        announcement.embed.set_thumbnail(url=None)
+        extra["file"] = card
+    else:
+        attachment = await avatar_file(announcement.avatar)
+        if attachment is not None:
+            announcement.embed.set_thumbnail(url=f"attachment://{AVATAR_FILENAME}")
+            extra["file"] = attachment
     mentions = announcement_mentions(member)
     if channel is None:
         return await send_moderation_log(
@@ -180,14 +270,17 @@ def sample_extras(event: str, guild, actor) -> dict:
     return {}
 
 
-async def send_test_announcement(guild, actor, event: str) -> str | None:
+async def send_test_announcement(guild, actor, event: str,
+                                 returning: bool = False) -> str | None:
     """The dashboard's "Send test": the saved template, with the operator as the member.
 
     Posted where the real one would go, marked as a test in the footer. Returns
-    an outbox error code, or None on success.
+    an outbox error code, or None on success. `returning` tests the join's
+    returning-member welcome.
     """
     announcement = build_announcement(
         event, actor, guild, footer=t("announcements.test_footer"),
+        returning=returning and event == "join",
         **sample_extras(event, guild, actor))
     if not await post_announcement(guild, event, actor, announcement):
         return "channel_unavailable"
@@ -215,8 +308,18 @@ class Announcements(commands.Cog):
         if not event_enabled(member.guild.id, "join"):
             return
         try:
+            returning = False
+            # Waited for only when there is a different message to send.
+            if rejoin_template(member.guild.id):
+                try:
+                    returning = await asyncio.wait_for(
+                        asyncio.shield(member_arrival(member.guild.id, member.id)),
+                        timeout=ARRIVAL_WAIT_SECONDS)
+                except asyncio.TimeoutError:
+                    returning = False
             await post_announcement(member.guild, "join", member,
-                                    build_announcement("join", member, member.guild))
+                                    build_announcement("join", member, member.guild,
+                                                       returning=returning))
         except Exception:
             # A broken template must never be why the next join goes unseen.
             announcement_logger.exception(

@@ -22,8 +22,7 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from discord.ext import commands
-from datetime import datetime
-from core.clock import local_date, local_time, parse_stored, utc_now
+from core.clock import local_date, utc_now
 from cogs.utils import BoundedCooldownMap, t, guild_setting_sync
 from core import database
 from core.feature_access import require_interaction_feature
