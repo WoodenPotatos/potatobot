@@ -6,6 +6,68 @@ stable. A build keeps its number across channels, so `2.18.3a` publishes as
 2026-10-22 by adding the old beta serial to z (`2.18.0-beta.1` is `2.18.1b`);
 the public repository's git tags keep their original names.
 
+## 2.19.26b
+
+- **A Privacy Policy and Terms of Service now ship with the bot**, in
+  `docs/legal/`, in English (binding) and Hungarian, written from a
+  line-by-line inventory of every table, log line, Discord post and outbound
+  network call the software makes (`docs/data_inventory.md`). They describe
+  what is stored under a member's Discord id and for how long, what `/mydata`
+  returns and `/deletemydata` keeps, which third parties receive anything
+  (Discord, Cloudflare in front of the dashboard, encrypted nightly backups to
+  Google Drive, a music search's text to YouTube), the dashboard's cookie, and
+  the automatic moderation actions a server can configure. The operator's
+  identity, the effective date and three deployment facts were filled in
+  over the same day; both documents are in force from 2026-10-31 as version
+  1.0, and reach their public addresses with this release.
+- **`/version` and the dashboard's sign-in card link the Privacy Policy and
+  the Terms of Service**, so both are reachable from inside the bot and from
+  the dashboard as Discord's Developer Terms require. Both read the same two
+  addresses, so when the documents move to the planned `welcome.potatobot.win`
+  pages, one edit moves every link.
+- **`/mydata` now returns everything an erasure touches.** It missed five
+  places: the casino earnings counter, group-search posts you host or joined,
+  the last turn you took in a counting or word-chain channel, staff audit
+  rows where you are the administrator or the subject of a removed warning,
+  and queued Discord actions about you.
+- **Erasure now scrubs every queued Discord action that names you.** It
+  rewrote only the erasure's own queue entry; a revocation of one of your
+  grants queued from the dashboard kept your id for up to 30 days afterwards.
+  Any queued action whose payload names you is re-keyed to the anonymous id.
+- **The Privacy Policy is now held to the code by the test suite.**
+  `scripts/legal_drift.py` records the facts the policy describes (which
+  tables hold a member, which hosts the bot contacts, which log lines carry a
+  user id, which loops act on their own, how long a dashboard session lives)
+  and CI fails when any of them changes until the policy has been re-read and
+  re-stamped, naming the section to look at.
+- **Members who leave are forgotten after a year.** The maintainer set the
+  installation's data retention to 365 days: a member whose last activity is
+  older than that and who is in none of the bot's servers is erased by the
+  daily sweep, with their balance kept under an anonymous record as always.
+  The Privacy Policy now states the window, and that error-alert email is not
+  enabled on this installation.
+- **The Privacy Policy and Terms name their operator**, Máté Domina, resident
+  in Hungary, with the bot hosted in Hungary and Hungarian law governing the
+  terms. The contact address is `privacy@potatobot.win`, forwarded through
+  Cloudflare Email Routing, which the policy's Cloudflare entry now says. The
+  Discord contact is `@woodenpotato`, pre-migration database backups are
+  promised deleted 90 days after their migration, the planned public
+  application is left out until it exists, and the policy keeps the sentence
+  that the host disk is not encrypted.
+- **The dashboard's audit history is no longer kept forever.** A new
+  installation-wide setting, "Audit history retention (days)" on the
+  Administration page, deletes staff audit rows (setting changes, warning
+  removals) older than the window each day; it ships at 90, and 0 keeps them
+  forever as before. Data-erasure records are never pruned: they name only
+  the anonymous replacement id and are the proof of what was deleted.
+- **Old pre-migration database backups are now deleted on schedule.** The
+  nightly offsite backup can prune the full database copies taken before
+  each schema upgrade, which until now stayed beside the live database
+  forever. It decides by the date in each file's name, runs only after that
+  night's off-site copy has been verified, and is off unless the operator
+  passes `--prune-local-backups-days`; the shipped units pass 90, matching
+  the Privacy Policy.
+
 ## 2.19.17b
 
 - **Music logs when a song starts and where in it a gap fell.** "Ran empty"

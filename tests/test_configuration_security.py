@@ -848,9 +848,12 @@ class QuadletUnitTests(unittest.TestCase):
         service = self.directives("potatobot-offsite-backup-podman.service")["Service"]
         values = lambda key: [value for name, value in service if name == key]
         self.assertEqual(["potatobot"], values("User"))
+        # The 90 is the retention docs/legal/PRIVACY.md §7 promises for the
+        # pre-migration copies; changing it here means changing the policy.
         self.assertEqual(
             ["/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py "
-             "/var/lib/potatobot/economy.db gdrivecrypt:"], values("ExecStart"))
+             "/var/lib/potatobot/economy.db gdrivecrypt: --prune-local-backups-days 90"],
+            values("ExecStart"))
         self.assertEqual(["/var/lib/potatobot", "/home/potatobot/.config/rclone"],
                          values("ReadWritePaths"))
         self.assertEqual(["read-only"], values("ProtectHome"))

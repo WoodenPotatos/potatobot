@@ -95,7 +95,111 @@ class BackupSnapshotTests(unittest.TestCase):
             self.assertEqual([], rows)
 
 
+def _stamp(days_ago: int) -> str:
+    from datetime import datetime, timedelta
+    return (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d-%H%M%S")
+
+
+class LocalBackupPruneTests(unittest.TestCase):
+    """The pre-migration copies beside the database are the other half of
+    retention: the Privacy Policy promises they go 90 days after the migration
+    they protect, and this flag is what keeps that promise. Everything here
+    pins what it must *not* delete."""
+
+    def setUp(self):
+        self.workdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.workdir.name)
+        self.database = self.root / "economy.db"
+        sqlite3.connect(self.database).close()
+        self.old = self.root / f"economy.db.backup-v9-{_stamp(200)}"
+        self.recent = self.root / f"economy.db.backup-v25-{_stamp(10)}"
+        self.undatable = self.root / "economy.db.backup-v5-garbage"
+        self.other = self.root / f"other.db.backup-v2-{_stamp(200)}"
+        self.wal = self.root / "economy.db-wal"
+        for path in (self.old, self.recent, self.undatable, self.other, self.wal):
+            path.write_bytes(b"x")
+        # A symlink wearing an old backup's name, pointing at the live file.
+        self.link = self.root / f"economy.db.backup-v1-{_stamp(400)}"
+        self.link.symlink_to(self.database)
+
+    def tearDown(self):
+        self.workdir.cleanup()
+
+    def test_only_this_databases_dated_copies_older_than_the_window_are_due(self):
+        due = offsite_backup.local_backups_due(self.database, 90)
+        self.assertEqual([self.old], due)
+
+    def test_the_default_of_zero_keeps_every_copy(self):
+        self.assertEqual([], offsite_backup.local_backups_due(self.database, 0))
+        self.assertEqual([], offsite_backup.local_backups_due(self.database, -1))
+
+    def test_the_name_decides_not_the_modification_time(self):
+        """A copy resets mtime; the podman cutover did. A fresh mtime on an old
+        name is still old, and an old mtime on a recent name is still recent."""
+        import os
+        import time
+        ancient = time.time() - 400 * 86400
+        os.utime(self.recent, (ancient, ancient))
+        os.utime(self.old, None)
+        self.assertEqual([self.old], offsite_backup.local_backups_due(self.database, 90))
+
+    def test_prune_deletes_the_due_copies_and_nothing_else(self):
+        removed = offsite_backup.prune_local_backups(self.database, 90)
+        self.assertEqual([self.old], removed)
+        self.assertFalse(self.old.exists())
+        for kept in (self.database, self.recent, self.undatable, self.other, self.wal):
+            self.assertTrue(kept.exists(), kept.name)
+        self.assertTrue(self.link.is_symlink())
+        self.assertTrue(self.database.exists(), "the symlink's target is the live file")
+
+    def test_the_cutoff_is_exact_to_the_day(self):
+        from datetime import datetime
+        now = datetime(2026, 10, 31, 12, 0, 0)
+        boundary = self.root / "economy.db.backup-v10-20260802-120000"
+        just_inside = self.root / "economy.db.backup-v11-20260802-115959"
+        boundary.write_bytes(b"x")
+        just_inside.write_bytes(b"x")
+        due = offsite_backup.local_backups_due(self.database, 90, now=now)
+        self.assertIn(just_inside, due)
+        self.assertNotIn(boundary, due)
+
+
 class MainTests(unittest.TestCase):
+    def test_the_local_prune_runs_only_after_the_offsite_copy_is_verified(self):
+        with tempfile.TemporaryDirectory() as workdir:
+            source = Path(workdir) / "source.db"
+            sqlite3.connect(source).close()
+            old = Path(workdir) / f"source.db.backup-v3-{_stamp(200)}"
+            old.write_bytes(b"x")
+
+            import subprocess
+
+            def failing_check(args, check):
+                if args[1] == "check":
+                    raise subprocess.CalledProcessError(1, args)
+
+            with patch("scripts.offsite_backup.shutil.which", return_value="/usr/bin/rclone"), \
+                 patch("scripts.offsite_backup.subprocess.run", side_effect=failing_check):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    offsite_backup.main([str(source), "r:", "--prune-local-backups-days", "90"])
+            self.assertTrue(old.exists(), "a failed verification must not cost a local copy")
+
+            with patch("scripts.offsite_backup.shutil.which", return_value="/usr/bin/rclone"), \
+                 patch("scripts.offsite_backup.subprocess.run"):
+                offsite_backup.main([str(source), "r:", "--prune-local-backups-days", "90"])
+            self.assertFalse(old.exists())
+
+    def test_without_the_flag_main_leaves_local_copies_alone(self):
+        with tempfile.TemporaryDirectory() as workdir:
+            source = Path(workdir) / "source.db"
+            sqlite3.connect(source).close()
+            old = Path(workdir) / f"source.db.backup-v3-{_stamp(200)}"
+            old.write_bytes(b"x")
+            with patch("scripts.offsite_backup.shutil.which", return_value="/usr/bin/rclone"), \
+                 patch("scripts.offsite_backup.subprocess.run"):
+                offsite_backup.main([str(source), "r:"])
+            self.assertTrue(old.exists())
+
     def test_refuses_a_database_that_does_not_exist(self):
         with tempfile.TemporaryDirectory() as workdir:
             missing = Path(workdir) / "nope.db"

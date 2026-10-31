@@ -26,7 +26,7 @@ if ROOT_DIR not in sys.path:
 
 from core import database
 from cogs.gacha import revoke_entitlement
-from cogs.utils import t
+from cogs.utils import guild_setting_sync, t
 from core.settings_registry import SETTING_DEFINITIONS
 
 privacy_logger = logging.getLogger("PotatoBot.Privacy")
@@ -198,7 +198,12 @@ class Privacy(commands.Cog):
         Two conditions must both hold: the recorded activity predates the window,
         and the member is absent from every guild the bot serves. Staleness alone
         would erase a lurker who simply never triggered an activity write.
+
+        The staff audit history is pruned first, on its own window
+        (`audit_retention_days`), whether or not a member window is set: the two
+        retentions are independent promises in the Privacy Policy (§7).
         """
+        await self._prune_audit_history()
         windows = [
             days for days in
             [await _retention_days(guild.id) for guild in self.bot.guilds]
@@ -241,6 +246,22 @@ class Privacy(commands.Cog):
                 "Retention sweep erased %s member(s) inactive since %s.",
                 erased, cutoff.date().isoformat(),
             )
+
+    async def _prune_audit_history(self) -> int:
+        """Apply `audit_retention_days`; a failure here must not stop the sweep."""
+        days = guild_setting_sync(None, "audit_retention_days")
+        if not isinstance(days, int) or isinstance(days, bool) or days <= 0:
+            return 0
+        try:
+            removed = await database.run_write(database.prune_settings_audit, days)
+        except Exception:
+            privacy_logger.exception("Audit history prune failed.")
+            return 0
+        if removed:
+            privacy_logger.info(
+                "Pruned %s audit row(s) older than %s days.", removed, days
+            )
+        return removed
 
     @retention_sweep.before_loop
     async def before_retention_sweep(self):

@@ -1,0 +1,1107 @@
+{
+  "dashboard_session": {
+    "SESSION_COOKIE_HTTPONLY": "True",
+    "SESSION_COOKIE_SAMESITE": "\"Lax\"",
+    "SESSION_COOKIE_SECURE": "( deployment_settings.dashboard_external_url or \"\" ).lower().startswith(\"https://\")",
+    "SESSION_IDLE_TIMEOUT": "timedelta(minutes=10)",
+    "SESSION_LIFETIME": "timedelta(hours=12)",
+    "oauth_scopes": [
+      "identify guilds"
+    ]
+  },
+  "erasure_lists": {
+    "delete_order": [
+      [
+        "fulfillment_requests",
+        "user_id = ?",
+        1
+      ],
+      [
+        "timed_entitlements",
+        "user_id = ?",
+        1
+      ],
+      [
+        "reward_vouchers",
+        "user_id = ?",
+        1
+      ],
+      [
+        "gacha_pulls",
+        "user_id = ?",
+        1
+      ],
+      [
+        "gacha_pity",
+        "user_id = ?",
+        1
+      ],
+      [
+        "user_inventory",
+        "user_id = ?",
+        1
+      ],
+      [
+        "activity_events",
+        "user_id = ?",
+        1
+      ],
+      [
+        "warnings",
+        "user_id = ?",
+        1
+      ],
+      [
+        "tickets",
+        "opener_id = ?",
+        1
+      ],
+      [
+        "voice_permissions",
+        "owner_id = ? OR target_id = ?",
+        2
+      ],
+      [
+        "voice_settings",
+        "user_id = ?",
+        1
+      ],
+      [
+        "active_channels",
+        "owner_id = ?",
+        1
+      ],
+      [
+        "user_sharing_preferences",
+        "user_id = ?",
+        1
+      ],
+      [
+        "user_identities",
+        "user_id = ?",
+        1
+      ],
+      [
+        "casino_earnings_window",
+        "user_id = ?",
+        1
+      ],
+      [
+        "lfg_posts",
+        "host_id = ?",
+        1
+      ],
+      [
+        "dashboard_access_invalidations",
+        "user_id = ?",
+        1
+      ]
+    ],
+    "null_actor": [
+      [
+        "warnings",
+        "mod_id"
+      ],
+      [
+        "tickets",
+        "claimer_id"
+      ],
+      [
+        "fulfillment_requests",
+        "completed_by"
+      ],
+      [
+        "timed_entitlements",
+        "granted_by"
+      ],
+      [
+        "realm_guilds",
+        "approved_by"
+      ],
+      [
+        "guild_data_scopes",
+        "updated_by"
+      ],
+      [
+        "feature_flags",
+        "updated_by"
+      ],
+      [
+        "guild_settings",
+        "updated_by"
+      ],
+      [
+        "instance_settings",
+        "updated_by"
+      ],
+      [
+        "managed_messages",
+        "updated_by"
+      ],
+      [
+        "shop_item_definitions",
+        "updated_by"
+      ],
+      [
+        "gacha_banners",
+        "updated_by"
+      ],
+      [
+        "work_responses",
+        "updated_by"
+      ],
+      [
+        "minigame_state",
+        "last_user_id"
+      ]
+    ],
+    "rekey_actor": [
+      [
+        "settings_audit",
+        "actor_id"
+      ],
+      [
+        "control_actions",
+        "actor_id"
+      ],
+      [
+        "realms",
+        "created_by"
+      ],
+      [
+        "dashboard_documents",
+        "updated_by"
+      ]
+    ],
+    "rekey_subject": [
+      "users",
+      "scoped_accounts",
+      "reward_claims",
+      "casino_wagers"
+    ],
+    "scrubbed_json": [
+      [
+        "lfg_posts",
+        "joined_json"
+      ],
+      [
+        "control_actions",
+        "payload_json"
+      ],
+      [
+        "settings_audit",
+        "old_value_json"
+      ]
+    ]
+  },
+  "features": [
+    "announce_ban",
+    "announce_boost",
+    "announce_boost_reward",
+    "announce_join",
+    "announce_kick",
+    "announce_leave",
+    "casino",
+    "casino_blackjack",
+    "casino_crash",
+    "casino_dice",
+    "casino_hilo",
+    "casino_mines",
+    "casino_rate_limit",
+    "casino_roulette",
+    "casino_russian",
+    "casino_slots",
+    "casino_wheel",
+    "chat_rewards",
+    "economy",
+    "everydle",
+    "everydle_dbdle",
+    "everydle_genshindle",
+    "everydle_loldle",
+    "everydle_valdle",
+    "factions",
+    "general",
+    "inactivity",
+    "invite_logging",
+    "levels",
+    "lfg",
+    "member_announcements",
+    "minigame_counting",
+    "minigame_word_chain",
+    "minigames",
+    "moderation",
+    "moderation_warn_actions",
+    "moderation_warn_alerts",
+    "moderation_word_filter",
+    "music",
+    "onboarding",
+    "patchbot",
+    "patchbot_cs2",
+    "patchbot_dbd",
+    "patchbot_genshin",
+    "patchbot_hsr",
+    "patchbot_lol",
+    "patchbot_minecraft",
+    "patchbot_phasmophobia",
+    "patchbot_r6",
+    "patchbot_valorant",
+    "patchbot_wuwa",
+    "patchbot_zzz",
+    "profiles",
+    "role_menus",
+    "shop",
+    "shop_gacha",
+    "social_twitch",
+    "social_youtube",
+    "temporary_voice",
+    "temporary_voice_faction_lock",
+    "tickets",
+    "voice_rewards"
+  ],
+  "intents": {
+    "bans": "True",
+    "members": "True",
+    "message_content": "True",
+    "moderation": "True"
+  },
+  "log_formats_naming_a_user": [
+    "cogs/music.py: Music extraction failed (guild_id=%s, user_id=%s, error=%s)",
+    "cogs/music.py: Music search failed (user_id=%s, error=%s)",
+    "cogs/privacy.py: Could not deliver a data export (user_id=%s).",
+    "cogs/privacy.py: Retention sweep erased %s member(s) inactive since %s.",
+    "cogs/serverevents.py: Assigned configured autoroles to user ID %s.",
+    "cogs/serverevents.py: Could not assign autoroles to user ID %s: missing Manage Roles permission or sufficient role hierarchy.",
+    "cogs/serverevents.py: Member account provisioning failed (guild_id=%s, user_id=%s).",
+    "cogs/serverevents.py: Registered new user ID %s.",
+    "cogs/serverevents.py: Returning user ID %s already has an account.",
+    "cogs/utils.py: Could not move the level role after an administrative change (guild=%s, member=%s)",
+    "core/database.py: Atomic user update failed (user=%s)",
+    "core/database.py: Batch balance update failed (users=%s)",
+    "core/database.py: Batch user reward update failed (users=%s)",
+    "core/database.py: Database ready (path=%s, schema=%s, users=%s)",
+    "core/database.py: Dice wager failed (guild=%s, user=%s)",
+    "core/database.py: Erased member data (tombstone=%s, reason=%s, deleted=%s)",
+    "core/database.py: Everydle reward failed (user=%s, cooldown=%s)",
+    "core/database.py: Gacha transaction failed (guild=%s, user=%s)",
+    "core/database.py: Instant wager failed (user=%s)",
+    "core/database.py: Inventory purchase failed (guild=%s, user=%s, item=%s)",
+    "core/database.py: Member data erasure failed",
+    "core/database.py: Periodic reward claim failed (guild=%s, user=%s, reward=%s)",
+    "core/database.py: Purchase failed (user=%s, upgrade=%s)",
+    "core/database.py: Roulette wager failed (guild=%s, user=%s)",
+    "core/database.py: Setting a member's experience failed (user=%s)",
+    "core/database.py: Slots wager failed (guild=%s, user=%s)",
+    "core/database.py: Timed reward failed (user=%s, cooldown=%s)",
+    "core/database.py: Wager reservation failed (user=%s)",
+    "core/database.py: Wheel wager failed (guild=%s, user=%s)",
+    "core/database.py: f'Failed to check whether user exists: {e}'",
+    "core/database.py: f'Failed to create user: {e}'",
+    "core/database.py: f'Failed to read full user data: {e}'",
+    "core/database.py: f'Failed to read top XP user: {e}'",
+    "core/database.py: f'Failed to read user balance (User: {user_id}): {e}'",
+    "core/database.py: f'Failed to read user profile: {e}'",
+    "core/database.py: f'Failed to reset user cooldowns: {e}'",
+    "core/database.py: f'Failed to save voice-room user limit: {e}'",
+    "core/support_tickets.py: Could not open a ticket (guild_id=%s, user_id=%s, kind=%s)",
+    "dashboard_api.py: Discord user guild request failed.",
+    "dashboard_api.py: Discord user identity request failed.",
+    "main.py: Legacy user state seeded into guild and instance scopes (users=%s)"
+  ],
+  "loops": [
+    "cogs/gacha.py:entitlement_cleanup",
+    "cogs/general.py:lfg_close",
+    "cogs/general.py:lfg_prune",
+    "cogs/invitelog.py:prime_missing",
+    "cogs/patchbot.py:patch_check_loop",
+    "cogs/privacy.py:retention_sweep",
+    "cogs/serverevents.py:inactivity_scanner",
+    "cogs/serverevents.py:voice_xp_paycheck",
+    "cogs/shop.py:rental_cleanup",
+    "cogs/socials.py:twitch_check_loop",
+    "cogs/socials.py:youtube_rss_loop"
+  ],
+  "outbound_hosts": [
+    "api.steampowered.com",
+    "api.twitch.tv",
+    "bbs-api-os.hoyolab.com",
+    "cdn.discordapp.com",
+    "dbd.tricky.lol",
+    "ddragon.leagueoflegends.com",
+    "discord.com",
+    "genshin-db-api.vercel.app",
+    "github.com",
+    "id.twitch.tv",
+    "img.youtube.com",
+    "launchermeta.mojang.com",
+    "media.discordapp.net",
+    "playvalorant.com",
+    "twitch.tv",
+    "valorant-api.com",
+    "www.hoyolab.com",
+    "www.leagueoflegends.com",
+    "www.minecraft.net",
+    "www.youtube.com"
+  ],
+  "privacy_settings": {
+    "audit_retention_days": {
+      "default": 90,
+      "feature": null,
+      "scope": "instance",
+      "type": "integer"
+    },
+    "bot_log_channel": {
+      "default": null,
+      "feature": null,
+      "scope": "guild",
+      "type": "channel"
+    },
+    "casino_rate_limit_alert_channel": {
+      "default": null,
+      "feature": "casino_rate_limit",
+      "scope": "guild",
+      "type": "channel"
+    },
+    "data_retention_days": {
+      "default": 0,
+      "feature": null,
+      "scope": "instance",
+      "type": "integer"
+    },
+    "ignored_users": {
+      "default": [],
+      "feature": "inactivity",
+      "scope": "guild",
+      "type": "string_list"
+    },
+    "invite_log_channel": {
+      "default": null,
+      "feature": "invite_logging",
+      "scope": "guild",
+      "type": "channel"
+    },
+    "invite_log_use_separate_channel": {
+      "default": false,
+      "feature": "invite_logging",
+      "scope": "guild",
+      "type": "boolean"
+    },
+    "join_message_card": {
+      "default": false,
+      "feature": "announce_join",
+      "scope": "guild",
+      "type": "boolean"
+    },
+    "join_message_card_text": {
+      "default": "",
+      "feature": "announce_join",
+      "scope": "guild",
+      "type": "string"
+    },
+    "leave_message_card": {
+      "default": false,
+      "feature": "announce_leave",
+      "scope": "guild",
+      "type": "boolean"
+    },
+    "leave_message_card_text": {
+      "default": "",
+      "feature": "announce_leave",
+      "scope": "guild",
+      "type": "string"
+    },
+    "moderation_log_channel": {
+      "default": null,
+      "feature": "moderation_warn_alerts",
+      "scope": "guild",
+      "type": "channel"
+    },
+    "rejoin_message_card_text": {
+      "default": "",
+      "feature": "announce_join",
+      "scope": "guild",
+      "type": "string"
+    },
+    "ticket_logs": {
+      "default": null,
+      "feature": "tickets",
+      "scope": "guild",
+      "type": "channel"
+    },
+    "warn_announce_channel": {
+      "default": null,
+      "feature": "moderation",
+      "scope": "guild",
+      "type": "channel"
+    },
+    "warn_threshold_general": {
+      "default": 0,
+      "feature": "moderation",
+      "scope": "guild",
+      "type": "integer"
+    },
+    "warn_threshold_harassment": {
+      "default": 0,
+      "feature": "moderation",
+      "scope": "guild",
+      "type": "integer"
+    },
+    "warn_threshold_language": {
+      "default": 0,
+      "feature": "moderation",
+      "scope": "guild",
+      "type": "integer"
+    },
+    "warn_threshold_nsfw": {
+      "default": 0,
+      "feature": "moderation",
+      "scope": "guild",
+      "type": "integer"
+    },
+    "warn_threshold_spam": {
+      "default": 0,
+      "feature": "moderation",
+      "scope": "guild",
+      "type": "integer"
+    },
+    "warn_timeout_minutes_general": {
+      "default": 60,
+      "feature": "moderation_warn_actions",
+      "scope": "guild",
+      "type": "integer"
+    },
+    "warn_timeout_minutes_harassment": {
+      "default": 60,
+      "feature": "moderation_warn_actions",
+      "scope": "guild",
+      "type": "integer"
+    },
+    "warn_timeout_minutes_language": {
+      "default": 60,
+      "feature": "moderation_warn_actions",
+      "scope": "guild",
+      "type": "integer"
+    },
+    "warn_timeout_minutes_nsfw": {
+      "default": 60,
+      "feature": "moderation_warn_actions",
+      "scope": "guild",
+      "type": "integer"
+    },
+    "warn_timeout_minutes_spam": {
+      "default": 60,
+      "feature": "moderation_warn_actions",
+      "scope": "guild",
+      "type": "integer"
+    },
+    "word_filter_delete_message": {
+      "default": true,
+      "feature": "moderation_word_filter",
+      "scope": "guild",
+      "type": "boolean"
+    },
+    "word_filter_exempt_roles": {
+      "default": [],
+      "feature": "moderation_word_filter",
+      "scope": "guild",
+      "type": "role_list"
+    },
+    "word_filter_tag": {
+      "default": "general",
+      "feature": "moderation_word_filter",
+      "scope": "guild",
+      "type": "string"
+    },
+    "word_filter_words": {
+      "default": [],
+      "feature": "moderation_word_filter",
+      "scope": "guild",
+      "type": "string_list"
+    }
+  },
+  "retention_constants": {
+    "cogs/general.py:LFG_PRUNE_DAYS": "8",
+    "cogs/privacy.py:CONFIRM_TIMEOUT_SECONDS": "60",
+    "cogs/privacy.py:REQUEST_COOLDOWN_SECONDS": "900",
+    "cogs/privacy.py:RETENTION_BATCH": "25",
+    "cogs/tickets.py:TRANSCRIPT_MESSAGE_LIMIT": "50000",
+    "cogs/tickets.py:TRANSCRIPT_PART_LIMIT": "5",
+    "core/control_actions.py:CONTROL_ACTION_RETENTION_DAYS": "30",
+    "core/database.py:ACCESS_INVALIDATION_RETENTION_HOURS": "24",
+    "core/database.py:EXPORT_ROW_LIMIT": "5000",
+    "core/logging_setup.py:backupCount": "10",
+    "core/logging_setup.py:maxBytes": "5 * 1024 * 1024",
+    "dashboard_api.py:MAX_TRACKED_SESSIONS": "2048",
+    "deploy/potatobot-offsite-backup-podman.service:ExecStart": "/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py /var/lib/potatobot/economy.db gdrivecrypt: --prune-local-backups-days 90",
+    "deploy/potatobot-offsite-backup.service:ExecStart": "/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py /opt/potatobot/economy.db gdrivecrypt: --prune-local-backups-days 90",
+    "scripts/offsite_backup.py:--prune-local-backups-days": "0",
+    "scripts/offsite_backup.py:--retention-days": "30"
+  },
+  "schema": {
+    "active_channels": [
+      "channel_id",
+      "owner_id",
+      "guild_id"
+    ],
+    "activity_events": [
+      "event_id",
+      "user_id",
+      "origin_guild_id",
+      "category",
+      "event_type",
+      "amount",
+      "metadata_json",
+      "created_at"
+    ],
+    "casino_earnings_window": [
+      "user_id",
+      "window_started_at",
+      "window_total"
+    ],
+    "casino_wagers": [
+      "wager_id",
+      "guild_id",
+      "user_id",
+      "game_key",
+      "stake",
+      "status",
+      "created_at",
+      "resolved_at",
+      "resolution_json"
+    ],
+    "control_actions": [
+      "action_id",
+      "guild_id",
+      "actor_id",
+      "action_type",
+      "payload_json",
+      "status",
+      "created_at",
+      "started_at",
+      "completed_at",
+      "error_code",
+      "lease_expires_at"
+    ],
+    "dashboard_access_invalidations": [
+      "invalidation_id",
+      "guild_id",
+      "user_id",
+      "created_at"
+    ],
+    "dashboard_documents": [
+      "document_id",
+      "guild_id",
+      "document_type",
+      "name",
+      "content_json",
+      "revision",
+      "updated_by",
+      "updated_at"
+    ],
+    "feature_flags": [
+      "guild_id",
+      "feature_key",
+      "enabled",
+      "revision",
+      "updated_by",
+      "updated_at"
+    ],
+    "fulfillment_requests": [
+      "request_id",
+      "voucher_id",
+      "guild_id",
+      "user_id",
+      "asset_type",
+      "status",
+      "created_at",
+      "completed_at",
+      "completed_by",
+      "ticket_channel_id"
+    ],
+    "gacha_banners": [
+      "guild_id",
+      "banner_key",
+      "display_name",
+      "enabled",
+      "config_json",
+      "revision",
+      "updated_by",
+      "updated_at",
+      "starts_at",
+      "ends_at"
+    ],
+    "gacha_pity": [
+      "guild_id",
+      "user_id",
+      "banner_key",
+      "pulls_since_five_star",
+      "pulls_toward_four_star",
+      "guaranteed_featured_five",
+      "guaranteed_featured_four",
+      "updated_at"
+    ],
+    "gacha_pulls": [
+      "pull_id",
+      "guild_id",
+      "user_id",
+      "banner_key",
+      "banner_revision",
+      "rarity",
+      "reward_key",
+      "reward_json",
+      "pity_before",
+      "soft_pity",
+      "hard_pity",
+      "four_star_guarantee",
+      "featured",
+      "featured_guaranteed",
+      "created_at"
+    ],
+    "game_patch_state": [
+      "game_key",
+      "latest_version",
+      "latest_url",
+      "latest_title",
+      "checked_at"
+    ],
+    "guild_data_scopes": [
+      "guild_id",
+      "category",
+      "scope_type",
+      "realm_id",
+      "revision",
+      "updated_by",
+      "updated_at"
+    ],
+    "guild_patch_announcements": [
+      "guild_id",
+      "game_key",
+      "last_announced_version"
+    ],
+    "guild_settings": [
+      "guild_id",
+      "setting_key",
+      "value_json",
+      "revision",
+      "updated_by",
+      "updated_at"
+    ],
+    "guilds": [
+      "guild_id",
+      "display_name",
+      "active",
+      "first_seen_at",
+      "last_seen_at"
+    ],
+    "instance_settings": [
+      "setting_key",
+      "value_json",
+      "revision",
+      "updated_by",
+      "updated_at"
+    ],
+    "lfg_posts": [
+      "guild_id",
+      "message_id",
+      "channel_id",
+      "host_id",
+      "game_role_id",
+      "game_text",
+      "needed",
+      "joined_json",
+      "created_at"
+    ],
+    "managed_message_entries": [
+      "entry_id",
+      "guild_id",
+      "kind",
+      "menu_key",
+      "position",
+      "label",
+      "role_id",
+      "emoji"
+    ],
+    "managed_messages": [
+      "guild_id",
+      "kind",
+      "menu_key",
+      "display_name",
+      "channel_id",
+      "message_id",
+      "title",
+      "body",
+      "colour",
+      "options_json",
+      "revision",
+      "updated_by",
+      "updated_at"
+    ],
+    "minigame_state": [
+      "guild_id",
+      "game_key",
+      "value",
+      "last_user_id",
+      "streak",
+      "best_streak",
+      "updated_at"
+    ],
+    "minigame_used_words": [
+      "guild_id",
+      "game_key",
+      "word",
+      "used_at"
+    ],
+    "realm_guilds": [
+      "realm_id",
+      "guild_id",
+      "status",
+      "approved_by",
+      "joined_at"
+    ],
+    "realms": [
+      "realm_id",
+      "name",
+      "created_by",
+      "status",
+      "created_at"
+    ],
+    "rented_items": [
+      "id",
+      "item_type",
+      "discord_item_id",
+      "expires_at",
+      "guild_id"
+    ],
+    "reward_claims": [
+      "guild_id",
+      "user_id",
+      "reward_key",
+      "claimed_at"
+    ],
+    "reward_vouchers": [
+      "voucher_id",
+      "guild_id",
+      "user_id",
+      "reward_key",
+      "source_type",
+      "duration_days",
+      "subject",
+      "status",
+      "acquired_at",
+      "redeemed_at",
+      "fulfilled_at",
+      "expires_at",
+      "discord_item_id"
+    ],
+    "rewards": [
+      "guild_id",
+      "activity_id",
+      "coin_reward",
+      "xp_reward"
+    ],
+    "scope_adoptions": [
+      "adoption_key",
+      "guild_id",
+      "user_count",
+      "adopted_at"
+    ],
+    "scoped_accounts": [
+      "scope_type",
+      "scope_id",
+      "user_id",
+      "balance",
+      "xp",
+      "level",
+      "created_at",
+      "updated_at",
+      "bj_wins",
+      "bj_losses",
+      "last_daily",
+      "last_job",
+      "rob_bonus",
+      "rob_defense",
+      "vault_protection",
+      "protected_reserve",
+      "bodyguard_until",
+      "last_rob",
+      "last_loldle_easy",
+      "last_loldle_medium",
+      "last_loldle_hard",
+      "last_valdle",
+      "last_genshindle",
+      "last_dbdle_killer",
+      "last_dbdle_survivor",
+      "last_dbdle_perk",
+      "streak_count",
+      "last_streak_update",
+      "last_active",
+      "inactive_warned",
+      "rules_read_time"
+    ],
+    "server_config": [
+      "guild_id",
+      "config_key",
+      "config_value"
+    ],
+    "settings_audit": [
+      "audit_id",
+      "guild_id",
+      "actor_id",
+      "action",
+      "target_key",
+      "old_value_json",
+      "new_value_json",
+      "created_at"
+    ],
+    "shop_item_definitions": [
+      "guild_id",
+      "item_key",
+      "template_type",
+      "category",
+      "enabled",
+      "price",
+      "config_json",
+      "revision",
+      "updated_by",
+      "updated_at"
+    ],
+    "shop_item_localizations": [
+      "guild_id",
+      "item_key",
+      "language",
+      "name",
+      "description"
+    ],
+    "shop_prices": [
+      "guild_id",
+      "item_id",
+      "price"
+    ],
+    "tickets": [
+      "channel_id",
+      "opener_id",
+      "created_at",
+      "guild_id",
+      "ticket_type",
+      "claimer_id"
+    ],
+    "timed_entitlements": [
+      "entitlement_id",
+      "guild_id",
+      "user_id",
+      "entitlement_key",
+      "starts_at",
+      "expires_at",
+      "source_voucher_id",
+      "discord_item_id",
+      "status",
+      "source_type",
+      "granted_by",
+      "revoked_at",
+      "discord_missing_since"
+    ],
+    "user_identities": [
+      "user_id",
+      "first_seen_at",
+      "last_seen_at"
+    ],
+    "user_inventory": [
+      "guild_id",
+      "user_id",
+      "item_key",
+      "quantity",
+      "updated_at"
+    ],
+    "user_sharing_preferences": [
+      "user_id",
+      "guild_id",
+      "category",
+      "opted_out",
+      "updated_at"
+    ],
+    "users": [
+      "user_id",
+      "balance",
+      "xp",
+      "level",
+      "bj_wins",
+      "bj_losses",
+      "last_daily",
+      "last_job",
+      "rob_bonus",
+      "rob_defense",
+      "vault_protection",
+      "protected_reserve",
+      "bodyguard_until",
+      "last_rob",
+      "last_loldle_easy",
+      "last_loldle_medium",
+      "last_loldle_hard",
+      "last_valdle",
+      "last_genshindle",
+      "last_dbdle_killer",
+      "last_dbdle_survivor",
+      "last_dbdle_perk",
+      "streak_count",
+      "last_streak_update",
+      "last_active",
+      "inactive_warned",
+      "rules_read_time"
+    ],
+    "voice_permissions": [
+      "guild_id",
+      "owner_id",
+      "target_id",
+      "is_allowed"
+    ],
+    "voice_settings": [
+      "guild_id",
+      "user_id",
+      "channel_name",
+      "user_limit",
+      "locked",
+      "bitrate"
+    ],
+    "warnings": [
+      "id",
+      "user_id",
+      "mod_id",
+      "reason",
+      "date",
+      "guild_id",
+      "tag"
+    ],
+    "work_responses": [
+      "response_id",
+      "guild_id",
+      "tier",
+      "weight",
+      "message",
+      "enabled",
+      "revision",
+      "updated_by",
+      "updated_at"
+    ]
+  },
+  "subject_tables": [
+    [
+      "users",
+      "user_id = ?",
+      1
+    ],
+    [
+      "scoped_accounts",
+      "user_id = ?",
+      1
+    ],
+    [
+      "casino_wagers",
+      "user_id = ?",
+      1
+    ],
+    [
+      "reward_claims",
+      "user_id = ?",
+      1
+    ],
+    [
+      "user_inventory",
+      "user_id = ?",
+      1
+    ],
+    [
+      "gacha_pity",
+      "user_id = ?",
+      1
+    ],
+    [
+      "gacha_pulls",
+      "user_id = ?",
+      1
+    ],
+    [
+      "reward_vouchers",
+      "user_id = ?",
+      1
+    ],
+    [
+      "timed_entitlements",
+      "user_id = ? OR granted_by = ?",
+      2
+    ],
+    [
+      "fulfillment_requests",
+      "user_id = ? OR completed_by = ?",
+      2
+    ],
+    [
+      "warnings",
+      "user_id = ? OR mod_id = ?",
+      2
+    ],
+    [
+      "tickets",
+      "opener_id = ? OR claimer_id = ?",
+      2
+    ],
+    [
+      "voice_settings",
+      "user_id = ?",
+      1
+    ],
+    [
+      "voice_permissions",
+      "owner_id = ? OR target_id = ?",
+      2
+    ],
+    [
+      "active_channels",
+      "owner_id = ?",
+      1
+    ],
+    [
+      "user_identities",
+      "user_id = ?",
+      1
+    ],
+    [
+      "user_sharing_preferences",
+      "user_id = ?",
+      1
+    ],
+    [
+      "activity_events",
+      "user_id = ?",
+      1
+    ],
+    [
+      "dashboard_access_invalidations",
+      "user_id = ?",
+      1
+    ],
+    [
+      "casino_earnings_window",
+      "user_id = ?",
+      1
+    ],
+    [
+      "lfg_posts",
+      "host_id = ? OR (json_valid(joined_json) AND EXISTS (SELECT 1 FROM json_each(lfg_posts.joined_json) WHERE json_each.value = ?))",
+      2
+    ],
+    [
+      "minigame_state",
+      "last_user_id = ?",
+      1
+    ],
+    [
+      "settings_audit",
+      "actor_id = ? OR (action IN ('warning.delete') AND json_valid(old_value_json) AND (json_extract(old_value_json, '$.user_id') = ? OR json_extract(old_value_json, '$.moderator_id') = ?))",
+      3
+    ],
+    [
+      "control_actions",
+      "actor_id = ? OR (json_valid(payload_json) AND json_extract(payload_json, '$.user_id') = ?)",
+      2
+    ]
+  ]
+}

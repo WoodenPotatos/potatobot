@@ -43,7 +43,11 @@ Type=oneshot
 User=potatobot
 Group=potatobot
 WorkingDirectory=/
-ExecStart=/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py /var/lib/potatobot/economy.db gdrivecrypt:
+# `--prune-local-backups-days 90`: docs/legal/PRIVACY.md §7 promises the
+# pre-migration copies beside the database go 90 days after the migration they
+# protect; this flag is what keeps the promise, after the night's offsite copy
+# has verified. Changing the number means changing the policy, both languages.
+ExecStart=/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py /var/lib/potatobot/economy.db gdrivecrypt: --prune-local-backups-days 90
 SyslogIdentifier=potatobot-offsite-backup
 
 NoNewPrivileges=true

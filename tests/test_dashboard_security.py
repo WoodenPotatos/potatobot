@@ -2262,3 +2262,35 @@ class RedeemsNameTests(unittest.TestCase):
         self.assertIsNone(row["user_name"])
         self.assertEqual("wave", row["item_name"])
         self.assertIn("/guilds/123/emojis/556", get.call_args.args[0])
+
+
+class LoginCardLegalLinksTests(unittest.TestCase):
+    """The sign-in card links the Privacy Policy and the Terms of Service.
+
+    Discord's Developer Terms (5(a)) want the policy "easily accessible to
+    users from your Application"; the dashboard is half of the application.
+    The addresses are `core/version.py`'s, the same ones `/version` shows, so
+    the shell is stamped from them rather than carrying a second copy.
+    """
+
+    def setUp(self):
+        self.client = dashboard_api.app.test_client()
+
+    def test_the_shell_is_stamped_with_both_addresses_and_no_placeholder_survives(self):
+        from core import version
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn(f'href="{version.PRIVACY_POLICY_URL}"', html)
+        self.assertIn(f'href="{version.TERMS_OF_SERVICE_URL}"', html)
+        self.assertNotIn("__PRIVACY_POLICY_URL__", html)
+        self.assertNotIn("__TERMS_OF_SERVICE_URL__", html)
+
+    def test_the_source_markup_carries_placeholders_not_addresses(self):
+        """A literal address in index.html would be a second copy to forget."""
+        from pathlib import Path
+        shell = Path(dashboard_api.__file__).resolve().parent / "dashboard" / "index.html"
+        source = shell.read_text(encoding="utf-8")
+        self.assertIn('href="__PRIVACY_POLICY_URL__"', source)
+        self.assertIn('href="__TERMS_OF_SERVICE_URL__"', source)
+        self.assertNotIn("github.com", source)
+        self.assertIn('data-i18n="dashboard.login_privacy"', source)
+        self.assertIn('data-i18n="dashboard.login_terms"', source)

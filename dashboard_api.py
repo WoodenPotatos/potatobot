@@ -451,6 +451,12 @@ def index():
             rendered = handle.read()
         for name in VERSIONED_ASSETS:
             rendered = rendered.replace(f'"{name}"', f'"{name}?v={token}"')
+        # The sign-in card links the Privacy Policy and the Terms (Discord
+        # Developer Terms 5(a)). The addresses live in core/version.py with
+        # `/version`'s, so moving the documents is one edit, never two.
+        rendered = (rendered
+                    .replace("__PRIVACY_POLICY_URL__", version.PRIVACY_POLICY_URL)
+                    .replace("__TERMS_OF_SERVICE_URL__", version.TERMS_OF_SERVICE_URL))
         # Keyed by the token, so it is rebuilt exactly when the client changes
         # and never grows beyond the versions seen since start.
         _shell_cache.clear()

@@ -15,7 +15,8 @@ from core import database
 from cogs.utils import (BoundedCooldownMap, display_member_name,
                         guild_setting_sync, handle_loop_error, t)
 from core.supported_games import lfg_role_for_channel
-from core.version import REPOSITORY_URL, release_channel, version_display
+from core.version import (PRIVACY_POLICY_URL, REPOSITORY_URL, TERMS_OF_SERVICE_URL,
+                          release_channel, version_display)
 from core.feature_access import require_interaction_feature
 
 general_logger = logging.getLogger("PotatoBot.General")
@@ -557,6 +558,13 @@ class General(commands.Cog):
                         value=f"**{maint_text}**", inline=True)
         embed.add_field(name=t("general.version_source"),
                         value=REPOSITORY_URL, inline=False)
+        # Where the policy is reachable from inside the application (Discord
+        # Developer Terms 5(a)); the maintainer's decision of 2026-10-31.
+        embed.add_field(name=t("general.version_legal"),
+                        value=t("general.version_legal_links",
+                                privacy_url=PRIVACY_POLICY_URL,
+                                terms_url=TERMS_OF_SERVICE_URL),
+                        inline=False)
 
         await ctx.send(embed=embed)
 

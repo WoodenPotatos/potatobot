@@ -469,10 +469,11 @@ steps on their own. Never point either at the live file while the bot runs.
 | `everydle_sources.py` | Upstream adapters for the Everydle datasets; `record <directory>` re-records the test fixtures. |
 | `everydle_drift.py` | Read-only drift report against upstream; exits 1 on drift and 2 when a source is unreachable. `--fixtures`, `--json`. |
 | `everydle_propose.py` | `draft -o patch.json` writes a reviewable patch; `apply patch.json [--dry-run]` applies it once no field is null. |
-| `offsite_backup.py` | One consistent database snapshot to an rclone remote, downloaded back and compared before pruning (`--retention-days`, default 30). Stdlib only. |
+| `offsite_backup.py` | One consistent database snapshot to an rclone remote, downloaded back and compared before pruning (`--retention-days`, default 30). `--prune-local-backups-days N` then deletes the pre-migration copies beside the database whose name-stamp is older than N days (default 0, keep all; the deployed units pass 90, the retention `docs/legal/PRIVACY.md` promises). Stdlib only. |
 | `bump_version.py` | The only writer of the version in `pyproject.toml`: `major` (architecture), `minor` (schema migration) or `patch` (everything else), keeping the channel letter (`2.18.3a`); `--channel`, `--set`, `--show` and `--dry-run`. |
 | `update_readme.py` | Regenerates the three marked blocks in `README.md`; `--check` fails when they are stale. |
 | `publish_public.py` | Builds, verifies and publishes the sanitised public snapshot (section 12). |
+| `legal_drift.py` | Holds `docs/legal/PRIVACY.md` to the code: `check` (the CI gate, also run by `/release`) compares the member tables, erasure lists, schema, outbound hosts, user-naming log lines, loops, features, privacy settings, intents, dashboard session and retention constants against `docs/legal/drift_stamp.json`, naming the policy section for each drifted fact; `stamp` records them after a review (`/legal-update`); `show` prints them. |
 
 ### Acceptance
 

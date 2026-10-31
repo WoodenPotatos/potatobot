@@ -72,7 +72,9 @@ Type=oneshot
 User=woody
 Group=woody
 WorkingDirectory=/opt/potatobot
-ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py /opt/potatobot/economy.db gdrivecrypt:
+# `--prune-local-backups-days 90`: the retention docs/legal/PRIVACY.md §7
+# promises for the pre-migration copies beside the database.
+ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py /opt/potatobot/economy.db gdrivecrypt: --prune-local-backups-days 90
 SyslogIdentifier=potatobot-offsite-backup
 
 NoNewPrivileges=true

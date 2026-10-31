@@ -230,6 +230,9 @@ svg[hidden] { display: none; }
 .login-card .brand-mark { margin: 0 auto var(--space-4); }
 .login-card h1 { font-size: 1.5rem; margin-bottom: var(--space-2); }
 .login-card p { color: var(--text-muted); margin-bottom: var(--space-6); }
+.login-card .login-legal { margin: var(--space-5) 0 0; font-size: .85rem; }
+.login-card .login-legal a { color: var(--text-muted); text-decoration: underline; }
+.login-card .login-legal a:hover { color: var(--accent); }
 
 .discord-btn {
     display: inline-flex;

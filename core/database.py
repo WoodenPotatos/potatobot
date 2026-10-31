@@ -4623,6 +4623,28 @@ def get_privacy_audit(guild_id: int, limit: int = 500) -> list[dict]:
     return _audit_rows(guild_id, limit, PRIVACY_AUDIT_ACTIONS)
 
 
+def prune_settings_audit(max_age_days: int) -> int:
+    """Delete staff audit rows older than the window; erasure records never.
+
+    Nothing removed these rows before, so the feed held every setting change
+    since the installation began, and a removed warning's payload (subject id,
+    staff reason) with it. `audit_retention_days` sets the window; 0 keeps
+    everything. The rows in `PRIVACY_AUDIT_ACTIONS` are the proof of what an
+    erasure deleted and name only a tombstone, so they stay whatever the
+    window -- the Privacy Policy promises them "indefinitely, anonymised".
+    """
+    if int(max_age_days) <= 0:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=int(max_age_days))).isoformat()
+    placeholders = ",".join("?" * len(PRIVACY_AUDIT_ACTIONS))
+    with get_connection() as conn:
+        return conn.execute(
+            f"DELETE FROM settings_audit WHERE created_at < ? "
+            f"AND action NOT IN ({placeholders})",
+            (cutoff, *PRIVACY_AUDIT_ACTIONS),
+        ).rowcount
+
+
 # Long enough that a dashboard process down for a while still sees what it
 # missed, and short enough that the table stays a handful of rows. A dashboard
 # that missed more than this starts with an empty permission cache anyway.
@@ -7679,7 +7701,17 @@ def finish_control_action(action_id: int, success: bool, error_code: str | None 
 
 EXPORT_ROW_LIMIT = 5000
 
+# What ``remove_warning`` writes into settings_audit.old_value_json. The subject's
+# id and the reason text live inside that payload, so an erasure has to rewrite it
+# and an export has to return it. Declared before SUBJECT_TABLES, which quotes it.
+_AUDIT_SUBJECT_ACTIONS = ("warning.delete",)
+_AUDIT_SUBJECT_ACTIONS_SQL = ", ".join(f"'{action}'" for action in _AUDIT_SUBJECT_ACTIONS)
+
 # (table, WHERE clause, number of times the subject id is bound)
+#
+# JSON columns are read with json_each / json_extract behind json_valid, never
+# with LIKE: a LIKE on an id matches every longer id that contains it, and a
+# malformed payload must not turn the whole export into an error.
 SUBJECT_TABLES = (
     ("users", "user_id = ?", 1),
     ("scoped_accounts", "user_id = ?", 1),
@@ -7705,6 +7737,30 @@ SUBJECT_TABLES = (
     ("user_sharing_preferences", "user_id = ?", 1),
     ("activity_events", "user_id = ?", 1),
     ("dashboard_access_invalidations", "user_id = ?", 1),
+    # The rolling anti-abuse counter is a record of the member's own play.
+    ("casino_earnings_window", "user_id = ?", 1),
+    # Posts the member hosts, and posts they joined: membership is a JSON list
+    # of ids inside the host's row.
+    ("lfg_posts",
+     "host_id = ? OR (json_valid(joined_json) AND EXISTS ("
+     "SELECT 1 FROM json_each(lfg_posts.joined_json) WHERE json_each.value = ?))",
+     2),
+    # Whose turn the counting or word chain last accepted.
+    ("minigame_state", "last_user_id = ?", 1),
+    # Changes the member made as an administrator, and a removed warning's
+    # payload naming them as its subject or as the moderator who issued it.
+    ("settings_audit",
+     f"actor_id = ? OR (action IN ({_AUDIT_SUBJECT_ACTIONS_SQL}) "
+     "AND json_valid(old_value_json) AND ("
+     "json_extract(old_value_json, '$.user_id') = ? "
+     "OR json_extract(old_value_json, '$.moderator_id') = ?))",
+     3),
+    # Outbox rows the member queued as an operator, and rows whose payload is
+    # about them: an erasure, or the revocation of one of their grants.
+    ("control_actions",
+     "actor_id = ? OR (json_valid(payload_json) "
+     "AND json_extract(payload_json, '$.user_id') = ?)",
+     2),
 )
 
 # Deleted outright, children before parents. Foreign keys are enforced on runtime
@@ -7770,10 +7826,6 @@ ERASE_REKEY_ACTOR = (
     ("realms", "created_by"),
     ("dashboard_documents", "updated_by"),
 )
-
-# What ``remove_warning`` writes into settings_audit.old_value_json. The subject's
-# id and the reason text live inside that payload, so an erasure has to rewrite it.
-_AUDIT_SUBJECT_ACTIONS = ("warning.delete",)
 
 # JSON columns that can carry a member id, each with the function that rewrites
 # it. Declared so the coverage test can hold the schema to this list: a column
@@ -7983,16 +8035,24 @@ def _scrub_lfg_parties_locked(conn, user_id: int) -> int:
 
 def _scrub_control_action_payloads_locked(conn, user_id: int,
                                           tombstone_id: int) -> int:
-    """Re-key the erasure action's own record of whom it erased.
+    """Re-key every outbox payload that names the member.
 
     An operator-requested erasure travels through the outbox as
     `{"user_id": <member>}`, and that row outlives the erasure it caused until
     `prune_control_actions` removes it — so for up to a month the queue named
-    the member the rest of the transaction had just forgotten.
+    the member the rest of the transaction had just forgotten. A
+    `revoke_entitlement` row carries the same key for the grant's holder, and
+    was missed when this matched on the action type; the match is now on the
+    payload itself, so a future action type naming a member is covered the day
+    it is added. A row the worker has not run yet then acts on the tombstone,
+    which no guild has a member for, and settles as nothing to do — the same
+    outcome as the erasure that already withdrew the grant in Discord.
     """
     rows = conn.execute(
         "SELECT action_id, payload_json FROM control_actions "
-        "WHERE action_type = 'erase_member'"
+        "WHERE json_valid(payload_json) "
+        "AND json_extract(payload_json, '$.user_id') = ?",
+        (int(user_id),),
     ).fetchall()
     scrubbed = 0
     for action_id, payload_json in rows:

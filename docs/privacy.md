@@ -1,5 +1,11 @@
 # Privacy and data lifecycle
 
+This is the design of export, erasure and retention. The member-facing
+Privacy Policy and Terms of Service for the maintainer's installations are in
+`docs/legal/` (English binding, Hungarian translation), and the table-by-table
+record they summarise is `docs/data_inventory.md`; a change to anything below
+is a change to both.
+
 PotatoBot stores Discord user and guild IDs, economy/profile/game state,
 moderation warnings, ticket ownership, voice preferences, rentals, feature and
 settings audit history, and limited activity timestamps. Ticket transcripts are
@@ -80,6 +86,14 @@ who simply never triggered an activity write. Each daily pass erases at most 25
 members. The window is one installation-wide setting, because erasure is
 installation-wide; the sweep still takes the shortest window any guild resolves,
 so no guild could retain data on another's behalf.
+
+`audit_retention_days` (same page, default 90, 0 = keep forever) is the other
+retention: the same daily pass deletes `settings_audit` rows older than the
+window through `prune_settings_audit`, which exempts every action in
+`PRIVACY_AUDIT_ACTIONS`. Erasure records therefore survive at any age, as the
+Privacy Policy promises; a removed warning's payload, which names its subject
+and carries staff prose, does not. The two windows are independent: the audit
+prune runs whether or not a member window is set.
 
 ## Operators
 

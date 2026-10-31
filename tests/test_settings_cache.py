@@ -67,12 +67,12 @@ class InstanceScopeTests(unittest.TestCase):
         self.temp_dir.cleanup()
         settings_cache.invalidate()
 
-    def test_the_five_installation_wide_settings_are_declared(self):
+    def test_the_installation_wide_settings_are_declared(self):
         declared = {key for key, definition in SETTING_DEFINITIONS.items()
                     if definition.scope is SettingScope.INSTANCE}
         self.assertEqual(
             {"language", "currency_emoji", "maintenance", "command_prefix",
-             "data_retention_days"},
+             "data_retention_days", "audit_retention_days"},
             declared,
         )
 

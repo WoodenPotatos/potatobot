@@ -669,6 +669,14 @@ SETTING_DEFINITIONS = {
         _setting("data_retention_days", "administration", "instance",
                  SettingValueType.INTEGER, 0, minimum=0, maximum=3650,
                  scope=SettingScope.INSTANCE),
+        # Days a staff audit row (a setting change, a warning removal) is kept.
+        # 0 keeps them forever, which is what every installation did before
+        # this existed. Erasure records are exempt whatever the value: they are
+        # the proof of what was deleted and name only a tombstone. Decided at
+        # 90 by the maintainer on 2026-10-31; the Privacy Policy §7 quotes it.
+        _setting("audit_retention_days", "administration", "instance",
+                 SettingValueType.INTEGER, 90, minimum=0, maximum=3650,
+                 scope=SettingScope.INSTANCE),
         _setting("economy_channels", "economy", "rewards", SettingValueType.CHANNEL_LIST,
                  [], feature="economy", channel_types=TEXT_CHANNEL_TYPES,
                  member_permissions=('view_channel', 'send_messages', 'use_application_commands')),

@@ -141,6 +141,35 @@ class PrivacyWorkflowTests(unittest.TestCase):
                 "INSERT INTO settings_audit (guild_id, actor_id, action, target_key, "
                 "created_at) VALUES (111, 7, 'setting.update', 'language', 'now')"
             )
+            # A warning about 7 that staff member 8 later removed: the subject
+            # survives only inside the audit payload.
+            conn.execute(
+                "INSERT INTO settings_audit (guild_id, actor_id, action, target_key, "
+                "old_value_json, created_at) VALUES (111, 8, 'warning.delete', "
+                "'warning:5', ?, 'now')",
+                (json.dumps({"user_id": 7, "reason": "spam", "date": "then",
+                             "moderator_id": 8, "source_guild_id": 111}),),
+            )
+            conn.execute(
+                "INSERT INTO casino_earnings_window (user_id, window_started_at, "
+                "window_total) VALUES (7, 'now', 500)"
+            )
+        # Written through the accessors, after the fixture connection has
+        # committed: each opens its own write connection.
+        # 7 hosts one post, joined 8's post, and member 1007 (whose id contains
+        # 7's) joined a third -- the export must not pick that one up.
+        database.create_lfg_post(111, 1001, 5, host_id=7, needed=0)
+        database.create_lfg_post(111, 1002, 5, host_id=8, needed=0)
+        database.create_lfg_post(111, 1003, 5, host_id=8, needed=0)
+        self.assertIn("joined", database.join_lfg_post(111, 1002, 7))
+        self.assertIn("joined", database.join_lfg_post(111, 1003, 1007))
+        # 7 took the last counting turn.
+        database.advance_minigame(111, "counting", "1", 7, "")
+        # An operator revoked one of 7's grants through the dashboard.
+        self.revoke_action_id = database.queue_control_action(
+            111, 42, "revoke_entitlement",
+            {"entitlement_id": 1, "user_id": 7, "entitlement_key": "premium",
+             "discord_item_id": None})
 
     def coin_supply(self):
         """Balances plus every stake still owed back to a player."""
@@ -170,6 +199,47 @@ class PrivacyWorkflowTests(unittest.TestCase):
             {row["channel_id"] for row in tables["tickets"]}, {900, 901}
         )
         self.assertEqual(tables["voice_permissions"][0]["target_id"], 7)
+
+    def test_export_reaches_the_json_and_audit_rows_that_escaped_it(self):
+        """The five tables the policy once had to disclose as omitted."""
+        tables = database.export_user_data(7)["tables"]
+        # Hosted and joined, but not the post member 1007 joined.
+        self.assertEqual(
+            {1001, 1002}, {row["message_id"] for row in tables["lfg_posts"]}
+        )
+        self.assertEqual(7, tables["minigame_state"][0]["last_user_id"])
+        self.assertEqual(500, tables["casino_earnings_window"][0]["window_total"])
+        # As the actor of one change and the subject of a removed warning.
+        self.assertEqual(
+            {"setting.update", "warning.delete"},
+            {row["action"] for row in tables["settings_audit"]},
+        )
+        self.assertEqual(
+            [self.revoke_action_id],
+            [row["action_id"] for row in tables["control_actions"]],
+        )
+
+    def test_export_of_the_other_member_does_not_borrow_these_rows(self):
+        tables = database.export_user_data(8)["tables"]
+        self.assertEqual(
+            {1002, 1003}, {row["message_id"] for row in tables["lfg_posts"]}
+        )
+        # 8 removed the warning, so the payload names 8 as moderator.
+        self.assertEqual(
+            ["warning.delete"], [row["action"] for row in tables["settings_audit"]]
+        )
+        self.assertEqual([], tables["control_actions"])
+        self.assertEqual([], tables["casino_earnings_window"])
+
+    def test_export_survives_a_malformed_json_payload(self):
+        with database.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO control_actions (guild_id, actor_id, action_type, "
+                "payload_json, status, created_at) "
+                "VALUES (111, 42, 'publish_managed', 'not json', 'completed', 'now')"
+            )
+        tables = database.export_user_data(7)["tables"]
+        self.assertEqual(1, len(tables["control_actions"]))
 
     def test_export_keeps_rows_the_gameplay_readers_filter_out(self):
         """get_user_inventory hides zero quantities; an export must not."""
@@ -361,7 +431,8 @@ class PrivacyWorkflowTests(unittest.TestCase):
         self.assertEqual(entry["old_value"]["user_id"], receipt["tombstone_id"])
         self.assertIsNone(entry["old_value"]["reason"])
         self.assertTrue(entry["old_value"]["erased"])
-        self.assertEqual(receipt["audit_payloads_scrubbed"], 1)
+        # This payload plus the removed warning the fixture already carries.
+        self.assertEqual(receipt["audit_payloads_scrubbed"], 2)
 
     # -- erasure: identifiers ----------------------------------------------
 
@@ -603,6 +674,27 @@ class ErasureReachesLateTablesTests(unittest.TestCase):
                 (self.action_id,)).fetchone()[0])
         self.assertEqual(receipt["tombstone_id"], payload["user_id"])
 
+    def test_a_queued_revocation_no_longer_names_the_member(self):
+        """The scrub matches the payload, not the action type."""
+        revoke_id = database.queue_control_action(
+            111, 42, "revoke_entitlement",
+            {"entitlement_id": 9, "user_id": 7, "entitlement_key": "premium",
+             "discord_item_id": None})
+        other_id = database.queue_control_action(
+            111, 42, "revoke_entitlement",
+            {"entitlement_id": 10, "user_id": 8, "entitlement_key": "premium",
+             "discord_item_id": None})
+        receipt = database.anonymize_user(7, actor_id=42, guild_id=111)
+        self.assertEqual(2, receipt["control_action_payloads_scrubbed"])
+        with sqlite3.connect(database.DB_PATH) as conn:
+            payloads = {
+                action_id: json.loads(payload) for action_id, payload in conn.execute(
+                    "SELECT action_id, payload_json FROM control_actions")
+            }
+        self.assertEqual(receipt["tombstone_id"], payloads[revoke_id]["user_id"])
+        self.assertEqual("premium", payloads[revoke_id]["entitlement_key"])
+        self.assertEqual(8, payloads[other_id]["user_id"])
+
     def test_a_longer_id_containing_this_one_is_left_alone(self):
         """The LIKE prefilter is a prefilter; membership decides."""
         database.create_lfg_post(111, 1003, 5, host_id=8, needed=0)
@@ -812,3 +904,119 @@ class _RevocationGuild:
 
     def get_emoji(self, emoji_id):
         return None
+
+
+class AuditRetentionTests(unittest.TestCase):
+    """`audit_retention_days` prunes staff audit rows; erasure records never.
+
+    The feed held every setting change since the installation began, and with
+    it every removed warning's payload. The Privacy Policy (§7) now promises a
+    window for the staff history and "indefinitely, anonymised" for erasure
+    records, so this holds the prune to both halves of that sentence.
+    """
+
+    def setUp(self):
+        self.original_path = database.DB_PATH
+        self.temp_dir = tempfile.TemporaryDirectory()
+        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.initialize_database()
+        database.register_guild(111, "Guild")
+        from datetime import datetime, timedelta, timezone
+        old = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat()
+        recent = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        with database.get_connection() as conn:
+            for action, created in (("setting.update", old), ("warning.delete", old),
+                                    ("user.erase", old), ("setting.update", recent),
+                                    ("user.erase", recent)):
+                conn.execute(
+                    "INSERT INTO settings_audit (guild_id, actor_id, action, "
+                    "target_key, created_at) VALUES (111, 7, ?, 'k', ?)",
+                    (action, created),
+                )
+
+    def tearDown(self):
+        database.DB_PATH = self.original_path
+        self.temp_dir.cleanup()
+
+    def _actions(self):
+        with sqlite3.connect(database.DB_PATH) as conn:
+            return sorted(row[0] for row in conn.execute(
+                "SELECT action FROM settings_audit"))
+
+    def test_old_staff_rows_go_and_erasure_records_stay_at_any_age(self):
+        removed = database.prune_settings_audit(90)
+        self.assertEqual(2, removed)
+        self.assertEqual(["setting.update", "user.erase", "user.erase"], self._actions())
+
+    def test_zero_keeps_everything(self):
+        self.assertEqual(0, database.prune_settings_audit(0))
+        self.assertEqual(5, len(self._actions()))
+
+    def test_the_setting_ships_at_ninety_days_installation_wide(self):
+        from core.settings_registry import SETTING_DEFINITIONS, SettingScope
+        definition = SETTING_DEFINITIONS["audit_retention_days"]
+        self.assertEqual(90, definition.default)
+        self.assertIs(SettingScope.INSTANCE, definition.scope)
+        self.assertEqual(0, definition.minimum)
+
+    def test_every_privacy_action_is_exempt_not_just_the_one_the_sweep_writes(self):
+        """`PRIVACY_AUDIT_ACTIONS` is the exemption list; a row written under any
+        name in it survives, so adding a privacy action there protects it here."""
+        from datetime import datetime, timedelta, timezone
+        old = (datetime.now(timezone.utc) - timedelta(days=400)).isoformat()
+        with database.get_connection() as conn:
+            for action in database.PRIVACY_AUDIT_ACTIONS:
+                conn.execute(
+                    "INSERT INTO settings_audit (guild_id, actor_id, action, "
+                    "target_key, created_at) VALUES (111, 7, ?, 'k', ?)", (action, old))
+        database.prune_settings_audit(30)
+        for action in database.PRIVACY_AUDIT_ACTIONS:
+            self.assertIn(action, self._actions())
+
+
+class AuditPruneInTheSweepTests(unittest.IsolatedAsyncioTestCase):
+    """The audit prune runs from the daily sweep whether or not a member
+    window is set, reads `audit_retention_days` through the settings cache,
+    and a failure in it never stops the member sweep behind it."""
+
+    async def asyncSetUp(self):
+        import cogs.privacy
+        self.module = cogs.privacy
+        self.bot = types.SimpleNamespace(guilds=[], user=types.SimpleNamespace(id=1))
+
+        async def ready():
+            return None
+        self.bot.wait_until_ready = ready
+        self.cog = cogs.privacy.Privacy(self.bot)
+
+    async def asyncTearDown(self):
+        self.cog.retention_sweep.cancel()
+
+    async def test_the_window_reaches_the_database_prune(self):
+        write = AsyncMock(return_value=3)
+        with patch.object(self.module, "guild_setting_sync", return_value=90), \
+                patch.object(self.module.database, "run_write", write):
+            self.assertEqual(3, await self.cog._prune_audit_history())
+        write.assert_awaited_once_with(self.module.database.prune_settings_audit, 90)
+
+    async def test_zero_and_non_integers_prune_nothing(self):
+        write = AsyncMock(return_value=3)
+        for value in (0, -5, None, True, "90"):
+            with patch.object(self.module, "guild_setting_sync", return_value=value), \
+                    patch.object(self.module.database, "run_write", write):
+                self.assertEqual(0, await self.cog._prune_audit_history(), value)
+        write.assert_not_awaited()
+
+    async def test_the_sweep_prunes_even_with_no_member_window(self):
+        """No guild, so no member window and an early return -- after the prune."""
+        prune = AsyncMock(return_value=0)
+        with patch.object(self.cog, "_prune_audit_history", prune):
+            await self.cog.retention_sweep()
+        prune.assert_awaited_once()
+
+    async def test_a_failing_prune_is_logged_and_the_sweep_goes_on(self):
+        write = AsyncMock(side_effect=RuntimeError("locked"))
+        with patch.object(self.module, "guild_setting_sync", return_value=90), \
+                patch.object(self.module.database, "run_write", write), \
+                self.assertLogs("PotatoBot.Privacy", level="ERROR"):
+            self.assertEqual(0, await self.cog._prune_audit_history())

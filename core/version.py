@@ -25,6 +25,14 @@ from pathlib import Path
 # the issue tracker and the changelog of the build they are actually running.
 REPOSITORY_URL = "https://github.com/WoodenPotatos/potatobot"
 
+# The Privacy Policy and Terms of Service ship in the repository so their
+# history is public, and `/version` links them because Discord's Developer
+# Terms require the policy to be reachable from the application itself. The
+# `beta` branch is the published line every installation runs from; the
+# Developer Portal carries these same two URLs.
+PRIVACY_POLICY_URL = f"{REPOSITORY_URL}/blob/beta/docs/legal/PRIVACY.md"
+TERMS_OF_SERVICE_URL = f"{REPOSITORY_URL}/blob/beta/docs/legal/TERMS.md"
+
 CHANNEL_ALPHA = "alpha"
 CHANNEL_BETA = "beta"
 CHANNEL_STABLE = "stable"

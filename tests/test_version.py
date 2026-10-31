@@ -98,6 +98,14 @@ class SingleSourceTests(unittest.TestCase):
         self.assertNotIn("potatobotbeta", version.REPOSITORY_URL,
                          "the private repository must never be advertised")
 
+    def test_the_legal_urls_point_at_files_that_exist_on_the_published_line(self):
+        """`/version` links the policy; a link to a moved file is a broken promise."""
+        root = Path(version.__file__).resolve().parents[1]
+        for url in (version.PRIVACY_POLICY_URL, version.TERMS_OF_SERVICE_URL):
+            prefix = f"{version.REPOSITORY_URL}/blob/beta/"
+            self.assertTrue(url.startswith(prefix), url)
+            self.assertTrue((root / url[len(prefix):]).is_file(), url)
+
 
 class BumpScriptTests(unittest.TestCase):
     """The bump script is what an operator runs; its ordering rule is the guard."""
