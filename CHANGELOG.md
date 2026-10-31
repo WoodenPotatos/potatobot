@@ -6,7 +6,7 @@ stable. A build keeps its number across channels, so `2.18.3a` publishes as
 2026-10-22 by adding the old beta serial to z (`2.18.0-beta.1` is `2.18.1b`);
 the public repository's git tags keep their original names.
 
-## 2.19.26b
+## 2.19.26
 
 - **A Privacy Policy and Terms of Service now ship with the bot**, in
   `docs/legal/`, in English (binding) and Hungarian, written from a
