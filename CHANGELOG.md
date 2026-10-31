@@ -6,7 +6,23 @@ stable. A build keeps its number across channels, so `2.18.3a` publishes as
 2026-10-22 by adding the old beta serial to z (`2.18.0-beta.1` is `2.18.1b`);
 the public repository's git tags keep their original names.
 
-## 2.19.26b
+## 2.19.29b
+
+- **A stable release channel exists.** The public repository now has a
+  `stable` branch beside `beta`. A stable release is the last published beta
+  copied with its letter stripped (`2.19.26b` becomes `2.19.26`, and
+  `/version` reports the channel as stable), so the code is byte-identical
+  to a beta that has already been out; betas keep landing on `beta`.
+- **The README below the introduction is generated from the code.** It said
+  the schema was at version 24 (it is 26) and that LoLdle's hard mode was
+  Hungarian-only (English has been complete since September), and the stable
+  release shipped saying so. Only the maintainer's introduction is written by
+  hand now; the version, the Python range, the intents, the schema version,
+  the read-worker bounds, the gacha pity numbers, the game and feature counts,
+  the documentation list and the recent releases are read from the code and
+  the repository each time, and the build fails when the file disagrees.
+
+## 2.19.26
 
 - **A Privacy Policy and Terms of Service now ship with the bot**, in
   `docs/legal/`, in English (binding) and Hungarian, written from a

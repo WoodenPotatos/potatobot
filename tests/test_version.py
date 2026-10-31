@@ -157,7 +157,9 @@ if __name__ == "__main__":
 
 
 class ReadmeGenerationTests(unittest.TestCase):
-    """The README is hand-written; only the marked blocks are ours.
+    """The README's introduction is hand-written; the version block and the
+    whole body below it are generated from the code (decided 2026-10-31,
+    after the stable README shipped saying the schema was at 24).
 
     A generator that appends to somebody's README when it cannot find its
     markers is a generator that gets removed from the pipeline, so the refusal
@@ -199,6 +201,35 @@ class ReadmeGenerationTests(unittest.TestCase):
         rendered = self.module.render_version()
         self.assertIn(version.version_display(), rendered)
         self.assertIn(version.release_channel(), rendered)
+
+    def test_the_body_states_facts_read_from_the_code(self):
+        """The sentences that lied: each number comes from where the code
+        keeps it, never from a literal in the generator."""
+        from core import database
+        from core.supported_games import SUPPORTED_GAME_KEYS
+        body = self.module.render_body()
+        self.assertIn(f"The schema is at version {database.LATEST_SCHEMA_VERSION}.", body)
+        self.assertIn(f"for {self.module._word(len(SUPPORTED_GAME_KEYS))} supported titles", body)
+        config = database.DEFAULT_GACHA_CONFIG
+        self.assertIn(f"{config['hard_pity']}-pull hard pity", body)
+        self.assertIn(f"pull {config['hard_pity']} guarantees a 5-star", body)
+        minors = self.module.python_minors()
+        self.assertIn(f"Requires Python {minors[0]}–{minors[-1]}.", body)
+        self.assertIn("Message Content", body)
+        # The documentation list is read from docs/, private documents excluded.
+        self.assertIn("(docs/privacy.md)", body)
+        self.assertNotIn("docs/lessons.md", body)
+
+    def test_the_introduction_is_the_only_unmarked_text(self):
+        """Everything after the version block sits inside the body block, so no
+        hand-written fact can creep in below the introduction again."""
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        after = text.split("<!-- END GENERATED: version -->", 1)[1]
+        stripped = after.replace("<!-- BEGIN GENERATED: body -->", "", 1)
+        body_end = stripped.rfind("<!-- END GENERATED: body -->")
+        self.assertGreater(body_end, 0)
+        self.assertEqual("", stripped[body_end + len("<!-- END GENERATED: body -->"):].strip())
+        self.assertEqual("", stripped[:stripped.find("## Quick start")].strip())
 
 
 class CurrencySymbolTests(unittest.TestCase):
