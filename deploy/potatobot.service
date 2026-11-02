@@ -25,8 +25,10 @@
 [Unit]
 Description=PotatoBot Discord bot
 Documentation=https://github.com/WoodenPotatos/potatobot
-After=network-online.target
-Wants=network-online.target
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+# Bare metal runs against a PostgreSQL on the host (docs/installation.md);
+# the bot also waits up to a minute for it (`wait_for_database`).
 # Discord outages and DNS problems can flap; back off rather than hammer.
 # These are [Unit] keys: systemd moved them out of [Service] in v230 and
 # silently ignores them there, which reverts the backoff to 5-in-10s.

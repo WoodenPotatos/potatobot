@@ -36,6 +36,9 @@ from core import item_catalog
 from core import settings_cache
 from core.settings_registry import SETTING_DEFINITIONS, validate_setting_value
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 
 class MechanicDeclarationTests(unittest.TestCase):
     def test_every_shipped_value_is_inside_its_own_bounds(self):
@@ -163,6 +166,7 @@ class MechanicReachesTheGameTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "mechanics.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
         settings_cache.invalidate()

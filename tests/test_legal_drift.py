@@ -62,7 +62,7 @@ class LegalDriftTests(unittest.TestCase):
             "30", self.facts["retention_constants"]["scripts/offsite_backup.py:--retention-days"])
 
     def test_a_new_subject_table_is_reported_against_the_export_section(self):
-        widened = tuple(database.SUBJECT_TABLES) + (("member_notes", "user_id = ?", 1),)
+        widened = tuple(database.SUBJECT_TABLES) + (("member_notes", "user_id = %s", 1),)
         with patch.object(database, "SUBJECT_TABLES", widened):
             facts = legal_drift.compute_facts()
         report = dict(legal_drift.drift(self.stamp, facts))

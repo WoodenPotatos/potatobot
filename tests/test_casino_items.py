@@ -10,6 +10,7 @@ that was refused. That is structural rather than remembered, because the
 consumption happens inside the same transaction as the stake.
 """
 
+import sys
 import os
 import random
 import tempfile
@@ -24,6 +25,9 @@ from core import item_catalog
 from core import settings_cache
 from core import settings_registry
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 
 GUILD = 10
 MEMBER = 1
@@ -34,6 +38,7 @@ class CasinoItemTestCase(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "casino.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Casino Guild")
         self.set_balance(10_000_000_000)
@@ -45,7 +50,7 @@ class CasinoItemTestCase(unittest.TestCase):
     def set_balance(self, amount):
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO users (user_id, balance) VALUES (?, ?) "
+                "INSERT INTO users (user_id, balance) VALUES (%s, %s) "
                 "ON CONFLICT(user_id) DO UPDATE SET balance = excluded.balance",
                 (MEMBER, amount),
             )
@@ -53,7 +58,7 @@ class CasinoItemTestCase(unittest.TestCase):
     def give(self, item_key, quantity):
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO user_inventory VALUES (?, ?, ?, ?, '2026-01-01') "
+                "INSERT INTO user_inventory VALUES (%s, %s, %s, %s, '2026-01-01') "
                 "ON CONFLICT(guild_id, user_id, item_key) DO UPDATE SET "
                 "quantity = excluded.quantity",
                 (GUILD, MEMBER, item_key, quantity),
@@ -606,7 +611,7 @@ class LadderBetCapTests(CasinoItemTestCase, unittest.IsolatedAsyncioTestCase):
     def wager_count(self):
         with database.get_connection() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) FROM casino_wagers WHERE guild_id = ? AND user_id = ?",
+                "SELECT COUNT(*) FROM casino_wagers WHERE guild_id = %s AND user_id = %s",
                 (GUILD, MEMBER),
             ).fetchone()
             return row[0]

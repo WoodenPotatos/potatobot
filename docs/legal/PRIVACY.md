@@ -206,7 +206,9 @@ service, no advertising network, no AI provider and no update telemetry.
 The bot and dashboard run on hardware we own, in **Hungary**, inside
 a rootless container under a dedicated system account, reachable for
 administration only over a private network with SSH keys. The database is a
-single SQLite file readable by that account alone.
+PostgreSQL server in its own container under that same account, reachable
+only from the bot's container over a private network, and readable by that
+account alone.
 
 ### 6.4 International transfers
 
@@ -247,7 +249,7 @@ transfer Discord makes under its own terms, not one we make.
 | Staff audit history (dashboard changes, warning removals) | Deleted after the audit window (`audit_retention_days`; 0 means indefinitely; **this installation: 90 days**). While kept, the acting administrator's ID is replaced by an anonymous ID on erasure and a removed warning's reason blanked. **Erasure records are exempt** and kept indefinitely: they name only the anonymous ID and are the proof of what was deleted. |
 | Operational logs (section 9) | The system journal is capped by size at 500 MB on this host, which currently holds about two months; the bot's own log file rotates at 10 × 5 MB (about 55 MB). |
 | Off-site encrypted backups | 30 days, then deleted automatically. |
-| Pre-migration backups on the server | A full copy taken before each database upgrade, kept beside the database as the rollback artefact. An erasure does not reach them. The nightly backup job deletes each one once it is older than the window, after that night's off-site copy has been verified. **This installation: 90 days after the migration they protect.** |
+| Pre-migration backups on the server | A full copy taken before each database upgrade, kept on the server as the rollback artefact. An erasure does not reach them. The nightly backup job deletes each one once it is older than the window, after that night's off-site copy has been verified. **This installation: 90 days after the migration they protect.** |
 | In-memory data (music queue, invite snapshot, cooldown maps, dashboard tokens and rate-limit counters) | Lost on restart; dashboard tokens at most 12 hours. |
 
 Erasing your data does not reach into backups. A backup restored after your

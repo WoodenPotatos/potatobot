@@ -1,0 +1,9 @@
+# The private network the bot and its PostgreSQL share (2.21). The database
+# publishes no port: only containers on this network can reach it, and the
+# bot finds it by container name (`PGHOST=potatobot-db`).
+#
+# Install beside the two container units, as the `potatobot` account:
+#   install -m 0644 deploy/potatobot.network ~potatobot/.config/containers/systemd/
+
+[Network]
+NetworkName=potatobot

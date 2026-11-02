@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,6 +26,9 @@ if ROOT not in sys.path:
 from core import database
 from core import item_catalog
 from core.settings_registry import SETTING_DEFINITIONS
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 
 class ShippedRewardPoolTests(unittest.TestCase):
@@ -320,6 +323,7 @@ class SharedItemPurchaseTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "shop.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Shop Guild")
         with database.get_connection() as conn:
@@ -343,7 +347,7 @@ class SharedItemPurchaseTests(unittest.TestCase):
             database._grant_gacha_reward_locked(
                 conn, 10, 1,
                 {"key": "lockpick", "kind": "item", "amount": 1},
-                database.DEFAULT_GACHA_CONFIG, datetime.now().isoformat(),
+                database.DEFAULT_GACHA_CONFIG, datetime.now(timezone.utc).isoformat(),
             )
         # One row, not one per source: the systems grant the same object.
         self.assertEqual(database.get_user_inventory(10, 1), {"lockpick": 2})
@@ -383,7 +387,7 @@ class SharedItemPurchaseTests(unittest.TestCase):
             granted = database._grant_gacha_reward_locked(
                 conn, 10, 1,
                 {"key": "big_vault", "kind": "vault", "amount": reserve},
-                database.DEFAULT_GACHA_CONFIG, datetime.now().isoformat(),
+                database.DEFAULT_GACHA_CONFIG, datetime.now(timezone.utc).isoformat(),
             )
         self.assertEqual(granted["duplicate_compensation"], reserve // 10)
         self.assertEqual(database.get_user_balance(1), before + reserve // 10)
@@ -398,7 +402,7 @@ class SharedItemPurchaseTests(unittest.TestCase):
             database._grant_gacha_reward_locked(
                 conn, 10, 2,
                 {"key": "med_vault", "kind": "vault", "amount": definition.value},
-                database.DEFAULT_GACHA_CONFIG, datetime.now().isoformat(),
+                database.DEFAULT_GACHA_CONFIG, datetime.now(timezone.utc).isoformat(),
             )
             pulled = conn.execute(
                 "SELECT protected_reserve FROM users WHERE user_id = 2"
@@ -419,6 +423,7 @@ class LegacyLockpickTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "legacy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Legacy Guild")
         with database.get_connection() as conn:
@@ -434,7 +439,7 @@ class LegacyLockpickTests(unittest.TestCase):
     def test_a_legacy_bonus_still_applies_and_is_then_cleared(self):
         # chance_roll 0.14 succeeds only with the stored +0.15 on top of 0.0.
         result = database.resolve_robbery(
-            1, 2, datetime.now().isoformat(), 0.0, 1.0, 0.14, 0.10, 10
+            1, 2, datetime.now(timezone.utc).isoformat(), 0.0, 1.0, 0.14, 0.10, 10
         )
         self.assertTrue(result["resolved"])
         self.assertTrue(result["won"])
@@ -656,6 +661,7 @@ class ShopHideCommandTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
         settings_cache.invalidate()

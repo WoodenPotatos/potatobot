@@ -20,6 +20,9 @@ if str(ROOT) not in sys.path:
 from core import database
 from cogs import roleselect
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 
 class RoleMenuStorageTests(unittest.TestCase):
     """The cog reads `managed_messages`, not the retired settings."""
@@ -28,6 +31,7 @@ class RoleMenuStorageTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         # Two guilds, because every bug this file is about only exists with two.
         for guild_id, name in ((111, "first"), (222, "second")):

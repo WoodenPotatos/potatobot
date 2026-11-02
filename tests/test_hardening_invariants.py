@@ -6,6 +6,7 @@ the one message that permits them, and transient maps grew for the process
 lifetime. Each test here pins one of those behaviours.
 """
 
+import sys
 import ast
 import asyncio
 import builtins
@@ -28,6 +29,9 @@ from core.feature_access import (
     seed_cached_feature,
 )
 from core.settings_registry import FEATURE_DEFINITIONS
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -367,6 +371,7 @@ class DashboardReadPathTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "reads.db")
+        pg_harness.fresh_database()
         try:
             database.initialize_database()
             database.register_guild(31, "Read Guild")

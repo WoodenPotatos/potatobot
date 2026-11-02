@@ -15,13 +15,18 @@
 #
 # One container, bot and dashboard in one process, matching the host today
 # (one service; `potatobot-dashboard` was never installed). The bot owns
-# schema creation, so `update_db.py` runs as its own step before a start that
-# carries a migration -- see the runbook.
+# schema creation and migrates at start, after a `pg_dump` whenever a
+# migration is pending (2.21). Its PostgreSQL is `potatobot-db.container`, on
+# the private `potatobot.network`; install all three together.
 
 [Unit]
 Description=PotatoBot Discord bot (rootless podman)
-After=network-online.target
+After=network-online.target potatobot-db.service
 Wants=network-online.target
+# The database unit is ready only once PostgreSQL answers over TCP
+# (`Notify=healthy`), so the bot starts after it; stopping the database stops
+# the bot rather than leaving it reconnecting to nothing.
+Requires=potatobot-db.service
 # The same backoff as deploy/potatobot.service. GATEWAY_GRACE_SECONDS in
 # main.py is sized against these two numbers (RestartLimitTests), so they
 # must not drift apart between the two ways of running the bot.
@@ -42,10 +47,22 @@ UserNS=keep-id:uid=10001,gid=10001
 
 # Data on a bind mount, not a named volume, so the host-side offsite-backup
 # and drift units keep reading a plain path. `Z`: the host enforces SELinux.
-Volume=/var/lib/potatobot:/data:Z
+# `bot/` on the encrypted mount; PostgreSQL's data is the `pgdata/` beside it.
+# With the volume closed `bot/` does not exist and podman refuses to start,
+# which is the guard (`deploy/potatobot-unlock`). `RequiresMountsFor=` is not
+# one: a rootless user manager sees only mounts that exist, so `/` meets it
+# (measured 2026-11-01), and the earlier draft that relied on it is gone.
+Volume=/var/lib/potatobot/bot:/data:Z
+Network=potatobot.network
 
 # Secrets stay out of the image and out of this file: root:potatobot 0640.
+# PGPASSWORD, the bot role's, is in it; the database superuser's is not.
 EnvironmentFile=/etc/potatobot/potatobot.env
+Environment=PGHOST=potatobot-db
+Environment=PGDATABASE=potatobot
+Environment=PGUSER=potatobot
+Environment=POTATOBOT_DATA_DIR=/data
+# Where 2.20's SQLite file sits, which the copy script reads at the cutover.
 Environment=POTATOBOT_DB_PATH=/data/economy.db
 Environment=POTATOBOT_LOG_DIR=/data/logs
 Environment=POTATOBOT_EVERYDLE_STATE_PATH=/data/everydle_state.json
@@ -71,8 +88,8 @@ DropCapability=all
 # after a deploy, this line is the first thing to remove.
 ReadOnly=true
 # What `UMask=0027` is to deploy/potatobot.service: without it the container
-# inherits 0022 and the database, every migration backup and the session
-# secret land 0644 on the host's bind mount. Measured 2026-10-16. Quadlet has
+# inherits 0022 and every pre-migration dump and the session secret land 0644
+# on the host's bind mount. Measured 2026-10-16. Quadlet has
 # no key of its own for this, so it goes through to `podman run` directly.
 PodmanArgs=--umask=0027
 
@@ -94,6 +111,10 @@ RunInit=true
 [Service]
 Restart=on-failure
 RestartSec=10s
+# The bot ends on the stop's SIGTERM, which podman reports as 143 (128 + 15);
+# without this every clean stop left the unit `failed`. A crash, the watchdog's
+# exit(1) and a SIGKILL still count as failures and still restart.
+SuccessExitStatus=143
 TimeoutStopSec=30
 SyslogIdentifier=potatobot
 

@@ -217,7 +217,9 @@ szolgáltatás, hirdetési hálózat, MI-szolgáltató és frissítési telemetr
 A bot és az irányítópult saját tulajdonú hardveren fut **Magyarország**
 területén, dedikált rendszerfiók alatt, root-jogosultság nélküli konténerben,
 adminisztrációs célból kizárólag privát hálózaton, SSH-kulccsal elérhetően. Az
-adatbázis egyetlen SQLite-fájl, amelyet csak ez a fiók olvashat.
+adatbázis egy PostgreSQL-kiszolgáló saját konténerben, ugyanezen fiók alatt,
+amely kizárólag a bot konténeréből, privát hálózaton érhető el, és amelyet csak
+ez a fiók olvashat.
 
 ### 6.4 Nemzetközi adattovábbítás
 
@@ -262,7 +264,7 @@ Discord végez a saját feltételei alapján, nem mi.
 | Stáb-naplóelőzmények (irányítópult-módosítások, figyelmeztetés-eltávolítások) | A naplózási időablak letelte után törlődnek (`audit_retention_days`; 0 = határozatlan; **ez a telepítés: 90 nap**). Amíg megvannak, törléskor az eljáró adminisztrátor azonosítóját anonim azonosító váltja fel, és az eltávolított figyelmeztetés indoklása kiürül. **Az adattörlési bejegyzések kivételek**, és határozatlan ideig megmaradnak: csak az anonim azonosítót nevezik meg, és ezek igazolják, mi törlődött. |
 | Működési naplók (9. pont) | A rendszernaplót ezen a gépen 500 MB-os méretkorlát határolja, amely jelenleg körülbelül két hónapot tartalmaz; a bot saját naplófájlja 10 × 5 MB-onként rotálódik (kb. 55 MB). |
 | Külső helyszíni titkosított mentések | 30 nap, utána automatikusan törlődnek. |
-| Migráció előtti mentések a szerveren | Minden adatbázis-frissítés előtt készült teljes másolat, az adatbázis mellett tárolva visszaállítási céllal. A törlés nem éri el őket. Az éjszakai mentési feladat törli mindegyiket, amint az időablaknál régebbi, miután az aznapi külső másolat ellenőrzése sikerült. **Ez a telepítés: az általuk védett migráció után 90 nappal.** |
+| Migráció előtti mentések a szerveren | Minden adatbázis-frissítés előtt készült teljes másolat, a szerveren tárolva visszaállítási céllal. A törlés nem éri el őket. Az éjszakai mentési feladat törli mindegyiket, amint az időablaknál régebbi, miután az aznapi külső másolat ellenőrzése sikerült. **Ez a telepítés: az általuk védett migráció után 90 nappal.** |
 | Memóriában tartott adatok (lejátszási sor, meghívó-pillanatkép, időkorlát-térképek, irányítópult-tokenek és sebességkorlát-számlálók) | Újraindításkor elvesznek; az irányítópult-tokenek legfeljebb 12 óra. |
 
 Az adataid törlése nem terjed ki a biztonsági mentésekre. A törlésed után

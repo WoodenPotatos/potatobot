@@ -52,7 +52,8 @@ configure_logger('waitress')
 logging_setup.enable_stack_dumps()
 
 # The database module is the single schema owner. Migrations are applied before
-# cogs or the dashboard can perform reads and writes.
+# cogs or the dashboard can perform reads and writes, once PostgreSQL answers.
+database_layer.wait_for_database()
 database_layer.initialize_database()
 recovery = database_layer.refund_pending_wagers()
 if recovery["count"]:
@@ -268,9 +269,9 @@ def watch_for_a_wedged_process(client, interval=WATCHDOG_INTERVAL_SECONDS,
     wedged.
 
     `os._exit` rather than a graceful close, because the state this fires in is
-    one where an orderly shutdown is exactly what might hang. SQLite is in WAL
-    mode and crash-safe, so an interrupted transaction rolls back; the cost of a
-    hard exit is a log line, and the cost of hanging is another fourteen hours.
+    one where an orderly shutdown is exactly what might hang. PostgreSQL rolls
+    back the transaction of a connection that vanishes, so the cost of a hard
+    exit is a log line, and the cost of hanging is another fourteen hours.
     """
     gateway_down_since = None
     while True:

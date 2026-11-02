@@ -1,21 +1,27 @@
-# PotatoBot as two supervised services sharing one database volume.
+# PotatoBot as two supervised services sharing one PostgreSQL (2.21).
 #
 # Splitting them means a dashboard restart never interrupts the bot, and a
 # dashboard crash cannot take Discord connectivity with it. They coordinate
-# entirely through SQLite: feature changes converge by revision polling, and
+# entirely through the database: feature changes converge by revision polling,
 # queued Discord publishes travel through the control_actions outbox, which only
-# the bot executes.
+# the bot executes, and every write takes one advisory lock, so the two
+# processes serialize exactly as one would.
 #
 # Invoke from the repository root:
 #   podman-compose -f container/compose.yaml up -d      (or: docker compose -f container/compose.yaml up -d)
 #
 # Copy .env.example to ../.env and fill in real values first -- both services
-# declare env_file: ../.env below and neither starts without it. Set a real
-# POTATOBOT_DASHBOARD_SESSION_SECRET there too: without one, the dashboard
-# generates a file beside the database on the /data volume, which survives a
-# recreate but is one more secret living with the data rather than the config.
+# declare env_file: ../.env below and neither starts without it; its PGPASSWORD
+# is the bot role's. Then create ../.env.postgres with POSTGRES_PASSWORD (the
+# database superuser's) and POTATOBOT_DB_PASSWORD (the same value as
+# PGPASSWORD); only the `db` service reads it, so the bot never holds the
+# superuser's password. Set a real POTATOBOT_DASHBOARD_SESSION_SECRET in .env
+# too: without one, the dashboard generates a file in the data directory on the
+# /data volume, which survives a recreate but is one more secret living with
+# the data rather than the config.
 #
-# Run migrations once, before first start:
+# The bot brings the schema up to date itself when it starts, after a pg_dump
+# whenever a migration is pending; `update_db.py` does the same as one step:
 #   podman-compose -f container/compose.yaml run --rm bot python update_db.py
 #
 # The weekly Everydle drift check has no service here -- it is one-shot and
@@ -43,24 +49,60 @@ x-hardening: &hardening
     - /tmp
 
 services:
+  db:
+    # The server CI tests against, pinned by digest; bump both together.
+    image: postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
+    restart: unless-stopped
+    env_file: ../.env.postgres
+    environment:
+      # Code-point text order, as SQLite had and the suite's server has.
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8
+    volumes:
+      - pgdata:/var/lib/postgresql
+      # Runs once on an empty data directory: the bot's own, non-superuser role.
+      - ../deploy/postgres-init:/docker-entrypoint-initdb.d:ro
+    # No ports: only the bot and the dashboard, on this project's network, reach it.
+    security_opt:
+      - "no-new-privileges:true"
+    read_only: true
+    # Docker gives a read-only container no tmpfs; PostgreSQL's socket and /tmp.
+    tmpfs:
+      - /var/run/postgresql
+      - /tmp
+    healthcheck:
+      # Over TCP: during initialisation the image's temporary server listens on
+      # its socket only, and a socket probe called that healthy.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "potatobot", "-d", "potatobot"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 6
+    stop_grace_period: 90s
+
   bot:
     <<: *hardening
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.19.29a
+    image: potatobot:2.21.16a
     restart: unless-stopped
     env_file: ../.env
     environment:
+      PGHOST: db
+      PGDATABASE: potatobot
+      PGUSER: potatobot
+      # Where a 2.20 SQLite file would sit, for the copy script.
       POTATOBOT_DB_PATH: /data/economy.db
+      POTATOBOT_DATA_DIR: /data
       POTATOBOT_LOG_DIR: /data/logs
       POTATOBOT_EVERYDLE_STATE_PATH: /data/everydle_state.json
       # The bot owns schema creation, so it must not also serve the dashboard.
       POTATOBOT_DASHBOARD_ENABLED: "false"
     volumes:
       - data:/data
-    # WAL needs the writers to see one filesystem; both services mount the same
-    # volume rather than copying the database.
+    depends_on:
+      db:
+        condition: service_healthy
     stop_grace_period: 30s
 
   dashboard:
@@ -68,12 +110,15 @@ services:
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.19.29a
+    image: potatobot:2.21.16a
     command: ["python", "dashboard_api.py"]
     restart: unless-stopped
     env_file: ../.env
     environment:
-      POTATOBOT_DB_PATH: /data/economy.db
+      PGHOST: db
+      PGDATABASE: potatobot
+      PGUSER: potatobot
+      POTATOBOT_DATA_DIR: /data
       POTATOBOT_LOG_DIR: /data/logs
       POTATOBOT_DASHBOARD_ENABLED: "true"
       POTATOBOT_DASHBOARD_HOST: 0.0.0.0
@@ -90,7 +135,11 @@ services:
       # never publish this port to an untrusted network.
       - "127.0.0.1:5000:5000"
     depends_on:
-      - bot
+      db:
+        condition: service_healthy
+      bot:
+        condition: service_started
 
 volumes:
   data:
+  pgdata:

@@ -8,6 +8,7 @@ a casino payout to whatever budget remains in the rolling window rather than
 refusing it outright, so a shown win is never clawed back to zero.
 """
 
+import sys
 import os
 import tempfile
 import unittest
@@ -16,6 +17,9 @@ from core import database
 from core import feature_access
 from core import settings_cache
 from core import settings_registry
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 GUILD = 10
 MEMBER = 1
@@ -63,11 +67,12 @@ class RateLimitDatabaseBehaviorTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "casino.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Casino Guild")
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO users (user_id, balance) VALUES (?, ?)",
+                "INSERT INTO users (user_id, balance) VALUES (%s, %s)",
                 (MEMBER, 10_000_000_000),
             )
 
@@ -79,7 +84,7 @@ class RateLimitDatabaseBehaviorTests(unittest.TestCase):
         with database.get_connection() as conn:
             return conn.execute(
                 "SELECT window_started_at, window_total FROM casino_earnings_window "
-                "WHERE user_id = ?", (MEMBER,),
+                "WHERE user_id = %s", (MEMBER,),
             ).fetchone()
 
     def test_no_rate_limit_argument_touches_no_window_row(self):
@@ -121,8 +126,8 @@ class RateLimitDatabaseBehaviorTests(unittest.TestCase):
             GUILD, MEMBER, 100, rng=_FixedRng(), casino_rate_limit=(300, 2000))
         with database.get_connection() as conn:
             conn.execute(
-                "UPDATE casino_earnings_window SET window_started_at = ? "
-                "WHERE user_id = ?",
+                "UPDATE casino_earnings_window SET window_started_at = %s "
+                "WHERE user_id = %s",
                 ("2000-01-01T00:00:00+00:00", MEMBER),
             )
         result = database.resolve_wheel_wager(
@@ -140,6 +145,7 @@ class RateLimitConfigResolutionTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "casino.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Casino Guild")
 

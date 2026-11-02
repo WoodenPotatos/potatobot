@@ -5,10 +5,10 @@ anonymise references where possible, and never silently alter financial totals.
 These tests pin each of those three properties.
 """
 
+import sys
 import json
 import re
 import os
-import sqlite3
 import tempfile
 import types
 import unittest
@@ -16,12 +16,16 @@ from unittest.mock import AsyncMock, patch
 
 from core import database
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 
 class PrivacyWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.original_path = database.DB_PATH
         self.temp_dir = tempfile.TemporaryDirectory()
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "Guild")
         self.seed()
@@ -35,7 +39,8 @@ class PrivacyWorkflowTests(unittest.TestCase):
         with database.get_connection() as conn:
             conn.execute(
                 "INSERT INTO users (user_id, balance, xp, last_active, streak_count, "
-                "last_daily) VALUES (7, 5000, 120, '2020-01-01T00:00:00+00:00', 4, 'x')"
+                "last_daily) VALUES (7, 5000, 120, '2020-01-01T00:00:00+00:00', 4, "
+                "'2020-01-02T00:00:00+00:00')"
             )
             conn.execute("INSERT INTO users (user_id, balance) VALUES (8, 100)")
             conn.execute(
@@ -146,7 +151,7 @@ class PrivacyWorkflowTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO settings_audit (guild_id, actor_id, action, target_key, "
                 "old_value_json, created_at) VALUES (111, 8, 'warning.delete', "
-                "'warning:5', ?, 'now')",
+                "'warning:5', %s, 'now')",
                 (json.dumps({"user_id": 7, "reason": "spam", "date": "then",
                              "moderator_id": 8, "source_guild_id": 111}),),
             )
@@ -259,7 +264,7 @@ class PrivacyWorkflowTests(unittest.TestCase):
             for index in range(database.EXPORT_ROW_LIMIT + 5):
                 conn.execute(
                     "INSERT INTO activity_events (user_id, origin_guild_id, category, "
-                    "event_type, created_at) VALUES (7, 111, 'economy', ?, 'now')",
+                    "event_type, created_at) VALUES (7, 111, 'economy', %s, 'now')",
                     (f"bulk-{index}",),
                 )
         export = database.export_user_data(7)
@@ -285,12 +290,12 @@ class PrivacyWorkflowTests(unittest.TestCase):
         self.assertEqual(receipt["refunded_wagers"], {"count": 1, "amount": 250})
         with database.get_connection() as conn:
             balance = conn.execute(
-                "SELECT balance FROM users WHERE user_id = ?",
+                "SELECT balance FROM users WHERE user_id = %s",
                 (receipt["tombstone_id"],),
             ).fetchone()[0]
             statuses = {
                 row[0] for row in conn.execute(
-                    "SELECT status FROM casino_wagers WHERE user_id = ?",
+                    "SELECT status FROM casino_wagers WHERE user_id = %s",
                     (receipt["tombstone_id"],),
                 )
             }
@@ -317,7 +322,7 @@ class PrivacyWorkflowTests(unittest.TestCase):
         receipt = database.anonymize_user(7, actor_id=8, guild_id=111)
         with database.get_connection() as conn:
             claims = conn.execute(
-                "SELECT COUNT(*) FROM reward_claims WHERE user_id = ?",
+                "SELECT COUNT(*) FROM reward_claims WHERE user_id = %s",
                 (receipt["tombstone_id"],),
             ).fetchone()[0]
         self.assertEqual(claims, 1)
@@ -327,7 +332,7 @@ class PrivacyWorkflowTests(unittest.TestCase):
         with database.get_connection() as conn:
             row = conn.execute(
                 "SELECT last_daily, streak_count, last_active, xp FROM users "
-                "WHERE user_id = ?", (receipt["tombstone_id"],)
+                "WHERE user_id = %s", (receipt["tombstone_id"],)
             ).fetchone()
         # Cooldowns, streaks and activity go; the economy figures stay.
         self.assertEqual(row, (None, 0, None, 120))
@@ -347,10 +352,8 @@ class PrivacyWorkflowTests(unittest.TestCase):
     def test_deletion_order_respects_the_voucher_foreign_keys(self):
         """timed_entitlements and fulfillment_requests reference reward_vouchers
         with no ON DELETE action, so a wrong order raises IntegrityError."""
-        with database.get_connection() as conn:
-            self.assertEqual(
-                conn.execute("PRAGMA foreign_keys").fetchone()[0], 1
-            )
+        # PostgreSQL enforces every foreign key on every connection; SQLite had
+        # to be told to, which this used to check.
         database.anonymize_user(7, actor_id=8, guild_id=111)  # must not raise
         with database.get_connection() as conn:
             self.assertEqual(
@@ -491,7 +494,7 @@ class PrivacyWorkflowTests(unittest.TestCase):
         with database.get_connection() as conn:
             conn.execute(
                 "UPDATE users SET last_active = '2020-01-01T00:00:00+00:00' "
-                "WHERE user_id = ?", (receipt["tombstone_id"],)
+                "WHERE user_id = %s", (receipt["tombstone_id"],)
             )
         self.assertEqual(
             database.get_retention_candidates("2021-01-01T00:00:00+00:00"), []
@@ -502,7 +505,7 @@ class PrivacyWorkflowTests(unittest.TestCase):
             for user_id in range(100, 140):
                 conn.execute(
                     "INSERT INTO users (user_id, last_active) "
-                    "VALUES (?, '2020-01-01T00:00:00+00:00')", (user_id,)
+                    "VALUES (%s, '2020-01-01T00:00:00+00:00')", (user_id,)
                 )
         self.assertEqual(
             len(database.get_retention_candidates("2021-01-01T00:00:00+00:00", 25)), 25
@@ -567,6 +570,7 @@ class ErasureColumnCoverageTests(unittest.TestCase):
         self.original_path = database.DB_PATH
         self.temp_dir = tempfile.TemporaryDirectory()
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
 
     def tearDown(self):
@@ -574,18 +578,18 @@ class ErasureColumnCoverageTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _columns(self):
-        with sqlite3.connect(database.DB_PATH) as conn:
-            tables = [row[0] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table' "
-                "AND name NOT LIKE 'sqlite_%'")]
-            for table in tables:
-                for _, name, ctype, *_ in conn.execute(f"PRAGMA table_info({table})"):
-                    yield table, name, (ctype or "").upper()
+        with database.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT table_name, column_name, data_type FROM information_schema.columns "
+                "WHERE table_schema = 'public' ORDER BY table_name, ordinal_position"
+            ).fetchall()
+        for table, name, ctype in rows:
+            yield table, name, ctype.upper()
 
     def _covered_member_columns(self):
         covered = set()
         for table, clause, _ in database.ERASE_DELETE_ORDER:
-            for column in re.findall(r"(\w+) = \?", clause):
+            for column in re.findall(r"(\w+) = %s", clause):
                 covered.add((table, column))
         for table in database.ERASE_REKEY_SUBJECT:
             covered.add((table, "user_id"))
@@ -632,6 +636,7 @@ class ErasureReachesLateTablesTests(unittest.TestCase):
         self.original_path = database.DB_PATH
         self.temp_dir = tempfile.TemporaryDirectory()
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "Guild")
         with database.get_connection() as conn:
@@ -668,9 +673,9 @@ class ErasureReachesLateTablesTests(unittest.TestCase):
     def test_the_erasure_action_no_longer_names_the_member(self):
         receipt = database.anonymize_user(7, actor_id=42, guild_id=111)
         self.assertEqual(1, receipt["control_action_payloads_scrubbed"])
-        with sqlite3.connect(database.DB_PATH) as conn:
+        with database.get_connection() as conn:
             payload = json.loads(conn.execute(
-                "SELECT payload_json FROM control_actions WHERE action_id = ?",
+                "SELECT payload_json FROM control_actions WHERE action_id = %s",
                 (self.action_id,)).fetchone()[0])
         self.assertEqual(receipt["tombstone_id"], payload["user_id"])
 
@@ -686,7 +691,7 @@ class ErasureReachesLateTablesTests(unittest.TestCase):
              "discord_item_id": None})
         receipt = database.anonymize_user(7, actor_id=42, guild_id=111)
         self.assertEqual(2, receipt["control_action_payloads_scrubbed"])
-        with sqlite3.connect(database.DB_PATH) as conn:
+        with database.get_connection() as conn:
             payloads = {
                 action_id: json.loads(payload) for action_id, payload in conn.execute(
                     "SELECT action_id, payload_json FROM control_actions")
@@ -748,6 +753,7 @@ class SubjectTableCoverageTests(unittest.TestCase):
         self.original_path = database.DB_PATH
         self.temp_dir = tempfile.TemporaryDirectory()
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
 
     def tearDown(self):
@@ -762,20 +768,16 @@ class SubjectTableCoverageTests(unittest.TestCase):
             | {table for table, _ in database.ERASE_NULL_ACTOR}
             | {table for table, _ in database.ERASE_REKEY_ACTOR}
         )
-        with sqlite3.connect(database.DB_PATH) as conn:
-            tables = [
-                row[0] for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'table' "
-                    "AND name NOT LIKE 'sqlite_%'"
-                )
-            ]
-            undeclared = [
-                table for table in tables
-                if table not in declared
-                and self.SUBJECT_COLUMNS & {
-                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
-                }
-            ]
+        with database.get_connection() as conn:
+            columns = {}
+            for table, column in conn.execute(
+                    "SELECT table_name, column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public'"):
+                columns.setdefault(table, set()).add(column)
+        undeclared = [
+            table for table in sorted(columns)
+            if table not in declared and self.SUBJECT_COLUMNS & columns[table]
+        ]
         self.assertEqual([], undeclared)
 
     def test_the_delete_order_lists_children_before_their_parents(self):
@@ -919,6 +921,7 @@ class AuditRetentionTests(unittest.TestCase):
         self.original_path = database.DB_PATH
         self.temp_dir = tempfile.TemporaryDirectory()
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "Guild")
         from datetime import datetime, timedelta, timezone
@@ -930,7 +933,7 @@ class AuditRetentionTests(unittest.TestCase):
                                     ("user.erase", recent)):
                 conn.execute(
                     "INSERT INTO settings_audit (guild_id, actor_id, action, "
-                    "target_key, created_at) VALUES (111, 7, ?, 'k', ?)",
+                    "target_key, created_at) VALUES (111, 7, %s, 'k', %s)",
                     (action, created),
                 )
 
@@ -939,7 +942,7 @@ class AuditRetentionTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _actions(self):
-        with sqlite3.connect(database.DB_PATH) as conn:
+        with database.get_connection() as conn:
             return sorted(row[0] for row in conn.execute(
                 "SELECT action FROM settings_audit"))
 
@@ -968,7 +971,7 @@ class AuditRetentionTests(unittest.TestCase):
             for action in database.PRIVACY_AUDIT_ACTIONS:
                 conn.execute(
                     "INSERT INTO settings_audit (guild_id, actor_id, action, "
-                    "target_key, created_at) VALUES (111, 7, ?, 'k', ?)", (action, old))
+                    "target_key, created_at) VALUES (111, 7, %s, 'k', %s)", (action, old))
         database.prune_settings_audit(30)
         for action in database.PRIVACY_AUDIT_ACTIONS:
             self.assertIn(action, self._actions())

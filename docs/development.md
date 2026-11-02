@@ -18,7 +18,7 @@ The dashboard is **load-bearing, not experimental**: it is the only way an opera
 | `cogs/utils.py` | Localization, shared configuration, checks, user updates, level-role handling, and debounced top-ranker reconciliation. |
 | `core/feature_access.py` | Command-to-feature registry, response visibility policy, early interaction acknowledgement, runtime feature cache, and hybrid context behavior. |
 | `core/settings_registry.py` | Typed feature and setting definitions, categories, constraints, dependencies, scopes, defaults, and apply behavior. |
-| `core/database.py` | SQLite schema, migrations, connection policy, transactions, asynchronous executors, and persistence accessors. |
+| `core/database.py` | Schema runner, connection pool and policy, transactions, asynchronous executors, and persistence accessors (PostgreSQL since 2.21; the schema files are `core/schema/`). |
 | `core/deployment.py` | Deployment profile and dashboard origin validation. |
 | `core/clock.py` | The one clock: `utc_now()` for every stored timestamp, `parse_stored()` to read one back (a legacy value with no offset is host-local time, never UTC), and `local_date()` for the day gates. |
 | `core/permission_audit.py` | One Discord-permission diagnostic shared by `/checkperms` and the dashboard permissions page. Pure data: it takes a guild plus a feature-state map plus resolved settings and returns coded findings. |
@@ -45,14 +45,14 @@ Startup follows this order:
 
 1. `main.py` loads `.env` from the repository directory and configures logging through `core/logging_setup.py`, including the `kill -USR1` stack dump.
 2. `core/deployment.py` validates the deployment profile, dashboard bind address, external URL, and OAuth callback.
-3. `database.initialize_database()` creates or migrates SQLite before cogs or the dashboard access it, and `refund_pending_wagers()` refunds any interactive wager a lost view left pending.
+3. `database.initialize_database()` creates or migrates the PostgreSQL schema (after `wait_for_database()`) before cogs or the dashboard access it, and `refund_pending_wagers()` refunds any interactive wager a lost view left pending.
 4. The settings cache loads the instance settings synchronously, because the command prefix is needed before the bot exists.
 5. `PotatoBot` is created with the required gateway intents and safe default mention policy.
 6. When `POTATOBOT_DASHBOARD_ENABLED` is true, the Waitress server starts in a daemon thread.
 7. `setup_hook` loads every Python cog except utility/package modules.
 8. Discord connects; `on_ready` registers guilds, loads feature state (guarded per guild) and settings state, starts the feature-cache poller, the event-loop lag monitor, the wedged-process watchdog thread and, with the dashboard in-process, the control-action worker; it performs private-profile legacy adoption when safe and synchronizes application commands.
 
-The bot and dashboard run in one process or two, decided by `POTATOBOT_DASHBOARD_ENABLED` (section 10). In-process, the dashboard is synchronous code in Waitress threads; either way, bot database work must go through the async executor helpers so synchronous SQLite access never blocks the Discord event loop.
+The bot and dashboard run in one process or two, decided by `POTATOBOT_DASHBOARD_ENABLED` (section 10). In-process, the dashboard is synchronous code in Waitress threads; either way, bot database work must go through the async executor helpers so synchronous database access never blocks the Discord event loop.
 
 ## 4. Command and interaction lifecycle
 
@@ -75,7 +75,7 @@ When adding a command:
 4. Gate every component, modal, autocomplete, listener, loop, and external action the feature can reach.
 5. Test acknowledgement, intended visibility, disabled behavior, cooldown/concurrency behavior, and error branches.
 
-Disabled features must not mutate SQLite, pay rewards, call Discord, or make external network requests. Persistent controls recheck their current feature state on every click.
+Disabled features must not mutate the database, pay rewards, call Discord, or make external network requests. Persistent controls recheck their current feature state on every click.
 
 ## 5. Feature system
 
@@ -89,7 +89,7 @@ Maintenance mode sits above normal feature flags. Prefix-only owner operations a
 
 ## 6. Database architecture
 
-SQLite uses the path from `POTATOBOT_DB_PATH`, falling back to `economy.db` in the repository. Connections are short-lived, context-managed, use WAL mode, and apply the schema through one owner: `database.initialize_database()`.
+PostgreSQL is reached through libpq's `PG*` environment (`database.DSN` is the connection string, empty for that environment, read at call time so a test or tool points it elsewhere). Connections are pooled (`psycopg_pool`) and lent per transaction by `get_connection()`, which commits on a clean exit and rolls back on an exception; the schema has one owner, `database.initialize_database()`, which applies `core/schema/0026_baseline.sql` and every numbered migration after it. Every write transaction takes one installation-wide advisory lock first, so writes serialize across processes as they did on SQLite; reads run `REPEATABLE READ, READ ONLY`. The rules and what each was measured against are in `docs/subsystems/database.md`.
 
 Bot access is divided into:
 
@@ -97,9 +97,9 @@ Bot access is divided into:
 - `database.run_write()`: write or transaction on one serialized worker;
 - `database.run()`: compatibility dispatch that sends only explicitly classified functions to the read pool and treats unknown functions as writes.
 
-Read-worker connections are query-only. Never classify an accessor as read-only if it creates missing rows, repairs state, writes timestamps, or otherwise mutates data. Keep Discord and network calls outside database transactions.
+Read-worker transactions are read-only. Never classify an accessor as read-only if it creates missing rows, repairs state, writes timestamps, or otherwise mutates data. Keep Discord and network calls outside database transactions.
 
-The worker count defaults to four and accepts values from two through eight. Tune it only after queue and execution measurements; more SQLite readers are not automatically faster.
+The worker count defaults to four and accepts values from two through eight. Tune it only after queue and execution measurements; more readers are not automatically faster, and every write still runs one at a time behind the advisory lock.
 
 Economy changes must remain atomic. Wagers are reserved before games begin, settlement occurs once, transfers update both parties in one transaction, and reward cooldown checks commit together with payouts. Never reintroduce split read/modify/write sequences.
 
@@ -107,12 +107,14 @@ Economy changes must remain atomic. Wagers are reserved before games begin, sett
 
 For every schema change:
 
-1. Add an ordered, transactional, idempotent migration in `core/database.py`.
+1. Add a numbered migration file in `core/schema/`; never edit the baseline or an applied migration.
 2. Keep `update_db.py` on the identical initialization path.
-3. Back up the deployed database before migration.
-4. Test a clean database, a representative older schema, repeated initialization, and data preservation.
-5. Assign every database-mutating test its own temporary `database.DB_PATH` and restore it in teardown.
-6. Compare deployed checksum, integrity, schema version, and important row counts before and after the complete suite.
+3. The bot dumps the database before migrating it, and refuses without the dump; rehearse with `scripts/rehearse_migration.py` before deploying.
+4. Test a clean database, a database at the previous version holding rows, repeated initialization, and data preservation (`db_snapshot` compare).
+5. Give every database test its database through `tests/pg_harness.py` (`fresh_database()`, or `create_database()` for a test that changes the schema).
+6. Give every new column its kind in `core/schema_types.py`; `BaselineSchemaTests` checks the fully migrated schema against it.
+
+`/schema-migration` has the procedure.
 
 Never require deleting or recreating the live database.
 
@@ -125,7 +127,7 @@ Configuration has four ownership classes:
 - Guild: channels, roles, factions, role menus, rewards, shop prices, social destinations, feature flags, and moderation behavior.
 - Runtime/user data: economy, cooldowns, warnings, tickets, rentals, voice settings, and daily-game state.
 
-Every guild and instance setting lives in SQLite and is resolved through `core/settings_cache.py`: stored row, else the registry default. `config.json` is gone (deleted 2026-09-21; see `docs/config_retirement_plan.md`), and a same-process dashboard save updates the cache immediately. Most lookups therefore change immediately, but command prefix, intents, task intervals, import-time persistent labels, Everydle language selection, and OAuth environment settings require reload or restart. Every new setting must declare `live`, `subsystem_reload`, or `restart` behavior.
+Every guild and instance setting lives in the database and is resolved through `core/settings_cache.py`: stored row, else the registry default. `config.json` is gone (deleted 2026-09-21; see `docs/config_retirement_plan.md`), and a same-process dashboard save updates the cache immediately. Most lookups therefore change immediately, but command prefix, intents, task intervals, import-time persistent labels, Everydle language selection, and OAuth environment settings require reload or restart. Every new setting must declare `live`, `subsystem_reload`, or `restart` behavior.
 
 Hungarian is the primary source language and English ships with it. Every user-visible string belongs in a locale file. When adding a key to `locales/hu.json`, fill in the English value in `locales/en.json` in the same change; every language after English gets the identical key with an empty value for a human translator. The same policy applies to `data/*/locales/`. `t()` resolves requested language → English → Hungarian and treats an empty value as a miss.
 
@@ -254,7 +256,7 @@ since `only` and `many` would otherwise demand a word beginning `ly` or `ny`.
 
 A word may be played once. `unique_value()` decides what a turn spends — the
 word, folded, or nothing at all for counting, whose values cannot repeat — and
-`advance_minigame` claims it with an `INSERT OR IGNORE` into `minigame_used_words`
+`advance_minigame` claims it with an `ON CONFLICT DO NOTHING` insert into `minigame_used_words`
 inside the same transaction that takes the turn, so the primary key *is* the
 duplicate check and a rolled-back turn gives the word back. Three answers come
 out of it: `None` for a race, `{"duplicate": True}` for a word already used, and
@@ -307,7 +309,7 @@ The two can share one process or run as two supervised services. Two services is
 preferred for anything beyond the private deployment: a dashboard restart never
 interrupts Discord, and a dashboard fault cannot take the bot with it.
 
-They coordinate only through SQLite. Feature changes converge by revision polling
+They coordinate only through the database. Feature changes converge by revision polling
 within about two seconds, and queued Discord publishes travel through the
 `control_actions` outbox, which only the bot executes. Nothing needs a message
 bus.
@@ -326,7 +328,7 @@ Three things make the split work:
   Discord's `managed` flag and the real check happens again when a role is used.
 - **No file in between.** `config.json` and its mirror were retired in stages
   and the file itself was deleted 2026-09-21 (`docs/config_retirement_plan.md`).
-  The two processes converge purely through SQLite now: a revision poll notices
+  The two processes converge purely through the database now: a revision poll notices
   a save the other process made within a couple of seconds, and `?reloadconfig`
   is the manual "now, please" path for a repair written directly through
   `database.set_guild_settings`.
@@ -356,7 +358,7 @@ Browser -> HTTPS origin -> one reverse proxy -> 127.0.0.1:5000
                                                        |
                                                PotatoBot process
                                                Discord gateway/REST
-                                               SQLite WAL database
+                                               PostgreSQL (own container)
 ```
 
 Keep the process under service supervision, keep port 5000 off untrusted interfaces, and restart after environment-variable changes because deployment and OAuth settings are read at import time.
@@ -365,16 +367,18 @@ Keep the process under service supervision, keep port 5000 off untrusted interfa
 
 ```bash
 venv/bin/python scripts/local_dashboard.py          # then open http://127.0.0.1:5001/
-venv/bin/python scripts/local_dashboard.py --fresh  # re-copy the database first
+venv/bin/python scripts/local_dashboard.py --fresh  # start the development database empty
+venv/bin/python scripts/local_dashboard.py --restore server.dump  # rebuild it from a dump
 ```
 
 `scripts/local_dashboard.py` serves the control plane on loopback with no Discord
-and no server. `--port`, `--auto-port`, `--source`, `--db`, `--guild` and
+and no server. `--port`, `--auto-port`, `--db`, `--restore`, `--guild` and
 `--skip-migration` adjust what it serves; everything it fakes is printed at
-startup. It copies `economy.db` to `.local-dev/economy.dev.db` with its WAL
-sidecars, fingerprints the copy, runs `database.initialize_database()` against it
-and prints the before/after comparison — so pointing it at a stale copy is also a
-migration rehearsal. It then builds a stand-in guild whose channels and roles are
+startup. It serves a development database only: on loopback, named `*_dev`
+(`potatobot_dev` on the suite's local server by default, section 11), never the
+database the `PG*` environment names. It fingerprints the database, runs
+`database.initialize_database()` against it and prints the before/after
+comparison — so restoring an older dump is also a migration rehearsal. It then builds a stand-in guild whose channels and roles are
 named after the ids `guild_settings` and the role-menu entries already reference,
 which is what makes `_resources_from_bot_cache` and `permission_audit.build_report`
 work unmodified, and injects a host session ahead of every other request hook so
@@ -416,6 +420,21 @@ most test modules then fail to import for a reason that has nothing to do with
 the change. The jsdom harnesses need Node and `npm ci` once; CI installs both,
 and a test that would skip without them is asserted not to.
 
+The PostgreSQL tests (2.21) need a server, and fail without one rather than
+skip. `tests/pg_harness.py` reads `POTATOBOT_TEST_DSN`, and unset it uses this
+throwaway local one: trust authentication on 127.0.0.1 only, data in memory,
+durability off, created with the built-in `C.UTF-8` locale the deployment uses
+so text sorts as it did on SQLite. CI runs the same image as a service.
+
+```bash
+podman run -d --name potatobot-test-pg \
+  -e POSTGRES_USER=potatobot -e POSTGRES_DB=potatobot -e POSTGRES_HOST_AUTH_METHOD=trust \
+  -e POSTGRES_INITDB_ARGS="--encoding=UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8" \
+  -p 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql:rw,size=1g \
+  docker.io/library/postgres:18 -c fsync=off -c synchronous_commit=off \
+  -c full_page_writes=off -c max_connections=300
+```
+
 ```bash
 npm ci --no-audit --no-fund
 venv/bin/python -m pip install --require-hashes -r requirements-dev.lock
@@ -447,11 +466,12 @@ Before deploying a schema change, rehearse it on a copy of the deployed database
 and prove no data was lost:
 
 ```bash
-venv/bin/python scripts/rehearse_migration.py /opt/potatobot/economy.db
+venv/bin/python scripts/rehearse_migration.py --target "dbname=rehearsal"
 ```
 
-It copies the database, fingerprints it, migrates the copy, fingerprints again and
-compares, exiting non-zero if any table's row count changes. The copy it leaves
+It dumps the deployed database, restores the dump into the empty scratch
+database you name, fingerprints it, migrates it, fingerprints again and
+compares, exiting non-zero if any table lost or rewrote rows. The dump it leaves
 behind is the rollback artefact; `--workdir` chooses where it goes.
 `scripts/db_snapshot.py record` and `compare` do the fingerprint and compare
 steps on their own. Never point either at the live file while the bot runs.
@@ -462,14 +482,14 @@ steps on their own. Never point either at the live file while the bot runs.
 | --- | --- |
 | `sync_locale_keys.py` | Mirrors the Hungarian catalogs' key structure into every other catalog, adding new keys and removing dropped ones. Run it after any locale change. |
 | `locale_audit.py` | Reports localization coverage; `--brief` exits non-zero on a referenced key no catalog has, `--json` emits the report. |
-| `rehearse_migration.py` | Migrates a copy of a database and compares fingerprints (above). |
-| `db_snapshot.py` | `record` prints a fingerprint as JSON; `compare` diffs two and fails on a changed row count. |
-| `load_test.py` | Synthetic write load through the bot's own executors against a throwaway database it creates and deletes, reporting latency (queue time included) at rising concurrency. `--levels`, `--ops`, `--users`, `--guilds`, `--json`, `--keep`. It has no option to target an existing database, by design. |
-| `local_dashboard.py` | The dashboard on loopback against a copy of the database (section 10). |
+| `rehearse_migration.py` | `pg_dump`s a database, restores it into an empty scratch database you name (`--target`), migrates that through `update_db.py` and compares fingerprints; every refusal (target is the source, target not empty, tools missing) fires before anything is written, and the bot's own pre-migration dump lands in the rehearsal's workdir, never the live backups. Needs version-18 `pg_dump`/`pg_restore`, which the image carries. |
+| `db_snapshot.py` | `record [DSN]` prints a fingerprint as JSON in one read-only transaction: schema version, and per table the row count, columns and an order-independent content hash; `compare` diffs two and fails on lost rows, lost columns, a dropped table or rows rewritten in place. Names the database and host, never a password. |
+| `load_test.py` | Synthetic write load through the bot's own executors against a throwaway database it creates on `--server` (the suite's local PostgreSQL by default) and drops, reporting latency (queue time included) at rising concurrency. `--levels`, `--ops`, `--users`, `--guilds`, `--json`, `--keep`. It has no option to target an existing database, by design. |
+| `local_dashboard.py` | The dashboard on loopback against a development database (section 10): loopback, named `*_dev`, never the one the `PG*` environment names; `--restore DUMP` rebuilds it from a `pg_dump` archive, `--fresh` starts it empty. |
 | `everydle_sources.py` | Upstream adapters for the Everydle datasets; `record <directory>` re-records the test fixtures. |
 | `everydle_drift.py` | Read-only drift report against upstream; exits 1 on drift and 2 when a source is unreachable. `--fixtures`, `--json`. |
 | `everydle_propose.py` | `draft -o patch.json` writes a reviewable patch; `apply patch.json [--dry-run]` applies it once no field is null. |
-| `offsite_backup.py` | One consistent database snapshot to an rclone remote, downloaded back and compared before pruning (`--retention-days`, default 30). `--prune-local-backups-days N` then deletes the pre-migration copies beside the database whose name-stamp is older than N days (default 0, keep all; the deployed units pass 90, the retention `docs/legal/PRIVACY.md` promises). Stdlib only. |
+| `offsite_backup.py` | One `pg_dump --format=custom` (or `--dump-command`, as the deployed unit runs it inside the database container) checked with `pg_restore --list`, uploaded to an rclone remote, downloaded back and compared before pruning (`--retention-days`, default 30). `--prune-local-backups-days N` then deletes the pre-migration dumps in `--backups-dir` and the 2.20 SQLite copies beside `--legacy-sqlite` whose name-stamp is older than N days (default 0, keep all; the deployed units pass 90, the retention `docs/legal/PRIVACY.md` promises). |
 | `bump_version.py` | The only writer of the version in `pyproject.toml`: `major` (architecture), `minor` (schema migration) or `patch` (everything else), keeping the channel letter (`2.18.3a`); `--channel`, `--set`, `--show` and `--dry-run`. |
 | `update_readme.py` | Generates everything in `README.md` below the hand-written introduction (the `version` and `body` blocks) from templates in the script and facts read from the code: Python range, intents, schema version, read-worker bounds, pity numbers, game and feature counts, the `docs/` list and the recent changelog. `--check` fails when the file and the generator disagree; the suite and the publisher both run it. |
 | `publish_public.py` | Builds, verifies and publishes the sanitised public snapshot (section 12). `--promote` turns the alpha into the next beta on the public `beta` branch; `--stable` copies the last published beta from its public tag, strips the letter and commits it on the public `stable` branch. |
@@ -495,7 +515,7 @@ Normal-operation targets are acknowledgement under one second, no-database ackno
 
 ## 12. Security and release boundary
 
-Never commit `.env`, session secrets, databases, backups, logs, tokens, OAuth secrets, or live deployment exports. Every guild and instance setting lives in SQLite and is hot-reloadable through the settings cache; there is no configuration file to review any more.
+Never commit `.env`, session secrets, databases, backups, logs, tokens, OAuth secrets, or live deployment exports. Every guild and instance setting lives in the database and is hot-reloadable through the settings cache; there is no configuration file to review any more.
 
 This repository's history contains retired credentials, so it is never made public and its refs are never mirrored. The public repository receives sanitised snapshots on its `beta` branch, with no ancestry from here, built by `scripts/publish_public.py`. The publisher derives the file list from `git ls-files`, drops the private documents and tooling, refuses on any finding rather than warning, and runs the test suite inside the built snapshot before publishing, which needs `npm` on `PATH`. Start with `--dry-run`; `--promote` turns the current alpha into the next beta. The code is licensed AGPL-3.0-only (`pyproject.toml`).
 

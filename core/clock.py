@@ -31,17 +31,30 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def parse_stored(text: str) -> datetime:
-    """An aware UTC datetime from a stored ISO-8601 string.
+def parse_stored(text: str | datetime) -> datetime:
+    """An aware UTC datetime from a stored ISO-8601 string, or from the
+    `datetime` a PostgreSQL `timestamptz` column reads back as.
 
     A value with no offset is a legacy *local* timestamp and is read as such;
     reading it as UTC would shift it by the host's offset. Raises `ValueError`
     on text that is not a timestamp, exactly as `fromisoformat` does.
     """
-    parsed = datetime.fromisoformat(text)
+    parsed = text if isinstance(text, datetime) else datetime.fromisoformat(text)
     if parsed.tzinfo is None:
         parsed = parsed.astimezone()  # naive is local time; this makes it aware
     return parsed.astimezone(timezone.utc)
+
+
+def stored_iso(value: str | datetime | None) -> str | None:
+    """A stored timestamp as ISO-8601 text, whatever the engine handed back.
+
+    SQLite returns the stored string, which passes through unchanged, so what
+    leaves today is byte-identical; PostgreSQL returns a `datetime`, which
+    becomes `.isoformat()`. For anything that leaves as text -- a JSON payload,
+    the export, the dashboard wire -- where a `datetime` either fails to encode
+    or, under Flask's encoder, silently becomes an RFC 822 date.
+    """
+    return value.isoformat() if isinstance(value, datetime) else value
 
 
 def local_time(moment: datetime) -> datetime:

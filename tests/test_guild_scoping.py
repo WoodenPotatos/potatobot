@@ -4,13 +4,17 @@ These cover what the migration tests cannot: that a second guild actually sees
 its own values, and that a leaderboard ranks only the members who are present.
 """
 
+import sys
 import os
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from core import database
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 
 class GuildScopingTests(unittest.TestCase):
@@ -18,6 +22,7 @@ class GuildScopingTests(unittest.TestCase):
         self.original_path = database.DB_PATH
         self.temp_dir = tempfile.TemporaryDirectory()
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "First")
         database.register_guild(222, "Second")
@@ -39,7 +44,7 @@ class GuildScopingTests(unittest.TestCase):
     def test_an_override_shadows_the_default_for_that_guild_only(self):
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO shop_prices (guild_id, item_id, price) VALUES (111, ?, 7)",
+                "INSERT INTO shop_prices (guild_id, item_id, price) VALUES (111, %s, 7)",
                 ("premium",),
             )
         self.assertEqual(database.get_shop_price(111, "premium", 0), 7)
@@ -127,7 +132,7 @@ class GuildScopingTests(unittest.TestCase):
             ):
                 conn.execute(
                     "INSERT INTO users (user_id, balance, xp, streak_count) "
-                    "VALUES (?, ?, ?, ?)", (user_id, balance, xp, streak),
+                    "VALUES (%s, %s, %s, %s)", (user_id, balance, xp, streak),
                 )
 
     def test_leaderboards_only_rank_the_members_of_the_calling_guild(self):
@@ -162,7 +167,7 @@ class GuildScopingTests(unittest.TestCase):
         with database.get_connection() as conn:
             for user_id in range(1, 2001):
                 conn.execute(
-                    "INSERT INTO users (user_id, balance, xp) VALUES (?, ?, ?)",
+                    "INSERT INTO users (user_id, balance, xp) VALUES (%s, %s, %s)",
                     (user_id, user_id, user_id),
                 )
         member_ids = list(range(1, 2001))
@@ -208,6 +213,7 @@ class LegacyProvenanceTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         for guild_id, name in ((111, "first"), (222, "second")):
             database.register_guild(guild_id, name)
@@ -220,7 +226,7 @@ class LegacyProvenanceTests(unittest.TestCase):
         with database.get_connection() as conn:
             conn.execute(
                 "INSERT INTO warnings (user_id, mod_id, reason, date, guild_id, tag) "
-                "VALUES (?, 9, 'legacy', '2026-01-01T00:00:00', NULL, NULL)",
+                "VALUES (%s, 9, 'legacy', '2026-01-01T00:00:00', NULL, NULL)",
                 (user_id,))
 
     def test_a_legacy_warning_counts_toward_no_threshold(self):
@@ -306,7 +312,7 @@ class RentalCleanupCogTests(unittest.IsolatedAsyncioTestCase):
         return guild
 
     def expired(self, guild_id):
-        past = (datetime.now() - timedelta(days=1)).isoformat()
+        past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         return [(42, "emoji", 1420070400000000001, past, guild_id)]
 
     async def test_an_unattributed_rental_is_kept_when_the_asset_is_elsewhere(self):
@@ -330,7 +336,7 @@ class RentalCleanupCogTests(unittest.IsolatedAsyncioTestCase):
         """Stored before `/rent_start` validated ids: `int()` failed on every
         pass and the generic handler kept the row for good."""
         guild = MagicMock()
-        past = (datetime.now() - timedelta(days=1)).isoformat()
+        past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         await self.shop._expire_guild_rentals(
             guild, [(42, "emoji", "not-an-id", past, 111)])
         self.assertEqual([42], self.deleted)

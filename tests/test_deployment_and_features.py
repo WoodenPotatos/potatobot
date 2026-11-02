@@ -1,6 +1,8 @@
+import sys
 import ast
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import shutil
 import subprocess
@@ -31,6 +33,9 @@ from core.settings_registry import (
     SettingValueType,
 )
 from core.settings_registry import DataCategory, DataScopeType
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 
 class DeploymentSettingsTests(unittest.TestCase):
@@ -113,6 +118,7 @@ class InstanceSettingAuthorityTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "authority.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Guild")
         from core import settings_cache
@@ -188,6 +194,7 @@ class FeaturePersistenceTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "features.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
 
@@ -273,7 +280,7 @@ class FeaturePersistenceTests(unittest.TestCase):
                 INSERT INTO scoped_accounts
                     (scope_type, scope_id, user_id, balance, xp, level,
                      created_at, updated_at)
-                VALUES ('guild', 123, 9, 750, 10, 2, ?, ?)
+                VALUES ('guild', 123, 9, 750, 10, 2, %s, %s)
                 """,
                 (now, now),
             )
@@ -306,15 +313,19 @@ class FeaturePersistenceTests(unittest.TestCase):
             database.set_user_sharing_preference(9, 123, "moderation", True)
 
     def test_legacy_adoption_seeds_guild_and_instance_once(self):
+        # Two distinct instants, so a copied-through value cannot pass as the
+        # other one; they read back as aware datetimes, equal by instant.
+        DAILY = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        ACTIVE = datetime(2026, 1, 6, 7, 8, 9, tzinfo=timezone.utc)
         with database.get_connection() as conn:
             conn.execute(
                 "INSERT INTO users "
                 "(user_id, balance, xp, level, last_daily, last_active) "
-                "VALUES (9, 777, 250, 6, 'daily-marker', 'activity-marker')"
+                "VALUES (9, 777, 250, 6, %s, %s)", (DAILY.isoformat(), ACTIVE.isoformat()),
             )
             conn.execute(
                 "INSERT INTO warnings (user_id, mod_id, reason, date) "
-                "VALUES (9, 42, 'test', 'warning-date')"
+                "VALUES (9, 42, 'test', '2026-01-03T00:00:00+00:00')"
             )
 
         first = database.adopt_legacy_database(123)
@@ -344,12 +355,12 @@ class FeaturePersistenceTests(unittest.TestCase):
         self.assertEqual(
             states,
             [
-                ("guild", 123, 777, 250, 6, "daily-marker", "activity-marker"),
-                ("instance", 0, 777, 250, 6, "daily-marker", "activity-marker"),
+                ("guild", 123, 777, 250, 6, DAILY, ACTIVE),
+                ("instance", 0, 777, 250, 6, DAILY, ACTIVE),
             ],
         )
         self.assertEqual(
-            legacy, (777, 250, 6, "daily-marker", "activity-marker")
+            legacy, (777, 250, 6, DAILY, ACTIVE)
         )
         self.assertEqual(warning_guild, 123)
         self.assertEqual(event_count, 1)

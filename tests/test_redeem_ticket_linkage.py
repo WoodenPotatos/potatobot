@@ -24,6 +24,9 @@ if ROOT not in sys.path:
 
 from core import database
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 GUILD = 1
 MEMBER = 7
 STAFF = 99
@@ -34,6 +37,7 @@ class _FulfillmentTestCase(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Guild")
 
@@ -46,7 +50,7 @@ class _FulfillmentTestCase(unittest.TestCase):
             conn.execute(
                 "INSERT INTO reward_vouchers (voucher_id, guild_id, user_id, "
                 "reward_key, duration_days, status, acquired_at) "
-                "VALUES (?, ?, ?, ?, 30, 'available', '2026-01-01')",
+                "VALUES (%s, %s, %s, %s, 30, 'available', '2026-01-01')",
                 (voucher_id, GUILD, MEMBER, reward_key),
             )
             conn.commit()
@@ -92,7 +96,7 @@ class CancelFulfillmentRequestTests(_FulfillmentTestCase):
             req_status, voucher_status = conn.execute(
                 "SELECT f.status, v.status FROM fulfillment_requests f "
                 "JOIN reward_vouchers v ON v.voucher_id = f.voucher_id "
-                "WHERE f.request_id = ?", (request["request_id"],),
+                "WHERE f.request_id = %s", (request["request_id"],),
             ).fetchone()
         self.assertEqual("cancelled", req_status)
         self.assertEqual("cancelled", voucher_status)
@@ -110,7 +114,7 @@ class CancelFulfillmentRequestTests(_FulfillmentTestCase):
         self.assertFalse(result["cancelled"])
         with database.get_connection() as conn:
             status = conn.execute(
-                "SELECT status FROM fulfillment_requests WHERE request_id = ?",
+                "SELECT status FROM fulfillment_requests WHERE request_id = %s",
                 (request["request_id"],),
             ).fetchone()[0]
         self.assertEqual("fulfilled", status, "a rejected cancel must not touch the row")
@@ -137,7 +141,7 @@ class RevokeTimedEntitlementTests(_FulfillmentTestCase):
         with database.get_connection() as conn:
             status, revoked_at, expires_at = conn.execute(
                 "SELECT status, revoked_at, expires_at FROM timed_entitlements "
-                "WHERE entitlement_id = ?", (entitlement["entitlement_id"],),
+                "WHERE entitlement_id = %s", (entitlement["entitlement_id"],),
             ).fetchone()
         self.assertEqual("cancelled", status)
         self.assertIsNotNone(revoked_at)
@@ -178,6 +182,7 @@ class ControlActionWhitelistTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Guild")
 
@@ -258,7 +263,7 @@ class RedeemFulfillViewTests(_FulfillmentTestCase, unittest.IsolatedAsyncioTestC
         interaction.response.edit_message.assert_awaited_once()
         with database.get_connection() as conn:
             status = conn.execute(
-                "SELECT status FROM fulfillment_requests WHERE request_id = ?",
+                "SELECT status FROM fulfillment_requests WHERE request_id = %s",
                 (request["request_id"],)).fetchone()[0]
         self.assertEqual("fulfilled", status)
 
@@ -278,7 +283,7 @@ class RedeemFulfillViewTests(_FulfillmentTestCase, unittest.IsolatedAsyncioTestC
                 interaction.response.edit_message.assert_not_called()
         with database.get_connection() as conn:
             status = conn.execute(
-                "SELECT status FROM fulfillment_requests WHERE request_id = ?",
+                "SELECT status FROM fulfillment_requests WHERE request_id = %s",
                 (request["request_id"],)).fetchone()[0]
         self.assertEqual("open", status)
 
@@ -315,6 +320,7 @@ class ControlActionDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "dispatch.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Guild")
 

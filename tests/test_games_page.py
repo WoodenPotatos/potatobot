@@ -6,6 +6,7 @@ feature and settings payloads come from the real API on a temporary database,
 so the stub the harness serves cannot drift from what the server sends.
 """
 
+import sys
 import json
 import os
 import shutil
@@ -16,6 +17,9 @@ import unittest
 from pathlib import Path
 
 from core import settings_cache
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,6 +44,7 @@ class GamesPageHarnessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             original_path, original_admin = database.DB_PATH, dashboard_api.ADMIN_ID
             database.DB_PATH = os.path.join(temp_dir, "fixture.db")
+            pg_harness.fresh_database()
             dashboard_api.ADMIN_ID = "42"
             settings_cache.invalidate()
             try:

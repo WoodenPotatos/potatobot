@@ -26,6 +26,9 @@ if ROOT not in sys.path:
 
 from core import database
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 # Not imported at module scope: tests.test_cog_loading unloads every cog,
 # which discord.py removes from sys.modules -- a module-level import here
 # would go stale and `patch()` would then patch a *different*, freshly
@@ -71,6 +74,7 @@ class UserActionViewVisibilityTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
 
@@ -157,6 +161,7 @@ class RejoinPermissionReplayTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
 

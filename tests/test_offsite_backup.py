@@ -2,15 +2,22 @@
 
 A prior attempt (`backup.sh`, deleted 2026-05-20) copied the whole project
 tree via `rclone`, which would have swept `.env` into the destination. These
-tests pin the two things that make the replacement safe: the snapshot is a
-real, consistent copy of the data (not a placeholder), and the tool never
-touches anything but the one database file it was given.
+tests pin what makes the replacement safe: the dump is a real, readable
+archive before anything leaves the host, only that one file is ever uploaded,
+nothing is pruned on the strength of a copy that did not verify, and the local
+prune deletes only what it can date.
+
+The PostgreSQL tools are stand-in scripts on a temporary PATH, so the real
+`take_dump` and `check_dump` run; only `rclone` is intercepted.
 """
 
-import sqlite3
+import os
+import stat
+import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,256 +25,227 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts import offsite_backup
+from scripts import offsite_backup  # noqa: E402
+
+_real_run = subprocess.run
 
 
-class BackupSnapshotTests(unittest.TestCase):
-    def test_the_snapshot_holds_the_same_rows_as_the_source(self):
-        with tempfile.TemporaryDirectory() as workdir:
-            source = Path(workdir) / "source.db"
-            destination = Path(workdir) / "snapshot.db"
-
-            with sqlite3.connect(source) as conn:
-                conn.execute("CREATE TABLE users (user_id INTEGER PRIMARY KEY, balance INTEGER)")
-                conn.execute("INSERT INTO users VALUES (1, 500)")
-                conn.commit()
-
-            offsite_backup.backup_snapshot(source, destination)
-
-            with sqlite3.connect(destination) as conn:
-                rows = conn.execute("SELECT user_id, balance FROM users").fetchall()
-            self.assertEqual([(1, 500)], rows)
-
-    def test_the_source_is_opened_explicitly_read_only(self):
-        """The deployed unit runs under `ProtectSystem=strict`, which makes
-        the filesystem read-only to it except explicitly listed paths.
-        sqlite3's default open mode is read-write-create, which fails with
-        "unable to open database file" against a read-only mount even though
-        nothing here ever writes to the source -- confirmed live against the
-        actual deployed unit. A permission-based local repro of the mount
-        being read-only does not reliably reproduce that failure (SQLite's
-        own read/write-fallback behavior differs from a real EROFS mount),
-        so this pins the fix structurally instead: the source must be opened
-        through a `file:` URI with `mode=ro`, in `uri` mode -- never the
-        default positional open sqlite3.connect(path) would otherwise use."""
-        with tempfile.TemporaryDirectory() as workdir:
-            source = Path(workdir) / "source.db"
-            destination = Path(workdir) / "snapshot.db"
-            sqlite3.connect(source).close()
-
-            real_connect = sqlite3.connect
-            calls = []
-
-            def spy_connect(*args, **kwargs):
-                calls.append((args, kwargs))
-                return real_connect(*args, **kwargs)
-
-            with patch("scripts.offsite_backup.sqlite3.connect", side_effect=spy_connect):
-                offsite_backup.backup_snapshot(source, destination)
-
-            source_call = calls[0]
-            self.assertTrue(source_call[1].get("uri") or
-                             (len(source_call[0]) > 1 and source_call[0][1]),
-                             "the source connection must be opened with uri=True")
-            arg = source_call[0][0]
-            self.assertTrue(arg.startswith("file:"), arg)
-            self.assertIn("mode=ro", arg)
-
-    def test_the_snapshot_is_independent_of_the_source_afterward(self):
-        """A later write to the source must not appear in an already-taken
-        snapshot -- it is a copy, not a live view."""
-        with tempfile.TemporaryDirectory() as workdir:
-            source = Path(workdir) / "source.db"
-            destination = Path(workdir) / "snapshot.db"
-
-            with sqlite3.connect(source) as conn:
-                conn.execute("CREATE TABLE users (user_id INTEGER PRIMARY KEY)")
-                conn.commit()
-
-            offsite_backup.backup_snapshot(source, destination)
-
-            with sqlite3.connect(source) as conn:
-                conn.execute("INSERT INTO users VALUES (99)")
-                conn.commit()
-
-            with sqlite3.connect(destination) as conn:
-                rows = conn.execute("SELECT user_id FROM users").fetchall()
-            self.assertEqual([], rows)
-
-
-def _stamp(days_ago: int) -> str:
-    from datetime import datetime, timedelta
+def _stamp(days_ago):
     return (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d-%H%M%S")
 
 
-class LocalBackupPruneTests(unittest.TestCase):
-    """The pre-migration copies beside the database are the other half of
-    retention: the Privacy Policy promises they go 90 days after the migration
-    they protect, and this flag is what keeps that promise. Everything here
-    pins what it must *not* delete."""
+class StandInTools:
+    """`pg_dump` and `pg_restore` stand-ins, and an `rclone` that is recorded."""
+
+    def __init__(self, test, dump_exit=0, dump_output="PGDMP-stand-in", restore_exit=0,
+                 failing_rclone=None):
+        self.workdir = tempfile.TemporaryDirectory()
+        test.addCleanup(self.workdir.cleanup)
+        self.bin = Path(self.workdir.name) / "bin"
+        self.bin.mkdir()
+        self._script("pg_dump", f"printf '%s' '{dump_output}'\nexit {dump_exit}\n")
+        self._script("pg_restore", f"cat > /dev/null\nexit {restore_exit}\n")
+        self._script("rclone", "exit 0\n")
+        self.failing_rclone = failing_rclone
+        self.rclone_calls = []
+        self.uploaded = None
+
+    def _script(self, name, body):
+        path = self.bin / name
+        path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        path.chmod(0o755)
+
+    def run(self, args, *pargs, **kwargs):
+        if args[0] == "rclone":
+            self.rclone_calls.append(args)
+            if args[1] == "copy":
+                self.uploaded = Path(args[2]).read_bytes()
+            if args[1] == self.failing_rclone:
+                raise subprocess.CalledProcessError(1, args)
+            return subprocess.CompletedProcess(args, 0)
+        return _real_run(args, *pargs, **kwargs)
+
+    def patched(self):
+        path = f"{self.bin}{os.pathsep}{os.environ['PATH']}"
+        return [patch.dict(os.environ, {"PATH": path}),
+                patch("scripts.offsite_backup.subprocess.run", side_effect=self.run)]
+
+
+def run_main(tools, argv):
+    patches = tools.patched()
+    for item in patches:
+        item.start()
+    try:
+        return offsite_backup.main(argv)
+    finally:
+        for item in reversed(patches):
+            item.stop()
+
+
+class DumpTests(unittest.TestCase):
 
     def setUp(self):
         self.workdir = tempfile.TemporaryDirectory()
-        self.root = Path(self.workdir.name)
-        self.database = self.root / "economy.db"
-        sqlite3.connect(self.database).close()
-        self.old = self.root / f"economy.db.backup-v9-{_stamp(200)}"
-        self.recent = self.root / f"economy.db.backup-v25-{_stamp(10)}"
-        self.undatable = self.root / "economy.db.backup-v5-garbage"
-        self.other = self.root / f"other.db.backup-v2-{_stamp(200)}"
-        self.wal = self.root / "economy.db-wal"
-        for path in (self.old, self.recent, self.undatable, self.other, self.wal):
+        self.addCleanup(self.workdir.cleanup)
+        self.dump = Path(self.workdir.name) / "potatobot.dump"
+
+    def test_the_dump_is_owner_only_and_holds_what_the_command_wrote(self):
+        offsite_backup.take_dump(["sh", "-c", "printf PGDMP-data"], self.dump)
+        self.assertEqual(b"PGDMP-data", self.dump.read_bytes())
+        self.assertEqual(0o600, stat.S_IMODE(self.dump.stat().st_mode))
+
+    def test_a_failed_or_empty_dump_raises_and_leaves_no_file(self):
+        for command in (["sh", "-c", "printf partial; exit 3"], ["sh", "-c", "exit 0"]):
+            with self.subTest(command=command[-1]):
+                with self.assertRaises(SystemExit):
+                    offsite_backup.take_dump(command, self.dump)
+                self.assertFalse(self.dump.exists())
+
+    def test_an_unreadable_archive_is_refused(self):
+        self.dump.write_bytes(b"not an archive")
+        with self.assertRaisesRegex(SystemExit, "not a readable archive"):
+            offsite_backup.check_dump(["sh", "-c", "cat > /dev/null; exit 1"], self.dump)
+
+    def test_the_archive_reaches_pg_restore_on_standard_input(self):
+        self.dump.write_bytes(b"PGDMP-data")
+        seen = Path(self.workdir.name) / "seen"
+        offsite_backup.check_dump(["sh", "-c", f'cat > "{seen}"; exit 0', "--"], self.dump)
+        self.assertEqual(b"PGDMP-data", seen.read_bytes())
+
+
+class LocalBackupPruneTests(unittest.TestCase):
+    """The pre-migration copies are the other half of retention: the Privacy
+    Policy promises they go 90 days after the migration they protect, and this
+    flag is what keeps that promise. Everything here pins what it must *not*
+    delete."""
+
+    def setUp(self):
+        self.workdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.workdir.cleanup)
+        root = Path(self.workdir.name)
+        self.backups = root / "backups"
+        self.backups.mkdir()
+        self.old_dump = self.backups / f"potatobot-v27-{_stamp(200)}.dump"
+        self.recent_dump = self.backups / f"potatobot-v28-{_stamp(10)}.dump"
+        self.undatable_dump = self.backups / "potatobot-v29-garbage.dump"
+        self.foreign = self.backups / f"other-v27-{_stamp(200)}.dump"
+        self.legacy = root / "economy.db"
+        self.legacy.write_bytes(b"x")
+        self.old_copy = root / f"economy.db.backup-v9-{_stamp(200)}"
+        self.recent_copy = root / f"economy.db.backup-v25-{_stamp(10)}"
+        self.other_db = root / f"other.db.backup-v2-{_stamp(200)}"
+        self.wal = root / "economy.db-wal"
+        for path in (self.old_dump, self.recent_dump, self.undatable_dump, self.foreign,
+                     self.old_copy, self.recent_copy, self.other_db, self.wal):
             path.write_bytes(b"x")
-        # A symlink wearing an old backup's name, pointing at the live file.
-        self.link = self.root / f"economy.db.backup-v1-{_stamp(400)}"
-        self.link.symlink_to(self.database)
+        # Symlinks wearing old names, pointing at the live files.
+        self.dump_link = self.backups / f"potatobot-v1-{_stamp(400)}.dump"
+        self.dump_link.symlink_to(self.recent_dump)
+        self.copy_link = root / f"economy.db.backup-v1-{_stamp(400)}"
+        self.copy_link.symlink_to(self.legacy)
 
-    def tearDown(self):
-        self.workdir.cleanup()
+    def test_only_dated_copies_older_than_the_window_are_due(self):
+        due = offsite_backup.local_backups_due(self.backups, self.legacy, 90)
+        self.assertEqual([self.old_dump, self.old_copy], due)
 
-    def test_only_this_databases_dated_copies_older_than_the_window_are_due(self):
-        due = offsite_backup.local_backups_due(self.database, 90)
-        self.assertEqual([self.old], due)
+    def test_either_kind_can_be_pruned_alone(self):
+        self.assertEqual([self.old_dump],
+                         offsite_backup.local_backups_due(self.backups, None, 90))
+        self.assertEqual([self.old_copy],
+                         offsite_backup.local_backups_due(None, self.legacy, 90))
 
     def test_the_default_of_zero_keeps_every_copy(self):
-        self.assertEqual([], offsite_backup.local_backups_due(self.database, 0))
-        self.assertEqual([], offsite_backup.local_backups_due(self.database, -1))
+        self.assertEqual([], offsite_backup.local_backups_due(self.backups, self.legacy, 0))
 
     def test_the_name_decides_not_the_modification_time(self):
-        """A copy resets mtime; the podman cutover did. A fresh mtime on an old
-        name is still old, and an old mtime on a recent name is still recent."""
-        import os
-        import time
-        ancient = time.time() - 400 * 86400
-        os.utime(self.recent, (ancient, ancient))
-        os.utime(self.old, None)
-        self.assertEqual([self.old], offsite_backup.local_backups_due(self.database, 90))
+        long_ago = (datetime.now() - timedelta(days=400)).timestamp()
+        os.utime(self.recent_dump, (long_ago, long_ago))
+        now = datetime.now().timestamp()
+        os.utime(self.old_dump, (now, now))
+        self.assertEqual([self.old_dump, self.old_copy],
+                         offsite_backup.local_backups_due(self.backups, self.legacy, 90))
 
     def test_prune_deletes_the_due_copies_and_nothing_else(self):
-        removed = offsite_backup.prune_local_backups(self.database, 90)
-        self.assertEqual([self.old], removed)
-        self.assertFalse(self.old.exists())
-        for kept in (self.database, self.recent, self.undatable, self.other, self.wal):
-            self.assertTrue(kept.exists(), kept.name)
-        self.assertTrue(self.link.is_symlink())
-        self.assertTrue(self.database.exists(), "the symlink's target is the live file")
+        removed = offsite_backup.prune_local_backups(self.backups, self.legacy, 90)
+        self.assertEqual([self.old_dump, self.old_copy], removed)
+        for kept in (self.recent_dump, self.undatable_dump, self.foreign, self.legacy,
+                     self.recent_copy, self.other_db, self.wal, self.dump_link,
+                     self.copy_link):
+            self.assertTrue(kept.exists() or kept.is_symlink(), kept.name)
 
     def test_the_cutoff_is_exact_to_the_day(self):
-        from datetime import datetime
-        now = datetime(2026, 10, 31, 12, 0, 0)
-        boundary = self.root / "economy.db.backup-v10-20260802-120000"
-        just_inside = self.root / "economy.db.backup-v11-20260802-115959"
-        boundary.write_bytes(b"x")
-        just_inside.write_bytes(b"x")
-        due = offsite_backup.local_backups_due(self.database, 90, now=now)
-        self.assertIn(just_inside, due)
-        self.assertNotIn(boundary, due)
+        now = datetime(2026, 11, 1, 12, 0, 0)
+        exactly = self.backups / "potatobot-v30-20260803-120000.dump"
+        just_inside = self.backups / "potatobot-v31-20260803-120001.dump"
+        for path in (exactly, just_inside):
+            path.write_bytes(b"x")
+        due = offsite_backup.local_backups_due(self.backups, None, 90, now=now)
+        self.assertNotIn(exactly, due)
+        self.assertNotIn(just_inside, due)
+        self.assertIn(self.old_dump, due)
 
 
 class MainTests(unittest.TestCase):
-    def test_the_local_prune_runs_only_after_the_offsite_copy_is_verified(self):
-        with tempfile.TemporaryDirectory() as workdir:
-            source = Path(workdir) / "source.db"
-            sqlite3.connect(source).close()
-            old = Path(workdir) / f"source.db.backup-v3-{_stamp(200)}"
-            old.write_bytes(b"x")
 
-            import subprocess
+    def test_dumps_checks_uploads_verifies_then_prunes_with_the_given_remote(self):
+        """The whole project tree is never in scope: only the one dump this
+        run produced is ever named in the upload call."""
+        tools = StandInTools(self)
+        run_main(tools, ["gdrivecrypt:PotatoBot", "--retention-days", "7"])
+        upload, check, prune = tools.rclone_calls
+        self.assertEqual(["rclone", "copy"], upload[:2])
+        self.assertTrue(upload[2].endswith(".dump"))
+        self.assertEqual("gdrivecrypt:PotatoBot", upload[3])
+        self.assertEqual(b"PGDMP-stand-in", tools.uploaded)
+        # The check names this run's dump alone, and compares bytes: a crypt
+        # remote has no plaintext hashes to compare.
+        self.assertEqual(["rclone", "check"], check[:2])
+        self.assertIn("--download", check)
+        self.assertIn("--one-way", check)
+        self.assertEqual(Path(upload[2]).name, check[check.index("--include") + 1])
+        self.assertEqual(["rclone", "delete", "gdrivecrypt:PotatoBot", "--min-age", "7d"],
+                         prune)
 
-            def failing_check(args, check):
-                if args[1] == "check":
-                    raise subprocess.CalledProcessError(1, args)
+    def test_a_failed_check_stops_the_run_before_any_prune(self):
+        tools = StandInTools(self, failing_rclone="check")
+        backups = Path(tools.workdir.name) / "backups"
+        backups.mkdir()
+        old = backups / f"potatobot-v27-{_stamp(200)}.dump"
+        old.write_bytes(b"x")
+        with self.assertRaises(subprocess.CalledProcessError):
+            run_main(tools, ["r:", "--backups-dir", str(backups),
+                             "--prune-local-backups-days", "90"])
+        self.assertNotIn("delete", [call[1] for call in tools.rclone_calls])
+        self.assertTrue(old.exists(), "a failed verification must not cost a local copy")
 
-            with patch("scripts.offsite_backup.shutil.which", return_value="/usr/bin/rclone"), \
-                 patch("scripts.offsite_backup.subprocess.run", side_effect=failing_check):
-                with self.assertRaises(subprocess.CalledProcessError):
-                    offsite_backup.main([str(source), "r:", "--prune-local-backups-days", "90"])
-            self.assertTrue(old.exists(), "a failed verification must not cost a local copy")
+    def test_the_local_prune_runs_after_a_verified_copy(self):
+        tools = StandInTools(self)
+        backups = Path(tools.workdir.name) / "backups"
+        backups.mkdir()
+        old = backups / f"potatobot-v27-{_stamp(200)}.dump"
+        old.write_bytes(b"x")
+        run_main(tools, ["r:", "--backups-dir", str(backups)])
+        self.assertTrue(old.exists(), "without the flag local copies stay")
+        run_main(tools, ["r:", "--backups-dir", str(backups),
+                         "--prune-local-backups-days", "90"])
+        self.assertFalse(old.exists())
 
-            with patch("scripts.offsite_backup.shutil.which", return_value="/usr/bin/rclone"), \
-                 patch("scripts.offsite_backup.subprocess.run"):
-                offsite_backup.main([str(source), "r:", "--prune-local-backups-days", "90"])
-            self.assertFalse(old.exists())
-
-    def test_without_the_flag_main_leaves_local_copies_alone(self):
-        with tempfile.TemporaryDirectory() as workdir:
-            source = Path(workdir) / "source.db"
-            sqlite3.connect(source).close()
-            old = Path(workdir) / f"source.db.backup-v3-{_stamp(200)}"
-            old.write_bytes(b"x")
-            with patch("scripts.offsite_backup.shutil.which", return_value="/usr/bin/rclone"), \
-                 patch("scripts.offsite_backup.subprocess.run"):
-                offsite_backup.main([str(source), "r:"])
-            self.assertTrue(old.exists())
-
-    def test_refuses_a_database_that_does_not_exist(self):
-        with tempfile.TemporaryDirectory() as workdir:
-            missing = Path(workdir) / "nope.db"
-            with self.assertRaises(SystemExit):
-                offsite_backup.main([str(missing), "gdrivebot:PotatoBotBackups"])
-
-    def test_refuses_when_rclone_is_not_on_path(self):
-        with tempfile.TemporaryDirectory() as workdir:
-            source = Path(workdir) / "source.db"
-            sqlite3.connect(source).close()
-            with patch("scripts.offsite_backup.shutil.which", return_value=None):
+    def test_a_failed_or_unreadable_dump_uploads_nothing(self):
+        for kwargs in ({"dump_exit": 1}, {"restore_exit": 1}):
+            with self.subTest(**kwargs):
+                tools = StandInTools(self, **kwargs)
                 with self.assertRaises(SystemExit):
-                    offsite_backup.main([str(source), "gdrivebot:PotatoBotBackups"])
+                    run_main(tools, ["r:"])
+                self.assertEqual([], tools.rclone_calls)
 
-    def test_uploads_verifies_then_prunes_with_the_given_remote_and_retention(self):
-        """The whole project tree is never in scope: only the one snapshot
-        file this run produced is ever named in the upload call."""
-        with tempfile.TemporaryDirectory() as workdir:
-            source = Path(workdir) / "source.db"
-            sqlite3.connect(source).close()
-
-            with patch("scripts.offsite_backup.shutil.which", return_value="/usr/bin/rclone"), \
-                 patch("scripts.offsite_backup.subprocess.run") as mocked_run:
-                offsite_backup.main([
-                    str(source), "gdrivebot:PotatoBotBackups", "--retention-days", "7",
-                ])
-
-            self.assertEqual(3, mocked_run.call_count)
-            upload_call, check_call, prune_call = mocked_run.call_args_list
-
-            upload_args = upload_call.args[0]
-            self.assertEqual("rclone", upload_args[0])
-            self.assertEqual("copy", upload_args[1])
-            self.assertTrue(upload_args[2].endswith(".db"))
-            self.assertEqual("gdrivebot:PotatoBotBackups", upload_args[3])
-
-            # The check names this run's snapshot alone, and compares bytes:
-            # a crypt remote has no plaintext hashes to compare.
-            check_args = check_call.args[0]
-            self.assertEqual(["rclone", "check"], check_args[:2])
-            self.assertEqual("gdrivebot:PotatoBotBackups", check_args[3])
-            self.assertIn("--download", check_args)
-            self.assertIn("--one-way", check_args)
-            self.assertEqual(Path(upload_args[2]).name,
-                             check_args[check_args.index("--include") + 1])
-            self.assertEqual(str(Path(upload_args[2]).parent), check_args[2])
-
-            prune_args = prune_call.args[0]
-            self.assertEqual(["rclone", "delete", "gdrivebot:PotatoBotBackups",
-                              "--min-age", "7d"], prune_args)
-
-    def test_a_failed_check_stops_the_run_before_the_prune(self):
-        """An upload that did not land must never be followed by a prune."""
-        import subprocess
-        with tempfile.TemporaryDirectory() as workdir:
-            source = Path(workdir) / "source.db"
-            sqlite3.connect(source).close()
-
-            def fake_run(args, check):
-                if args[1] == "check":
-                    raise subprocess.CalledProcessError(1, args)
-
-            with patch("scripts.offsite_backup.shutil.which", return_value="/usr/bin/rclone"), \
-                 patch("scripts.offsite_backup.subprocess.run", side_effect=fake_run) as mocked_run:
-                with self.assertRaises(subprocess.CalledProcessError):
-                    offsite_backup.main([str(source), "gdrivebot:PotatoBotBackups"])
-
-            self.assertNotIn("delete", [call.args[0][1] for call in mocked_run.call_args_list])
+    def test_a_missing_tool_is_refused_before_anything_runs(self):
+        tools = StandInTools(self)
+        (tools.bin / "rclone").unlink()
+        with patch.dict(os.environ, {"PATH": str(tools.bin)}), \
+                patch("scripts.offsite_backup.subprocess.run") as mocked:
+            with self.assertRaisesRegex(SystemExit, "rclone not found"):
+                offsite_backup.main(["r:"])
+        mocked.assert_not_called()
 
 
 if __name__ == "__main__":

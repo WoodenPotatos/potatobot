@@ -6,6 +6,7 @@ change that can move dashboard authority, and `dashboard_api` forgets the
 cached permission snapshots a row touches, so the next request asks Discord.
 """
 
+import sys
 import importlib
 import os
 import tempfile
@@ -18,6 +19,9 @@ import discord
 
 import dashboard_api
 from core import database
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 GUILD = 1420070400000000001
 OTHER_GUILD = 1420070400000000002
@@ -105,6 +109,7 @@ class DashboardSideInvalidationTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "dashboard.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Guild")
         database.register_guild(OTHER_GUILD, "Other")

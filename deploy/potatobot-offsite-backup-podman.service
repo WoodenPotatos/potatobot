@@ -10,18 +10,27 @@
 #
 # What differs from the bare-metal unit, and why:
 #
-# `User=potatobot`: the account the container runs as. The bind-mounted data
-# directory is owned by it on the host (`keep-id` maps the image's uid 10001
-# onto it), so this unit reads the database as its owner and nobody else.
+# `User=potatobot`: the account both containers run as. The dump is taken
+# inside the database's own container (`podman exec potatobot-db pg_dump`),
+# because the database publishes no port; it authenticates over the
+# container's local socket, so no password is needed here at all. The archive
+# is checked by `pg_restore --list` in the same container, fed on stdin.
+#
+# `XDG_RUNTIME_DIR` and the podman paths in `ReadWritePaths`: a rootless
+# `podman exec` finds the account's containers through its runtime directory
+# (`/run/user/984`, the account's uid; lingering keeps it present) and records
+# state under `~/.local/share/containers`. No `RestrictNamespaces`: `podman
+# exec` enters the container's namespaces. **Verify on the host before relying
+# on it** (todo.md §2, Phase 4): this sandbox cannot be trialled off the host.
 #
 # `/usr/bin/python3` and a root-owned copy of the script in
 # `/usr/local/libexec/potatobot/`: the code tree's venv is not this account's,
 # and `scripts/offsite_backup.py` is stdlib-only. Re-install the copy when the
 # script changes; a deploy that rebuilds the image does not touch it.
 #
-# `ReadWritePaths=/var/lib/potatobot`: any connection to a WAL-mode database,
-# including `mode=ro`, writes the `-shm` sidecar to register as a reader (the
-# same reason as the bare-metal unit's `/opt/potatobot`).
+# `ReadWritePaths=/var/lib/potatobot/bot`: the prune deletes the bot's
+# pre-migration dumps in `backups/` and 2.20's SQLite copies beside
+# `economy.db`, and nothing else.
 #
 # `ReadWritePaths=/home/potatobot/.config/rclone`: rclone rewrites its config
 # by temp file and rename, so the directory must be writable under
@@ -35,7 +44,7 @@
 [Unit]
 Description=PotatoBot offsite database backup (podman host)
 Documentation=https://github.com/WoodenPotatos/potatobot
-After=network-online.target
+After=network-online.target potatobot-db.service
 Wants=network-online.target
 
 [Service]
@@ -43,23 +52,25 @@ Type=oneshot
 User=potatobot
 Group=potatobot
 WorkingDirectory=/
+Environment=XDG_RUNTIME_DIR=/run/user/984
 # `--prune-local-backups-days 90`: docs/legal/PRIVACY.md §7 promises the
-# pre-migration copies beside the database go 90 days after the migration they
-# protect; this flag is what keeps the promise, after the night's offsite copy
-# has verified. Changing the number means changing the policy, both languages.
-ExecStart=/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py /var/lib/potatobot/economy.db gdrivecrypt: --prune-local-backups-days 90
+# pre-migration copies go 90 days after the migration they protect; this flag
+# is what keeps the promise, after the night's offsite copy has verified.
+# Changing the number means changing the policy, both languages.
+ExecStart=/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py gdrivecrypt: --dump-command "podman exec potatobot-db pg_dump --format=custom -U potatobot potatobot" --restore-command "podman exec -i potatobot-db pg_restore" --backups-dir /var/lib/potatobot/bot/backups --legacy-sqlite /var/lib/potatobot/bot/economy.db --prune-local-backups-days 90
 SyslogIdentifier=potatobot-offsite-backup
 
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/potatobot
+ReadWritePaths=/var/lib/potatobot/bot
 ReadWritePaths=/home/potatobot/.config/rclone
+ReadWritePaths=/home/potatobot/.local/share/containers
+ReadWritePaths=/run/user/984
 ProtectHome=read-only
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-RestrictNamespaces=true
 RestrictSUIDSGID=true
 RestrictRealtime=true
 LockPersonality=true

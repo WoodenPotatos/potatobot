@@ -28,6 +28,9 @@ if ROOT not in sys.path:
 
 from core import database
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 GUILD = 1
 MEMBER = 7
 ROLE = 1420070400000000009
@@ -38,6 +41,7 @@ class VoucherSubjectTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "vouchers.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Guild")
 
@@ -51,7 +55,7 @@ class VoucherSubjectTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO reward_vouchers (voucher_id, guild_id, user_id, "
                 "reward_key, source_type, duration_days, subject, status, "
-                "acquired_at) VALUES (?, ?, ?, ?, 'gacha', ?, ?, ?, '2026-01-01')",
+                "acquired_at) VALUES (%s, %s, %s, %s, 'gacha', %s, %s, %s, '2026-01-01')",
                 (voucher_id, GUILD, MEMBER, reward_key, days, subject, status))
             conn.commit()
 

@@ -13,87 +13,87 @@
     "delete_order": [
       [
         "fulfillment_requests",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "timed_entitlements",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "reward_vouchers",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "gacha_pulls",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "gacha_pity",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "user_inventory",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "activity_events",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "warnings",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "tickets",
-        "opener_id = ?",
+        "opener_id = %s",
         1
       ],
       [
         "voice_permissions",
-        "owner_id = ? OR target_id = ?",
+        "owner_id = %s OR target_id = %s",
         2
       ],
       [
         "voice_settings",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "active_channels",
-        "owner_id = ?",
+        "owner_id = %s",
         1
       ],
       [
         "user_sharing_preferences",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "user_identities",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "casino_earnings_window",
-        "user_id = ?",
+        "user_id = %s",
         1
       ],
       [
         "lfg_posts",
-        "host_id = ?",
+        "host_id = %s",
         1
       ],
       [
         "dashboard_access_invalidations",
-        "user_id = ?",
+        "user_id = %s",
         1
       ]
     ],
@@ -278,7 +278,7 @@
     "core/database.py: Atomic user update failed (user=%s)",
     "core/database.py: Batch balance update failed (users=%s)",
     "core/database.py: Batch user reward update failed (users=%s)",
-    "core/database.py: Database ready (path=%s, schema=%s, users=%s)",
+    "core/database.py: Database ready (database=%s, schema=%s, users=%s)",
     "core/database.py: Dice wager failed (guild=%s, user=%s)",
     "core/database.py: Erased member data (tombstone=%s, reason=%s, deleted=%s)",
     "core/database.py: Everydle reward failed (user=%s, cooldown=%s)",
@@ -531,8 +531,8 @@
     "core/logging_setup.py:backupCount": "10",
     "core/logging_setup.py:maxBytes": "5 * 1024 * 1024",
     "dashboard_api.py:MAX_TRACKED_SESSIONS": "2048",
-    "deploy/potatobot-offsite-backup-podman.service:ExecStart": "/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py /var/lib/potatobot/economy.db gdrivecrypt: --prune-local-backups-days 90",
-    "deploy/potatobot-offsite-backup.service:ExecStart": "/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py /opt/potatobot/economy.db gdrivecrypt: --prune-local-backups-days 90",
+    "deploy/potatobot-offsite-backup-podman.service:ExecStart": "/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py gdrivecrypt: --dump-command \"podman exec potatobot-db pg_dump --format=custom -U potatobot potatobot\" --restore-command \"podman exec -i potatobot-db pg_restore\" --backups-dir /var/lib/potatobot/bot/backups --legacy-sqlite /var/lib/potatobot/bot/economy.db --prune-local-backups-days 90",
+    "deploy/potatobot-offsite-backup.service:ExecStart": "/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py gdrivecrypt: --backups-dir /opt/potatobot/backups --legacy-sqlite /opt/potatobot/economy.db --prune-local-backups-days 90",
     "scripts/offsite_backup.py:--prune-local-backups-days": "0",
     "scripts/offsite_backup.py:--retention-days": "30"
   },
@@ -790,7 +790,8 @@
       "redeemed_at",
       "fulfilled_at",
       "expires_at",
-      "discord_item_id"
+      "discord_item_id",
+      "insertion_order"
     ],
     "rewards": [
       "guild_id",
@@ -985,122 +986,122 @@
   "subject_tables": [
     [
       "users",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "scoped_accounts",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "casino_wagers",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "reward_claims",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "user_inventory",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "gacha_pity",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "gacha_pulls",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "reward_vouchers",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "timed_entitlements",
-      "user_id = ? OR granted_by = ?",
+      "user_id = %s OR granted_by = %s",
       2
     ],
     [
       "fulfillment_requests",
-      "user_id = ? OR completed_by = ?",
+      "user_id = %s OR completed_by = %s",
       2
     ],
     [
       "warnings",
-      "user_id = ? OR mod_id = ?",
+      "user_id = %s OR mod_id = %s",
       2
     ],
     [
       "tickets",
-      "opener_id = ? OR claimer_id = ?",
+      "opener_id = %s OR claimer_id = %s",
       2
     ],
     [
       "voice_settings",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "voice_permissions",
-      "owner_id = ? OR target_id = ?",
+      "owner_id = %s OR target_id = %s",
       2
     ],
     [
       "active_channels",
-      "owner_id = ?",
+      "owner_id = %s",
       1
     ],
     [
       "user_identities",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "user_sharing_preferences",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "activity_events",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "dashboard_access_invalidations",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "casino_earnings_window",
-      "user_id = ?",
+      "user_id = %s",
       1
     ],
     [
       "lfg_posts",
-      "host_id = ? OR (json_valid(joined_json) AND EXISTS (SELECT 1 FROM json_each(lfg_posts.joined_json) WHERE json_each.value = ?))",
+      "host_id = %s OR joined_json LIKE ('%%' || %s || '%%')",
       2
     ],
     [
       "minigame_state",
-      "last_user_id = ?",
+      "last_user_id = %s",
       1
     ],
     [
       "settings_audit",
-      "actor_id = ? OR (action IN ('warning.delete') AND json_valid(old_value_json) AND (json_extract(old_value_json, '$.user_id') = ? OR json_extract(old_value_json, '$.moderator_id') = ?))",
-      3
+      "actor_id = %s OR (action IN ('warning.delete') AND old_value_json LIKE ('%%' || %s || '%%'))",
+      2
     ],
     [
       "control_actions",
-      "actor_id = ? OR (json_valid(payload_json) AND json_extract(payload_json, '$.user_id') = ?)",
+      "actor_id = %s OR payload_json LIKE ('%%' || %s || '%%')",
       2
     ]
   ]

@@ -8,6 +8,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -101,10 +104,28 @@ class LocalDevelopmentDashboardTests(unittest.TestCase):
         self.assertIn('os.environ["POTATOBOT_DASHBOARD_HOST"] = "127.0.0.1"',
                       self.SOURCE)
 
-    def test_it_works_on_a_copy_rather_than_the_source_database(self):
-        self.assertIn("economy.dev.db", self.SOURCE)
-        # The WAL sidecars must travel with the file or recent commits are lost.
-        self.assertIn('for suffix in ("", "-wal", "-shm")', self.SOURCE)
+    def test_it_refuses_any_database_but_a_loopback_development_one(self):
+        """Served with OAuth bypassed and migrated in place, so it may never be
+        a database something else serves: loopback, `*_dev`, and not the one
+        libpq's PG* environment names. All three, because a self-hoster's real
+        database can be on localhost too. (On SQLite, `--db economy.db` once
+        migrated and served the real file in place with OAuth bypassed.)"""
+        module = self.load_script()
+        module.refuse_real_database("postgresql://potatobot@127.0.0.1:55432/potatobot_dev")
+        refused = {
+            "postgresql://potatobot@db.example:5432/potatobot_dev": "loopback",
+            "host=/var/run/postgresql dbname=potatobot_dev": "loopback",
+            "postgresql://potatobot@127.0.0.1:5432/potatobot": "development database",
+            "postgresql://potatobot@localhost/potatobot_dev": "PG\\* environment",
+        }
+        for dsn, reason in refused.items():
+            with self.subTest(dsn=dsn), patch.dict(os.environ, {"PGDATABASE": "potatobot_dev"}
+                                                   if "localhost" in dsn else {}):
+                with self.assertRaisesRegex(SystemExit, reason):
+                    module.refuse_real_database(dsn)
+
+    def test_its_files_stay_out_of_any_real_data_directory(self):
+        self.assertIn('os.environ["POTATOBOT_DATA_DIR"] = str(LOCAL_DEV_DIR)', self.SOURCE)
 
     def load_script(self):
         import importlib.util
@@ -118,7 +139,8 @@ class LocalDevelopmentDashboardTests(unittest.TestCase):
         """The stand-in bot is read by production code, so it drifts silently.
 
         The resource list grew a role `color`, the permission audit a
-        `guild.default_role` and the audit feed a `guild.get_member`; the
+        `guild.default_role`, the audit feed a `guild.get_member` and the
+        entitlements page `guild.stickers`; the
         stand-ins had none of them, so every local page
         load's resource fetch raised, `loadGuild` aborted, and the dashboard ran
         with no feature state — no sub-toggles, no generated sub-pages — which
@@ -134,6 +156,7 @@ class LocalDevelopmentDashboardTests(unittest.TestCase):
         original_path, original_bot = database.DB_PATH, dashboard_api._dashboard_bot
         with tempfile.TemporaryDirectory() as directory:
             database.DB_PATH = os.path.join(directory, "standin.db")
+            pg_harness.fresh_database()
             try:
                 database.initialize_database()
                 dashboard_api._dashboard_bot = script.build_dev_bot([guild_id])
@@ -145,26 +168,15 @@ class LocalDevelopmentDashboardTests(unittest.TestCase):
                 self.assertEqual("local-dev", dashboard_api._actor_name_from_bot(
                     guild_id, int(script.LOCAL_HOST_ID)))
                 self.assertIsNone(dashboard_api._actor_name_from_bot(guild_id, 7))
+                # The entitlements page names each granted item through the bot;
+                # a live copy holding a sticker grant made that page a 500.
+                for kind in ("emoji", "sticker", "sound", "role"):
+                    with self.subTest(kind=kind):
+                        self.assertIsNone(
+                            dashboard_api._item_name_from_bot(guild_id, kind, 7))
             finally:
                 database.DB_PATH = original_path
                 dashboard_api._dashboard_bot = original_bot
-
-    def test_it_refuses_to_serve_a_real_database_in_place(self):
-        """`copy_database` reuses an existing target, so `--db economy.db`
-        migrated and served the real file with OAuth bypassed."""
-        import os
-        import tempfile
-        script = self.load_script()
-        with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / "source.db"
-            configured = Path(directory) / "configured.db"
-            with patch.dict(os.environ, {"POTATOBOT_DB_PATH": str(configured)}):
-                for target in (source, configured, ROOT / "economy.db",
-                               Path(os.path.relpath(ROOT / "economy.db"))):
-                    with self.subTest(target=str(target)):
-                        with self.assertRaises(SystemExit):
-                            script.refuse_real_database(source, target)
-                script.refuse_real_database(source, Path(directory) / "copy.db")
 
     def test_the_injected_session_is_loopback_only_with_a_per_run_token(self):
         import flask
@@ -536,8 +548,8 @@ class ConfigurationSecurityTests(unittest.TestCase):
         """Named explicitly, because the cost of one omission is a credential in
         a published image layer."""
         text = (ROOT / ".dockerignore").read_text(encoding="utf-8")
-        for pattern in (".env", "*.db", "*.db-wal", "backups/", "logs/",
-                        ".dashboard_session_secret", "venv/", ".git"):
+        for pattern in (".env", ".env.postgres", "*.db", "*.db-wal", "*.dump",
+                        "backups/", "logs/", ".dashboard_session_secret", "venv/", ".git"):
             with self.subTest(pattern=pattern):
                 self.assertIn(pattern, text)
 
@@ -560,7 +572,7 @@ class ConfigurationSecurityTests(unittest.TestCase):
                         if line.strip() and not line.lstrip().startswith("#")]
         self.assertNotIn("chown potatobot:potatobot /app", "\n".join(instructions))
         self.assertIn("COPY . .", instructions)
-        for setting in ("POTATOBOT_LOG_DIR=/data/logs",
+        for setting in ("POTATOBOT_DATA_DIR=/data", "POTATOBOT_LOG_DIR=/data/logs",
                         "POTATOBOT_EVERYDLE_STATE_PATH=/data/everydle_state.json"):
             with self.subTest(setting=setting):
                 self.assertIn(setting, containerfile)
@@ -586,6 +598,63 @@ class ConfigurationSecurityTests(unittest.TestCase):
                 # does not end every existing session.
                 legacy.write_text("x" * 40, encoding="utf-8")
                 self.assertEqual("x" * 40, dashboard_api._load_session_secret())
+
+    def test_the_secret_and_the_cards_follow_the_data_directory(self):
+        """`POTATOBOT_DATA_DIR` names where the installation's own files live,
+        apart from the database, which on PostgreSQL has no directory."""
+        import tempfile
+        import dashboard_api
+        from core import database, welcome_card
+        with tempfile.TemporaryDirectory() as data, \
+                tempfile.TemporaryDirectory() as db_dir, \
+                tempfile.TemporaryDirectory() as code_dir:
+            with patch.dict(os.environ, {"POTATOBOT_DASHBOARD_SESSION_SECRET": ""}), \
+                    patch.object(database, "DB_PATH", str(Path(db_dir) / "economy.db")), \
+                    patch.object(database, "DATA_DIR", data), \
+                    patch.object(dashboard_api, "LEGACY_SESSION_SECRET_PATH",
+                                 str(Path(code_dir) / ".dashboard_session_secret")):
+                generated = dashboard_api._load_session_secret()
+                self.assertEqual(generated, (Path(data) / ".dashboard_session_secret")
+                                 .read_text(encoding="utf-8"))
+                self.assertFalse((Path(db_dir) / ".dashboard_session_secret").exists())
+                self.assertEqual(Path(data) / "cards" / "7-join.png",
+                                 welcome_card.background_path(7, "join"))
+
+    def test_an_unset_or_blank_data_directory_means_beside_the_database(self):
+        from core import database
+        for unset in (None, ""):
+            with patch.object(database, "DATA_DIR", unset), \
+                    patch.object(database, "DB_PATH", "/srv/potato/economy.db"):
+                self.assertEqual("/srv/potato", database.data_dir())
+
+    def test_the_environment_value_is_read_once_and_blank_is_unset(self):
+        import subprocess
+        import sys
+        probe = "from core import database; print(repr(database.DATA_DIR))"
+        root = Path(__file__).resolve().parents[1]
+        for value, expected in (("   ", "None"), ("/data", "'/data'"), (" /data ", "'/data'")):
+            env = dict(os.environ, POTATOBOT_DATA_DIR=value)
+            out = subprocess.run([sys.executable, "-c", probe], cwd=root, env=env,
+                                 capture_output=True, text=True, check=True).stdout.strip()
+            self.assertEqual(expected, out.splitlines()[-1], value)
+
+    def test_the_suite_runs_with_no_data_directory_configured(self):
+        """A test redirects `DB_PATH` to a temporary file and expects the cards
+        and the session secret to follow it. With `POTATOBOT_DATA_DIR` set in
+        the shell they would land in that real directory instead."""
+        from core import database
+        self.assertIsNone(database.DATA_DIR,
+                          "unset POTATOBOT_DATA_DIR before running the suite")
+
+    def test_ci_runs_the_suite_against_a_pinned_postgresql(self):
+        """The PostgreSQL tests fail without a server, so CI must provide one:
+        pinned by digest, with the locale the deployment uses."""
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        verify = workflow[workflow.index("  verify:"):workflow.index("  container:")]
+        self.assertRegex(verify, r"image: postgres:18@sha256:[0-9a-f]{64}")
+        self.assertIn("--locale-provider=builtin --builtin-locale=C.UTF-8", verify)
+        self.assertIn("POTATOBOT_TEST_DSN: postgresql://potatobot@127.0.0.1:55432/potatobot",
+                      verify)
 
     def test_license_carries_the_canonical_agpl_text(self):
         text = (Path(__file__).resolve().parents[1] / "LICENSE").read_text(encoding="utf-8")
@@ -643,7 +712,7 @@ class RepositoryLayoutTests(unittest.TestCase):
         "database.py", "deployment.py",
         "feature_access.py", "item_catalog.py", "logging_setup.py",
         "managed_messages.py", "minigame_data.py", "music_extract.py",
-        "permission_audit.py",
+        "permission_audit.py", "schema_types.py",
         "settings_cache.py", "settings_registry.py", "support_tickets.py",
         "supported_games.py", "version.py", "welcome_card.py",
         "wordchain_dictionary.py",
@@ -778,7 +847,8 @@ class QuadletUnitTests(unittest.TestCase):
         self.assertNotIn("User", dict(self.container))
 
     def test_data_is_a_host_bind_mount_with_an_selinux_label(self):
-        self.assertEqual(["/var/lib/potatobot:/data:Z"], self.values("Volume"))
+        # `bot/` on the LUKS mount; PostgreSQL's `pgdata/` sits beside it.
+        self.assertEqual(["/var/lib/potatobot/bot:/data:Z"], self.values("Volume"))
         environment = self.values("Environment")
         for path in ("POTATOBOT_DB_PATH=/data/economy.db",
                      "POTATOBOT_LOG_DIR=/data/logs",
@@ -825,6 +895,12 @@ class QuadletUnitTests(unittest.TestCase):
         waited ten seconds and ended in SIGKILL."""
         self.assertEqual(["true"], self.values("RunInit"))
 
+    def test_a_stop_is_not_reported_as_a_failure(self):
+        """The bot ends on SIGTERM, so a stop exits 143; without this every
+        clean stop left the unit `failed` (each one since 2026-10-22)."""
+        service = [value for name, value in self.unit["Service"] if name == "SuccessExitStatus"]
+        self.assertEqual(["143"], service)
+
     def test_the_hardening_subset_matches_compose(self):
         self.assertEqual(["true"], self.values("NoNewPrivileges"))
         self.assertEqual(["all"], self.values("DropCapability"))
@@ -848,19 +924,187 @@ class QuadletUnitTests(unittest.TestCase):
         service = self.directives("potatobot-offsite-backup-podman.service")["Service"]
         values = lambda key: [value for name, value in service if name == key]
         self.assertEqual(["potatobot"], values("User"))
-        # The 90 is the retention docs/legal/PRIVACY.md §7 promises for the
-        # pre-migration copies; changing it here means changing the policy.
+        # The dump is taken inside the database's container, which publishes
+        # no port; the 90 is the retention docs/legal/PRIVACY.md §7 promises
+        # for the pre-migration copies, and changing it means changing the policy.
         self.assertEqual(
-            ["/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py "
-             "/var/lib/potatobot/economy.db gdrivecrypt: --prune-local-backups-days 90"],
+            ['/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py gdrivecrypt: '
+             '--dump-command "podman exec potatobot-db pg_dump --format=custom -U potatobot potatobot" '
+             '--restore-command "podman exec -i potatobot-db pg_restore" '
+             '--backups-dir /var/lib/potatobot/bot/backups '
+             '--legacy-sqlite /var/lib/potatobot/bot/economy.db --prune-local-backups-days 90'],
             values("ExecStart"))
-        self.assertEqual(["/var/lib/potatobot", "/home/potatobot/.config/rclone"],
+        self.assertEqual(["/var/lib/potatobot/bot", "/home/potatobot/.config/rclone",
+                          "/home/potatobot/.local/share/containers", "/run/user/984"],
                          values("ReadWritePaths"))
         self.assertEqual(["read-only"], values("ProtectHome"))
         self.assertEqual(["strict"], values("ProtectSystem"))
         self.assertEqual([], values("EnvironmentFile"))
         self.assertNotIn("/opt/potatobot",
                          " ".join(value for _, value in service))
+
+
+
+class DatabaseUnitTests(unittest.TestCase):
+    """`deploy/potatobot-db.container`, `potatobot.network` and the bot's link
+    to them (2.21). Each property was established by a trial under the flags
+    Quadlet generates (2026-11-01), and each would fail silently if lost."""
+
+    directives = staticmethod(QuadletUnitTests.directives)
+
+    def setUp(self):
+        self.db = self.directives("potatobot-db.container")
+        self.container = self.db["Container"]
+
+    def values(self, key, section=None):
+        entries = self.db[section] if section else self.container
+        return [value for name, value in entries if name == key]
+
+    def test_the_server_is_the_one_ci_tests_against(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        ci_image = re.search(r"image: (postgres:18@sha256:[0-9a-f]{64})", workflow).group(1)
+        self.assertEqual([f"docker.io/library/{ci_image}"], self.values("Image"))
+
+    def test_the_locale_flags_reach_initdb_as_one_value(self):
+        """Unquoted, systemd split the value at its spaces and the locale flags
+        were dropped: a glibc-collated database sorting text differently from
+        SQLite and the suite, with no error anywhere."""
+        initdb = [value for value in self.values("Environment")
+                  if "POSTGRES_INITDB_ARGS" in value]
+        self.assertEqual(['"POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale-provider=builtin '
+                          '--builtin-locale=C.UTF-8"'], initdb)
+
+    def test_nothing_outside_the_network_reaches_the_database(self):
+        self.assertEqual([], self.values("PublishPort"))
+        self.assertEqual(["potatobot.network"], self.values("Network"))
+        network = self.directives("potatobot.network")["Network"]
+        self.assertIn(("NetworkName", "potatobot"), network)
+
+    def test_ready_means_healthy_over_tcp(self):
+        """A socket probe called the image's temporary init-time server healthy."""
+        self.assertEqual(["healthy"], self.values("Notify"))
+        self.assertTrue(self.values("HealthCmd")[0].startswith("pg_isready -h 127.0.0.1"))
+
+    def test_the_superuser_password_lives_apart_from_the_bot(self):
+        self.assertEqual(["/etc/potatobot/potatobot-db.env"], self.values("EnvironmentFile"))
+        bot = QuadletUnitTests.directives("potatobot.container")["Container"]
+        self.assertEqual(["/etc/potatobot/potatobot.env"],
+                         [value for name, value in bot if name == "EnvironmentFile"])
+
+    def test_the_data_is_on_the_encrypted_mount_and_the_bot_follows_the_database(self):
+        """The guard against writing to the plain disk is that each volume's
+        source is a subdirectory of the encrypted mount, absent while it is
+        closed. `RequiresMountsFor=` in a user unit was the first draft's guard
+        and guarded nothing: a rootless user manager sees only existing mounts,
+        so `/` satisfied it (measured 2026-11-01). It must not come back
+        looking like protection."""
+        self.assertIn("/var/lib/potatobot/pgdata:/var/lib/postgresql:Z", self.values("Volume"))
+        bot = QuadletUnitTests.directives("potatobot.container")
+        self.assertIn(("Volume", "/var/lib/potatobot/bot:/data:Z"), bot["Container"])
+        for name in ("potatobot.container", "potatobot-db.container",
+                     "potatobot-offsite-backup-podman.service"):
+            with self.subTest(unit=name):
+                directives = QuadletUnitTests.directives(name)
+                self.assertNotIn("RequiresMountsFor",
+                                 [key for key, _ in directives.get("Unit", [])])
+        unit = [value for name, value in bot["Unit"]]
+        self.assertIn("potatobot-db.service", unit)
+        self.assertIn(("Network", "potatobot.network"), bot["Container"])
+
+    def test_the_container_is_read_only_and_keeps_no_umask(self):
+        """The image's entrypoint could not enter its own data directories under
+        `--umask=0027`; PostgreSQL makes its files 0600 itself."""
+        self.assertEqual(["true"], self.values("ReadOnly"))
+        self.assertEqual(["true"], self.values("NoNewPrivileges"))
+        self.assertNotIn("--umask", " ".join(self.values("PodmanArgs")))
+
+    def test_the_bots_role_is_no_superuser(self):
+        script = (ROOT / "deploy" / "postgres-init" / "10-potatobot-role.sh").read_text(
+            encoding="utf-8")
+        self.assertIn("CREATE ROLE potatobot LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE", script)
+        self.assertIn("CREATE DATABASE potatobot OWNER potatobot", script)
+
+
+class VaultUnlockTests(unittest.TestCase):
+    """`deploy/potatobot-unlock` opens the encrypted data volume after a boot.
+
+    Run here against stand-in commands that record their arguments. The
+    refusal is the one that matters: a file under the bare mountpoint means
+    something wrote member data to the plain disk, and mounting over it would
+    hide that rather than stop it.
+    """
+
+    SCRIPT = ROOT / "deploy" / "potatobot-unlock"
+    STUBS = ("id", "mountpoint", "cryptsetup", "mount", "systemctl")
+
+    def setUp(self):
+        import tempfile
+        self.work = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, self.work)
+        self.bin = self.work / "bin"
+        self.bin.mkdir()
+        self.log = self.work / "calls.log"
+        for name in self.STUBS:
+            stub = self.bin / name
+            stub.write_text(
+                "#!/bin/sh\n"
+                f'echo "{name} $*" >> "{self.log}"\n'
+                f'[ "{name}" = id ] && {{ echo "${{FAKE_UID:-0}}"; exit 0; }}\n'
+                f'[ "{name}" = mountpoint ] && exit "${{FAKE_MOUNTED:-1}}"\n'
+                "exit 0\n")
+            stub.chmod(0o755)
+        self.mountpoint = self.work / "potatobot"
+        self.mountpoint.mkdir()
+
+    def run_script(self, *args, **env):
+        environment = {"PATH": f"{self.bin}:/usr/bin:/bin",
+                       "POTATOBOT_VAULT_MOUNTPOINT": str(self.mountpoint),
+                       "POTATOBOT_VAULT_NAME": "probe-vault-that-is-not-open", **env}
+        result = subprocess.run(["/bin/sh", str(self.SCRIPT), *args], env=environment,
+                                capture_output=True, text=True)
+        calls = self.log.read_text().splitlines() if self.log.exists() else []
+        return result, [c for c in calls if not c.startswith(("id", "mountpoint"))]
+
+    def test_it_opens_mounts_hardened_and_starts_the_bot(self):
+        result, calls = self.run_script()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(calls[0].startswith("cryptsetup open --type luks2 "), calls)
+        self.assertNotIn("--key-file", calls[0], "the passphrase is typed, never stored")
+        self.assertEqual(f"mount -o nodev,nosuid,noexec /dev/mapper/probe-vault-that-is-not-open "
+                         f"{self.mountpoint}", calls[1])
+        # A boot's failed starts are cleared before the start, one unit a call.
+        self.assertEqual(["systemctl --user -M potatobot@ reset-failed potatobot-db",
+                          "systemctl --user -M potatobot@ reset-failed potatobot",
+                          "systemctl --user -M potatobot@ start potatobot",
+                          "systemctl --user -M potatobot@ is-active potatobot"], calls[2:])
+
+    def test_something_under_the_bare_mountpoint_is_refused(self):
+        (self.mountpoint / "economy.db").write_text("")
+        result, calls = self.run_script()
+        self.assertEqual(1, result.returncode)
+        self.assertIn("plain disk", result.stderr)
+        self.assertEqual([], calls, "nothing is opened, mounted or started")
+
+    def test_mount_only_starts_nothing(self):
+        result, calls = self.run_script("--mount-only")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse([c for c in calls if c.startswith("systemctl")], calls)
+
+    def test_an_open_volume_is_not_mounted_twice(self):
+        result, calls = self.run_script("--mount-only", FAKE_MOUNTED="0")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual([], calls)
+
+    def test_it_needs_root_and_a_known_argument(self):
+        self.assertEqual(2, self.run_script(FAKE_UID="1000")[0].returncode)
+        self.assertEqual(2, self.run_script("--force")[0].returncode)
+        self.assertFalse(self.log.exists() and any(
+            c.startswith(("cryptsetup", "mount ")) for c in self.log.read_text().splitlines()))
+
+    def test_it_is_executable_and_the_bot_unit_relies_on_its_guard(self):
+        self.assertTrue(os.access(self.SCRIPT, os.X_OK))
+        unit = (ROOT / "deploy" / "potatobot.container").read_text(encoding="utf-8")
+        self.assertIn("Volume=/var/lib/potatobot/bot:/data:Z", unit)
 
 
 class PinnedDependencyTests(unittest.TestCase):

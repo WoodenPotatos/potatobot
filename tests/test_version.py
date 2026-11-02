@@ -214,7 +214,7 @@ class ReadmeGenerationTests(unittest.TestCase):
         self.assertIn(f"{config['hard_pity']}-pull hard pity", body)
         self.assertIn(f"pull {config['hard_pity']} guarantees a 5-star", body)
         minors = self.module.python_minors()
-        self.assertIn(f"Requires Python {minors[0]}–{minors[-1]}.", body)
+        self.assertIn(f"Requires Python {minors[0]}–{minors[-1]} and PostgreSQL 18.", body)
         self.assertIn("Message Content", body)
         # The documentation list is read from docs/, private documents excluded.
         self.assertIn("(docs/privacy.md)", body)

@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, `deploy/` holds the systemd units and a rootless podman Quadlet unit, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.19.29b** &nbsp;·&nbsp; channel `beta`
+**Version 2.21.16b** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -28,12 +28,12 @@ git clone https://github.com/WoodenPotatos/potatobot.git /opt/potatobot
 cd /opt/potatobot
 python3 -m venv venv
 ./venv/bin/python -m pip install --require-hashes --requirement requirements.lock
-cp .env.example .env        # add your bot token
-POTATOBOT_DB_PATH=$PWD/economy.db ./venv/bin/python update_db.py
+cp .env.example .env        # add your bot token and the PG* settings
+./venv/bin/python update_db.py   # against the PostgreSQL 18 database you created
 ./venv/bin/python main.py
 ```
 
-Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Every setting lives in SQLite from the start and is editable from the dashboard once it is running. The full walkthrough — Discord application, intents, OAuth, HTTPS, systemd and the guild setup check — is in [docs/installation.md](docs/installation.md).
+Runs on a headless Linux server under systemd. Requires Python 3.12–3.14 and PostgreSQL 18. Every setting lives in the database from the start and is editable from the dashboard once it is running. The full walkthrough — Discord application, intents, OAuth, HTTPS, systemd and the guild setup check — is in [docs/installation.md](docs/installation.md).
 
 ## Highlights
 
@@ -41,7 +41,8 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Ever
 - Atomic economy rewards, transfers, purchases, wagers, and crash-safe game settlement
 - Complete Hungarian and English localization of the bot, the dashboard and the
   Everydle minigame data, with Hungarian as the source language
-- SQLite WAL storage with ordered, in-place migrations and asynchronous read/write execution
+- PostgreSQL storage with numbered, transactional migrations, a dump before each one,
+  and asynchronous read/write execution
 - 62 guild feature switches in eleven groups, with dependency checks,
   audit revisions, and runtime cache refresh
 - Moderation, warnings, faction management, tickets, onboarding, role menus, and temporary voice channels
@@ -86,7 +87,7 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14. Ever
 - A Discord application and bot token
 - Discord privileged Message Content and Server Members intents
 - FFmpeg for music playback
-- SQLite support (included with normal Python builds)
+- PostgreSQL 18, on the host or as the container beside the bot
 - Optional Twitch API credentials for stream notifications
 - For the dashboard, an HTTPS reverse proxy in front of loopback: Tailscale
   Serve, a Cloudflare Tunnel, nginx or Caddy
@@ -97,11 +98,12 @@ Runtime dependencies are pinned in `requirements.lock`; development and security
 
 Environment variables own credentials and deployment settings. Typed guild settings,
 feature revisions, gacha state, inventory, vouchers, and dashboard audit records live in
-SQLite, which is the only thing that writes them.
+PostgreSQL, and the bot is the only thing that creates the schema.
 
 Important environment variables are documented in `.env.example`. In particular:
 
-- `POTATOBOT_DB_PATH` selects the database file.
+- `PGHOST`, `PGDATABASE`, `PGUSER` and `PGPASSWORD` (libpq's own) select the database; the role is the bot's own, not a superuser.
+- `POTATOBOT_DATA_DIR` selects where the dashboard session secret and welcome-card backgrounds live; unset, they sit beside the database.
 - `POTATOBOT_DB_READ_WORKERS` selects 2–8 concurrent read workers; the default is 4.
 - `POTATOBOT_DEPLOYMENT_PROFILE` accepts `private`, `managed`, or `self_hosted`.
 - `POTATOBOT_LEGACY_GUILD_ID` identifies the original guild when a legacy private database is connected to multiple guilds.
@@ -184,7 +186,19 @@ matrices — is in [docs/development.md](docs/development.md).
 
 ## Recent releases
 
-### 2.19.29b
+### 2.21.16b
+
+- **The PostgreSQL move begins (2.20).** The bot still runs on SQLite and behaves the same; the 2.20 line first makes the code independent of the database engine, one step at a time, and then switches engines. First step: every write connection now opens its transaction, and takes the database's write lock, as soon as it is created, in one place instead of fifty-four. Writes that used to take the lock only at their first statement now take it up front too, which matters only when the dashboard runs as its own process.
+- **Database errors are caught under engine-neutral names.** Every handler that caught SQLite's own exception types now catches `EngineError` or `IntegrityError` from the database module, so the engine switch repoints two names instead of fifty-four handlers. Nothing a member or operator sees changes.
+- **Conflicting inserts use the portable form.** SQLite's `INSERT OR IGNORE` and `INSERT OR REPLACE` became `ON CONFLICT DO NOTHING` and `ON CONFLICT … DO UPDATE`, which PostgreSQL also understands. Re-opening a non-support ticket on a channel that already has a row still replaces it completely, including clearing its claimer.
+- **New rows report their id with `RETURNING`.** The eight inserts that hand back the id of what they created (realms, warnings, work responses and adopted tiers, fulfillment requests, manual entitlements, dashboard documents, queued Discord actions) read it from `RETURNING` instead of SQLite's `lastrowid`; the ids are the same.
+- **`/mydata` and erasure find a member inside stored lists in Python.** Party lists, removed-warning records and queued Discord actions used SQLite's own JSON functions to find the member's id. They now narrow the rows in SQL and decide in Python, so the same rows are exported and scrubbed on either engine. The Privacy Policy's statements are unchanged; its review record was re-stamped after re-reading the sections it names.
+- **Two aggregate queries no longer depend on SQLite.** Creating a gacha banner counts a duplicate key in a form PostgreSQL accepts, and the gacha luck leaderboard's average is always a plain number. Nothing visible changes.
+- **Sorted lists say how to break a tie.** Leaderboards, the No. 1 role, timed grants, party clean-up, role-menu buttons and the guild list now name a final sort key and where an empty value goes, reproducing the order SQLite already gave. On PostgreSQL a member with no recorded XP would otherwise have topped the leaderboard.
+- **A member with no recorded XP, balance or streak no longer empties a leaderboard.** One such row made the board's merge fail, and the board showed nobody. Such a member is now simply not ranked. No current data has one; it was found while auditing sort order.
+- …and 23 more, in [CHANGELOG.md](CHANGELOG.md).
+
+### 2.19.29
 
 - **A stable release channel exists.** The public repository now has a `stable` branch beside `beta`. A stable release is the last published beta copied with its letter stripped (`2.19.26b` becomes `2.19.26`, and `/version` reports the channel as stable), so the code is byte-identical to a beta that has already been out; betas keep landing on `beta`.
 - **The README below the introduction is generated from the code.** It said the schema was at version 24 (it is 26) and that LoLdle's hard mode was Hungarian-only (English has been complete since September), and the stable release shipped saying so. Only the maintainer's introduction is written by hand now; the version, the Python range, the intents, the schema version, the read-worker bounds, the gacha pity numbers, the game and feature counts, the documentation list and the recent releases are read from the code and the repository each time, and the build fails when the file disagrees.
@@ -200,18 +214,6 @@ matrices — is in [docs/development.md](docs/development.md).
 - **The Privacy Policy and Terms name their operator**, Máté Domina, resident in Hungary, with the bot hosted in Hungary and Hungarian law governing the terms. The contact address is `privacy@potatobot.win`, forwarded through Cloudflare Email Routing, which the policy's Cloudflare entry now says. The Discord contact is `@woodenpotato`, pre-migration database backups are promised deleted 90 days after their migration, the planned public application is left out until it exists, and the policy keeps the sentence that the host disk is not encrypted.
 - **The dashboard's audit history is no longer kept forever.** A new installation-wide setting, "Audit history retention (days)" on the Administration page, deletes staff audit rows (setting changes, warning removals) older than the window each day; it ships at 90, and 0 keeps them forever as before. Data-erasure records are never pruned: they name only the anonymous replacement id and are the proof of what was deleted.
 - …and 1 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.19.17b
-
-- **Music logs when a song starts and where in it a gap fell.** "Ran empty" now says how many seconds into the song it happened, and each song logs how long it waited and how much it had buffered, so whether gaps cluster at the start (which a larger reserve would fix) can be read off the log.
-- **Queueing songs no longer makes you wait.** The music panel's search and `/play` each had a 15-second cooldown, so queueing a second song meant waiting it out. Now there is no timer: each person can have one lookup running at a time, and the next one can start as soon as it finishes.
-- **A song now builds a short reserve before it starts**, about half a second of audio, so the start of a song no longer runs dry for a moment while the stream gets going.
-- **Songs no longer start with a sped-up blip.** While a song was still loading, the player counted the wait as falling behind and then played the first half second or so too fast to catch up. It now plays silence on time while the song loads, so it starts at normal speed. A stream that runs short mid-song is now a short gap instead of a gap followed by a rush.
-- **Music logs when its player falls behind.** A gap followed by a sped-up rush can come from the stream, from the bot being busy, or from the network to Discord. The log now says which of the first two it was, so the next one can be traced instead of guessed at.
-- **The dashboard's and the bot's main files are now type-checked in CI**, as the shared core already was, and a linter (ruff) now catches unused imports, undefined names and the like everywhere. Its 57 findings and mypy's six were all fixed; no behaviour changed.
-- **The container is locked down further.** Its root filesystem is now read-only, so the bot cannot change its own code, and files it creates are readable only by its own account, however the container is started (started through compose, it would have written the database readable by every account on the host).
-- **Join and leave messages can show an image card.** Switch it on in the event's settings: the member's avatar and name, with a line of your own underneath, drawn on a background image. Upload any picture as the background (it is cropped to fit), or keep the built-in one. The card takes the message's big image spot, and the dashboard shows a live preview. If many people join at once, the bot sends the normal message instead of drawing a card for each of them.
-- …and 16 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 

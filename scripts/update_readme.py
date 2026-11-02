@@ -178,13 +178,14 @@ def render_install() -> str:
         "cd /opt/potatobot",
         "python3 -m venv venv",
         "./venv/bin/python -m pip install --require-hashes --requirement requirements.lock",
-        "cp .env.example .env        # add your bot token",
-        "POTATOBOT_DB_PATH=$PWD/economy.db ./venv/bin/python update_db.py",
+        "cp .env.example .env        # add your bot token and the PG* settings",
+        "./venv/bin/python update_db.py   # against the PostgreSQL 18 database you created",
         "./venv/bin/python main.py",
         "```",
         "",
         "Runs on a headless Linux server under systemd. Requires Python"
-        f" {minors[0]}–{minors[-1]}. Every setting lives in SQLite from the start and is"
+        f" {minors[0]}–{minors[-1]} and PostgreSQL 18. Every setting lives in the database"
+        " from the start and is"
         " editable from the dashboard once it is running. The full"
         " walkthrough — Discord application, intents, OAuth, HTTPS, systemd"
         " and the guild setup check — is in"
@@ -202,7 +203,8 @@ def render_highlights() -> str:
         "- Atomic economy rewards, transfers, purchases, wagers, and crash-safe game settlement",
         "- Complete Hungarian and English localization of the bot, the dashboard and the",
         "  Everydle minigame data, with Hungarian as the source language",
-        "- SQLite WAL storage with ordered, in-place migrations and asynchronous read/write execution",
+        "- PostgreSQL storage with numbered, transactional migrations, a dump before each one,",
+        "  and asynchronous read/write execution",
         f"- {features} guild feature switches in {_word(groups)} groups, with dependency checks,",
         "  audit revisions, and runtime cache refresh",
         "- Moderation, warnings, faction management, tickets, onboarding, role menus, and temporary voice channels",
@@ -255,7 +257,7 @@ def render_requirements() -> str:
         "- A Discord application and bot token",
         f"- Discord privileged {' and '.join(intents)} intents",
         "- FFmpeg for music playback",
-        "- SQLite support (included with normal Python builds)",
+        "- PostgreSQL 18, on the host or as the container beside the bot",
         "- Optional Twitch API credentials for stream notifications",
         "- For the dashboard, an HTTPS reverse proxy in front of loopback: Tailscale",
         "  Serve, a Cloudflare Tunnel, nginx or Caddy",
@@ -274,11 +276,14 @@ def render_configuration() -> str:
         "",
         "Environment variables own credentials and deployment settings. Typed guild settings,",
         "feature revisions, gacha state, inventory, vouchers, and dashboard audit records live in",
-        "SQLite, which is the only thing that writes them.",
+        "PostgreSQL, and the bot is the only thing that creates the schema.",
         "",
         "Important environment variables are documented in `.env.example`. In particular:",
         "",
-        "- `POTATOBOT_DB_PATH` selects the database file.",
+        "- `PGHOST`, `PGDATABASE`, `PGUSER` and `PGPASSWORD` (libpq's own) select the"
+        " database; the role is the bot's own, not a superuser.",
+        "- `POTATOBOT_DATA_DIR` selects where the dashboard session secret and welcome-card"
+        " backgrounds live; unset, they sit beside the database.",
         f"- `POTATOBOT_DB_READ_WORKERS` selects {low}–{high} concurrent read workers;"
         f" the default is {default}.",
         "- `POTATOBOT_DEPLOYMENT_PROFILE` accepts "

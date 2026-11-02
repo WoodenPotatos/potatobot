@@ -16,6 +16,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.settings_registry import FEATURE_DEFINITIONS, SETTING_DEFINITIONS  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 PYTHON_SOURCES = [
     *ROOT.glob("*.py"),
     # `core/` holds the shared modules; the root keeps only the entry points.
@@ -450,6 +453,7 @@ class OperatorAndMemberLanguageTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "language.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
         settings_cache.invalidate()

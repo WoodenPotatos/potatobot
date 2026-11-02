@@ -7,6 +7,7 @@ JSON long after the managed-message builders had been brought under a
 declaration. These are the three checks that pattern uses.
 """
 
+import sys
 import json
 import os
 import re
@@ -21,6 +22,9 @@ import dashboard_api
 from core import settings_cache
 from core import database
 from core import item_catalog
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -157,6 +161,7 @@ class DashboardItemTestCase(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "items.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Guild")
         dashboard_api.app.config.update(TESTING=True)
@@ -659,6 +664,7 @@ class CustomRewardLabelTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "labels.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
         database.create_shop_item_definition(1, 42, {

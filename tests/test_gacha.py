@@ -1,3 +1,4 @@
+import sys
 import asyncio
 import json
 import os
@@ -5,11 +6,15 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 from core import database
+from core.clock import parse_stored
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,6 +33,7 @@ class GachaTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "gacha.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
@@ -51,8 +57,8 @@ class GachaTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO gacha_pity "
                 "(guild_id, user_id, banner_key, pulls_since_five_star, "
-                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 75, 0, ?)",
-                (datetime.now().isoformat(),),
+                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 75, 0, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         result = database.perform_gacha_pulls(10, 1, 1, rng=QueueRng(94000, 0))
         self.assertTrue(result["results"][0]["soft_pity"])
@@ -63,8 +69,8 @@ class GachaTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO gacha_pity "
                 "(guild_id, user_id, banner_key, pulls_since_five_star, "
-                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 99, 0, ?)",
-                (datetime.now().isoformat(),),
+                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 99, 0, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         result = database.perform_gacha_pulls(10, 1, 1, rng=QueueRng(0))
         self.assertTrue(result["results"][0]["hard_pity"])
@@ -86,8 +92,8 @@ class GachaTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO gacha_pity "
                 "(guild_id, user_id, banner_key, pulls_since_five_star, "
-                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 99, 0, ?)",
-                (datetime.now().isoformat(),),
+                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 99, 0, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         before = database.get_user_balance(1)
         result = database.perform_gacha_pulls(10, 1, 1, rng=QueueRng(0))
@@ -102,11 +108,11 @@ class GachaTests(unittest.TestCase):
         with database.get_connection() as conn:
             conn.execute("UPDATE users SET protected_reserve = 100000 WHERE user_id = 2")
             conn.execute(
-                "INSERT INTO user_inventory VALUES (10, 1, 'vault_glove', 1, ?)",
-                (datetime.now().isoformat(),),
+                "INSERT INTO user_inventory VALUES (10, 1, 'vault_glove', 1, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         result = database.resolve_robbery(
-            1, 2, datetime.now().isoformat(), 1.0, 1.0, 0.0, 0.10, 10
+            1, 2, datetime.now(timezone.utc).isoformat(), 1.0, 1.0, 0.0, 0.10, 10
         )
         self.assertEqual(result["amount"], 2500)
         self.assertTrue(result["consumed_glove"])
@@ -117,8 +123,8 @@ class GachaTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO gacha_pity "
                 "(guild_id, user_id, banner_key, pulls_since_five_star, "
-                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 0, 9, ?)",
-                (datetime.now().isoformat(),),
+                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 0, 9, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         result = database.perform_gacha_pulls(10, 1, 1, rng=QueueRng(0, 0))
         reward = result["results"][0]
@@ -131,8 +137,8 @@ class GachaTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO gacha_pity "
                 "(guild_id, user_id, banner_key, pulls_since_five_star, "
-                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 0, 9, ?)",
-                (datetime.now().isoformat(),),
+                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 0, 9, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         result = database.perform_gacha_pulls(10, 1, 1, rng=QueueRng(99999, 0))
         self.assertEqual(result["results"][0]["rarity"], 5)
@@ -141,8 +147,8 @@ class GachaTests(unittest.TestCase):
     def test_loaded_die_is_consumed_only_by_valid_paid_dice_game(self):
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO user_inventory VALUES (10, 1, 'loaded_die', 1, ?)",
-                (datetime.now().isoformat(),),
+                "INSERT INTO user_inventory VALUES (10, 1, 'loaded_die', 1, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         self.assertIsNone(database.resolve_dice_wager(10, 1, 2000000, 2, 6, 5))
         self.assertEqual(database.get_user_inventory(10, 1)["loaded_die"], 1)
@@ -157,8 +163,8 @@ class GachaTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO reward_vouchers "
                 "(voucher_id, guild_id, user_id, reward_key, duration_days, acquired_at) "
-                "VALUES ('voucher', 10, 1, 'sticker_30d', 30, ?)",
-                (datetime.now().isoformat(),),
+                "VALUES ('voucher', 10, 1, 'sticker_30d', 30, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         redeemed = database.redeem_voucher(10, 1, "voucher")
         self.assertEqual(redeemed["kind"], "fulfillment")
@@ -178,12 +184,12 @@ class GachaTests(unittest.TestCase):
         self.assertEqual(source_type, "gacha")
 
     def test_premium_extension_can_be_rolled_back_without_losing_prior_time(self):
-        acquired = datetime.now().isoformat()
+        acquired = datetime.now(timezone.utc).isoformat()
         with database.get_connection() as conn:
-            conn.executemany(
+            conn.cursor().executemany(
                 "INSERT INTO reward_vouchers "
                 "(voucher_id, guild_id, user_id, reward_key, duration_days, acquired_at) "
-                "VALUES (?, 10, 1, 'premium_30d', 30, ?)",
+                "VALUES (%s, 10, 1, 'premium_30d', 30, %s)",
                 [("premium-a", acquired), ("premium-b", acquired)],
             )
         first = database.redeem_voucher(10, 1, "premium-a")
@@ -198,7 +204,8 @@ class GachaTests(unittest.TestCase):
             status = conn.execute(
                 "SELECT status FROM reward_vouchers WHERE voucher_id = 'premium-b'"
             ).fetchone()[0]
-        self.assertEqual(expiry, first["expires_at"])
+        # Instants, not spellings: PostgreSQL reads the column back as a datetime.
+        self.assertEqual(parse_stored(expiry), parse_stored(first["expires_at"]))
         self.assertEqual(status, "available")
 
     def test_safe_custom_consumable_purchase_uses_inventory(self):
@@ -207,8 +214,8 @@ class GachaTests(unittest.TestCase):
                 "INSERT INTO shop_item_definitions "
                 "(guild_id, item_key, template_type, enabled, price, config_json, updated_at) "
                 "VALUES (10, 'glove_shop', 'consumable', 1, 1000, "
-                "'{\"item_key\": \"vault_glove\"}', ?)",
-                (datetime.now().isoformat(),),
+                "'{\"item_key\": \"vault_glove\"}', %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         result = database.purchase_custom_shop_item(10, 1, "glove_shop")
         self.assertTrue(result["purchased"])
@@ -220,14 +227,14 @@ class GachaTests(unittest.TestCase):
                 "INSERT INTO shop_item_definitions "
                 "(guild_id, item_key, template_type, enabled, price, config_json, updated_at) "
                 "VALUES (10, 'custom_emoji', 'fulfillment_voucher', 1, 1000, "
-                "'{\"asset_type\": \"emoji\", \"duration_days\": 30}', ?)",
-                (datetime.now().isoformat(),),
+                "'{\"asset_type\": \"emoji\", \"duration_days\": 30}', %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         purchased = database.purchase_custom_shop_item(10, 1, "custom_emoji")
         self.assertTrue(purchased["purchased"])
         with database.get_connection() as conn:
             source_type = conn.execute(
-                "SELECT source_type FROM reward_vouchers WHERE voucher_id = ?",
+                "SELECT source_type FROM reward_vouchers WHERE voucher_id = %s",
                 (purchased["voucher_id"],),
             ).fetchone()[0]
         self.assertEqual(source_type, "shop")
@@ -258,8 +265,8 @@ class GachaTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO gacha_pity "
                 "(guild_id, user_id, banner_key, pulls_since_five_star, "
-                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 75, 0, ?)",
-                (datetime.now().isoformat(),),
+                "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 75, 0, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         result = database.perform_gacha_pulls(10, 1, 1, rng=QueueRng(0, 0))
         self.assertTrue(result["purchased"])
@@ -271,8 +278,8 @@ class GachaTests(unittest.TestCase):
                 "INSERT INTO shop_item_definitions "
                 "(guild_id, item_key, template_type, enabled, price, config_json, updated_at) "
                 "VALUES (10, 'vip_role', 'fixed_role', 1, 1000, "
-                "'{\"role_id\": 555}', ?)",
-                (datetime.now().isoformat(),),
+                "'{\"role_id\": 555}', %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         before = database.get_user_balance(1)
         purchase = database.purchase_custom_shop_item(10, 1, "vip_role")
@@ -298,8 +305,8 @@ class GachaTests(unittest.TestCase):
                 "INSERT INTO shop_item_definitions "
                 "(guild_id, item_key, template_type, enabled, price, config_json, updated_at) "
                 "VALUES (10, 'timed_vip', 'timed_role', 1, 1000, "
-                "'{\"role_id\": 777, \"duration_days\": 30}', ?)",
-                (datetime.now().isoformat(),),
+                "'{\"role_id\": 777, \"duration_days\": 30}', %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         first = database.purchase_custom_shop_item(10, 1, "timed_vip")
         second = database.purchase_custom_shop_item(10, 1, "timed_vip")
@@ -313,7 +320,7 @@ class GachaTests(unittest.TestCase):
                 "SELECT expires_at FROM timed_entitlements WHERE guild_id = 10 "
                 "AND user_id = 1 AND entitlement_key = 'role:777' AND status = 'active'"
             ).fetchone()[0]
-        self.assertEqual(expires_at, first["expires_at"])
+        self.assertEqual(parse_stored(expires_at), parse_stored(first["expires_at"]))
 
     def test_a_slow_action_keeps_its_lease_and_is_not_posted_twice(self):
         """Re-queueing on elapsed time alone made a slow multi-section publish
@@ -327,7 +334,7 @@ class GachaTests(unittest.TestCase):
         with database.get_connection() as conn:
             conn.execute(
                 "UPDATE control_actions SET started_at = '2000-01-01T00:00:00+00:00' "
-                "WHERE action_id = ?", (action_id,),
+                "WHERE action_id = %s", (action_id,),
             )
         database.renew_control_action_lease(action_id)
         self.assertIsNone(database.claim_control_action())
@@ -336,7 +343,7 @@ class GachaTests(unittest.TestCase):
         with database.get_connection() as conn:
             conn.execute(
                 "UPDATE control_actions SET lease_expires_at = '2000-01-01T00:00:00+00:00' "
-                "WHERE action_id = ?", (action_id,),
+                "WHERE action_id = %s", (action_id,),
             )
         recovered = database.claim_control_action()
         self.assertEqual(recovered["action_id"], action_id)
@@ -407,7 +414,7 @@ class GachaTests(unittest.TestCase):
         database.finish_control_action(action_id, True)
         with database.get_connection() as conn:
             status = conn.execute(
-                "SELECT status FROM control_actions WHERE action_id = ?", (action_id,)
+                "SELECT status FROM control_actions WHERE action_id = %s", (action_id,)
             ).fetchone()[0]
         self.assertEqual(status, "completed")
 
@@ -420,6 +427,7 @@ class GachaBannerTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "banners.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
@@ -557,7 +565,7 @@ class GachaBannerTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO gacha_banners (guild_id, banner_key, display_name, "
                 "enabled, config_json, revision, updated_at) "
-                "VALUES (10, 'legacy', NULL, 1, ?, 1, '2026-01-01T00:00:00+00:00')",
+                "VALUES (10, 'legacy', NULL, 1, %s, 1, '2026-01-01T00:00:00+00:00')",
                 (json.dumps(database.DEFAULT_GACHA_CONFIG, sort_keys=True),),
             )
             conn.commit()
@@ -572,6 +580,7 @@ class GachaBannerScheduleTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "banners.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
@@ -692,6 +701,7 @@ class BannerRewardReconciliationTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "gacha.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(42, "Guild")
 
@@ -793,6 +803,7 @@ class FeaturedSplitTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "gacha.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
@@ -829,10 +840,10 @@ class FeaturedSplitTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO gacha_pity (guild_id, user_id, banner_key, "
                 "pulls_since_five_star, pulls_toward_four_star, updated_at) "
-                "VALUES (10, 1, ?, 99, 0, ?) "
+                "VALUES (10, 1, %s, 99, 0, %s) "
                 "ON CONFLICT(guild_id, user_id, banner_key) DO UPDATE SET "
                 "pulls_since_five_star = 99",
-                (banner_key, datetime.now().isoformat()),
+                (banner_key, datetime.now(timezone.utc).isoformat()),
             )
         return database.perform_gacha_pulls(
             10, 1, 1, banner_key=banner_key, rng=QueueRng(*rng_points))
@@ -842,7 +853,7 @@ class FeaturedSplitTests(unittest.TestCase):
             return conn.execute(
                 "SELECT guaranteed_featured_five, guaranteed_featured_four "
                 "FROM gacha_pity WHERE guild_id = 10 AND user_id = 1 "
-                "AND banner_key = ?", (banner_key,)
+                "AND banner_key = %s", (banner_key,)
             ).fetchone()
 
     # -- winning and losing --------------------------------------------------
@@ -906,7 +917,7 @@ class FeaturedSplitTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO gacha_pity (guild_id, user_id, banner_key, "
                 "pulls_since_five_star, pulls_toward_four_star, updated_at) "
-                "VALUES (10, 1, 'event', 0, 9, ?)", (datetime.now().isoformat(),))
+                "VALUES (10, 1, 'event', 0, 9, %s)", (datetime.now(timezone.utc).isoformat(),))
         # Tier draw, then the split roll: the tenth-pull floor forces a 4-star.
         result = database.perform_gacha_pulls(
             10, 1, 1, banner_key="event", rng=QueueRng(0, 0))
@@ -961,7 +972,7 @@ class FeaturedSplitTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO gacha_pity (guild_id, user_id, banner_key, "
                 "pulls_since_five_star, pulls_toward_four_star, updated_at) "
-                "VALUES (10, 1, 'standard', 0, 0, ?)", (datetime.now().isoformat(),))
+                "VALUES (10, 1, 'standard', 0, 0, %s)", (datetime.now(timezone.utc).isoformat(),))
         database.perform_gacha_pulls(10, 1, 10, rng=counter)
         # One tier draw plus one reward draw per pull, and nothing else.
         self.assertEqual(20, counter.calls)
@@ -1065,8 +1076,8 @@ class FeaturedSplitTests(unittest.TestCase):
         with database.get_connection() as conn:
             conn.execute(
                 "INSERT INTO gacha_banners (guild_id, banner_key, enabled, "
-                "config_json, revision, updated_at) VALUES (10, 'old', 1, ?, 3, ?)",
-                (json.dumps(legacy), datetime.now().isoformat()),
+                "config_json, revision, updated_at) VALUES (10, 'old', 1, %s, 3, %s)",
+                (json.dumps(legacy), datetime.now(timezone.utc).isoformat()),
             )
         listed = {banner["banner_key"]: banner
                   for banner in database.list_gacha_banners(10)}
@@ -1102,6 +1113,7 @@ class FeaturedSplitRateTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "gacha.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
@@ -1235,6 +1247,7 @@ class PityHistoryTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "gacha.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
@@ -1258,8 +1271,8 @@ class PityHistoryTests(unittest.TestCase):
                 "INSERT INTO gacha_pulls (guild_id, user_id, banner_key, "
                 "banner_revision, rarity, reward_key, reward_json, pity_before, "
                 "soft_pity, hard_pity, created_at) "
-                "VALUES (10, 1, 'standard', 1, 5, 'big_vault', '{}', 89, 1, 0, ?)",
-                (datetime.now().isoformat(),),
+                "VALUES (10, 1, 'standard', 1, 5, 'big_vault', '{}', 89, 1, 0, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         entry = database.get_five_star_history(10, 1)[0]
         self.assertEqual(90, entry["pity"], "the 90th pull, not the 89th")
@@ -1273,8 +1286,8 @@ class PityHistoryTests(unittest.TestCase):
                 "INSERT INTO gacha_pulls (guild_id, user_id, banner_key, "
                 "banner_revision, rarity, reward_key, reward_json, pity_before, "
                 "soft_pity, hard_pity, created_at) "
-                "VALUES (10, 1, 'standard', 1, 3, 'coins_250', '{}', 0, 0, 0, ?)",
-                (datetime.now().isoformat(),),
+                "VALUES (10, 1, 'standard', 1, 3, 'coins_250', '{}', 0, 0, 0, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
             newest = conn.execute(
                 "SELECT reward_key FROM gacha_pulls WHERE rarity = 5 "
@@ -1304,8 +1317,8 @@ class PityHistoryTests(unittest.TestCase):
                 "INSERT INTO gacha_pulls (guild_id, user_id, banner_key, "
                 "banner_revision, rarity, reward_key, reward_json, pity_before, "
                 "soft_pity, hard_pity, created_at) "
-                "VALUES (20, 1, 'standard', 1, 5, 'big_vault', '{}', 5, 0, 0, ?)",
-                (datetime.now().isoformat(),),
+                "VALUES (20, 1, 'standard', 1, 5, 'big_vault', '{}', 5, 0, 0, %s)",
+                (datetime.now(timezone.utc).isoformat(),),
             )
         self.assertEqual([], database.get_five_star_history(10, 1))
         self.assertEqual(1, len(database.get_five_star_history(20, 1)))
@@ -1345,6 +1358,7 @@ class GachaAssetsSurviveShopBeingOffTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "gacha_assets.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(self.GUILD, "Guild")
 
@@ -1357,7 +1371,7 @@ class GachaAssetsSurviveShopBeingOffTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO reward_vouchers (voucher_id, guild_id, user_id, "
                 "reward_key, source_type, duration_days, status, acquired_at) "
-                "VALUES (?, ?, ?, ?, 'gacha', ?, 'available', '2026-01-01')",
+                "VALUES (%s, %s, %s, %s, 'gacha', %s, 'available', '2026-01-01')",
                 (voucher_id, self.GUILD, self.MEMBER, reward_key, days))
             conn.commit()
         return voucher_id
@@ -1385,7 +1399,7 @@ class GachaAssetsSurviveShopBeingOffTests(unittest.TestCase):
         with database.get_connection() as conn:
             rows = conn.execute(
                 "SELECT entitlement_key, discord_item_id FROM timed_entitlements "
-                "WHERE guild_id = ? AND user_id = ?",
+                "WHERE guild_id = %s AND user_id = %s",
                 (self.GUILD, self.MEMBER)).fetchall()
         self.assertEqual([("emoji", "998877")], rows,
                          "the grant must land in timed_entitlements, not rented_items")
@@ -1446,6 +1460,7 @@ class ManualEntitlementGrantTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "manual_grants.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(self.GUILD, "Guild")
 
@@ -1461,7 +1476,7 @@ class ManualEntitlementGrantTests(unittest.TestCase):
             row = conn.execute(
                 "SELECT entitlement_key, discord_item_id, source_voucher_id, "
                 "source_type, granted_by, status FROM timed_entitlements "
-                "WHERE entitlement_id = ?", (result["entitlement_id"],)
+                "WHERE entitlement_id = %s", (result["entitlement_id"],)
             ).fetchone()
         self.assertEqual(
             ("sticker", "999", None, "manual", self.STAFF, "active"), row)
@@ -1540,6 +1555,7 @@ class AssetPresenceVerificationTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "asset_presence.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(self.GUILD, "Guild")
 
@@ -1567,7 +1583,7 @@ class AssetPresenceVerificationTests(unittest.IsolatedAsyncioTestCase):
             conn.execute(
                 "INSERT INTO timed_entitlements (guild_id, user_id, "
                 "entitlement_key, starts_at, expires_at, source_type) "
-                "VALUES (?, ?, 'premium', '2026-01-01', '2099-01-01', 'manual')",
+                "VALUES (%s, %s, 'premium', '2026-01-01', '2099-01-01', 'manual')",
                 (self.GUILD, self.MEMBER))
             conn.commit()
         rows = database.get_active_asset_entitlements()
@@ -1588,13 +1604,13 @@ class AssetPresenceVerificationTests(unittest.IsolatedAsyncioTestCase):
         with database.get_connection() as conn:
             conn.execute(
                 "UPDATE timed_entitlements SET status = 'expired' "
-                "WHERE entitlement_id = ?", (entitlement_id,))
+                "WHERE entitlement_id = %s", (entitlement_id,))
             conn.commit()
         database.set_entitlement_discord_presence(entitlement_id, True)
         with database.get_connection() as conn:
             value = conn.execute(
                 "SELECT discord_missing_since FROM timed_entitlements "
-                "WHERE entitlement_id = ?", (entitlement_id,)).fetchone()[0]
+                "WHERE entitlement_id = %s", (entitlement_id,)).fetchone()[0]
         self.assertIsNone(value, "an expired row must not be flagged missing")
 
     # --------------------------------------------------------- cog layer
@@ -1724,6 +1740,7 @@ class RewardLabelResolutionTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "labels.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
         database.create_shop_item_definition(1, 42, {

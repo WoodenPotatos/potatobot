@@ -33,6 +33,9 @@ from core import managed_messages
 from core import settings_cache
 from core.feature_access import refresh_feature_cache
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 
 class MarkdownPreviewTests(unittest.TestCase):
     """The preview renders Discord's emphasis, including nested.
@@ -55,6 +58,7 @@ class ManagedMessageRouteTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "dashboard.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
         dashboard_api.app.config.update(TESTING=True)
@@ -268,6 +272,7 @@ class RenderTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "render.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
         settings_cache.invalidate()
@@ -365,6 +370,7 @@ class ButtonLabelTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "labels.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
         settings_cache.invalidate()
@@ -977,6 +983,7 @@ class PublishEditsThePostedMessageWhereItIsTests(unittest.IsolatedAsyncioTestCas
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "publish.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "Guild")
         refresh_feature_cache(111)

@@ -25,6 +25,26 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
+    # The suite's PostgreSQL (2.21). Pinned by digest like every action, and
+    # created with the built-in C.UTF-8 locale the deployment uses, so text
+    # sorts by code point as it did on SQLite. Trust authentication on a
+    # throwaway service keeps a password out of the repository. With no
+    # server the PostgreSQL tests fail rather than skip (tests/pg_harness.py).
+    services:
+      postgres:
+        image: postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
+        env:
+          POSTGRES_USER: potatobot
+          POSTGRES_DB: potatobot
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U potatobot"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      POTATOBOT_TEST_DSN: postgresql://potatobot@127.0.0.1:55432/potatobot
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7

@@ -25,6 +25,9 @@ if ROOT not in sys.path:
 
 from core import database
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 
 def strip_comments(source: str) -> str:
     """Source without comment lines.
@@ -80,6 +83,7 @@ class SetUserExperienceTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.original = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp.name, "levels.db")
+        pg_harness.fresh_database()
         database.initialize_database()
 
     def tearDown(self):
@@ -140,6 +144,7 @@ class DeltaReportsOldExperienceTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.original = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp.name, "levels.db")
+        pg_harness.fresh_database()
         database.initialize_database()
 
     def tearDown(self):

@@ -21,6 +21,9 @@ if ROOT not in sys.path:
 
 from core import database
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 GUILD = 4242
 MESSAGE = 1420070400000000001
 CHANNEL = 1420070400000000002
@@ -35,6 +38,7 @@ class LfgPostStateTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "lfg.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Guild")
 
@@ -168,7 +172,7 @@ class LfgPostStateTests(unittest.TestCase):
                                  game_text="Old")
         with database.get_connection() as conn:
             conn.execute("UPDATE lfg_posts SET created_at = '2020-01-01T00:00:00+00:00' "
-                         "WHERE message_id = ?", (MESSAGE + 1,))
+                         "WHERE message_id = %s", (MESSAGE + 1,))
             conn.commit()
         self.assertEqual(1, database.prune_lfg_posts(7))
         self.assertIsNotNone(database.get_lfg_post(GUILD, MESSAGE))
@@ -254,6 +258,7 @@ class ExpiredLfgPostReadTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "lfg.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Guild")
 
@@ -266,7 +271,7 @@ class ExpiredLfgPostReadTests(unittest.TestCase):
         database.create_lfg_post(guild, message_id, CHANNEL, HOST, 2, game_text="Valorant")
         stamp = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
         with database.get_connection() as conn:
-            conn.execute("UPDATE lfg_posts SET created_at = ? WHERE message_id = ?",
+            conn.execute("UPDATE lfg_posts SET created_at = %s WHERE message_id = %s",
                          (stamp, message_id))
             conn.commit()
 

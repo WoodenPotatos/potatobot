@@ -1,3 +1,4 @@
+import sys
 import json
 import os
 import tempfile
@@ -5,6 +6,7 @@ import threading
 import time
 import re
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -16,12 +18,16 @@ from core import settings_cache
 from core import database
 from core import permission_audit
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 
 class DashboardSecurityTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "dashboard.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
         dashboard_api.app.config.update(TESTING=True)
@@ -800,7 +806,7 @@ class DashboardSecurityTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO reward_vouchers (voucher_id, guild_id, user_id, "
                 "reward_key, duration_days, status, acquired_at) VALUES "
-                "('v-test', ?, ?, 'emoji_30d', 30, 'available', '2026-01-01')",
+                "('v-test', %s, %s, 'emoji_30d', 30, 'available', '2026-01-01')",
                 (guild_id, user_id),
             )
             conn.commit()
@@ -810,7 +816,7 @@ class DashboardSecurityTests(unittest.TestCase):
     def _queued_action_types(self, guild_id=123):
         with database.get_connection() as conn:
             return [row[0] for row in conn.execute(
-                "SELECT action_type FROM control_actions WHERE guild_id = ?",
+                "SELECT action_type FROM control_actions WHERE guild_id = %s",
                 (guild_id,)).fetchall()]
 
     def test_completing_a_linked_fulfillment_queues_a_ticket_notice(self):
@@ -1088,7 +1094,7 @@ class DashboardSecurityTests(unittest.TestCase):
         with database.get_connection() as conn:
             conn.execute(
                 "UPDATE control_actions SET completed_at = '2000-01-01T00:00:00+00:00' "
-                "WHERE action_id = ?", (done,),
+                "WHERE action_id = %s", (done,),
             )
         self.assertEqual(database.prune_control_actions(30), 1)
         with database.get_connection() as conn:
@@ -1424,7 +1430,7 @@ class DashboardSecurityTests(unittest.TestCase):
         with database.get_connection() as conn:
             row = conn.execute(
                 "SELECT action_type, actor_id, payload_json, status "
-                "FROM control_actions WHERE action_id = ?", (action_id,)
+                "FROM control_actions WHERE action_id = %s", (action_id,)
             ).fetchone()
         self.assertEqual(row[0], "erase_member")
         self.assertEqual(row[1], 42)
@@ -1819,6 +1825,23 @@ if __name__ == "__main__":
     unittest.main()
 
 
+
+class TimestampWireFormatTests(unittest.TestCase):
+    """A `datetime` reaching a response is ISO-8601 text, never Flask's RFC 822.
+
+    No route hands one over on SQLite; every `timestamptz` read on PostgreSQL
+    is one, so the app's JSON provider is the one place that converts.
+    """
+
+    def test_a_datetime_is_written_as_iso(self):
+        moment = datetime(2026, 10, 31, 20, 41, 33, tzinfo=timezone.utc)
+        self.assertEqual({"at": "2026-10-31T20:41:33+00:00"},
+                         json.loads(dashboard_api.app.json.dumps({"at": moment})))
+
+    def test_everything_else_encodes_as_before(self):
+        value = {"id": "1420070400000000042", "n": 3, "none": None, "list": [1, "a"]}
+        self.assertEqual(value, json.loads(dashboard_api.app.json.dumps(value)))
+
 class SnowflakeWireFormatTests(unittest.TestCase):
     """A Discord id must survive the round trip through the browser.
 
@@ -2099,6 +2122,7 @@ class AuditActorNameTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "dashboard.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
         dashboard_api.app.config.update(TESTING=True)

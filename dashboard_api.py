@@ -14,7 +14,6 @@ import os
 import hmac
 import re
 import secrets
-import sqlite3
 import threading
 import time
 from collections import defaultdict, deque
@@ -31,6 +30,7 @@ from cogs.utils import (
 from dotenv import load_dotenv
 from flask import (Flask, g, has_request_context, jsonify, redirect, request,
                    send_from_directory, session)
+from flask.json.provider import DefaultJSONProvider
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from core import version
@@ -65,6 +65,26 @@ dashboard_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashbo
 app = Flask(__name__, static_folder=dashboard_dir, static_url_path="/")
 
 
+class _WireJSONProvider(DefaultJSONProvider):
+    """Every response's JSON, with a timestamp as ISO-8601 text.
+
+    Flask's own encoder writes a date as RFC 822 ("Sat, 31 Oct 2026 …")
+    without complaint. No route hands it one on SQLite, where stored
+    timestamps are already text; PostgreSQL returns a `datetime` for every
+    `timestamptz`, and this is the one place that turns it into the ISO the
+    client parses (docs/subsystems/database.md).
+    """
+
+    @staticmethod
+    def default(o):
+        if isinstance(o, datetime):
+            return o.isoformat()
+        return DefaultJSONProvider.default(o)
+
+
+app.json = _WireJSONProvider(app)
+
+
 #: Where the generated session secret lived before it followed the database.
 LEGACY_SESSION_SECRET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                           ".dashboard_session_secret")
@@ -80,14 +100,14 @@ def _load_session_secret() -> str:
             )
         return configured
 
-    # Beside the database, which is the one directory every deployment shape
-    # keeps writable and persistent: in the image `/app` is root-owned and is
-    # not the volume, so a secret there either fails to write or dies with the
-    # container, ending every session. Unset, the database is beside this file
-    # anyway. A secret already at the old spot is still read first, so moving
-    # the default logs nobody out.
-    secret_path = os.path.join(
-        os.path.dirname(os.path.abspath(database.DB_PATH)), ".dashboard_session_secret")
+    # In the data directory (beside the database unless POTATOBOT_DATA_DIR
+    # says otherwise), the one directory every deployment shape keeps writable
+    # and persistent: in the image `/app` is root-owned and is not the volume,
+    # so a secret there either fails to write or dies with the container,
+    # ending every session. Unset, the database is beside this file anyway. A
+    # secret already at the old spot is still read first, so moving the default
+    # logs nobody out.
+    secret_path = os.path.join(database.data_dir(), ".dashboard_session_secret")
     for candidate in dict.fromkeys((LEGACY_SESSION_SECRET_PATH, secret_path)):
         try:
             with open(candidate, "r", encoding="utf-8") as secret_file:
@@ -1713,7 +1733,7 @@ def realms():
                 "data": {"realm_id": realm_id},
             }
         ), 201
-    except (ValueError, sqlite3.IntegrityError) as error:
+    except (ValueError, database.IntegrityError) as error:
         return invalid_request_response(error)
 
 
@@ -1892,7 +1912,7 @@ def _mirror_price_and_reward_tables(guild_id: int, changed: dict):
             if key.startswith("shop_price_"):
                 conn.execute(
                     "INSERT INTO shop_prices (guild_id, item_id, price) "
-                    "VALUES (?, ?, ?) ON CONFLICT(guild_id, item_id) "
+                    "VALUES (%s, %s, %s) ON CONFLICT(guild_id, item_id) "
                     "DO UPDATE SET price = excluded.price",
                     (guild_id, key.removeprefix("shop_price_"), value),
                 )
@@ -1904,14 +1924,15 @@ def _mirror_price_and_reward_tables(guild_id: int, changed: dict):
                 # Read it on this connection rather than opening a nested one.
                 default = conn.execute(
                     "SELECT coin_reward, xp_reward FROM rewards "
-                    "WHERE guild_id = 0 AND activity_id = ?", (activity,)
+                    "WHERE guild_id = 0 AND activity_id = %s", (activity,)
                 ).fetchone()
                 default_coin, default_xp = default if default else (0, 0)
                 conn.execute(
                     f"INSERT INTO rewards "
                     f"(guild_id, activity_id, coin_reward, xp_reward) "
-                    f"VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, activity_id) "
-                    f"DO UPDATE SET {column} = excluded.{column}",
+                    f"VALUES (%s, %s, %s, %s) ON CONFLICT(guild_id, activity_id) "
+                    f"DO UPDATE SET {database.sql_identifier(column)} = "
+                    f"excluded.{database.sql_identifier(column)}",
                     (
                         guild_id, activity,
                         value if column == "coin_reward" else default_coin,
@@ -2880,7 +2901,7 @@ def create_guild_shop_item(guild_id):
         database.create_shop_item_definition(guild_id, actor_id(), item)
         return jsonify({"status": "success",
                         "message": t("dashboard.shop_item_created")}), 201
-    except (ValueError, sqlite3.IntegrityError) as error:
+    except (ValueError, database.IntegrityError) as error:
         return invalid_request_response(error)
 
 

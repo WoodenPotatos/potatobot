@@ -7,6 +7,7 @@ distinct empty-state message is what actually gets sent when nobody
 qualifies.
 """
 
+import sys
 import os
 import tempfile
 import unittest
@@ -14,6 +15,9 @@ import unittest
 from core import database
 from cogs.utils import t
 from cogs.profiles import LeaderboardView
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 
 GUILD = 4242
@@ -45,6 +49,7 @@ class LeaderboardViewTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = database.DB_PATH
         database.DB_PATH = os.path.join(self.temp_dir.name, "leaderboard.db")
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Leaderboard Guild")
         self.alice = _FakeMember(1, "Alice")
@@ -59,7 +64,7 @@ class LeaderboardViewTests(unittest.IsolatedAsyncioTestCase):
         with database.get_connection() as conn:
             conn.execute(
                 "INSERT INTO users (user_id, balance, xp, streak_count) "
-                "VALUES (?, ?, ?, ?)", (user_id, balance, xp, streak_count),
+                "VALUES (%s, %s, %s, %s)", (user_id, balance, xp, streak_count),
             )
 
     def seed_five_star(self, user_id, pity_before, banner_key=None):
@@ -70,7 +75,7 @@ class LeaderboardViewTests(unittest.IsolatedAsyncioTestCase):
                 "banner_revision, rarity, reward_key, reward_json, pity_before, "
                 "soft_pity, hard_pity, four_star_guarantee, featured, "
                 "featured_guaranteed, created_at) VALUES "
-                "(?, ?, ?, 1, 5, 'test_reward', '{}', ?, 0, 0, 0, 0, 0, "
+                "(%s, %s, %s, 1, 5, 'test_reward', '{}', %s, 0, 0, 0, 0, 0, "
                 "'2026-01-01T00:00:00+00:00')",
                 (GUILD, user_id, banner_key or database.DEFAULT_GACHA_BANNER_KEY,
                  pity_before),

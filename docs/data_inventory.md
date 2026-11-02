@@ -15,7 +15,7 @@ canonical declaration of where a member appears is `SUBJECT_TABLES`,
 `ERASE_REKEY_ACTOR` in `core/database.py`; a coverage test reads them, so a new
 per-member table is added there first and here second.
 
-## 1. SQLite tables
+## 1. Database tables
 
 All DDL is in `core/database.py` (`_create_current_schema`,
 `_create_scoped_schema`, `_create_integrity_schema`,
@@ -40,7 +40,7 @@ re-keyed to the tombstone, **–** holds no member id.
 | `realms`, `realm_guilds`, `guild_data_scopes` | `created_by`, `approved_by`, `updated_by` (operators) | realm name (operator) | T / N / N | **no** |
 | `user_sharing_preferences` | `user_id` | opt-out flag, TS | D | yes |
 | `feature_flags`, `guild_settings`, `instance_settings` | `updated_by` (administrator) | setting values; `setting.update` values may embed member ids (`ignored_users`) or operator text | N | **no** |
-| `lfg_posts` | `host_id`, `joined_json` (UIDs) | FREE TEXT `game_text`; `created_at` TS | D as host; removed from `joined_json` | yes (host, or member of `joined_json` via `json_each`) |
+| `lfg_posts` | `host_id`, `joined_json` (UIDs) | FREE TEXT `game_text`; `created_at` TS | D as host; removed from `joined_json` | yes (host, or member of `joined_json`, matched exactly in Python) |
 | `minigame_state` | `last_user_id` | FREE TEXT `value` (current number/word); TS | N | yes |
 | `minigame_used_words` | none by design | FREE TEXT `word` (folded), `used_at` | untouched; cleared on chain reset | – |
 | `dashboard_access_invalidations` | `user_id` | TS | D; also pruned after 24 h | yes |
@@ -87,17 +87,17 @@ tombstone and per-table counts. Discord grants are revoked first by
 `revoke_all_entitlements`. `/deletemydata` needs one confirmation within 60 s;
 the host can queue the same erasure from the dashboard's Privacy page.
 
-## 2. Files outside SQLite
+## 2. Files outside the database
 
 | What | Where | Content | Retention |
 | --- | --- | --- | --- |
 | Bot log | `LOG_DIR/bot.log` (`/data/logs` in the container) | see §3 | `RotatingFileHandler` 5 MB × 10 |
 | stdout → journald | host journal | same lines | host `SystemMaxUse=500M`; about two months on the reference host |
-| Pre-migration backups | `{DB_PATH}.backup-v{n}-{timestamp}`, mode 0600 | full database copy | deleted by `scripts/offsite_backup.py --prune-local-backups-days N` after the night's offsite copy verifies, by the date in the file name; the deployed units pass 90; the flag defaults to 0 (keep) |
-| Offsite backup | `rclone crypt` remote on Google Drive | full database copy, encrypted before upload | `--retention-days` 30 |
+| Pre-migration backups | `backups/potatobot-v{n}-{timestamp}.dump` in the data directory (a `pg_dump`, mode 0600, since 2.21), and 2.20's `{DB_PATH}.backup-v{n}-{timestamp}` SQLite copies until they are archived | full database copy | deleted by `scripts/offsite_backup.py --prune-local-backups-days N` (both kinds) after the night's offsite copy verifies, by the date in the file name; the deployed units pass 90; the flag defaults to 0 (keep) |
+| Offsite backup | `rclone crypt` remote on Google Drive | full database dump (`pg_dump`), encrypted before upload | `--retention-days` 30 |
 | Everydle state | `data/everydle_state.json` or `POTATOBOT_EVERYDLE_STATE_PATH` | daily target ids | no member data |
-| Welcome-card backgrounds | `core/welcome_card.py` `background_path` | operator-uploaded PNG per guild | until replaced or deleted from the dashboard |
-| Session secret | `.dashboard_session_secret`, 0600 | random key | until rotated |
+| Welcome-card backgrounds | `cards/` in the data directory (`POTATOBOT_DATA_DIR`, else beside the database; `core/welcome_card.py` `background_path`) | operator-uploaded PNG per guild | until replaced or deleted from the dashboard |
+| Session secret | `.dashboard_session_secret` in the data directory, 0600 | random key | until rotated |
 
 ## 3. Operational log content
 
