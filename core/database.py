@@ -1,4 +1,9 @@
-import sqlite3
+"""The schema owner: DDL, migrations, connections and every query.
+
+Rules for changing it, including the engine-neutral SQL the PostgreSQL move
+depends on: docs/subsystems/database.md.
+"""
+
 import logging
 import math
 import os
@@ -9,10 +14,15 @@ import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing, contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 
-from core.clock import local_date, parse_stored, utc_now
+import psycopg
+from psycopg.adapt import Dumper
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
+
+from core.clock import local_date, parse_stored, stored_iso, utc_now
 
 from core import item_catalog
 
@@ -153,15 +163,39 @@ async def run(fn, *args, **kwargs):
 
 
 def shutdown_executors(wait: bool = True):
-    """Release database worker threads during orderly process shutdown."""
+    """Release database worker threads and connections during orderly shutdown."""
     _READ_EXECUTOR.shutdown(wait=wait, cancel_futures=True)
     _WRITE_EXECUTOR.shutdown(wait=wait, cancel_futures=True)
+    close_connection_pool()
 
 # Resolve the database from an explicit deployment override or the repository
 # root. This module lives in `core/`, so the root is two levels up -- one too
 # few would point a whole installation at `core/economy.db`.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.getenv("POTATOBOT_DB_PATH", os.path.join(BASE_DIR, "economy.db"))
+# Which PostgreSQL to use: a libpq connection string, or empty for libpq's own
+# environment (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD or PGPASSFILE),
+# which is how a deployment configures it, so no code here parses or logs a
+# secret. A module global read at call time, like DATA_DIR: a test or a tool
+# points it at another database by construction.
+DSN = ""
+
+# Where the installation's own files live -- the dashboard session secret, the
+# welcome-card backgrounds, the pre-migration dumps -- named apart from the
+# database, because on PostgreSQL the database has no directory to live beside.
+# Unset, empty or blank means beside the code (the repository root, or `/app`
+# in the image, which sets it to `/data` instead): where SQLite's `economy.db`
+# and these files sat by default, so a checkout that never configured a path
+# keeps finding them (the maintainer, 2026-11-02, when SQLite and its
+# `POTATOBOT_DB_PATH` were removed). A module global read at call time: a test
+# or a tool points it at a temporary directory by construction.
+DATA_DIR = os.getenv("POTATOBOT_DATA_DIR", "").strip() or None
+
+
+def data_dir() -> str:
+    """The directory the installation's own files live in."""
+    if DATA_DIR:
+        return os.path.abspath(DATA_DIR)
+    return BASE_DIR
 
 VALID_COOLDOWN_COLUMNS = {
     "last_daily", "last_job", "last_rob",
@@ -170,13 +204,11 @@ VALID_COOLDOWN_COLUMNS = {
     "last_dbdle_survivor", "last_dbdle_perk",
 }
 
-LATEST_SCHEMA_VERSION = 26
-
 # The largest amount any single balance change, stake or transfer may carry.
-# Far above any real balance, and far below 2**63: an amount past that reaches
-# `sqlite3` as a Python int it cannot bind and raises `OverflowError`, which no
-# `except sqlite3.Error` catches -- so `/pay` with a twenty-digit amount died silently
-# from the member's side. Every command refuses first with a message; this is
+# Far above any real balance, and far below 2**63, the edge of a `bigint`: an
+# amount past that once reached the driver as an int it could not bind and
+# raised `OverflowError`, which no `except EngineError` catches -- so `/pay`
+# with a twenty-digit amount died silently from the member's side. Every command refuses first with a message; this is
 # the backstop for the paths that do not.
 MAX_AMOUNT = 10**12
 
@@ -314,6 +346,33 @@ DEFAULT_GACHA_CONFIG: dict = {
 }
 
 
+# The driver's exceptions under engine-neutral names. Handlers catch these and
+# never the driver's own module, so an engine change repoints these two lines
+# rather than every handler (2.20.1a). ``EngineError`` is the
+# driver's root class, DB-API ``Error`` -- deliberately not DB-API's narrower
+# ``DatabaseError``, which would miss an interface error.
+EngineError = psycopg.Error
+IntegrityError = psycopg.IntegrityError
+
+_PLAIN_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_]*")
+
+
+def sql_identifier(name: str) -> str:
+    """A table or column name to interpolate into SQL, or `ValueError`.
+
+    Only a plain lowercase identifier passes, and it is returned unchanged:
+    every name in this schema is one, both engines accept it unquoted, and the
+    SQL text stays byte-identical. Quoting is deliberately not the answer --
+    SQLite reads a double-quoted name that matches no column as a string
+    literal, so a typo would select text instead of failing. Every runtime
+    f-string that names a table or column goes through here
+    (`TransactionShapeTests`, docs/subsystems/database.md).
+    """
+    if not isinstance(name, str) or not _PLAIN_IDENTIFIER.fullmatch(name):
+        raise ValueError(f"not a plain SQL identifier: {name!r}")
+    return name
+
+
 class DatabaseOperationError(RuntimeError):
     """Raised when a critical database write cannot be committed."""
 
@@ -351,7 +410,7 @@ def write_settings_audit(conn, guild_id: int | None, actor_id: int, action: str,
     conn.execute(
         "INSERT INTO settings_audit "
         "(guild_id, actor_id, action, target_key, old_value_json, "
-        "new_value_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "new_value_json, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
         (
             guild_id, int(actor_id), action, target_key,
             json.dumps(old_value, sort_keys=True) if old_value is not None else None,
@@ -374,933 +433,15 @@ def record_settings_audit(guild_id: int | None, actor_id: int, action: str,
 # no legacy guild is ever guessed at migration time. Adding a column to a primary
 # key is not something SQLite can do in place, so these tables are rebuilt rather
 # than altered.
-_SHOP_PRICES_DDL = (
-    "guild_id INTEGER NOT NULL DEFAULT 0, item_id TEXT NOT NULL, price INTEGER, "
-    "PRIMARY KEY (guild_id, item_id)"
-)
-_REWARDS_DDL = (
-    "guild_id INTEGER NOT NULL DEFAULT 0, activity_id TEXT NOT NULL, "
-    "coin_reward INTEGER, xp_reward INTEGER, PRIMARY KEY (guild_id, activity_id)"
-)
-_SERVER_CONFIG_DDL = (
-    "guild_id INTEGER NOT NULL DEFAULT 0, config_key TEXT NOT NULL, "
-    "config_value TEXT, PRIMARY KEY (guild_id, config_key)"
-)
-_VOICE_SETTINGS_DDL = (
-    "guild_id INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL, "
-    "channel_name TEXT, user_limit INTEGER DEFAULT 0, locked INTEGER DEFAULT 0, "
-    "bitrate INTEGER DEFAULT 64000, PRIMARY KEY (guild_id, user_id)"
-)
-_VOICE_PERMISSIONS_DDL = (
-    "guild_id INTEGER NOT NULL DEFAULT 0, owner_id INTEGER NOT NULL, "
-    "target_id INTEGER NOT NULL, is_allowed INTEGER, "
-    "PRIMARY KEY (guild_id, owner_id, target_id)"
-)
-# A channel snowflake is already globally unique, so this table needs the populated
-# column and nothing more; its primary key is unchanged.
-_ACTIVE_CHANNELS_DDL = (
-    "channel_id INTEGER PRIMARY KEY, owner_id INTEGER, "
-    "guild_id INTEGER NOT NULL DEFAULT 0"
-)
-
-# (table, column DDL, intended primary key, columns to copy across verbatim)
-GUILD_SCOPED_REBUILDS = (
-    ("shop_prices", _SHOP_PRICES_DDL, ("guild_id", "item_id"),
-     ("item_id", "price")),
-    ("rewards", _REWARDS_DDL, ("guild_id", "activity_id"),
-     ("activity_id", "coin_reward", "xp_reward")),
-    ("server_config", _SERVER_CONFIG_DDL, ("guild_id", "config_key"),
-     ("config_key", "config_value")),
-    ("voice_settings", _VOICE_SETTINGS_DDL, ("guild_id", "user_id"),
-     ("user_id", "channel_name", "user_limit", "locked", "bitrate")),
-    ("voice_permissions", _VOICE_PERMISSIONS_DDL,
-     ("guild_id", "owner_id", "target_id"),
-     ("owner_id", "target_id", "is_allowed")),
-    ("active_channels", _ACTIVE_CHANNELS_DDL, ("channel_id",),
-     ("channel_id", "owner_id")),
-)
-
-
-def _rebuild_guild_scoped_table(conn, table, columns_ddl, intended_pk, copy_columns):
-    """Give one table its guild dimension by create/copy/drop/rename.
-
-    Detection is by table shape rather than schema version, so a database left
-    half-migrated by an interrupted upgrade repairs itself and a second run is a
-    no-op. Every existing row is copied, with a pre-schema-8 NULL provenance
-    becoming 0 — the installation default — because ``CLAUDE.md`` forbids guessing
-    which guild legacy rows belonged to.
-    """
-    info = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    if not info:
-        return
-    # PRAGMA table_info rows are (cid, name, type, notnull, default, pk); ``pk`` is
-    # the 1-based position within the primary key, or 0 for a non-key column.
-    current_pk = tuple(
-        row[1] for row in sorted((row for row in info if row[5]), key=lambda r: r[5])
-    )
-    guild_column = next((row for row in info if row[1] == "guild_id"), None)
-    if current_pk == intended_pk and guild_column is not None and guild_column[3]:
-        return
-    provenance = "COALESCE(guild_id, 0)" if guild_column is not None else "0"
-
-    conn.execute(f"CREATE TABLE {table}__scoped ({columns_ddl})")
-    # A long-lived database can carry columns this version never declared — the
-    # dev copy still has active_channels.faction_group from a removed feature.
-    # Carry them across rather than let a rebuild become a silent data loss;
-    # they are re-added as nullable because ADD COLUMN cannot introduce a NOT
-    # NULL column without a default.
-    known = {row[1] for row in conn.execute(f"PRAGMA table_info({table}__scoped)")}
-    carried = [row for row in info if row[1] not in known]
-    for row in carried:
-        conn.execute(
-            f"ALTER TABLE {table}__scoped ADD COLUMN {row[1]} {row[2] or 'BLOB'}"
-        )
-        db_logger.warning(
-            "Preserved undeclared column %s.%s across the schema 8 rebuild.",
-            table, row[1],
-        )
-
-    copied = ", ".join(tuple(copy_columns) + tuple(row[1] for row in carried))
-    conn.execute(
-        f"INSERT INTO {table}__scoped (guild_id, {copied}) "
-        f"SELECT {provenance}, {copied} FROM {table}"
-    )
-    conn.execute(f"DROP TABLE {table}")
-    conn.execute(f"ALTER TABLE {table}__scoped RENAME TO {table}")
-    db_logger.info("Rebuilt %s with guild scope (schema 8).", table)
-
-
-def _create_current_schema(conn):
-    """Creates missing tables and fills missing columns without replacing data."""
-    conn.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)")
-    existing_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()
-    }
-    for column_name, declaration in USER_COLUMNS.items():
-        if column_name not in existing_columns:
-            conn.execute(f"ALTER TABLE users ADD COLUMN {column_name} {declaration}")
-
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_xp ON users(xp DESC)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_balance ON users(balance DESC)")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_users_streak "
-        "ON users(streak_count DESC) WHERE streak_count > 0"
-    )
-
-    conn.execute(f"CREATE TABLE IF NOT EXISTS voice_settings ({_VOICE_SETTINGS_DDL})")
-    conn.execute(
-        f"CREATE TABLE IF NOT EXISTS voice_permissions ({_VOICE_PERMISSIONS_DDL})"
-    )
-    conn.execute(f"CREATE TABLE IF NOT EXISTS active_channels ({_ACTIVE_CHANNELS_DDL})")
-    # Instance-wide, like the wallet it watches: a rolling per-user casino
-    # earnings window feeding `casino_rate_limit`. Purely additive and gated on
-    # table absence, never on a version check, so an interrupted upgrade is a
-    # no-op to repeat.
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS casino_earnings_window (
-            user_id INTEGER PRIMARY KEY,
-            window_started_at TEXT NOT NULL,
-            window_total INTEGER NOT NULL DEFAULT 0
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS warnings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
-            mod_id INTEGER, reason TEXT, date TEXT
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS rented_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, item_type TEXT,
-            discord_item_id TEXT, expires_at TEXT
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tickets (
-            channel_id INTEGER PRIMARY KEY, opener_id INTEGER NOT NULL,
-            created_at TEXT NOT NULL
-        )
-    """)
-    conn.execute(f"CREATE TABLE IF NOT EXISTS shop_prices ({_SHOP_PRICES_DDL})")
-    conn.execute(f"CREATE TABLE IF NOT EXISTS rewards ({_REWARDS_DDL})")
-    conn.execute(f"CREATE TABLE IF NOT EXISTS server_config ({_SERVER_CONFIG_DDL})")
-    # Add tenant provenance to legacy tables without changing existing rows.
-    for table_name in ("tickets", "warnings", "rented_items"):
-        columns = {
-            row[1] for row in conn.execute(f"PRAGMA table_info({table_name})")
-        }
-        if "guild_id" not in columns:
-            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN guild_id INTEGER")
-    ticket_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(tickets)")
-    }
-    if "ticket_type" not in ticket_columns:
-        # Legacy rows deliberately remain NULL because older versions did not
-        # distinguish support tickets from rental fulfilment channels.
-        conn.execute("ALTER TABLE tickets ADD COLUMN ticket_type TEXT")
-    if "claimer_id" not in ticket_columns:
-        # Schema 7. The claimer used to live only in memory, so a restart lost it
-        # and the closing transcript attributed the ticket to nobody.
-        conn.execute("ALTER TABLE tickets ADD COLUMN claimer_id INTEGER")
-
-    # Schema 8 puts guild_id into the primary key of every table above that was
-    # keyed only by an item, activity or user. Schema 7 had already added the
-    # column to the voice tables, but nothing read it and every row stayed NULL.
-    for rebuild in GUILD_SCOPED_REBUILDS:
-        _rebuild_guild_scoped_table(conn, *rebuild)
-
-    # Installation defaults live at guild_id 0, so the seeding stays idempotent
-    # under the composite key and a guild without an override reads these rows.
-    for key, value in SHOP_DEFAULTS.items():
-        conn.execute(
-            "INSERT OR IGNORE INTO shop_prices (guild_id, item_id, price) "
-            "VALUES (0, ?, ?)",
-            (key, value),
-        )
-    for key, values in REWARD_DEFAULTS.items():
-        conn.execute(
-            "INSERT OR IGNORE INTO rewards "
-            "(guild_id, activity_id, coin_reward, xp_reward) VALUES (0, ?, ?, ?)",
-            (key, values[0], values[1]),
-        )
-
-
-def _create_scoped_schema(conn):
-    """Create the additive tenant/control-plane schema without moving legacy data."""
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS guilds (
-            guild_id INTEGER PRIMARY KEY,
-            display_name TEXT,
-            active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-            first_seen_at TEXT NOT NULL,
-            last_seen_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS realms (
-            realm_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            created_by INTEGER NOT NULL,
-            status TEXT NOT NULL DEFAULT 'active'
-                CHECK (status IN ('active', 'suspended', 'archived')),
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS realm_guilds (
-            realm_id INTEGER NOT NULL REFERENCES realms(realm_id),
-            guild_id INTEGER NOT NULL REFERENCES guilds(guild_id),
-            status TEXT NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending', 'approved', 'rejected', 'left')),
-            approved_by INTEGER,
-            joined_at TEXT,
-            PRIMARY KEY (realm_id, guild_id)
-        );
-        CREATE TABLE IF NOT EXISTS guild_data_scopes (
-            guild_id INTEGER NOT NULL REFERENCES guilds(guild_id),
-            category TEXT NOT NULL
-                CHECK (category IN ('economy', 'profile', 'game_stats', 'moderation')),
-            scope_type TEXT NOT NULL DEFAULT 'guild'
-                CHECK (scope_type IN ('guild', 'realm', 'instance')),
-            realm_id INTEGER REFERENCES realms(realm_id),
-            revision INTEGER NOT NULL DEFAULT 1,
-            updated_by INTEGER,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, category),
-            CHECK (
-                (scope_type = 'realm' AND realm_id IS NOT NULL) OR
-                (scope_type != 'realm' AND realm_id IS NULL)
-            )
-        );
-        CREATE TABLE IF NOT EXISTS user_sharing_preferences (
-            user_id INTEGER NOT NULL,
-            guild_id INTEGER NOT NULL REFERENCES guilds(guild_id),
-            category TEXT NOT NULL
-                CHECK (category IN ('economy', 'profile', 'game_stats')),
-            opted_out INTEGER NOT NULL DEFAULT 0 CHECK (opted_out IN (0, 1)),
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (user_id, guild_id, category)
-        );
-        CREATE TABLE IF NOT EXISTS feature_flags (
-            guild_id INTEGER NOT NULL REFERENCES guilds(guild_id),
-            feature_key TEXT NOT NULL,
-            enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-            revision INTEGER NOT NULL DEFAULT 1,
-            updated_by INTEGER,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, feature_key)
-        );
-        -- Schema 11. An installation-wide setting has no guild dimension, and
-        -- putting that in the schema rather than in a convention is the point:
-        -- five settings were declared per guild and stored per guild while being
-        -- instance-wide in fact, which nothing noticed because there is one
-        -- guild. `guild_settings` also carries a foreign key to `guilds`, so the
-        -- guild_id = 0 convention `active_channels` uses would have needed a
-        -- sentinel guild row; a separate table needs nothing.
-        CREATE TABLE IF NOT EXISTS instance_settings (
-            setting_key TEXT PRIMARY KEY,
-            value_json TEXT NOT NULL,
-            revision INTEGER NOT NULL DEFAULT 1,
-            updated_by INTEGER,
-            updated_at TEXT NOT NULL
-        );
-        -- Schema 15. One row per channel game per guild: where the chain is up
-        -- to, and who moved last. Small and hot — read on every message in a
-        -- game channel — so it is one row rather than a log.
-        CREATE TABLE IF NOT EXISTS lfg_posts (
-            guild_id INTEGER NOT NULL,
-            message_id INTEGER NOT NULL,
-            channel_id INTEGER NOT NULL,
-            host_id INTEGER NOT NULL,
-            -- Exactly one of these is set: a game is either one of the guild's
-            -- game roles or a line of text the host typed.
-            game_role_id INTEGER,
-            game_text TEXT,
-            needed INTEGER NOT NULL DEFAULT 0,
-            -- The party, as an ordered JSON list. A second table would be more
-            -- normalised and every read wants the whole list anyway, in order,
-            -- which is what the embed prints.
-            joined_json TEXT NOT NULL DEFAULT '[]',
-            created_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, message_id)
-        );
-        CREATE TABLE IF NOT EXISTS minigame_state (
-            guild_id INTEGER NOT NULL,
-            game_key TEXT NOT NULL,
-            value TEXT NOT NULL DEFAULT '',
-            last_user_id INTEGER,
-            streak INTEGER NOT NULL DEFAULT 0,
-            best_streak INTEGER NOT NULL DEFAULT 0,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, game_key)
-        );
-        -- Schema 19. Every word a chain has already used, so a word counts
-        -- once rather than once per member who remembers it. Purely additive,
-        -- rewriting no row, and a new table is gated on its own shape by
-        -- `IF NOT EXISTS` — there is nothing to ALTER.
-        --
-        -- The word is stored *folded*, by the caller, because the fold has to
-        -- be applied to both sides or a rule becomes an argument. No member id
-        -- is kept: who played a word is in the channel and in
-        -- `minigame_state.last_user_id`, and storing it again would put this
-        -- table on the erasure path for nothing.
-        -- Schema 25. A Discord event that may have changed who can use the
-        -- dashboard for a guild: a member gaining or losing Administrator or
-        -- Manage Server, leaving, or an ownership transfer (one member), or a
-        -- role's own permissions changing (`user_id` NULL: everyone in the
-        -- guild). The bot writes a row; the dashboard, which may be another
-        -- process, reads rows newer than the last it saw and forgets the
-        -- cached permission snapshots they touch, so the next request asks
-        -- Discord again instead of waiting out the cache. A row decides
-        -- nothing about access itself. AUTOINCREMENT because the dashboard
-        -- follows the id: plain rowids restart below the last id once pruning
-        -- empties the table, and every later event would read as already seen.
-        CREATE TABLE IF NOT EXISTS dashboard_access_invalidations (
-            invalidation_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER,
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS minigame_used_words (
-            guild_id INTEGER NOT NULL,
-            game_key TEXT NOT NULL,
-            word TEXT NOT NULL,
-            used_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, game_key, word)
-        );
-        -- Schema 20. The latest patch seen upstream for a game, one row per
-        -- game rather than per guild: the newest League of Legends patch is
-        -- the same fact for every guild, so fetching it once and fanning the
-        -- announcement out to guilds is what makes patchbot poll upstream
-        -- once per tick instead of once per guild watching that game.
-        CREATE TABLE IF NOT EXISTS game_patch_state (
-            game_key TEXT PRIMARY KEY,
-            latest_version TEXT,
-            latest_url TEXT,
-            latest_title TEXT,
-            checked_at TEXT
-        );
-        -- A guild's own announcement history, kept separately from the global
-        -- state above and persisted rather than in-memory like socials.py's
-        -- dedup: a restart losing this would either re-announce an old patch
-        -- or (worse, if baselined naively) skip a real one, which is a worse
-        -- failure here than the live-stream case socials.py was built for.
-        CREATE TABLE IF NOT EXISTS guild_patch_announcements (
-            guild_id INTEGER NOT NULL,
-            game_key TEXT NOT NULL,
-            last_announced_version TEXT,
-            PRIMARY KEY (guild_id, game_key)
-        );
-        CREATE TABLE IF NOT EXISTS guild_settings (
-            guild_id INTEGER NOT NULL REFERENCES guilds(guild_id),
-            setting_key TEXT NOT NULL,
-            value_json TEXT NOT NULL,
-            revision INTEGER NOT NULL DEFAULT 1,
-            updated_by INTEGER,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, setting_key)
-        );
-        CREATE TABLE IF NOT EXISTS settings_audit (
-            audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            actor_id INTEGER NOT NULL,
-            action TEXT NOT NULL,
-            target_key TEXT NOT NULL,
-            old_value_json TEXT,
-            new_value_json TEXT,
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS user_identities (
-            user_id INTEGER PRIMARY KEY,
-            first_seen_at TEXT NOT NULL,
-            last_seen_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS activity_events (
-            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            origin_guild_id INTEGER,
-            category TEXT NOT NULL,
-            event_type TEXT NOT NULL,
-            amount INTEGER,
-            metadata_json TEXT,
-            created_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_activity_user_guild
-            ON activity_events(user_id, origin_guild_id, created_at);
-        CREATE TABLE IF NOT EXISTS scoped_accounts (
-            scope_type TEXT NOT NULL
-                CHECK (scope_type IN ('guild', 'realm', 'instance')),
-            scope_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            balance INTEGER NOT NULL DEFAULT 100 CHECK (balance >= 0),
-            xp INTEGER NOT NULL DEFAULT 0 CHECK (xp >= 0),
-            level INTEGER NOT NULL DEFAULT 1 CHECK (level >= 1),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (scope_type, scope_id, user_id)
-        );
-        CREATE TABLE IF NOT EXISTS scope_adoptions (
-            adoption_key TEXT PRIMARY KEY,
-            guild_id INTEGER NOT NULL,
-            user_count INTEGER NOT NULL,
-            adopted_at TEXT NOT NULL
-        );
-    """)
-    scoped_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(scoped_accounts)")
-    }
-    for column_name, declaration in USER_COLUMNS.items():
-        if column_name not in scoped_columns:
-            conn.execute(
-                f"ALTER TABLE scoped_accounts ADD COLUMN {column_name} {declaration}"
-            )
-
-
-def _create_integrity_schema(conn):
-    """Create crash-recovery and deduplication records introduced in schema 4."""
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS casino_wagers (
-            wager_id TEXT PRIMARY KEY,
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            game_key TEXT NOT NULL,
-            stake INTEGER NOT NULL CHECK (stake > 0),
-            status TEXT NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending', 'settled', 'refunded')),
-            created_at TEXT NOT NULL,
-            resolved_at TEXT,
-            resolution_json TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_casino_wagers_pending
-            ON casino_wagers(status, created_at);
-        CREATE INDEX IF NOT EXISTS idx_casino_wagers_user
-            ON casino_wagers(guild_id, user_id, created_at);
-
-        CREATE TABLE IF NOT EXISTS reward_claims (
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            reward_key TEXT NOT NULL,
-            claimed_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, user_id, reward_key)
-        );
-
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_one_support_ticket_per_member
-            ON tickets(guild_id, opener_id)
-            WHERE ticket_type = 'support';
-    """)
-
-
-def _create_control_plane_v5_schema(conn):
-    """Create configurable commerce, gacha, entitlement, and action records."""
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS shop_item_definitions (
-            guild_id INTEGER NOT NULL,
-            item_key TEXT NOT NULL,
-            template_type TEXT NOT NULL,
-            category TEXT,
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            price INTEGER NOT NULL CHECK (price >= 0),
-            config_json TEXT NOT NULL DEFAULT '{}',
-            revision INTEGER NOT NULL DEFAULT 1,
-            updated_by INTEGER,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, item_key)
-        );
-        CREATE TABLE IF NOT EXISTS shop_item_localizations (
-            guild_id INTEGER NOT NULL,
-            item_key TEXT NOT NULL,
-            language TEXT NOT NULL,
-            name TEXT NOT NULL,
-            description TEXT NOT NULL,
-            PRIMARY KEY (guild_id, item_key, language),
-            FOREIGN KEY (guild_id, item_key)
-                REFERENCES shop_item_definitions(guild_id, item_key) ON DELETE CASCADE
-        );
-        CREATE TABLE IF NOT EXISTS user_inventory (
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            item_key TEXT NOT NULL,
-            quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, user_id, item_key)
-        );
-        CREATE TABLE IF NOT EXISTS work_responses (
-            response_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            -- Which outcome of `/work` this line belongs to. The tiers are
-            -- mechanics, not text, so they stay English identifiers.
-            tier TEXT NOT NULL CHECK (tier IN ('normal', 'free', 'high')),
-            weight INTEGER NOT NULL CHECK (weight > 0),
-            message TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            revision INTEGER NOT NULL DEFAULT 1,
-            updated_by INTEGER,
-            updated_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_work_responses_guild
-            ON work_responses(guild_id, tier);
-        CREATE TABLE IF NOT EXISTS gacha_banners (
-            guild_id INTEGER NOT NULL,
-            banner_key TEXT NOT NULL,
-            -- Operator-facing label. NULL on a banner created before schema 9,
-            -- which then renders as its key.
-            display_name TEXT,
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            config_json TEXT NOT NULL,
-            revision INTEGER NOT NULL DEFAULT 1,
-            updated_by INTEGER,
-            updated_at TEXT NOT NULL,
-            -- Both NULL means "no schedule": pullability then depends only on
-            -- `enabled`, exactly as before schema 21. A bound present narrows
-            -- that further; `enabled` still applies on top as a manual override.
-            starts_at TEXT,
-            ends_at TEXT,
-            PRIMARY KEY (guild_id, banner_key)
-        );
-        CREATE TABLE IF NOT EXISTS gacha_pity (
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            banner_key TEXT NOT NULL,
-            pulls_since_five_star INTEGER NOT NULL DEFAULT 0,
-            pulls_toward_four_star INTEGER NOT NULL DEFAULT 0,
-            guaranteed_featured_five INTEGER NOT NULL DEFAULT 0,
-            guaranteed_featured_four INTEGER NOT NULL DEFAULT 0,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, user_id, banner_key)
-        );
-        CREATE TABLE IF NOT EXISTS gacha_pulls (
-            pull_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            banner_key TEXT NOT NULL,
-            banner_revision INTEGER NOT NULL,
-            rarity INTEGER NOT NULL CHECK (rarity IN (3, 4, 5)),
-            reward_key TEXT NOT NULL,
-            reward_json TEXT NOT NULL,
-            pity_before INTEGER NOT NULL,
-            soft_pity INTEGER NOT NULL CHECK (soft_pity IN (0, 1)),
-            hard_pity INTEGER NOT NULL CHECK (hard_pity IN (0, 1)),
-            four_star_guarantee INTEGER NOT NULL DEFAULT 0 CHECK (four_star_guarantee IN (0, 1)),
-            featured INTEGER NOT NULL DEFAULT 0 CHECK (featured IN (0, 1)),
-            featured_guaranteed INTEGER NOT NULL DEFAULT 0 CHECK (featured_guaranteed IN (0, 1)),
-            created_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_gacha_pulls_user
-            ON gacha_pulls(guild_id, user_id, created_at);
-        CREATE TABLE IF NOT EXISTS reward_vouchers (
-            voucher_id TEXT PRIMARY KEY,
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            reward_key TEXT NOT NULL,
-            source_type TEXT NOT NULL DEFAULT 'gacha'
-                CHECK (source_type IN ('gacha', 'shop')),
-            duration_days INTEGER NOT NULL CHECK (duration_days > 0),
-            -- What the voucher is *for*, written when it is granted. NULL means
-            -- "derive it from `reward_key`", which is how every voucher granted
-            -- before this column still redeems.
-            subject TEXT,
-            status TEXT NOT NULL DEFAULT 'available'
-                CHECK (status IN ('available', 'pending', 'active', 'fulfilled', 'expired', 'cancelled')),
-            acquired_at TEXT NOT NULL,
-            redeemed_at TEXT,
-            fulfilled_at TEXT,
-            expires_at TEXT,
-            discord_item_id TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_reward_vouchers_user
-            ON reward_vouchers(guild_id, user_id, acquired_at DESC);
-        CREATE TABLE IF NOT EXISTS timed_entitlements (
-            entitlement_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            entitlement_key TEXT NOT NULL,
-            starts_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            source_voucher_id TEXT UNIQUE REFERENCES reward_vouchers(voucher_id),
-            discord_item_id TEXT,
-            status TEXT NOT NULL DEFAULT 'active'
-                CHECK (status IN ('active', 'expired', 'cancelled')),
-            -- Schema 22. NULL means "derive it from the voucher join" -- see
-            -- the ALTER TABLE in _create_control_plane_v5_schema for why
-            -- these carry no CHECK.
-            source_type TEXT,
-            granted_by INTEGER
-        );
-        CREATE TABLE IF NOT EXISTS fulfillment_requests (
-            request_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            voucher_id TEXT NOT NULL UNIQUE REFERENCES reward_vouchers(voucher_id),
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            asset_type TEXT NOT NULL CHECK (asset_type IN ('emoji', 'sticker', 'sound')),
-            status TEXT NOT NULL DEFAULT 'open'
-                CHECK (status IN ('open', 'fulfilled', 'cancelled')),
-            created_at TEXT NOT NULL,
-            completed_at TEXT,
-            completed_by INTEGER
-        );
-        -- Schema 12. A message the dashboard posted and can edit again.
-        --
-        -- `message_id` is the whole point. Nothing published from the dashboard
-        -- was ever tracked — every `channel.send(...)` return value was
-        -- discarded — so a published draft could only ever be posted a second
-        -- time, never updated. The bot's own `/update_games` worked solely
-        -- because the operator typed the message id by hand.
-        --
-        -- One table for every kind of managed message rather than one per kind:
-        -- a role menu, a rules panel and a ticket launcher differ in what they
-        -- render, not in what has to be remembered about them.
-        CREATE TABLE IF NOT EXISTS managed_messages (
-            guild_id INTEGER NOT NULL,
-            kind TEXT NOT NULL
-                CHECK (kind IN ('role_menu', 'rules', 'ticket', 'airlock',
-                               'embed')),
-            menu_key TEXT NOT NULL,
-            display_name TEXT NOT NULL,
-            -- NULL until posted, and NULL again once the message is gone.
-            channel_id INTEGER,
-            message_id INTEGER,
-            title TEXT,
-            body TEXT,
-            colour INTEGER,
-            options_json TEXT NOT NULL DEFAULT '{}',
-            revision INTEGER NOT NULL DEFAULT 1,
-            updated_by INTEGER,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, kind, menu_key)
-        );
-        -- A role menu's buttons. A child table rather than a JSON column so a
-        -- role can be added without rewriting the row, and so `position` can
-        -- carry the button order Discord will render.
-        CREATE TABLE IF NOT EXISTS managed_message_entries (
-            entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            kind TEXT NOT NULL,
-            menu_key TEXT NOT NULL,
-            position INTEGER NOT NULL,
-            label TEXT NOT NULL,
-            role_id INTEGER,
-            emoji TEXT NOT NULL DEFAULT '',
-            UNIQUE (guild_id, kind, menu_key, label)
-        );
-        CREATE INDEX IF NOT EXISTS idx_managed_entries_menu
-            ON managed_message_entries(guild_id, kind, menu_key, position);
-        -- Retired at schema 13: the plain embed sender became a managed
-        -- message, and nothing reads or writes this table any more. It is kept
-        -- rather than dropped for the same reason `server_config` is — dropping
-        -- a table is a destructive migration with nothing to gain — and can go
-        -- in a later cleanup.
-        CREATE TABLE IF NOT EXISTS dashboard_documents (
-            document_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            document_type TEXT NOT NULL CHECK (document_type IN ('embed', 'rules', 'panel')),
-            name TEXT NOT NULL,
-            content_json TEXT NOT NULL,
-            revision INTEGER NOT NULL DEFAULT 1,
-            updated_by INTEGER NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE (guild_id, document_type, name)
-        );
-        CREATE TABLE IF NOT EXISTS control_actions (
-            action_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            actor_id INTEGER NOT NULL,
-            action_type TEXT NOT NULL,
-            payload_json TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
-            created_at TEXT NOT NULL,
-            started_at TEXT,
-            completed_at TEXT,
-            error_code TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_control_actions_pending
-            ON control_actions(status, created_at);
-    """)
-    action_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(control_actions)")
-    }
-    if "started_at" not in action_columns:
-        conn.execute("ALTER TABLE control_actions ADD COLUMN started_at TEXT")
-    if "lease_expires_at" not in action_columns:
-        # Schema 7. Only a lapsed lease is reclaimed, so a legitimately slow
-        # publish is not re-queued while it is still running.
-        conn.execute("ALTER TABLE control_actions ADD COLUMN lease_expires_at TEXT")
-    pity_columns = {row[1] for row in conn.execute("PRAGMA table_info(gacha_pity)")}
-    if "pulls_toward_four_star" not in pity_columns:
-        conn.execute(
-            "ALTER TABLE gacha_pity ADD COLUMN pulls_toward_four_star "
-            "INTEGER NOT NULL DEFAULT 0"
-        )
-    if "guaranteed_featured_five" not in pity_columns:
-        # Schema 14, purely additive. A banner may now feature one 4-star and one
-        # 5-star; losing that split sets a per-tier guarantee that the next rare
-        # of that tier from that banner is the featured reward. Two columns
-        # rather than one because the tiers guarantee independently. The grain is
-        # already right: gacha_pity is keyed (guild_id, user_id, banner_key).
-        # An existing row defaults to 0 — no guarantee held — which is truthful
-        # for pulls made before any banner could feature anything.
-        conn.execute(
-            "ALTER TABLE gacha_pity ADD COLUMN guaranteed_featured_five "
-            "INTEGER NOT NULL DEFAULT 0"
-        )
-    if "guaranteed_featured_four" not in pity_columns:
-        conn.execute(
-            "ALTER TABLE gacha_pity ADD COLUMN guaranteed_featured_four "
-            "INTEGER NOT NULL DEFAULT 0"
-        )
-    pull_columns = {row[1] for row in conn.execute("PRAGMA table_info(gacha_pulls)")}
-    if "four_star_guarantee" not in pull_columns:
-        conn.execute(
-            "ALTER TABLE gacha_pulls ADD COLUMN four_star_guarantee "
-            "INTEGER NOT NULL DEFAULT 0 CHECK (four_star_guarantee IN (0, 1))"
-        )
-    if "featured" not in pull_columns:
-        # Schema 14. Guarantee markers of the same kind as four_star_guarantee:
-        # whether this pull awarded the banner's featured reward, and whether a
-        # held guarantee is what decided it. Immutable history, so an existing
-        # row reading 0/0 is correct rather than merely defaulted.
-        conn.execute(
-            "ALTER TABLE gacha_pulls ADD COLUMN featured "
-            "INTEGER NOT NULL DEFAULT 0 CHECK (featured IN (0, 1))"
-        )
-    if "featured_guaranteed" not in pull_columns:
-        conn.execute(
-            "ALTER TABLE gacha_pulls ADD COLUMN featured_guaranteed "
-            "INTEGER NOT NULL DEFAULT 0 CHECK (featured_guaranteed IN (0, 1))"
-        )
-    voucher_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(reward_vouchers)")
-    }
-    if "subject" not in voucher_columns:
-        # Schema 18, purely additive and rewriting no row. A voucher's meaning
-        # used to be inferred from its key — `redeem_voucher` did
-        # `reward_key.split("_", 1)[0]` and refused anything not beginning
-        # `emoji`, `sticker` or `sound` — which is why a guild's own voucher item
-        # could never be a banner reward, and why a key like `emoji_thing` would
-        # have worked by accident. The subject states it instead.
-        #
-        # NULL means "derive from the key", the same third state
-        # `gacha_banners.display_name` and `warnings.tag` carry, so every voucher
-        # already granted keeps redeeming down the path it always did.
-        conn.execute("ALTER TABLE reward_vouchers ADD COLUMN subject TEXT")
-    shop_item_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(shop_item_definitions)")
-    }
-    if "category" not in shop_item_columns:
-        # Schema 16, purely additive and rewriting no row. The shop menu splits
-        # into sections, so a custom item can name the shelf it belongs on.
-        #
-        # Nullable with **no default and no CHECK**, deliberately, and both
-        # halves matter. NULL means "not chosen — resolve from the template",
-        # the same sentence `gacha_banners.display_name` and `warnings.tag`
-        # already carry; `NOT NULL DEFAULT 'perks'` would make every existing
-        # row assert a choice its operator never made, and nothing afterwards
-        # could tell a backfill from a decision. And SQLite cannot alter a CHECK
-        # without rebuilding the table, so a CHECK would freeze today's five
-        # sections into every deployed database and adding a sixth would become
-        # a drop-and-rename; `enabled` and `price` carry CHECKs because their
-        # domains are permanent, and this one is ours to grow. It is validated
-        # in Python against `item_catalog.ItemCategory`, which is the one source.
-        conn.execute("ALTER TABLE shop_item_definitions ADD COLUMN category TEXT")
-    banner_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(gacha_banners)")
-    }
-    if "display_name" not in banner_columns:
-        # Schema 9, purely additive. A guild can now run several banners, so a
-        # banner needs an operator-facing name; the key stays the stable
-        # identifier that pull history and pity rows reference. An existing
-        # banner keeps a NULL name and falls back to its key.
-        conn.execute("ALTER TABLE gacha_banners ADD COLUMN display_name TEXT")
-    if "starts_at" not in banner_columns:
-        # Schema 21, purely additive. NULL on every existing banner means "no
-        # schedule", so pullability is unchanged until an operator sets one.
-        conn.execute("ALTER TABLE gacha_banners ADD COLUMN starts_at TEXT")
-    if "ends_at" not in banner_columns:
-        conn.execute("ALTER TABLE gacha_banners ADD COLUMN ends_at TEXT")
-    warning_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(warnings)")
-    }
-    if "tag" not in warning_columns:
-        # Schema 10, purely additive and rewriting no row. A warning now carries
-        # which kind of rule it was for, so a threshold and its consequence can
-        # be configured per kind instead of one count governing everything. An
-        # existing warning keeps a NULL tag and is counted under the default
-        # tag, which is what it has always effectively been.
-        conn.execute("ALTER TABLE warnings ADD COLUMN tag TEXT")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_warnings_guild_user_tag "
-            "ON warnings(guild_id, user_id, tag)"
-        )
-    voucher_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(reward_vouchers)")
-    }
-    if "source_type" not in voucher_columns:
-        conn.execute(
-            "ALTER TABLE reward_vouchers ADD COLUMN source_type TEXT "
-            "NOT NULL DEFAULT 'gacha' CHECK (source_type IN ('gacha', 'shop'))"
-        )
-    entitlement_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(timed_entitlements)")
-    }
-    if "source_type" not in entitlement_columns:
-        # Schema 22, purely additive. Every entitlement so far derives its
-        # provenance from the voucher it was redeemed from, via the join
-        # `get_active_entitlements`/`get_expired_entitlements` already make to
-        # `reward_vouchers`. A manually-granted entitlement has no voucher, so
-        # it needs to state its own provenance on the row rather than coming
-        # back NULL from that join -- which `entitlement_cleanup` would then
-        # skip forever, exactly the outlives-its-record failure this table
-        # exists to prevent.
-        #
-        # No CHECK, deliberately, the same reasoning `shop_item_definitions.
-        # category` carries: SQLite cannot alter a CHECK without rebuilding
-        # the table, and the set of legitimate sources is ours to grow. NULL
-        # keeps meaning "derive it from the voucher join" for every row that
-        # predates this column.
-        conn.execute("ALTER TABLE timed_entitlements ADD COLUMN source_type TEXT")
-    if "granted_by" not in entitlement_columns:
-        # Schema 22. The staff Discord id behind a manual grant -- NULL for
-        # every voucher-derived row, mirroring fulfillment_requests.completed_by.
-        conn.execute("ALTER TABLE timed_entitlements ADD COLUMN granted_by INTEGER")
-    if "revoked_at" not in entitlement_columns:
-        # Schema 23. Set only by an operator revoking an active entitlement
-        # from the Redeems page. NULL for every row that expired, was
-        # cancelled by the erasure path, or simply ran its course -- the
-        # original `expires_at` stays untouched either way, so the grant's
-        # own history is never rewritten, only the moment it was cut short.
-        conn.execute("ALTER TABLE timed_entitlements ADD COLUMN revoked_at TEXT")
-    if "discord_missing_since" not in entitlement_columns:
-        # Schema 24. Set by `entitlement_cleanup`'s verification pass the
-        # first time it confirms (via a real 404, not any other failure) that
-        # a still-active asset's Discord side is already gone -- surfaced on
-        # the Redeems page so staff learn about a dead grant without waiting
-        # for it to expire on its own, which can be up to a year away. NULL
-        # means "last known to exist" or "never checked since being cleared."
-        conn.execute(
-            "ALTER TABLE timed_entitlements ADD COLUMN discord_missing_since TEXT"
-        )
-
-    fulfillment_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(fulfillment_requests)")
-    }
-    if "ticket_channel_id" not in fulfillment_columns:
-        # Schema 23, purely additive. Before this, the only link between a
-        # redeem ticket and its fulfillment request was a human-readable
-        # "#request_id" printed into the ticket's opening embed -- staff had
-        # to read it and cross-reference it by eye against the Redeems page.
-        # NULL for a request with no ticket (tickets disabled at redemption
-        # time) or one that predates this column.
-        conn.execute(
-            "ALTER TABLE fulfillment_requests ADD COLUMN ticket_channel_id INTEGER"
-        )
-
-
-# The three role menus that shipped as typed settings, and the key each becomes.
-# `menu_key` is what a posted message's buttons are addressed by, so it is stable
-# and never derived from the operator-facing name.
+# The role menus 2.x seeded from the old `*_roles` settings. The settings are
+# long gone and the seeding with them (SQLite's migration chain, retired with
+# the PostgreSQL move); the menu keys stay because their locale labels do
+# (`scripts/locale_audit.py`).
 SEEDED_ROLE_MENUS = (
     ("game_roles", "games"),
     ("news_roles", "news"),
     ("theme_roles", "themes"),
 )
-
-
-# Settings that changed key rather than meaning. A rename has to move the stored
-# row or the guild silently reverts to the default: the old key stops being read
-# on the same day the new one starts being written.
-RENAMED_SETTINGS = (
-    # "Games and prices" priced nothing and owned this one channel; it is the
-    # LFG channel with no role, which is what `/search` has always used it as.
-    ("other_games_channel", "lfg_default_channel"),
-)
-
-
-def widen_managed_message_kinds(conn) -> bool:
-    """Schema 13: let `managed_messages` hold an `embed` row.
-
-    The plain embed sender was the last builder still writing fire-and-forget
-    drafts, so an embed could be posted and never edited. Making it a managed
-    message means widening a CHECK constraint, and SQLite cannot alter one — so
-    this is a **rebuild** (create, copy, drop, rename), the same shape schema 8
-    used for the six tables that gained a guild dimension.
-
-    Gated on the table's own SQL rather than on a version, so re-running is a
-    no-op and an interrupted upgrade repairs itself. Nothing references this
-    table by foreign key, and `initialize_database` opens its connection without
-    `PRAGMA foreign_keys`, which is what makes the rename safe.
-    """
-    row = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' "
-        "AND name = 'managed_messages'").fetchone()
-    if row is None or "'embed'" in (row[0] or ""):
-        return False
-    conn.execute("""
-        CREATE TABLE managed_messages_rebuilt (
-            guild_id INTEGER NOT NULL,
-            kind TEXT NOT NULL
-                CHECK (kind IN ('role_menu', 'rules', 'ticket', 'airlock',
-                               'embed')),
-            menu_key TEXT NOT NULL,
-            display_name TEXT NOT NULL,
-            channel_id INTEGER,
-            message_id INTEGER,
-            title TEXT,
-            body TEXT,
-            colour INTEGER,
-            options_json TEXT NOT NULL DEFAULT '{}',
-            revision INTEGER NOT NULL DEFAULT 1,
-            updated_by INTEGER,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, kind, menu_key)
-        )
-    """)
-    conn.execute("""
-        INSERT INTO managed_messages_rebuilt
-            (guild_id, kind, menu_key, display_name, channel_id, message_id,
-             title, body, colour, options_json, revision, updated_by, updated_at)
-        SELECT guild_id, kind, menu_key, display_name, channel_id, message_id,
-               title, body, colour, options_json, revision, updated_by, updated_at
-        FROM managed_messages
-    """)
-    conn.execute("DROP TABLE managed_messages")
-    conn.execute("ALTER TABLE managed_messages_rebuilt RENAME TO managed_messages")
-    return True
 
 
 def repair_warning_provenance(conn) -> int:
@@ -1321,409 +462,162 @@ def repair_warning_provenance(conn) -> int:
     repaired = 0
     for table in ("warnings", "tickets", "rented_items"):
         repaired += conn.execute(
-            f"UPDATE {table} SET guild_id = ? WHERE guild_id IS NULL",
+            f"UPDATE {sql_identifier(table)} SET guild_id = %s WHERE guild_id IS NULL",
             (guilds[0],),
         ).rowcount
     return repaired
 
 
-def rename_managed_option_keys(conn) -> int:
-    """Move a rules panel's `accept_label` to `button_label`, once.
+# The schema is the baseline plus numbered migrations, one file each, applied in
+# order and recorded in `schema_migrations` (docs/subsystems/database.md).
+SCHEMA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema")
+_SCHEMA_FILE = re.compile(r"(\d{4})_[a-z0-9_]+\.sql")
+BASELINE_VERSION = 26
 
-    The rules panel stored an accept-button label under its own name while the
-    ticket launcher and the entry gate had none. All three take an operator's
-    label now, and one concept with two names would mean every reader
-    remembering which kind spells it which way — the same argument the settings
-    rename makes, one level down inside a JSON blob.
 
-    Gated on the old key being present and the new one absent, so re-running is
-    a no-op. No DDL: `options_json` is a TEXT column.
-    """
-    moved = 0
-    rows = conn.execute(
-        "SELECT guild_id, menu_key, options_json FROM managed_messages "
-        "WHERE kind = 'rules'").fetchall()
-    for guild_id, menu_key, options_json in rows:
-        try:
-            options = json.loads(options_json)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(options, dict) or "accept_label" not in options:
-            continue
-        options.setdefault("button_label", options.pop("accept_label"))
-        options.pop("accept_label", None)
+def schema_files() -> list[tuple[int, str]]:
+    """(version, path) for the baseline and every migration, in order."""
+    files = []
+    for name in sorted(os.listdir(SCHEMA_DIR)):
+        match = _SCHEMA_FILE.fullmatch(name)
+        if match:
+            files.append((int(match.group(1)), os.path.join(SCHEMA_DIR, name)))
+    versions = [version for version, _ in files]
+    if not files or versions[0] != BASELINE_VERSION or len(set(versions)) != len(versions):
+        raise DatabaseOperationError("core/schema must start at the baseline, one file per version")
+    return files
+
+
+LATEST_SCHEMA_VERSION = schema_files()[-1][0]
+
+
+def _seed_installation_defaults(conn) -> int:
+    """The rows a fresh installation needs: the installation-default prices and
+    rewards at guild 0, which a guild without an override reads, and the
+    shipped `/work` responses. Idempotent, so every start runs it."""
+    for key, value in SHOP_DEFAULTS.items():
         conn.execute(
-            "UPDATE managed_messages SET options_json = ? "
-            "WHERE guild_id = ? AND kind = 'rules' AND menu_key = ?",
-            (json.dumps(options, sort_keys=True), guild_id, menu_key))
-        moved += 1
-    return moved
-
-
-def rename_setting_rows(conn) -> int:
-    """Move a stored setting to its new key, once.
-
-    Gated on the old key being present and the new one absent, so re-running is
-    a no-op and a guild that has already saved under the new name keeps what it
-    saved rather than having it overwritten by a stale row.
-    """
-    moved = 0
-    for old_key, new_key in RENAMED_SETTINGS:
-        moved += conn.execute(
-            "UPDATE guild_settings SET setting_key = ? "
-            "WHERE setting_key = ? AND guild_id NOT IN "
-            "(SELECT guild_id FROM guild_settings WHERE setting_key = ?)",
-            (new_key, old_key, new_key),
-        ).rowcount
-        # Anything left is a guild that has both: the old row is stale.
-        conn.execute("DELETE FROM guild_settings WHERE setting_key = ?", (old_key,))
-    return moved
-
-
-def seed_role_menus_from_settings(conn) -> int:
-    """Turn the three role-menu settings into managed messages, once.
-
-    Schema 12. Gated on absence in `managed_messages` rather than on a version,
-    so re-running is a no-op and an interrupted upgrade repairs itself.
-
-    `message_id` is deliberately left NULL. A menu already posted stays posted
-    and keeps working — the buttons route by `custom_id` and the roles still
-    resolve — but the dashboard cannot edit that message until it is either
-    re-posted or told which message it is. Guessing an id is not available to us,
-    and posting a second copy on upgrade would be worse than asking.
-
-    Only a guild's **stored** setting seeds a menu, never the `config.json`
-    fallback the runtime readers used at the time: that file was single-tenant
-    and named one installation's roles with no guild attached, so seeding from
-    it would have handed a second guild the legacy guild's role ids.
-
-    The settings rows are left in place. They stop being read in the same change
-    that moves the readers over, and leaving them until then means an upgrade
-    that is interrupted between the two has not lost anything.
-    """
-    seeded = 0
-    timestamp = datetime.now(timezone.utc).isoformat()
-    guild_ids = [row[0] for row in conn.execute(
-        "SELECT guild_id FROM guilds WHERE active = 1")]
-    for guild_id in guild_ids:
-        for setting_key, menu_key in SEEDED_ROLE_MENUS:
-            existing = conn.execute(
-                "SELECT 1 FROM managed_messages "
-                "WHERE guild_id = ? AND kind = 'role_menu' AND menu_key = ?",
-                (guild_id, menu_key),
-            ).fetchone()
-            if existing:
-                continue
-            stored = conn.execute(
-                "SELECT value_json FROM guild_settings "
-                "WHERE guild_id = ? AND setting_key = ?",
-                (guild_id, setting_key),
-            ).fetchone()
-            # Only a stored row seeds a menu. The `config.json` fallback every
-            # other reader had at the time was single-tenant — it named one
-            # installation's roles with no guild attached — so using it here
-            # would have given a second guild the legacy guild's role ids. A
-            # guild that never saved the setting starts with no menu and
-            # creates one, which is the honest answer rather than a guessed one.
-            if stored is None:
-                continue
-            entries = json.loads(stored[0])
-            if not isinstance(entries, dict) or not entries:
-                continue
-            conn.execute(
-                "INSERT INTO managed_messages (guild_id, kind, menu_key, "
-                "display_name, options_json, revision, updated_at) "
-                "VALUES (?, 'role_menu', ?, ?, '{}', 1, ?)",
-                (guild_id, menu_key, menu_key, timestamp),
-            )
-            for position, (label, entry) in enumerate(entries.items()):
-                if isinstance(entry, dict):
-                    role_id, emoji = entry.get("id"), entry.get("emoji") or ""
-                else:
-                    # The legacy bare-id form the role menu shape still accepts.
-                    role_id, emoji = entry, ""
-                conn.execute(
-                    "INSERT INTO managed_message_entries (guild_id, kind, "
-                    "menu_key, position, label, role_id, emoji) "
-                    "VALUES (?, 'role_menu', ?, ?, ?, ?, ?)",
-                    (guild_id, menu_key, position, str(label),
-                     int(role_id) if role_id else None, str(emoji)),
-                )
-            seeded += 1
-    return seeded
-
-
-def seed_games_from_settings(conn) -> int:
-    """Schema 26: fold LFG's channel map and the per-game patch settings into
-    one `games` row per guild, once.
-
-    Before this, a game was three unrelated things: a `{channel: role}` pair in
-    `lfg_channels` with no game named, and `patchbot_<game>_channel` and
-    `_role` for each supported game. The maintainer chose one row per game
-    (2026-10-30), with one role for both pings.
-
-    - Each supported game with a stored patch channel or role becomes a row
-      under its key, LFG off.
-    - Each LFG pair joins the supported row whose role it shares, when exactly
-      one does: LFG on, the LFG channel becomes the game channel, and a
-      different patch channel is kept as the row's override. Anything else
-      becomes a custom row, `Game 1`, `Game 2`…, since nothing stored names it;
-      the operator renames it.
-
-    Gated on the guild having no `games` row, so re-running is a no-op and a
-    guild that already saved one keeps it. The old rows are left in place, as
-    the role-menu seeding left its settings: nothing reads them any more, and a
-    rollback to a build that does still finds them.
-    """
-    from core.supported_games import SUPPORTED_GAME_KEYS
-
-    source_keys = ["lfg_channels"] + [
-        f"patchbot_{game}_{part}" for game in SUPPORTED_GAME_KEYS
-        for part in ("channel", "role")]
-    placeholders = ", ".join("?" for _ in source_keys)
-    guild_ids = [row[0] for row in conn.execute(
-        f"SELECT DISTINCT guild_id FROM guild_settings "
-        f"WHERE setting_key IN ({placeholders})", source_keys)]
-    timestamp = utc_now().isoformat()
-    seeded = 0
-    for guild_id in guild_ids:
-        if conn.execute(
-                "SELECT 1 FROM guild_settings WHERE guild_id = ? AND setting_key = 'games'",
-                (guild_id,)).fetchone():
-            continue
-        stored = {}
-        for key, value_json in conn.execute(
-                f"SELECT setting_key, value_json FROM guild_settings "
-                f"WHERE guild_id = ? AND setting_key IN ({placeholders})",
-                (guild_id, *source_keys)):
-            try:
-                stored[key] = json.loads(value_json)
-            except (TypeError, ValueError):
-                continue
-
-        def snowflake(value):
-            try:
-                return int(value) if value not in (None, "", 0, "0") else None
-            except (TypeError, ValueError):
-                return None
-
-        games = {}
-        for game in SUPPORTED_GAME_KEYS:
-            channel = snowflake(stored.get(f"patchbot_{game}_channel"))
-            role = snowflake(stored.get(f"patchbot_{game}_role"))
-            if channel or role:
-                games[game] = {"role": role, "channel": channel, "lfg": False,
-                               "patch_channel": None}
-        pairs = stored.get("lfg_channels")
-        custom = 0
-        for channel_key, role_value in (pairs.items() if isinstance(pairs, dict) else ()):
-            channel, role = snowflake(channel_key), snowflake(role_value)
-            if channel is None:
-                continue
-            matches = [game for game, row in games.items()
-                       if role is not None and row["role"] == role and not row["lfg"]]
-            if len(matches) == 1:
-                row = games[matches[0]]
-                if row["channel"] not in (None, channel):
-                    row["patch_channel"] = row["channel"]
-                row["channel"], row["lfg"] = channel, role is not None
-                continue
-            custom += 1
-            while f"Game {custom}" in games:
-                custom += 1
-            games[f"Game {custom}"] = {"role": role, "channel": channel,
-                                       "lfg": role is not None, "patch_channel": None}
-        if not games:
-            continue
+            "INSERT INTO shop_prices (guild_id, item_id, price) "
+            "VALUES (0, %s, %s) ON CONFLICT DO NOTHING",
+            (key, value),
+        )
+    for key, values in REWARD_DEFAULTS.items():
         conn.execute(
-            "INSERT INTO guild_settings "
-            "(guild_id, setting_key, value_json, revision, updated_by, updated_at) "
-            "VALUES (?, 'games', ?, 1, NULL, ?)",
-            (guild_id, json.dumps(games), timestamp))
-        seeded += 1
-    return seeded
+            "INSERT INTO rewards "
+            "(guild_id, activity_id, coin_reward, xp_reward) VALUES (0, %s, %s, %s) "
+            "ON CONFLICT DO NOTHING",
+            (key, values[0], values[1]),
+        )
+    return seed_default_work_responses(conn)
 
 
-def _promote_instance_settings(conn) -> int:
-    """Move a setting now declared instance-wide out of `guild_settings`.
+def _pre_migration_backup(version: int) -> str:
+    """A `pg_dump` of the whole database before a migration touches it.
 
-    Schema 11. Gated on absence in `instance_settings` rather than on a version,
-    so re-running is a no-op and an interrupted upgrade repairs itself. The guild
-    rows are deleted once copied, because a row nothing reads is a trap for the
-    next person: rolling back means restoring the pre-migration backup the
-    migration already wrote, not downgrading in place.
-
-    A key stored for more than one guild can only have one installation-wide
-    value, so the most recently updated row wins and the discarded ones are
-    logged rather than dropped silently — on a single-guild installation this
-    never fires, and on any other it is the thing an operator needs to know.
+    Written owner-only into `data_dir()/backups`, named by the version it was
+    taken at and the local time (a filename an operator reads, not a value
+    anything parses). A migration with no backup behind it is refused: the dump
+    is the rollback.
     """
-    from core.settings_registry import SETTING_DEFINITIONS, SettingScope
+    import subprocess
 
-    instance_keys = [key for key, definition in SETTING_DEFINITIONS.items()
-                     if definition.scope is SettingScope.INSTANCE]
-    if not instance_keys:
-        return 0
-    placeholders = ",".join("?" * len(instance_keys))
-    already = {row[0] for row in conn.execute(
-        f"SELECT setting_key FROM instance_settings WHERE setting_key IN ({placeholders})",
-        instance_keys,
-    )}
-    moved = 0
-    for key in instance_keys:
-        rows = conn.execute(
-            "SELECT guild_id, value_json, revision, updated_by, updated_at "
-            "FROM guild_settings WHERE setting_key = ? "
-            "ORDER BY updated_at DESC, revision DESC",
-            (key,),
-        ).fetchall()
-        if not rows:
-            continue
-        if key not in already:
-            _, value_json, revision, updated_by, updated_at = rows[0]
-            conn.execute(
-                "INSERT INTO instance_settings "
-                "(setting_key, value_json, revision, updated_by, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (key, value_json, revision, updated_by, updated_at),
+    directory = os.path.join(data_dir(), "backups")
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = os.path.join(directory, f"potatobot-v{version}-{stamp}.dump")
+    # O_EXCL refuses to write into a file already there, and 0600 holds
+    # whatever umask the caller has: the dump is every member's data.
+    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            completed = subprocess.run(
+                ["pg_dump", "--format=custom", "--dbname", DSN],
+                stdout=output, stderr=subprocess.PIPE, check=False, timeout=600,
             )
-            moved += 1
-            if len(rows) > 1:
-                db_logger.warning(
-                    "Setting %r was stored for %s guilds but is "
-                    "installation-wide; kept the row from guild %s and "
-                    "discarded %s other(s).",
-                    key, len(rows), rows[0][0], len(rows) - 1,
-                )
-        conn.execute("DELETE FROM guild_settings WHERE setting_key = ?", (key,))
-    return moved
+    except (OSError, subprocess.SubprocessError) as exc:
+        os.unlink(path)
+        raise DatabaseOperationError("pre-migration backup failed") from exc
+    if completed.returncode != 0:
+        os.unlink(path)
+        raise DatabaseOperationError("pre-migration backup failed")
+    db_logger.info("Pre-migration database backup created: %s", path)
+    return path
 
 
 def initialize_database():
-    """Applies ordered, transactional, repeatable schema migrations."""
+    """Bring the database to the latest schema, then seed what a fresh
+    installation needs.
+
+    An empty database gets the baseline; one that already has the schema gets
+    every numbered migration past its recorded version, after a `pg_dump`
+    whenever it holds data. Everything runs in one transaction under the write
+    lock, and PostgreSQL's DDL is transactional, so an interrupted start leaves
+    the schema it found and two processes starting at once take turns. Only
+    the bot calls this; the dashboard never creates the schema.
+    """
+    files = schema_files()
     try:
-        with closing(sqlite3.connect(DB_PATH, timeout=20)) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            # Deliberately no PRAGMA foreign_keys here. Schema 8 rebuilds tables by
-            # drop-and-rename, which SQLite would otherwise refuse or silently
-            # rewrite references for. Runtime connections from get_connection() do
-            # enforce foreign keys.
-            current_version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if current_version > LATEST_SCHEMA_VERSION:
+        with get_connection() as conn:
+            present = conn.execute(
+                "SELECT to_regclass('public.schema_migrations')").fetchone()[0]
+            if present is None:
+                if conn.execute("SELECT count(*) FROM pg_tables "
+                                "WHERE schemaname = 'public'").fetchone()[0]:
+                    raise DatabaseOperationError(
+                        "the database has tables but no schema_migrations; "
+                        "refusing to guess what it holds")
+                current = 0
+            else:
+                current = conn.execute(
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+                ).fetchone()[0]
+            if current > LATEST_SCHEMA_VERSION:
                 raise DatabaseOperationError(
-                    f"database schema {current_version} is newer than supported "
-                    f"version {LATEST_SCHEMA_VERSION}"
-                )
-            has_existing_schema = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' "
-                "AND name NOT LIKE 'sqlite_%' LIMIT 1"
-            ).fetchone() is not None
-            if current_version < LATEST_SCHEMA_VERSION and has_existing_schema:
-                # Local time on purpose: a filename an operator reads beside the
-                # database, not a value anything parses.
-                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                backup_path = f"{DB_PATH}.backup-v{current_version}-{timestamp}"
-                # Created owner-only before SQLite opens it: `sqlite3.connect`
-                # takes its mode from whatever umask the caller happens to
-                # have, and a backup is a full copy of every member's data.
-                # O_EXCL also refuses to write into a file already there.
-                os.close(os.open(backup_path,
-                                 os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
-                with closing(sqlite3.connect(backup_path)) as backup_conn:
-                    conn.backup(backup_conn)
-                db_logger.info("Pre-migration database backup created: %s", backup_path)
-            conn.execute("BEGIN IMMEDIATE")
-            # Repair partially initialized databases without replacing existing data.
-            _create_current_schema(conn)
-            _create_scoped_schema(conn)
-            _create_integrity_schema(conn)
-            _create_control_plane_v5_schema(conn)
-            if current_version < 5:
-                # Preserve each legacy percentage vault as the closest approved
-                # fixed reserve. The percentage column remains for rollback and
-                # historical inspection but is no longer used by robbery logic.
-                conn.execute("""
-                    UPDATE users
-                    SET protected_reserve = CASE
-                        WHEN vault_protection <= 0 THEN 0
-                        WHEN vault_protection <= 0.25 THEN 25000
-                        WHEN vault_protection <= 0.50 THEN 100000
-                        ELSE 500000
-                    END
-                    WHERE protected_reserve = 0
-                """)
-            if current_version < 6:
-                for guild_id, banner_key, config_json in conn.execute(
-                    "SELECT guild_id, banner_key, config_json FROM gacha_banners"
-                ).fetchall():
-                    banner_config = json.loads(config_json)
-                    banner_config.setdefault("four_star_guarantee_interval", 10)
+                    f"database schema {current} is newer than supported "
+                    f"version {LATEST_SCHEMA_VERSION}")
+            pending = [(version, path) for version, path in files if version > current]
+            if current and pending and conn.execute(
+                    "SELECT EXISTS (SELECT 1 FROM users)").fetchone()[0]:
+                _pre_migration_backup(current)
+            for version, path in pending:
+                with open(path, encoding="utf-8") as schema_file:
+                    conn.execute(schema_file.read())
+                if version != BASELINE_VERSION:  # the baseline records itself
                     conn.execute(
-                        "UPDATE gacha_banners SET config_json = ? "
-                        "WHERE guild_id = ? AND banner_key = ?",
-                        (json.dumps(banner_config, sort_keys=True), guild_id, banner_key),
-                    )
+                        "INSERT INTO schema_migrations (version, applied_at) "
+                        "VALUES (%s, %s)", (version, utc_now()))
+            if pending:
+                db_logger.info("Applied schema %s.",
+                               ", ".join(str(version) for version, _ in pending))
             attributed = repair_warning_provenance(conn)
             if attributed:
                 db_logger.info(
                     "Attributed %s legacy row(s) with no guild provenance.",
                     attributed)
-            renamed = rename_setting_rows(conn)
-            if renamed:
-                db_logger.info("Moved %s setting row(s) to a new key.", renamed)
-            if widen_managed_message_kinds(conn):
-                db_logger.info(
-                    "Rebuilt managed_messages so it can hold an embed.")
-            relabelled = rename_managed_option_keys(conn)
-            if relabelled:
-                db_logger.info(
-                    "Moved %s managed message option(s) to a new key.",
-                    relabelled)
-            menus = seed_role_menus_from_settings(conn)
-            if menus:
-                db_logger.info("Seeded %s role menu(s) into managed_messages.",
-                               menus)
-            games = seed_games_from_settings(conn)
-            if games:
-                db_logger.info("Folded LFG and patch-notes settings into "
-                               "one game list for %s guild(s).", games)
-            moved = _promote_instance_settings(conn)
-            if moved:
-                db_logger.info(
-                    "Moved %s installation-wide setting(s) out of guild_settings.",
-                    moved,
-                )
-            seeded = seed_default_work_responses(conn)
+            seeded = _seed_installation_defaults(conn)
             if seeded:
                 db_logger.info(
-                    "Seeded %s installation-default /work responses.", seeded
-                )
-            if current_version < LATEST_SCHEMA_VERSION:
-                conn.execute(f"PRAGMA user_version = {LATEST_SCHEMA_VERSION}")
-            conn.commit()
+                    "Seeded %s installation-default /work responses.", seeded)
             user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-            db_logger.info(
-                "Database ready (path=%s, schema=%s, users=%s)",
-                os.path.abspath(DB_PATH),
-                LATEST_SCHEMA_VERSION,
-                user_count,
-            )
+            database_name = conn.info.dbname
+        db_logger.info(
+            "Database ready (database=%s, schema=%s, users=%s)",
+            database_name, LATEST_SCHEMA_VERSION, user_count,
+        )
     except DatabaseOperationError:
         raise
-    except sqlite3.Error as exc:
-        db_logger.exception("Database migration failed (path=%s)", DB_PATH)
+    except EngineError as exc:
+        db_logger.exception("Database migration failed")
         raise DatabaseOperationError("database migration failed") from exc
-
-
 def _ensure_user(conn, user_id: int, timestamp: str = None):
     conn.execute(
         """
-        INSERT OR IGNORE INTO users (
+        INSERT INTO users (
             user_id, balance, xp, level, bj_wins, bj_losses,
             rob_bonus, rob_defense, vault_protection, last_active,
             inactive_warned
-        ) VALUES (?, 100, 0, 1, 0, 0, 0.0, 1.0, 0.0, ?, 0)
+        ) VALUES (%s, 100, 0, 1, 0, 0, 0.0, 1.0, 0.0, %s, 0)
+        ON CONFLICT DO NOTHING
         """,
         (user_id, timestamp or utc_now().isoformat()),
     )
@@ -1767,7 +661,7 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
                               "balance or xp change exceeds MAX_AMOUNT")
     _ensure_user(conn, user_id)
     row = conn.execute(
-        "SELECT balance, xp, level, bj_wins, bj_losses FROM users WHERE user_id = ?",
+        "SELECT balance, xp, level, bj_wins, bj_losses FROM users WHERE user_id = %s",
         (user_id,),
     ).fetchone()
     old_balance, old_xp, old_level, old_wins, old_losses = row
@@ -1778,7 +672,7 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
         now = utc_now()
         window_row = conn.execute(
             "SELECT window_started_at, window_total FROM casino_earnings_window "
-            "WHERE user_id = ?",
+            "WHERE user_id = %s",
             (user_id,),
         ).fetchone()
         if window_row is None:
@@ -1799,7 +693,7 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
         conn.execute(
             """
             INSERT INTO casino_earnings_window (user_id, window_started_at, window_total)
-            VALUES (?, ?, ?)
+            VALUES (%s, %s, %s)
             ON CONFLICT(user_id) DO UPDATE SET
                 window_started_at = excluded.window_started_at,
                 window_total = excluded.window_total
@@ -1820,8 +714,8 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
     conn.execute(
         """
         UPDATE users
-        SET balance = ?, xp = ?, level = ?, bj_wins = ?, bj_losses = ?
-        WHERE user_id = ?
+        SET balance = %s, xp = %s, level = %s, bj_wins = %s, bj_losses = %s
+        WHERE user_id = %s
         """,
         (new_balance, new_xp, new_level, new_wins, new_losses, user_id),
     )
@@ -1847,13 +741,12 @@ def apply_user_delta(user_id: int, balance_change: int = 0, xp_change: int = 0,
     """Atomically applies a user's balance, XP, and game-stat changes."""
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             result = _apply_stats_locked(
                 conn, user_id, balance_change, xp_change, win_inc, loss_inc
             )
             conn.commit()
             return result
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Atomic user update failed (user=%s)", user_id)
         raise DatabaseOperationError("atomic user update failed") from exc
 
@@ -1869,24 +762,23 @@ def set_user_experience(user_id: int, new_xp: int):
     An absolute write rather than a read-modify-write of a value the caller
     computed, so it does not reintroduce the split-update pattern the hardening
     baseline forbids — the caller says what the XP should *be*, and the row is
-    read and written under one `BEGIN IMMEDIATE`.
+    read and written in one write transaction.
 
     Returns the shape `_apply_stats_locked` returns, so the Discord-side helpers
     that follow a level change need no second case for it.
     """
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, user_id)
             row = conn.execute(
                 "SELECT balance, xp, level, bj_wins, bj_losses FROM users "
-                "WHERE user_id = ?", (user_id,),
+                "WHERE user_id = %s", (user_id,),
             ).fetchone()
             balance, old_xp, old_level, wins, losses = row
             target_xp = max(0, int(new_xp))
             target_level = level_for_xp(target_xp)
             conn.execute(
-                "UPDATE users SET xp = ?, level = ? WHERE user_id = ?",
+                "UPDATE users SET xp = %s, level = %s WHERE user_id = %s",
                 (target_xp, target_level, user_id),
             )
             conn.commit()
@@ -1896,7 +788,7 @@ def set_user_experience(user_id: int, new_xp: int):
                 "old_xp": old_xp,
                 "xp_changed": target_xp != old_xp,
             }
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Setting a member's experience failed (user=%s)", user_id)
         raise DatabaseOperationError("setting experience failed") from exc
 
@@ -1907,21 +799,20 @@ def reserve_wager(user_id: int, amount: int):
         return None
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, user_id)
             changed = conn.execute(
-                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
                 (amount, user_id, amount),
             ).rowcount
             if changed != 1:
                 conn.rollback()
                 return None
             balance = conn.execute(
-                "SELECT balance FROM users WHERE user_id = ?", (user_id,)
+                "SELECT balance FROM users WHERE user_id = %s", (user_id,)
             ).fetchone()[0]
             conn.commit()
             return balance
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Wager reservation failed (user=%s)", user_id)
         raise DatabaseOperationError("wager reservation failed") from exc
 
@@ -1951,11 +842,10 @@ def begin_interactive_wager(wager_id: str, guild_id: int, user_id: int,
     created_at = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, user_id)
             changed = conn.execute(
-                "UPDATE users SET balance = balance - ? "
-                "WHERE user_id = ? AND balance >= ?",
+                "UPDATE users SET balance = balance - %s "
+                "WHERE user_id = %s AND balance >= %s",
                 (stake, user_id, stake),
             ).rowcount
             if changed != 1:
@@ -1964,21 +854,21 @@ def begin_interactive_wager(wager_id: str, guild_id: int, user_id: int,
             conn.execute(
                 "INSERT INTO casino_wagers "
                 "(wager_id, guild_id, user_id, game_key, stake, status, created_at) "
-                "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+                "VALUES (%s, %s, %s, %s, %s, 'pending', %s)",
                 (wager_id, guild_id, user_id, game_key, stake, created_at),
             )
             # After the debit, so an unaffordable wager never spends an item.
             consumed = bool(consume_item and _consume_inventory_item(
                 conn, guild_id, user_id, consume_item, created_at))
             balance = conn.execute(
-                "SELECT balance FROM users WHERE user_id = ?", (user_id,)
+                "SELECT balance FROM users WHERE user_id = %s", (user_id,)
             ).fetchone()[0]
             conn.commit()
             return {"balance": balance, "consumed": consumed}
-    except sqlite3.IntegrityError as exc:
+    except IntegrityError as exc:
         db_logger.warning("Interactive wager identity collision (wager_id=%s)", wager_id)
         raise DatabaseOperationError("interactive wager identity collision") from exc
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Interactive wager reservation failed (wager_id=%s)", wager_id)
         raise DatabaseOperationError("interactive wager reservation failed") from exc
 
@@ -1989,33 +879,32 @@ def increase_interactive_wager(wager_id: str, user_id: int, amount: int):
         return None
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             pending = conn.execute(
                 "SELECT 1 FROM casino_wagers "
-                "WHERE wager_id = ? AND user_id = ? AND status = 'pending'",
+                "WHERE wager_id = %s AND user_id = %s AND status = 'pending'",
                 (wager_id, user_id),
             ).fetchone()
             if pending is None:
                 conn.rollback()
                 return None
             changed = conn.execute(
-                "UPDATE users SET balance = balance - ? "
-                "WHERE user_id = ? AND balance >= ?",
+                "UPDATE users SET balance = balance - %s "
+                "WHERE user_id = %s AND balance >= %s",
                 (amount, user_id, amount),
             ).rowcount
             if changed != 1:
                 conn.rollback()
                 return None
             conn.execute(
-                "UPDATE casino_wagers SET stake = stake + ? WHERE wager_id = ?",
+                "UPDATE casino_wagers SET stake = stake + %s WHERE wager_id = %s",
                 (amount, wager_id),
             )
             balance = conn.execute(
-                "SELECT balance FROM users WHERE user_id = ?", (user_id,)
+                "SELECT balance FROM users WHERE user_id = %s", (user_id,)
             ).fetchone()[0]
             conn.commit()
             return balance
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Interactive wager increase failed (wager_id=%s)", wager_id)
         raise DatabaseOperationError("interactive wager increase failed") from exc
 
@@ -2030,10 +919,9 @@ def resolve_interactive_wager(wager_id: str, user_id: int, credit: int = 0,
     resolved_at = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             changed = conn.execute(
-                "UPDATE casino_wagers SET status = 'settled', resolved_at = ?, "
-                "resolution_json = ? WHERE wager_id = ? AND user_id = ? "
+                "UPDATE casino_wagers SET status = 'settled', resolved_at = %s, "
+                "resolution_json = %s WHERE wager_id = %s AND user_id = %s "
                 "AND status = 'pending'",
                 (
                     resolved_at,
@@ -2051,7 +939,7 @@ def resolve_interactive_wager(wager_id: str, user_id: int, credit: int = 0,
             )
             conn.commit()
             return result
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Interactive wager settlement failed (wager_id=%s)", wager_id)
         raise DatabaseOperationError("interactive wager settlement failed") from exc
 
@@ -2061,26 +949,25 @@ def refund_interactive_wager(wager_id: str, reason: str = "delivery_failed"):
     resolved_at = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT user_id, stake FROM casino_wagers "
-                "WHERE wager_id = ? AND status = 'pending'", (wager_id,)
+                "WHERE wager_id = %s AND status = 'pending'", (wager_id,)
             ).fetchone()
             if row is None:
                 conn.rollback()
                 return False
             conn.execute(
-                "UPDATE users SET balance = balance + ? WHERE user_id = ?",
+                "UPDATE users SET balance = balance + %s WHERE user_id = %s",
                 (row[1], row[0]),
             )
             conn.execute(
-                "UPDATE casino_wagers SET status = 'refunded', resolved_at = ?, "
-                "resolution_json = ? WHERE wager_id = ? AND status = 'pending'",
+                "UPDATE casino_wagers SET status = 'refunded', resolved_at = %s, "
+                "resolution_json = %s WHERE wager_id = %s AND status = 'pending'",
                 (resolved_at, json.dumps({"reason": reason}), wager_id),
             )
             conn.commit()
             return True
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Interactive wager refund failed (wager_id=%s)", wager_id)
         raise DatabaseOperationError("interactive wager refund failed") from exc
 
@@ -2090,24 +977,23 @@ def refund_pending_wagers(reason: str = "process_restart"):
     resolved_at = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 "SELECT wager_id, user_id, stake FROM casino_wagers "
                 "WHERE status = 'pending'"
             ).fetchall()
             for wager_id, user_id, stake in rows:
                 conn.execute(
-                    "UPDATE users SET balance = balance + ? WHERE user_id = ?",
+                    "UPDATE users SET balance = balance + %s WHERE user_id = %s",
                     (stake, user_id),
                 )
                 conn.execute(
-                    "UPDATE casino_wagers SET status = 'refunded', resolved_at = ?, "
-                    "resolution_json = ? WHERE wager_id = ? AND status = 'pending'",
+                    "UPDATE casino_wagers SET status = 'refunded', resolved_at = %s, "
+                    "resolution_json = %s WHERE wager_id = %s AND status = 'pending'",
                     (resolved_at, json.dumps({"reason": reason}), wager_id),
                 )
             conn.commit()
             return {"count": len(rows), "amount": sum(row[2] for row in rows)}
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Pending wager recovery failed")
         raise DatabaseOperationError("pending wager recovery failed") from exc
 
@@ -2120,10 +1006,9 @@ def claim_periodic_reward(guild_id: int, user_id: int, reward_key: str,
     now = datetime.now(timezone.utc)
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             previous = conn.execute(
                 "SELECT claimed_at FROM reward_claims "
-                "WHERE guild_id = ? AND user_id = ? AND reward_key = ?",
+                "WHERE guild_id = %s AND user_id = %s AND reward_key = %s",
                 (guild_id, user_id, reward_key),
             ).fetchone()
             if previous is not None:
@@ -2135,13 +1020,13 @@ def claim_periodic_reward(guild_id: int, user_id: int, reward_key: str,
             result = _apply_stats_locked(conn, user_id, amount, 0, 0, 0)
             conn.execute(
                 "INSERT INTO reward_claims (guild_id, user_id, reward_key, claimed_at) "
-                "VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id, reward_key) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT(guild_id, user_id, reward_key) "
                 "DO UPDATE SET claimed_at = excluded.claimed_at",
                 (guild_id, user_id, reward_key, now.isoformat()),
             )
             conn.commit()
             return result
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception(
             "Periodic reward claim failed (guild=%s, user=%s, reward=%s)",
             guild_id, user_id, reward_key,
@@ -2157,10 +1042,9 @@ def resolve_instant_wager(user_id: int, stake: int, credit: int = 0,
         return None
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, user_id)
             changed = conn.execute(
-                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
                 (stake, user_id, stake),
             ).rowcount
             if changed != 1:
@@ -2172,7 +1056,7 @@ def resolve_instant_wager(user_id: int, stake: int, credit: int = 0,
             )
             conn.commit()
             return result
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Instant wager failed (user=%s)", user_id)
         raise DatabaseOperationError("instant wager failed") from exc
 
@@ -2186,24 +1070,23 @@ def resolve_dice_wager(guild_id: int, user_id: int, stake: int,
         return None
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, user_id)
             if conn.execute(
-                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
                 (stake, user_id, stake),
             ).rowcount != 1:
                 conn.rollback()
                 return None
             loaded = conn.execute(
-                "SELECT quantity FROM user_inventory WHERE guild_id = ? AND user_id = ? "
+                "SELECT quantity FROM user_inventory WHERE guild_id = %s AND user_id = %s "
                 "AND item_key = 'loaded_die' AND quantity > 0",
                 (int(guild_id), int(user_id)),
             ).fetchone() is not None
             player_roll = max(first_roll, second_roll) if loaded else first_roll
             if loaded:
                 conn.execute(
-                    "UPDATE user_inventory SET quantity = quantity - 1, updated_at = ? "
-                    "WHERE guild_id = ? AND user_id = ? AND item_key = 'loaded_die'",
+                    "UPDATE user_inventory SET quantity = quantity - 1, updated_at = %s "
+                    "WHERE guild_id = %s AND user_id = %s AND item_key = 'loaded_die'",
                     (datetime.now(timezone.utc).isoformat(), int(guild_id), int(user_id)),
                 )
             if player_roll > bot_roll:
@@ -2226,7 +1109,7 @@ def resolve_dice_wager(guild_id: int, user_id: int, stake: int,
                            "first_roll": first_roll, "second_roll": second_roll,
                            "net_winnings": result["applied_credit"] - stake})
             return result
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Dice wager failed (guild=%s, user=%s)", guild_id, user_id)
         raise DatabaseOperationError("dice wager failed") from exc
 
@@ -2291,10 +1174,9 @@ def resolve_roulette_wager(guild_id: int, user_id: int, stake: int,
     rng = rng or secrets.SystemRandom()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, user_id)
             if conn.execute(
-                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
                 (stake, user_id, stake),
             ).rowcount != 1:
                 conn.rollback()
@@ -2330,7 +1212,7 @@ def resolve_roulette_wager(guild_id: int, user_id: int, stake: int,
                            "second_number": second_number,
                            "second_colour": second_colour})
             return result
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Roulette wager failed (guild=%s, user=%s)",
                             guild_id, user_id)
         raise DatabaseOperationError("roulette wager failed") from exc
@@ -2398,10 +1280,9 @@ def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None,
     total_weight = sum(weight for _, weight in segments)
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, user_id)
             if conn.execute(
-                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
                 (stake, user_id, stake),
             ).rowcount != 1:
                 conn.rollback()
@@ -2427,7 +1308,7 @@ def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None,
                            "payout": result["applied_credit"],
                            "lucky_charm": charm, "second_multiplier": second})
             return result
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Wheel wager failed (guild=%s, user=%s)",
                             guild_id, user_id)
         raise DatabaseOperationError("wheel wager failed") from exc
@@ -2445,10 +1326,9 @@ def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None,
     rng = rng or secrets.SystemRandom()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, user_id)
             if conn.execute(
-                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
                 (stake, user_id, stake),
             ).rowcount != 1:
                 conn.rollback()
@@ -2476,7 +1356,7 @@ def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None,
                            "lucky_charm": charm,
                            "second_reels": list(second_reels) if second_reels else None})
             return result
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Slots wager failed (guild=%s, user=%s)",
                             guild_id, user_id)
         raise DatabaseOperationError("slots wager failed") from exc
@@ -2489,11 +1369,10 @@ def transfer_balance(sender_id: int, recipient_id: int, amount: int,
         return None
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, sender_id)
             _ensure_user(conn, recipient_id)
             sender = conn.execute(
-                "SELECT balance, xp, level FROM users WHERE user_id = ?", (sender_id,)
+                "SELECT balance, xp, level FROM users WHERE user_id = %s", (sender_id,)
             ).fetchone()
             if sender[0] < amount:
                 conn.rollback()
@@ -2501,11 +1380,11 @@ def transfer_balance(sender_id: int, recipient_id: int, amount: int,
             new_xp = max(0, sender[1] + sender_xp)
             new_level = level_for_xp(new_xp)
             conn.execute(
-                "UPDATE users SET balance = balance - ?, xp = ?, level = ? WHERE user_id = ?",
+                "UPDATE users SET balance = balance - %s, xp = %s, level = %s WHERE user_id = %s",
                 (amount, new_xp, new_level, sender_id),
             )
             conn.execute(
-                "UPDATE users SET balance = balance + ? WHERE user_id = ?",
+                "UPDATE users SET balance = balance + %s WHERE user_id = %s",
                 (amount, recipient_id),
             )
             new_balance = sender[0] - amount
@@ -2515,7 +1394,7 @@ def transfer_balance(sender_id: int, recipient_id: int, amount: int,
                 "old_level": sender[2],
                 "xp_changed": new_xp != sender[1],
             }
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Balance transfer failed (sender=%s)", sender_id)
         raise DatabaseOperationError("balance transfer failed") from exc
 
@@ -2527,12 +1406,11 @@ def apply_batch_balance(user_ids, amount: int):
         return 0
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             for user_id in unique_ids:
                 _apply_stats_locked(conn, user_id, balance_change=amount)
             conn.commit()
             return len(unique_ids)
-    except (sqlite3.Error, ValueError) as exc:
+    except (EngineError, ValueError) as exc:
         db_logger.exception("Batch balance update failed (users=%s)", len(unique_ids))
         raise DatabaseOperationError("batch balance update failed") from exc
 
@@ -2547,7 +1425,6 @@ def apply_batch_user_deltas(deltas):
         return {}
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             results = {}
             for user_id, balance_change, xp_change in deltas:
                 results[int(user_id)] = _apply_stats_locked(
@@ -2558,7 +1435,7 @@ def apply_batch_user_deltas(deltas):
                 )
             conn.commit()
             return results
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Batch user reward update failed (users=%s)", len(deltas))
         raise DatabaseOperationError("batch user reward update failed") from exc
 
@@ -2572,10 +1449,9 @@ def claim_timed_reward(user_id: int, cooldown_column: str, timestamp: str,
     now = parse_stored(timestamp)
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, user_id, timestamp)
             last_value = conn.execute(
-                f"SELECT {cooldown_column} FROM users WHERE user_id = ?", (user_id,)
+                f"SELECT {sql_identifier(cooldown_column)} FROM users WHERE user_id = %s", (user_id,)
             ).fetchone()[0]
             if last_value:
                 last = parse_stored(last_value)
@@ -2594,13 +1470,13 @@ def claim_timed_reward(user_id: int, cooldown_column: str, timestamp: str,
 
             result = _apply_stats_locked(conn, user_id, coin_reward, xp_reward)
             conn.execute(
-                f"UPDATE users SET {cooldown_column} = ? WHERE user_id = ?",
+                f"UPDATE users SET {sql_identifier(cooldown_column)} = %s WHERE user_id = %s",
                 (timestamp, user_id),
             )
             conn.commit()
             result.update({"claimed": True, "last_claim": last_value})
             return result
-    except (sqlite3.Error, ValueError) as exc:
+    except (EngineError, ValueError) as exc:
         db_logger.exception("Timed reward failed (user=%s, cooldown=%s)", user_id, cooldown_column)
         raise DatabaseOperationError("timed reward failed") from exc
 
@@ -2616,8 +1492,8 @@ def _consume_inventory_item(conn, guild_id: int, user_id: int, item_key: str,
     the answer, so two concurrent settlements cannot spend one item.
     """
     return conn.execute(
-        "UPDATE user_inventory SET quantity = quantity - 1, updated_at = ? "
-        "WHERE guild_id = ? AND user_id = ? AND item_key = ? AND quantity > 0",
+        "UPDATE user_inventory SET quantity = quantity - 1, updated_at = %s "
+        "WHERE guild_id = %s AND user_id = %s AND item_key = %s AND quantity > 0",
         (timestamp or datetime.now(timezone.utc).isoformat(),
          int(guild_id), int(user_id), item_key),
     ).rowcount == 1
@@ -2633,8 +1509,8 @@ def _consume_streak_freeze(conn, guild_id: int, user_id: int,
     freeze.
     """
     return conn.execute(
-        "UPDATE user_inventory SET quantity = quantity - 1, updated_at = ? "
-        "WHERE guild_id = ? AND user_id = ? AND item_key = 'streak_freeze' "
+        "UPDATE user_inventory SET quantity = quantity - 1, updated_at = %s "
+        "WHERE guild_id = %s AND user_id = %s AND item_key = 'streak_freeze' "
         "AND quantity > 0",
         (timestamp, int(guild_id), int(user_id)),
     ).rowcount == 1
@@ -2661,11 +1537,10 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
     now = parse_stored(timestamp)
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, user_id, timestamp)
             row = conn.execute(
-                f"SELECT {cooldown_column}, streak_count, last_streak_update "
-                "FROM users WHERE user_id = ?",
+                f"SELECT {sql_identifier(cooldown_column)}, streak_count, last_streak_update "
+                "FROM users WHERE user_id = %s",
                 (user_id,),
             ).fetchone()
             last_claim, streak_count, last_streak_update = row
@@ -2715,8 +1590,9 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
             conn.execute(
                 f"""
                 UPDATE users
-                SET {cooldown_column} = ?, streak_count = ?, last_streak_update = ?
-                WHERE user_id = ?
+                SET {sql_identifier(cooldown_column)} = %s, streak_count = %s,
+                    last_streak_update = %s
+                WHERE user_id = %s
                 """,
                 (timestamp, new_streak, timestamp, user_id),
             )
@@ -2724,7 +1600,7 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
             result.update({"claimed": True, "reward": reward,
                            "streak": new_streak, "froze_streak": froze_streak})
             return result
-    except (sqlite3.Error, ValueError) as exc:
+    except (EngineError, ValueError) as exc:
         db_logger.exception("Everydle reward failed (user=%s, cooldown=%s)", user_id, cooldown_column)
         raise DatabaseOperationError("Everydle reward failed") from exc
 
@@ -2740,18 +1616,17 @@ def purchase_upgrade(user_id: int, price: int, upgrade: str, value=None):
         raise ValueError("invalid purchase")
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, user_id)
             if upgrade == "vault":
                 current = conn.execute(
-                    "SELECT protected_reserve FROM users WHERE user_id = ?", (user_id,)
+                    "SELECT protected_reserve FROM users WHERE user_id = %s", (user_id,)
                 ).fetchone()[0]
                 if current >= int(value):
                     conn.rollback()
                     return {"purchased": False, "reason": "already_owned"}
 
             changed = conn.execute(
-                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
                 (price, user_id, price),
             ).rowcount
             if changed != 1:
@@ -2760,19 +1635,19 @@ def purchase_upgrade(user_id: int, price: int, upgrade: str, value=None):
 
             if upgrade == "vault":
                 conn.execute(
-                    "UPDATE users SET protected_reserve = ? WHERE user_id = ?", (int(value), user_id)
+                    "UPDATE users SET protected_reserve = %s WHERE user_id = %s", (int(value), user_id)
                 )
             elif upgrade == "bodyguard":
                 conn.execute(
-                    "UPDATE users SET rob_defense = 0.7, bodyguard_until = ? WHERE user_id = ?",
+                    "UPDATE users SET rob_defense = 0.7, bodyguard_until = %s WHERE user_id = %s",
                     (value, user_id),
                 )
             balance = conn.execute(
-                "SELECT balance FROM users WHERE user_id = ?", (user_id,)
+                "SELECT balance FROM users WHERE user_id = %s", (user_id,)
             ).fetchone()[0]
             conn.commit()
             return {"purchased": True, "balance": balance}
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Purchase failed (user=%s, upgrade=%s)", user_id, upgrade)
         raise DatabaseOperationError("purchase failed") from exc
 
@@ -2792,28 +1667,27 @@ def purchase_inventory_item(guild_id: int, user_id: int, price: int,
     timestamp = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             _ensure_user(conn, int(user_id), timestamp)
             if conn.execute(
-                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
                 (price, int(user_id), price),
             ).rowcount != 1:
                 conn.rollback()
                 return {"purchased": False, "reason": "insufficient_funds"}
             conn.execute(
                 "INSERT INTO user_inventory (guild_id, user_id, item_key, quantity, updated_at) "
-                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(guild_id, user_id, item_key) "
-                "DO UPDATE SET quantity = quantity + excluded.quantity, "
+                "VALUES (%s, %s, %s, %s, %s) ON CONFLICT(guild_id, user_id, item_key) "
+                "DO UPDATE SET quantity = user_inventory.quantity + excluded.quantity, "
                 "updated_at = excluded.updated_at",
                 (int(guild_id), int(user_id), item_key, int(quantity), timestamp),
             )
             balance = conn.execute(
-                "SELECT balance FROM users WHERE user_id = ?", (int(user_id),)
+                "SELECT balance FROM users WHERE user_id = %s", (int(user_id),)
             ).fetchone()[0]
             conn.commit()
             return {"purchased": True, "balance": balance, "price": price,
                     "item_key": item_key, "quantity": int(quantity)}
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Inventory purchase failed (guild=%s, user=%s, item=%s)",
                             guild_id, user_id, item_key)
         raise DatabaseOperationError("inventory purchase failed") from exc
@@ -2824,36 +1698,132 @@ def refund_balance(user_id: int, amount: int):
         return
     apply_user_delta(user_id, balance_change=amount)
 
+# One installation-wide advisory lock key ("Potato"), taken by every write
+# transaction. PostgreSQL scopes advisory locks to the database.
+_WRITE_LOCK_KEY = 0x506F7461746F
+# Read workers, the one writer and the dashboard's Waitress threads, with room.
+_POOL_MAX_SIZE = 16
+
+
+class _FlagDumper(Dumper):
+    """A Python bool as the 0 or 1 a FLAG (`smallint`) column holds, which is
+    what SQLite stored; the schema has no boolean column for it to mean."""
+
+    oid = psycopg.adapters.types["int2"].oid
+
+    def dump(self, obj):
+        return b"1" if obj else b"0"
+
+
+def _configure_connection(conn):
+    conn.adapters.register_dumper(bool, _FlagDumper)
+    # Every instant comes back in UTC whatever the server's own zone is.
+    conn.execute("SET TIME ZONE 'UTC'")
+    conn.commit()
+
+
+_pool_lock = threading.Lock()
+_pool = None
+_pool_dsn = None
+
+
+def _connection_pool() -> ConnectionPool:
+    """The process's pool, rebuilt if `DSN` has changed since it opened."""
+    global _pool, _pool_dsn
+    with _pool_lock:
+        if _pool is None or _pool_dsn != DSN:
+            if _pool is not None:
+                _pool.close()
+            _pool = ConnectionPool(
+                DSN, min_size=1, max_size=_POOL_MAX_SIZE, timeout=30,
+                configure=_configure_connection, open=True, name="potatobot",
+            )
+            _pool_dsn = DSN
+        return _pool
+
+
+def wait_for_database(timeout: float = 60.0) -> None:
+    """Block until PostgreSQL accepts a connection, or raise after `timeout`.
+
+    The database container can come up a few seconds after the bot's. Waiting
+    here, with backoff, keeps that ordinary start from becoming a crash loop;
+    60 seconds stays well inside systemd's five restarts in 300
+    (`RestartLimitTests`), so a database that is really gone still ends in a
+    visible failure rather than a silent one.
+    """
+    deadline = time.monotonic() + timeout
+    delay = 0.5
+    while True:
+        try:
+            with psycopg.connect(DSN, connect_timeout=5) as conn:
+                conn.execute("SELECT 1")
+            return
+        except psycopg.OperationalError as exc:
+            if time.monotonic() + delay > deadline:
+                raise DatabaseOperationError("PostgreSQL did not become reachable") from exc
+            db_logger.warning("Waiting for PostgreSQL (retry_in_s=%.1f)", delay)
+            time.sleep(delay)
+            delay = min(delay * 2, 5.0)
+
+
+def close_connection_pool():
+    """Close the pool during an orderly shutdown, or before pointing `DSN`
+    elsewhere for good."""
+    global _pool, _pool_dsn
+    with _pool_lock:
+        if _pool is not None:
+            _pool.close()
+        _pool, _pool_dsn = None, None
+
+
+def _begin_write_transaction(conn):
+    """Open the transaction and take the database's write lock at once.
+
+    The one place a write transaction is started. Taking the lock at the start,
+    not at the first write, is what lets a read-then-write body (a balance
+    check, a revision compare) act on what it read: no other writer, in this
+    process or another, can commit in between. SQLite spelled it
+    ``BEGIN IMMEDIATE``; here it is a transaction-scoped advisory lock, held
+    until the commit or rollback, which every write takes, so a dashboard run as
+    its own process serializes with the bot exactly as it did on SQLite.
+    """
+    try:
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", (_WRITE_LOCK_KEY,))
+    except EngineError as exc:
+        raise DatabaseOperationError("could not begin the write transaction") from exc
+
+
 @contextmanager
 def get_connection():
-    """Yield a short-lived SQLite connection with consistent durability settings.
+    """Lend a pooled PostgreSQL connection for one transaction.
 
-    Read-pool workers do not take the process write lock. Serialized writer
-    workers and direct synchronous callers retain it for the transaction lifetime.
+    Read-pool workers do not take the process write lock and get a
+    `REPEATABLE READ, READ ONLY` transaction: no write, and one snapshot across
+    a multi-statement read, as SQLite's WAL gave. Every other connection --
+    serialized writer workers and direct synchronous callers -- holds the
+    process write lock and arrives with the write transaction already begun, so
+    no accessor starts one itself. Commits on a clean exit, rolls back on an
+    exception. Nothing nests a second connection inside an open one; with the
+    write lock taken up front, one would wait forever behind its own caller.
     """
-    lock = (
-        nullcontext()
-        if getattr(_DB_EXECUTION, "mode", None) == "read"
-        else _DB_WRITE_LOCK
-    )
+    reading = getattr(_DB_EXECUTION, "mode", None) == "read"
+    lock = nullcontext() if reading else _DB_WRITE_LOCK
     with lock:
-        conn = sqlite3.connect(DB_PATH, timeout=20)
-        try:
-            conn.execute("PRAGMA foreign_keys=ON;")
-            if getattr(_DB_EXECUTION, "mode", None) == "read":
-                conn.execute("PRAGMA query_only=ON;")
-            conn.execute("PRAGMA synchronous=NORMAL;")
-            conn.execute("PRAGMA busy_timeout=5000;")
-            conn.execute("PRAGMA temp_store=MEMORY;")
-            conn.execute("PRAGMA cache_size=-16000;")
-            conn.execute("PRAGMA mmap_size=268435456;")
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        with _connection_pool().connection() as conn:
+            try:
+                if reading:
+                    conn.execute(
+                        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+                else:
+                    _begin_write_transaction(conn)
+                yield conn
+                conn.commit()
+            except BaseException:
+                try:
+                    conn.rollback()
+                except EngineError:
+                    pass  # the connection is gone; the pool replaces it
+                raise
 
 
 # ==========================================
@@ -2867,7 +1837,7 @@ def register_guild(guild_id: int, display_name: str = None):
         conn.execute(
             """
             INSERT INTO guilds (guild_id, display_name, active, first_seen_at, last_seen_at)
-            VALUES (?, ?, 1, ?, ?)
+            VALUES (%s, %s, 1, %s, %s)
             ON CONFLICT(guild_id) DO UPDATE SET
                 display_name = excluded.display_name,
                 active = 1,
@@ -2881,7 +1851,7 @@ def mark_guild_inactive(guild_id: int):
     """Retain tenant data while marking a guild unavailable to the dashboard."""
     with get_connection() as conn:
         conn.execute(
-            "UPDATE guilds SET active = 0, last_seen_at = ? WHERE guild_id = ?",
+            "UPDATE guilds SET active = 0, last_seen_at = %s WHERE guild_id = %s",
             (utc_now().isoformat(), int(guild_id)),
         )
 
@@ -2895,9 +1865,10 @@ def get_active_guild_ids() -> set[int]:
 
 
 def get_schema_version() -> int:
-    """The schema version the database file is actually at."""
+    """The schema version the database is actually at."""
     with get_connection() as conn:
-        return conn.execute("PRAGMA user_version").fetchone()[0]
+        return conn.execute(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
 
 
 def get_active_guilds(guild_ids=None) -> list[dict]:
@@ -2906,16 +1877,17 @@ def get_active_guilds(guild_ids=None) -> list[dict]:
         if guild_ids is None:
             rows = conn.execute(
                 "SELECT guild_id, display_name FROM guilds WHERE active = 1 "
-                "ORDER BY display_name, guild_id"
+                "ORDER BY display_name NULLS FIRST, guild_id"
             ).fetchall()
         else:
             normalized = sorted({int(guild_id) for guild_id in guild_ids})
             if not normalized:
                 return []
-            placeholders = ",".join("?" for _ in normalized)
+            placeholders = ",".join("%s" for _ in normalized)
             rows = conn.execute(
                 f"SELECT guild_id, display_name FROM guilds WHERE active = 1 "
-                f"AND guild_id IN ({placeholders}) ORDER BY display_name, guild_id",
+                f"AND guild_id IN ({placeholders}) "
+                "ORDER BY display_name NULLS FIRST, guild_id",
                 normalized,
             ).fetchall()
     return [{"id": str(row[0]), "name": row[1] or str(row[0])} for row in rows]
@@ -2930,7 +1902,7 @@ def get_feature_states(guild_id: int) -> dict[str, dict]:
             row[0]: (bool(row[1]), row[2])
             for row in conn.execute(
                 "SELECT feature_key, enabled, revision FROM feature_flags "
-                "WHERE guild_id = ?",
+                "WHERE guild_id = %s",
                 (int(guild_id),),
             )
         }
@@ -2959,7 +1931,7 @@ def get_feature_revision(guild_id: int) -> int:
     with get_connection() as conn:
         row = conn.execute(
             "SELECT COALESCE(MAX(audit_id), 0) FROM settings_audit "
-            "WHERE guild_id = ? AND action = 'feature.update'",
+            "WHERE guild_id = %s AND action = 'feature.update'",
             (int(guild_id),),
         ).fetchone()
     return int(row[0]) if row else 0
@@ -2974,7 +1946,7 @@ def is_feature_enabled(guild_id: int, feature_key: str) -> bool:
         return definition.default
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT enabled FROM feature_flags WHERE guild_id = ? AND feature_key = ?",
+            "SELECT enabled FROM feature_flags WHERE guild_id = %s AND feature_key = %s",
             (int(guild_id), feature_key),
         ).fetchone()
     return bool(row[0]) if row else definition.default
@@ -2992,7 +1964,7 @@ def set_feature_state(guild_id: int, feature_key: str, enabled: bool,
     guild_id = int(guild_id)
     with get_connection() as conn:
         register = conn.execute(
-            "SELECT 1 FROM guilds WHERE guild_id = ? AND active = 1", (guild_id,)
+            "SELECT 1 FROM guilds WHERE guild_id = %s AND active = 1", (guild_id,)
         ).fetchone()
         if not register:
             raise ValueError("guild is not registered and active")
@@ -3000,7 +1972,7 @@ def set_feature_state(guild_id: int, feature_key: str, enabled: bool,
             row[0]: {"enabled": bool(row[1]), "revision": int(row[2])}
             for row in conn.execute(
                 "SELECT feature_key, enabled, revision FROM feature_flags "
-                "WHERE guild_id = ?", (guild_id,)
+                "WHERE guild_id = %s", (guild_id,)
             )
         }
         current = {
@@ -3043,13 +2015,13 @@ def set_feature_state(guild_id: int, feature_key: str, enabled: bool,
                 """
                 INSERT INTO feature_flags
                     (guild_id, feature_key, enabled, revision, updated_by, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT(guild_id, feature_key) DO UPDATE SET
                     enabled = excluded.enabled,
                     revision = excluded.revision,
                     updated_by = excluded.updated_by,
                     updated_at = excluded.updated_at
-                WHERE feature_flags.revision = ?
+                WHERE feature_flags.revision = %s
                 """,
                 (
                     guild_id, key, int(new_enabled), new_revision,
@@ -3061,7 +2033,7 @@ def set_feature_state(guild_id: int, feature_key: str, enabled: bool,
                 INSERT INTO settings_audit
                     (guild_id, actor_id, action, target_key, old_value_json,
                      new_value_json, created_at)
-                VALUES (?, ?, 'feature.update', ?, ?, ?, ?)
+                VALUES (%s, %s, 'feature.update', %s, %s, %s, %s)
                 """,
                 (
                     guild_id, int(actor_id), key,
@@ -3088,12 +2060,11 @@ def create_realm(name: str, actor_id: int) -> int:
         raise ValueError("realm name must contain between 3 and 64 characters")
     now = utc_now().isoformat()
     with get_connection() as conn:
-        cursor = conn.execute(
+        return conn.execute(
             "INSERT INTO realms (name, created_by, status, created_at) "
-            "VALUES (?, ?, 'active', ?)",
+            "VALUES (%s, %s, 'active', %s) RETURNING realm_id",
             (normalized, int(actor_id), now),
-        )
-        return cursor.lastrowid
+        ).fetchone()[0]
 
 
 def get_realms() -> list[dict]:
@@ -3124,11 +2095,11 @@ def request_realm_membership(realm_id: int, guild_id: int):
     """Create a pending membership; only a later host action can approve it."""
     with get_connection() as conn:
         active_realm = conn.execute(
-            "SELECT 1 FROM realms WHERE realm_id = ? AND status = 'active'",
+            "SELECT 1 FROM realms WHERE realm_id = %s AND status = 'active'",
             (int(realm_id),),
         ).fetchone()
         active_guild = conn.execute(
-            "SELECT 1 FROM guilds WHERE guild_id = ? AND active = 1",
+            "SELECT 1 FROM guilds WHERE guild_id = %s AND active = 1",
             (int(guild_id),),
         ).fetchone()
         if not active_realm or not active_guild:
@@ -3136,7 +2107,7 @@ def request_realm_membership(realm_id: int, guild_id: int):
         conn.execute(
             """
             INSERT INTO realm_guilds (realm_id, guild_id, status)
-            VALUES (?, ?, 'pending')
+            VALUES (%s, %s, 'pending')
             ON CONFLICT(realm_id, guild_id) DO UPDATE SET
                 status = 'pending', approved_by = NULL, joined_at = NULL
             """,
@@ -3150,8 +2121,8 @@ def approve_realm_membership(realm_id: int, guild_id: int, actor_id: int):
         cursor = conn.execute(
             """
             UPDATE realm_guilds
-            SET status = 'approved', approved_by = ?, joined_at = ?
-            WHERE realm_id = ? AND guild_id = ? AND status = 'pending'
+            SET status = 'approved', approved_by = %s, joined_at = %s
+            WHERE realm_id = %s AND guild_id = %s AND status = 'pending'
             """,
             (
                 int(actor_id), utc_now().isoformat(),
@@ -3171,7 +2142,7 @@ def get_guild_data_scopes(guild_id: int) -> dict[str, dict]:
             row[0]: row[1:]
             for row in conn.execute(
                 "SELECT category, scope_type, realm_id, revision "
-                "FROM guild_data_scopes WHERE guild_id = ?",
+                "FROM guild_data_scopes WHERE guild_id = %s",
                 (int(guild_id),),
             )
         }
@@ -3204,7 +2175,7 @@ def resolve_data_context(guild_id: int, category: str, user_id: int = None):
         with get_connection() as conn:
             opted_out = conn.execute(
                 "SELECT opted_out FROM user_sharing_preferences "
-                "WHERE user_id = ? AND guild_id = ? AND category = ?",
+                "WHERE user_id = %s AND guild_id = %s AND category = %s",
                 (int(user_id), guild_id, category_value.value),
             ).fetchone()
         if opted_out and opted_out[0]:
@@ -3242,7 +2213,7 @@ def set_guild_data_scope(guild_id: int, category: str, scope_type: str,
     with get_connection() as conn:
         if scope_value == DataScopeType.REALM.value:
             membership = conn.execute(
-                "SELECT 1 FROM realm_guilds WHERE realm_id = ? AND guild_id = ? "
+                "SELECT 1 FROM realm_guilds WHERE realm_id = %s AND guild_id = %s "
                 "AND status = 'approved'",
                 (int(realm_id), guild_id),
             ).fetchone()
@@ -3255,7 +2226,7 @@ def set_guild_data_scope(guild_id: int, category: str, scope_type: str,
                 INSERT INTO guild_data_scopes
                     (guild_id, category, scope_type, realm_id, revision,
                      updated_by, updated_at)
-                VALUES (?, ?, ?, ?, 1, ?, ?)
+                VALUES (%s, %s, %s, %s, 1, %s, %s)
                 """,
                 (guild_id, category_value, scope_value, realm_id, int(actor_id), now),
             )
@@ -3263,9 +2234,9 @@ def set_guild_data_scope(guild_id: int, category: str, scope_type: str,
             cursor = conn.execute(
                 """
                 UPDATE guild_data_scopes
-                SET scope_type = ?, realm_id = ?, revision = ?, updated_by = ?,
-                    updated_at = ?
-                WHERE guild_id = ? AND category = ? AND revision = ?
+                SET scope_type = %s, realm_id = %s, revision = %s, updated_by = %s,
+                    updated_at = %s
+                WHERE guild_id = %s AND category = %s AND revision = %s
                 """,
                 (
                     scope_value, realm_id, new_revision, int(actor_id), now,
@@ -3279,7 +2250,7 @@ def set_guild_data_scope(guild_id: int, category: str, scope_type: str,
             INSERT INTO settings_audit
                 (guild_id, actor_id, action, target_key, old_value_json,
                  new_value_json, created_at)
-            VALUES (?, ?, 'data_scope.update', ?, ?, ?, ?)
+            VALUES (%s, %s, 'data_scope.update', %s, %s, %s, %s)
             """,
             (
                 guild_id, int(actor_id), category_value,
@@ -3311,7 +2282,7 @@ def set_user_sharing_preference(user_id: int, guild_id: int, category: str,
             """
             INSERT INTO user_sharing_preferences
                 (user_id, guild_id, category, opted_out, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT(user_id, guild_id, category) DO UPDATE SET
                 opted_out = excluded.opted_out, updated_at = excluded.updated_at
             """,
@@ -3333,18 +2304,17 @@ def adopt_legacy_database(guild_id: int) -> dict:
     adoption_key = f"legacy-users-v1:{guild_id}"
     now = utc_now().isoformat()
     user_columns = list(USER_COLUMNS)
-    select_columns = ", ".join(["user_id", *user_columns])
-    insert_columns = ", ".join(
+    select_columns = ", ".join(sql_identifier(c) for c in ["user_id", *user_columns])
+    insert_columns = ", ".join(sql_identifier(c) for c in
         ["scope_type", "scope_id", "user_id", *user_columns, "created_at", "updated_at"]
     )
-    placeholders = ", ".join("?" for _ in range(5 + len(user_columns)))
+    placeholders = ", ".join("%s" for _ in range(5 + len(user_columns)))
 
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
                 "SELECT user_count, adopted_at FROM scope_adoptions "
-                "WHERE adoption_key = ?",
+                "WHERE adoption_key = %s",
                 (adoption_key,),
             ).fetchone()
             if existing:
@@ -3355,7 +2325,7 @@ def adopt_legacy_database(guild_id: int) -> dict:
                 }
 
             guild = conn.execute(
-                "SELECT 1 FROM guilds WHERE guild_id = ? AND active = 1",
+                "SELECT 1 FROM guilds WHERE guild_id = %s AND active = 1",
                 (guild_id,),
             ).fetchone()
             if not guild:
@@ -3374,7 +2344,7 @@ def adopt_legacy_database(guild_id: int) -> dict:
                 conn.execute(
                     """
                     INSERT INTO user_identities (user_id, first_seen_at, last_seen_at)
-                    VALUES (?, ?, ?)
+                    VALUES (%s, %s, %s)
                     ON CONFLICT(user_id) DO UPDATE SET
                         last_seen_at = excluded.last_seen_at
                     """,
@@ -3385,7 +2355,7 @@ def adopt_legacy_database(guild_id: int) -> dict:
                     INSERT INTO activity_events
                         (user_id, origin_guild_id, category, event_type,
                          metadata_json, created_at)
-                    VALUES (?, ?, 'migration', 'legacy_snapshot', ?, ?)
+                    VALUES (%s, %s, 'migration', 'legacy_snapshot', %s, %s)
                     """,
                     (
                         user_id, guild_id,
@@ -3395,16 +2365,17 @@ def adopt_legacy_database(guild_id: int) -> dict:
 
             for table_name in ("tickets", "warnings", "rented_items"):
                 conn.execute(
-                    f"UPDATE {table_name} SET guild_id = ? WHERE guild_id IS NULL",
+                    f"UPDATE {sql_identifier(table_name)} SET guild_id = %s "
+                    "WHERE guild_id IS NULL",
                     (guild_id,),
                 )
             conn.execute(
                 "INSERT INTO scope_adoptions "
-                "(adoption_key, guild_id, user_count, adopted_at) VALUES (?, ?, ?, ?)",
+                "(adoption_key, guild_id, user_count, adopted_at) VALUES (%s, %s, %s, %s)",
                 (adoption_key, guild_id, len(users), now),
             )
             return {"adopted": True, "user_count": len(users), "adopted_at": now}
-    except (sqlite3.Error, ValueError) as exc:
+    except (EngineError, ValueError) as exc:
         db_logger.exception("Legacy scope adoption failed (guild=%s)", guild_id)
         raise DatabaseOperationError("legacy scope adoption failed") from exc
 
@@ -3418,7 +2389,7 @@ def get_user_balance(user_id: int) -> int:
         # The connection context guarantees rollback and closure on every path.
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+            cursor.execute("SELECT balance FROM users WHERE user_id = %s", (user_id,))
             result = cursor.fetchone()
             return result[0] if result else 0
     except Exception as e:
@@ -3436,9 +2407,9 @@ def get_user_balance(user_id: int) -> int:
 def _upsert_voice_setting(guild_id: int, user_id: int, column: str, value):
     with get_connection() as conn:
         conn.execute(
-            f"INSERT INTO voice_settings (guild_id, user_id, {column}) "
-            f"VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) "
-            f"DO UPDATE SET {column}=excluded.{column}",
+            f"INSERT INTO voice_settings (guild_id, user_id, {sql_identifier(column)}) "
+            f"VALUES (%s, %s, %s) ON CONFLICT(guild_id, user_id) "
+            f"DO UPDATE SET {sql_identifier(column)}=excluded.{sql_identifier(column)}",
             (int(guild_id), int(user_id), value),
         )
 
@@ -3475,7 +2446,7 @@ def set_voice_permission(guild_id: int, owner_id: int, target_id: int, is_allowe
         with get_connection() as conn:
             conn.execute(
                 "INSERT INTO voice_permissions "
-                "(guild_id, owner_id, target_id, is_allowed) VALUES (?, ?, ?, ?) "
+                "(guild_id, owner_id, target_id, is_allowed) VALUES (%s, %s, %s, %s) "
                 "ON CONFLICT(guild_id, owner_id, target_id) "
                 "DO UPDATE SET is_allowed=excluded.is_allowed",
                 (int(guild_id), owner_id, target_id, is_allowed),
@@ -3489,7 +2460,7 @@ def get_voice_settings(guild_id: int, user_id: int):
         with get_connection() as conn:
             cursor = conn.execute(
                 "SELECT channel_name, user_limit, locked, bitrate FROM voice_settings "
-                "WHERE user_id = ? AND guild_id IN (?, 0) "
+                "WHERE user_id = %s AND guild_id IN (%s, 0) "
                 "ORDER BY guild_id DESC LIMIT 1",
                 (user_id, int(guild_id)),
             )
@@ -3504,14 +2475,14 @@ def get_voice_permissions(guild_id: int, owner_id: int):
         with get_connection() as conn:
             rows = conn.execute(
                 "SELECT target_id, is_allowed FROM voice_permissions "
-                "WHERE owner_id = ? AND guild_id = ?",
+                "WHERE owner_id = %s AND guild_id = %s",
                 (owner_id, int(guild_id)),
             ).fetchall()
             if rows:
                 return rows
             return conn.execute(
                 "SELECT target_id, is_allowed FROM voice_permissions "
-                "WHERE owner_id = ? AND guild_id = 0",
+                "WHERE owner_id = %s AND guild_id = 0",
                 (owner_id,),
             ).fetchall()
     except Exception as e:
@@ -3522,7 +2493,7 @@ def get_active_channel_owner(channel_id: int):
     """Channel snowflakes are globally unique, so this needs no guild predicate."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("SELECT owner_id FROM active_channels WHERE channel_id = ?", (channel_id,))
+            cursor = conn.execute("SELECT owner_id FROM active_channels WHERE channel_id = %s", (channel_id,))
             result = cursor.fetchone()
             return result[0] if result else None
     except Exception as e:
@@ -3534,7 +2505,7 @@ def add_active_channel(guild_id: int, channel_id: int, owner_id: int):
         with get_connection() as conn:
             conn.execute(
                 "INSERT INTO active_channels (channel_id, owner_id, guild_id) "
-                "VALUES (?, ?, ?)",
+                "VALUES (%s, %s, %s)",
                 (channel_id, owner_id, int(guild_id)),
             )
     except Exception as e:
@@ -3544,7 +2515,7 @@ def add_active_channel(guild_id: int, channel_id: int, owner_id: int):
 def remove_active_channel(channel_id: int):
     try:
         with get_connection() as conn:
-            conn.execute("DELETE FROM active_channels WHERE channel_id = ?", (channel_id,))
+            conn.execute("DELETE FROM active_channels WHERE channel_id = %s", (channel_id,))
     except Exception as e:
         db_logger.error(f"Failed to remove active voice room: {e}")
         raise DatabaseOperationError("active channel delete failed") from e
@@ -3552,7 +2523,7 @@ def remove_active_channel(channel_id: int):
 def update_active_channel_owner(channel_id: int, new_owner_id: int):
     try:
         with get_connection() as conn:
-            conn.execute("UPDATE active_channels SET owner_id = ? WHERE channel_id = ?", (new_owner_id, channel_id))
+            conn.execute("UPDATE active_channels SET owner_id = %s WHERE channel_id = %s", (new_owner_id, channel_id))
     except Exception as e:
         db_logger.error(f"Failed to transfer voice-room ownership: {e}")
         raise DatabaseOperationError("active channel owner update failed") from e
@@ -3562,17 +2533,28 @@ def add_ticket(channel_id: int, opener_id: int, guild_id: int = None,
                ticket_type: str = None):
     try:
         with get_connection() as conn:
-            insert_mode = "INSERT" if ticket_type == "support" else "INSERT OR REPLACE"
+            # A support ticket is a plain insert, so a second one for the same
+            # member hits the partial unique index and is refused. Any other
+            # ticket replaces a stale row on its channel completely -- what
+            # SQLite's INSERT OR REPLACE did by deleting it -- so every column
+            # outside the insert is reset here; TicketReplacementTests pins
+            # the column set, so a new column cannot be missed.
+            replace = "" if ticket_type == "support" else (
+                " ON CONFLICT (channel_id) DO UPDATE SET "
+                "opener_id = excluded.opener_id, created_at = excluded.created_at, "
+                "guild_id = excluded.guild_id, ticket_type = excluded.ticket_type, "
+                "claimer_id = NULL"
+            )
             conn.execute(
-                f"{insert_mode} INTO tickets "
+                "INSERT INTO tickets "
                 "(channel_id, opener_id, created_at, guild_id, ticket_type) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "VALUES (%s, %s, %s, %s, %s)" + replace,
                 (
                     channel_id, opener_id, datetime.now(timezone.utc).isoformat(),
                     guild_id, ticket_type,
                 ),
             )
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Ticket registration failed (channel=%s)", channel_id)
         raise DatabaseOperationError("ticket registration failed") from exc
 
@@ -3582,12 +2564,12 @@ def get_open_support_ticket(guild_id: int, opener_id: int):
     try:
         with get_connection() as conn:
             row = conn.execute(
-                "SELECT channel_id FROM tickets WHERE guild_id = ? "
-                "AND opener_id = ? AND ticket_type = 'support'",
+                "SELECT channel_id FROM tickets WHERE guild_id = %s "
+                "AND opener_id = %s AND ticket_type = 'support'",
                 (guild_id, opener_id),
             ).fetchone()
             return row[0] if row else None
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception(
             "Support ticket lookup failed (guild=%s, opener=%s)",
             guild_id, opener_id,
@@ -3604,10 +2586,10 @@ def set_ticket_claimer(channel_id: int, claimer_id: int) -> None:
     try:
         with get_connection() as conn:
             conn.execute(
-                "UPDATE tickets SET claimer_id = ? WHERE channel_id = ?",
+                "UPDATE tickets SET claimer_id = %s WHERE channel_id = %s",
                 (int(claimer_id), int(channel_id)),
             )
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Ticket claim failed (channel=%s)", channel_id)
         raise DatabaseOperationError("ticket claim failed") from exc
 
@@ -3616,10 +2598,10 @@ def get_ticket_claimer(channel_id: int):
     try:
         with get_connection() as conn:
             row = conn.execute(
-                "SELECT claimer_id FROM tickets WHERE channel_id = ?", (int(channel_id),)
+                "SELECT claimer_id FROM tickets WHERE channel_id = %s", (int(channel_id),)
             ).fetchone()
             return row[0] if row else None
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Ticket claimer lookup failed (channel=%s)", channel_id)
         raise DatabaseOperationError("ticket claimer lookup failed") from exc
 
@@ -3628,10 +2610,10 @@ def get_ticket_opener(channel_id: int):
     try:
         with get_connection() as conn:
             row = conn.execute(
-                "SELECT opener_id FROM tickets WHERE channel_id = ?", (channel_id,)
+                "SELECT opener_id FROM tickets WHERE channel_id = %s", (channel_id,)
             ).fetchone()
             return row[0] if row else None
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Ticket lookup failed (channel=%s)", channel_id)
         raise DatabaseOperationError("ticket lookup failed") from exc
 
@@ -3639,8 +2621,8 @@ def get_ticket_opener(channel_id: int):
 def remove_ticket(channel_id: int):
     try:
         with get_connection() as conn:
-            conn.execute("DELETE FROM tickets WHERE channel_id = ?", (channel_id,))
-    except sqlite3.Error as exc:
+            conn.execute("DELETE FROM tickets WHERE channel_id = %s", (channel_id,))
+    except EngineError as exc:
         db_logger.exception("Ticket removal failed (channel=%s)", channel_id)
         raise DatabaseOperationError("ticket removal failed") from exc
 
@@ -3652,7 +2634,7 @@ def set_rules_read_time(user_id: int, seconds: int):
     """Store how many seconds the member took to accept the rules."""
     try:
         with get_connection() as conn:
-            conn.execute("UPDATE users SET rules_read_time = ? WHERE user_id = ?", (seconds, user_id))
+            conn.execute("UPDATE users SET rules_read_time = %s WHERE user_id = %s", (seconds, user_id))
     except Exception as e: 
         db_logger.error(f"Failed to save rules acceptance time: {e}")
         raise DatabaseOperationError("rules read time update failed") from e
@@ -3661,7 +2643,7 @@ def user_exists(user_id: int) -> bool:
     """Return whether an account row exists for the user."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,))
+            cursor = conn.execute("SELECT 1 FROM users WHERE user_id = %s", (user_id,))
             return cursor.fetchone() is not None
     except Exception as e:
         db_logger.error(f"Failed to check whether user exists: {e}")
@@ -3687,7 +2669,7 @@ def reset_user_cooldowns(user_id: int):
                     bodyguard_until = NULL,
                     last_streak_update = NULL,
                     streak_count = 0
-                WHERE user_id = ?
+                WHERE user_id = %s
             """, (user_id,))
     except Exception as e: 
         db_logger.error(f"Failed to reset user cooldowns: {e}")
@@ -3700,7 +2682,7 @@ def add_rented_item(item_type: str, item_id: str, expires_at: str,
         with get_connection() as conn:
             conn.execute(
                 "INSERT INTO rented_items "
-                "(item_type, discord_item_id, expires_at, guild_id) VALUES (?, ?, ?, ?)",
+                "(item_type, discord_item_id, expires_at, guild_id) VALUES (%s, %s, %s, %s)",
                 (item_type, item_id, expires_at, guild_id),
             )
     except Exception as e: 
@@ -3723,8 +2705,8 @@ def _warn_tag_filter(tag: str | None) -> tuple[str, tuple]:
         return "", ()
     from core.settings_registry import WARN_DEFAULT_TAG
     if tag == WARN_DEFAULT_TAG:
-        return " AND (tag = ? OR tag IS NULL)", (tag,)
-    return " AND tag = ?", (tag,)
+        return " AND (tag = %s OR tag IS NULL)", (tag,)
+    return " AND tag = %s", (tag,)
 
 
 def add_warning(user_id: int, mod_id: int, reason: str, date: str,
@@ -3734,7 +2716,7 @@ def add_warning(user_id: int, mod_id: int, reason: str, date: str,
         with get_connection() as conn:
             conn.execute(
                 "INSERT INTO warnings (user_id, mod_id, reason, date, guild_id, tag) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "VALUES (%s, %s, %s, %s, %s, %s)",
                 (user_id, mod_id, reason, date, guild_id, tag),
             )
     except Exception as e:
@@ -3754,13 +2736,11 @@ def record_warning(user_id: int, mod_id: int, reason: str, date: str,
     """
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            cursor = conn.execute(
+            warning_id = conn.execute(
                 "INSERT INTO warnings (user_id, mod_id, reason, date, guild_id, tag) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
                 (int(user_id), int(mod_id), reason, date, int(guild_id), tag),
-            )
-            warning_id = cursor.lastrowid
+            ).fetchone()[0]
             # Guild-scoped only, deliberately. A pre-schema-8 warning carries
             # no provenance, and counting it in every guild meant one
             # installation's history could push a member over a threshold in a
@@ -3770,7 +2750,7 @@ def record_warning(user_id: int, mod_id: int, reason: str, date: str,
             # /modlogs and stays removable — invisible history would be worse.
             # `repair_warning_provenance` attributes these on any installation
             # where the answer is unambiguous, so this is a no-op there.
-            scope = "user_id = ? AND guild_id = ?"
+            scope = "user_id = %s AND guild_id = %s"
             total = conn.execute(
                 f"SELECT COUNT(*) FROM warnings WHERE {scope}",
                 (int(user_id), int(guild_id)),
@@ -3796,7 +2776,7 @@ def get_warning_count(user_id: int, guild_id: int = None,
         with get_connection() as conn:
             if guild_id is None:
                 cursor = conn.execute(
-                    f"SELECT COUNT(*) FROM warnings WHERE user_id = ?{clause}",
+                    f"SELECT COUNT(*) FROM warnings WHERE user_id = %s{clause}",
                     (user_id, *parameters),
                 )
             else:
@@ -3804,8 +2784,8 @@ def get_warning_count(user_id: int, guild_id: int = None,
                 # is the count a member is told after an /unwarn, and it has to
                 # agree with the number the threshold compares against.
                 cursor = conn.execute(
-                    "SELECT COUNT(*) FROM warnings WHERE user_id = ? "
-                    f"AND guild_id = ?{clause}",
+                    "SELECT COUNT(*) FROM warnings WHERE user_id = %s "
+                    f"AND guild_id = %s{clause}",
                     (user_id, guild_id, *parameters),
                 )
             result = cursor.fetchone()
@@ -3825,13 +2805,13 @@ def get_warnings(user_id: int, guild_id: int = None):
             if guild_id is None:
                 cursor = conn.execute(
                     "SELECT id, reason, date, mod_id, tag FROM warnings "
-                    "WHERE user_id = ?",
+                    "WHERE user_id = %s",
                     (user_id,),
                 )
             else:
                 cursor = conn.execute(
                     "SELECT id, reason, date, mod_id, tag FROM warnings "
-                    "WHERE user_id = ? AND (guild_id = ? OR guild_id IS NULL)",
+                    "WHERE user_id = %s AND (guild_id = %s OR guild_id IS NULL)",
                     (user_id, guild_id),
                 )
             return cursor.fetchall()
@@ -3845,19 +2825,18 @@ def remove_warning(warning_id: int, user_id: int, guild_id: int,
     """Remove one precisely identified guild warning and retain an audit record."""
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 """
                 SELECT reason, date, mod_id, guild_id FROM warnings
-                WHERE id = ? AND user_id = ?
-                  AND (guild_id = ? OR guild_id IS NULL)
+                WHERE id = %s AND user_id = %s
+                  AND (guild_id = %s OR guild_id IS NULL)
                 """,
                 (int(warning_id), int(user_id), int(guild_id)),
             ).fetchone()
             if not row:
                 return None
             cursor = conn.execute(
-                "DELETE FROM warnings WHERE id = ? AND user_id = ?",
+                "DELETE FROM warnings WHERE id = %s AND user_id = %s",
                 (int(warning_id), int(user_id)),
             )
             if cursor.rowcount != 1:
@@ -3868,14 +2847,14 @@ def remove_warning(warning_id: int, user_id: int, guild_id: int,
                 INSERT INTO settings_audit
                     (guild_id, actor_id, action, target_key, old_value_json,
                      new_value_json, created_at)
-                VALUES (?, ?, 'warning.delete', ?, ?, NULL, ?)
+                VALUES (%s, %s, 'warning.delete', %s, %s, NULL, %s)
                 """,
                 (
                     int(guild_id), int(actor_id), str(int(warning_id)),
                     json.dumps(
                         {
                             "user_id": int(user_id), "reason": row[0],
-                            "date": row[1], "moderator_id": row[2],
+                            "date": stored_iso(row[1]), "moderator_id": row[2],
                             "source_guild_id": row[3],
                         },
                         ensure_ascii=False,
@@ -3886,7 +2865,7 @@ def remove_warning(warning_id: int, user_id: int, guild_id: int,
             return {"warning_id": int(warning_id), "reason": row[0]}
     except DatabaseOperationError:
         raise
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception(
             "Warning removal failed (warning=%s, guild=%s)", warning_id, guild_id
         )
@@ -3896,7 +2875,7 @@ def get_user_intel(user_id: int):
     """Return moderation-facing profile metadata and activity state."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("SELECT rules_read_time, last_active FROM users WHERE user_id = ?", (user_id,))
+            cursor = conn.execute("SELECT rules_read_time, last_active FROM users WHERE user_id = %s", (user_id,))
             return cursor.fetchone()
     except Exception as e:
         db_logger.error(f"Failed to read moderation profile data: {e}")
@@ -3911,6 +2890,9 @@ def get_user_intel(user_id: int):
 # members. Member lists can be large, so the id set is chunked well under SQLite's
 # variable limit and the per-chunk winners are merged here. Erased members keep an
 # anonymous economy row under a negative tombstone id and must never be ranked.
+# Each ranking query also leaves out a NULL value: the merge below sorts in
+# Python, where None does not compare with an int, and one such row emptied the
+# whole board through the caller's error handler.
 _MEMBER_ID_CHUNK = 900
 
 
@@ -3922,7 +2904,7 @@ def _ranked_members(conn, sql: str, member_ids, limit: int, order_index: int):
     merged = []
     for start in range(0, len(ids), _MEMBER_ID_CHUNK):
         chunk = ids[start:start + _MEMBER_ID_CHUNK]
-        placeholders = ",".join("?" * len(chunk))
+        placeholders = ",".join(["%s"] * len(chunk))
         merged.extend(
             conn.execute(
                 sql.format(placeholders=placeholders), (*chunk, limit)
@@ -3938,7 +2920,8 @@ def get_top_levels(member_ids, limit: int = 10):
             return _ranked_members(
                 conn,
                 "SELECT user_id, level, xp FROM users "
-                "WHERE user_id IN ({placeholders}) ORDER BY xp DESC LIMIT ?",
+                "WHERE user_id IN ({placeholders}) AND xp IS NOT NULL "
+                "ORDER BY xp DESC, user_id LIMIT %s",
                 member_ids, limit, 2,
             )
     except Exception as e:
@@ -3951,7 +2934,8 @@ def get_top_balances(member_ids, limit: int = 10):
             return _ranked_members(
                 conn,
                 "SELECT user_id, balance, level FROM users "
-                "WHERE user_id IN ({placeholders}) ORDER BY balance DESC LIMIT ?",
+                "WHERE user_id IN ({placeholders}) AND balance IS NOT NULL "
+                "ORDER BY balance DESC, user_id LIMIT %s",
                 member_ids, limit, 1,
             )
     except Exception as e:
@@ -3966,7 +2950,7 @@ def get_top_streaks(member_ids, limit: int = 10):
                 conn,
                 "SELECT user_id, streak_count FROM users "
                 "WHERE user_id IN ({placeholders}) AND streak_count > 0 "
-                "ORDER BY streak_count DESC LIMIT ?",
+                "ORDER BY streak_count DESC, user_id LIMIT %s",
                 member_ids, limit, 1,
             )
     except Exception as e:
@@ -3991,15 +2975,18 @@ def get_top_gacha_luck(guild_id: int, member_ids, banner_key: str = None,
         with get_connection() as conn:
             rows = conn.execute(
                 "SELECT user_id, AVG(pity_before + 1), COUNT(*) "
-                "FROM gacha_pulls WHERE guild_id = ? AND banner_key = ? "
-                "AND rarity = 5 GROUP BY user_id HAVING COUNT(*) >= ? "
-                "ORDER BY 2 ASC",
+                "FROM gacha_pulls WHERE guild_id = %s AND banner_key = %s "
+                "AND rarity = 5 GROUP BY user_id HAVING COUNT(*) >= %s "
+                "ORDER BY 2 ASC, user_id",
                 (guild_id, key, minimum_five_stars),
             ).fetchall()
     except Exception as e:
         db_logger.error(f"Failed to read gacha luck leaderboard: {e}")
         return []
-    return [row for row in rows if row[0] in ids][:limit]
+    # AVG over integers is a float on SQLite and a Decimal on PostgreSQL;
+    # the caller gets a float from either.
+    return [(user_id, float(average), count)
+            for user_id, average, count in rows if user_id in ids][:limit]
 
 
 def get_user_profile(user_id: int):
@@ -4008,7 +2995,7 @@ def get_user_profile(user_id: int):
             cursor = conn.execute("""
                 SELECT level, xp, balance, bj_wins, bj_losses, streak_count,
                        last_streak_update
-                FROM users WHERE user_id = ?
+                FROM users WHERE user_id = %s
             """, (user_id,))
             return cursor.fetchone()
     except Exception as e:
@@ -4023,9 +3010,9 @@ def get_user_rank(xp: int, member_ids) -> int:
         with get_connection() as conn:
             for start in range(0, len(ids), _MEMBER_ID_CHUNK):
                 chunk = ids[start:start + _MEMBER_ID_CHUNK]
-                placeholders = ",".join("?" * len(chunk))
+                placeholders = ",".join(["%s"] * len(chunk))
                 ahead += conn.execute(
-                    f"SELECT COUNT(*) FROM users WHERE xp > ? "
+                    f"SELECT COUNT(*) FROM users WHERE xp > %s "
                     f"AND user_id IN ({placeholders})",
                     (xp, *chunk),
                 ).fetchone()[0]
@@ -4042,7 +3029,7 @@ def update_last_active(user_id: int, timestamp: str):
     """Record recent activity and clear the inactivity-warning flag."""
     try:
         with get_connection() as conn:
-            conn.execute("UPDATE users SET last_active = ?, inactive_warned = 0 WHERE user_id = ?", (timestamp, user_id))
+            conn.execute("UPDATE users SET last_active = %s, inactive_warned = 0 WHERE user_id = %s", (timestamp, user_id))
     except Exception as e:
         db_logger.error(f"Failed to update last-active timestamp: {e}")
         raise DatabaseOperationError("last-active update failed") from e
@@ -4051,7 +3038,7 @@ def get_inactivity_data(user_id: int):
     """Return the user's last-active timestamp and warning state."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("SELECT last_active, inactive_warned FROM users WHERE user_id = ?", (user_id,))
+            cursor = conn.execute("SELECT last_active, inactive_warned FROM users WHERE user_id = %s", (user_id,))
             return cursor.fetchone()
     except Exception as e:
         db_logger.error(f"Failed to read inactivity data: {e}")
@@ -4061,7 +3048,7 @@ def set_inactive_warned(user_id: int):
     """Mark the user as having received an inactivity warning."""
     try:
         with get_connection() as conn:
-            conn.execute("UPDATE users SET inactive_warned = 1 WHERE user_id = ?", (user_id,))
+            conn.execute("UPDATE users SET inactive_warned = 1 WHERE user_id = %s", (user_id,))
     except Exception as e:
         db_logger.error(f"Failed to set inactivity warning state: {e}")
         raise DatabaseOperationError("inactive warning update failed") from e
@@ -4073,7 +3060,7 @@ def create_new_user(user_id: int, timestamp: str):
             conn.execute("""
                 INSERT INTO users (user_id, balance, xp, level, bj_wins, bj_losses, 
                                 rob_bonus, rob_defense, vault_protection, last_active, inactive_warned) 
-                VALUES (?, 100, 0, 1, 0, 0, 0.0, 1.0, 0.0, ?, 0)
+                VALUES (%s, 100, 0, 1, 0, 0, 0.0, 1.0, 0.0, %s, 0)
             """, (user_id, timestamp))
     except Exception as e:
         db_logger.error(f"Failed to create user: {e}")
@@ -4106,7 +3093,7 @@ def get_all_rentals(guild_id: int):
         with get_connection() as conn:
             cursor = conn.execute(
                 "SELECT id, item_type, discord_item_id, expires_at, guild_id "
-                "FROM rented_items r WHERE (r.guild_id = ? OR r.guild_id IS NULL) "
+                "FROM rented_items r WHERE (r.guild_id = %s OR r.guild_id IS NULL) "
                 "AND NOT EXISTS ("
                 "SELECT 1 FROM timed_entitlements e WHERE e.guild_id = r.guild_id "
                 "AND e.entitlement_key = r.item_type "
@@ -4122,7 +3109,7 @@ def delete_rental(rental_id: int):
     """Delete one expired rental record."""
     try:
         with get_connection() as conn:
-            conn.execute("DELETE FROM rented_items WHERE id = ?", (rental_id,))
+            conn.execute("DELETE FROM rented_items WHERE id = %s", (rental_id,))
     except Exception as e:
         db_logger.error(f"Failed to delete rental: {e}")
         raise DatabaseOperationError("rental delete failed") from e
@@ -4138,10 +3125,10 @@ def get_cooldown(user_id: int, col_name: str):
     try:
         with get_connection() as conn:
             # The allowlist makes the interpolated identifier safe; values remain parameterized.
-            cursor = conn.execute(f"SELECT {col_name} FROM users WHERE user_id = ?", (user_id,))
+            cursor = conn.execute(f"SELECT {sql_identifier(col_name)} FROM users WHERE user_id = %s", (user_id,))
             result = cursor.fetchone()
             return result[0] if result else None
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         # Raised, not swallowed: returning None here read as "never played
         # today" to the Everydle gates, so a database error opened a second
         # game. The payout stays guarded by the atomic claim regardless.
@@ -4154,8 +3141,8 @@ def set_cooldown(user_id: int, col_name: str, timestamp: str):
         raise ValueError(f"invalid cooldown column: {col_name}")
     try:
         with get_connection() as conn:
-            conn.execute(f"UPDATE users SET {col_name} = ? WHERE user_id = ?", (timestamp, user_id))
-    except sqlite3.Error as exc:
+            conn.execute(f"UPDATE users SET {sql_identifier(col_name)} = %s WHERE user_id = %s", (timestamp, user_id))
+    except EngineError as exc:
         db_logger.exception("Cooldown update failed (column=%s)", col_name)
         raise DatabaseOperationError("cooldown update failed") from exc
 
@@ -4167,24 +3154,23 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
     now = parse_stored(timestamp)
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             attacker = conn.execute(
                 """
                 SELECT balance, xp, level, bj_wins, bj_losses, rob_bonus, last_rob,
                     COALESCE((SELECT quantity FROM user_inventory
-                        WHERE guild_id = ? AND user_id = users.user_id
+                        WHERE guild_id = %s AND user_id = users.user_id
                         AND item_key = 'lockpick'), 0),
                     COALESCE((SELECT quantity FROM user_inventory
-                        WHERE guild_id = ? AND user_id = users.user_id
+                        WHERE guild_id = %s AND user_id = users.user_id
                         AND item_key = 'vault_glove'), 0)
-                FROM users WHERE user_id = ?
+                FROM users WHERE user_id = %s
                 """,
                 (int(guild_id), int(guild_id), attacker_id),
             ).fetchone()
             victim = conn.execute(
                 """
                 SELECT balance, rob_defense, protected_reserve, bodyguard_until
-                FROM users WHERE user_id = ?
+                FROM users WHERE user_id = %s
                 """,
                 (victim_id,),
             ).fetchone()
@@ -4207,7 +3193,7 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
             if victim[3] and now > parse_stored(victim[3]):
                 victim_defense = 1.0
                 conn.execute(
-                    "UPDATE users SET rob_defense = 1.0, bodyguard_until = NULL WHERE user_id = ?",
+                    "UPDATE users SET rob_defense = 1.0, bodyguard_until = NULL WHERE user_id = %s",
                     (victim_id,),
                 )
             # attacker[5] is the legacy column-backed lockpick. Nothing writes it
@@ -4266,15 +3252,15 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
 
             consumed_lockpick = attacker[5] > 0
             conn.execute(
-                "UPDATE users SET last_rob = ?, rob_bonus = 0.0 WHERE user_id = ?",
+                "UPDATE users SET last_rob = %s, rob_bonus = 0.0 WHERE user_id = %s",
                 (timestamp, attacker_id),
             )
             for item_key, present in (("lockpick", inventory_lockpick),
                                       ("vault_glove", inventory_glove)):
                 if present:
                     conn.execute(
-                        "UPDATE user_inventory SET quantity = quantity - 1, updated_at = ? "
-                        "WHERE guild_id = ? AND user_id = ? AND item_key = ? AND quantity > 0",
+                        "UPDATE user_inventory SET quantity = quantity - 1, updated_at = %s "
+                        "WHERE guild_id = %s AND user_id = %s AND item_key = %s AND quantity > 0",
                         (timestamp, int(guild_id), attacker_id, item_key),
                     )
             conn.commit()
@@ -4288,7 +3274,7 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
                 "consumed_glove": inventory_glove,
             })
             return attacker_result
-    except (sqlite3.Error, ValueError) as exc:
+    except (EngineError, ValueError) as exc:
         db_logger.exception("Robbery transaction failed (attacker=%s)", attacker_id)
         raise DatabaseOperationError("robbery transaction failed") from exc
 
@@ -4296,7 +3282,7 @@ def get_rob_stats(user_id: int):
     """Return all account values required to resolve a robbery."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("SELECT balance, rob_bonus, rob_defense, protected_reserve, bodyguard_until FROM users WHERE user_id = ?", (user_id,))
+            cursor = conn.execute("SELECT balance, rob_bonus, rob_defense, protected_reserve, bodyguard_until FROM users WHERE user_id = %s", (user_id,))
             return cursor.fetchone()
     except Exception as e:
         db_logger.error(f"Failed to read robbery state: {e}")
@@ -4306,7 +3292,7 @@ def expire_bodyguard(user_id: int):
     """Clear expired bodyguard protection."""
     try:
         with get_connection() as conn:
-            conn.execute("UPDATE users SET rob_defense = 1.0, bodyguard_until = NULL WHERE user_id = ?", (user_id,))
+            conn.execute("UPDATE users SET rob_defense = 1.0, bodyguard_until = NULL WHERE user_id = %s", (user_id,))
     except Exception as e:
         db_logger.error(f"Failed to expire bodyguard: {e}")
         raise DatabaseOperationError("bodyguard expiry failed") from e
@@ -4326,7 +3312,7 @@ def get_top_xp_user(member_ids):
             leaders = _ranked_members(
                 conn,
                 "SELECT user_id, xp FROM users WHERE user_id IN ({placeholders}) "
-                "ORDER BY xp DESC LIMIT ?",
+                "AND xp IS NOT NULL ORDER BY xp DESC, user_id LIMIT %s",
                 member_ids, 1, 1,
             )
         return leaders[0][0] if leaders else None
@@ -4340,7 +3326,7 @@ def get_full_user_data(user_id: int):
         with get_connection() as conn:
             cursor = conn.execute("""SELECT balance, xp, level, bj_wins, bj_losses, 
                                   rob_bonus, rob_defense, protected_reserve, bodyguard_until
-                                  FROM users WHERE user_id = ?""", (user_id,))
+                                  FROM users WHERE user_id = %s""", (user_id,))
             return cursor.fetchone()
     except Exception as e:
         db_logger.error(f"Failed to read full user data: {e}")
@@ -4351,7 +3337,7 @@ def get_streak_data(user_id: int):
     """Return the user's daily streak state."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("SELECT streak_count, last_streak_update FROM users WHERE user_id = ?", (user_id,))
+            cursor = conn.execute("SELECT streak_count, last_streak_update FROM users WHERE user_id = %s", (user_id,))
             return cursor.fetchone()
     except Exception as e:
         db_logger.error(f"Failed to read streak state: {e}")
@@ -4361,7 +3347,7 @@ def save_streak_data(user_id: int, streak_count: int, timestamp: str):
     """Persist an already-calculated daily streak state."""
     try:
         with get_connection() as conn:
-            conn.execute("UPDATE users SET streak_count = ?, last_streak_update = ? WHERE user_id = ?", 
+            conn.execute("UPDATE users SET streak_count = %s, last_streak_update = %s WHERE user_id = %s", 
                          (streak_count, timestamp, user_id))
     except Exception as e:
         db_logger.error(f"Failed to save streak state: {e}")
@@ -4386,8 +3372,8 @@ def get_shop_price(guild_id: int, item_id: str, default: int = 0) -> int:
     try:
         with get_connection() as conn:
             cursor = conn.execute(
-                "SELECT price FROM shop_prices WHERE item_id = ? "
-                "AND guild_id IN (?, 0) ORDER BY guild_id DESC LIMIT 1",
+                "SELECT price FROM shop_prices WHERE item_id = %s "
+                "AND guild_id IN (%s, 0) ORDER BY guild_id DESC LIMIT 1",
                 (item_id, int(guild_id)),
             )
             res = cursor.fetchone()
@@ -4407,7 +3393,7 @@ def get_shop_prices(guild_id: int) -> dict[str, int]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT item_id, price, guild_id FROM shop_prices "
-            "WHERE guild_id IN (?, 0) ORDER BY guild_id ASC",
+            "WHERE guild_id IN (%s, 0) ORDER BY guild_id ASC",
             (int(guild_id),),
         ).fetchall()
     # Ascending order means a guild override overwrites the default it shadows.
@@ -4418,8 +3404,8 @@ def get_reward(guild_id: int, activity_id: str, def_coin: int = 0, def_xp: int =
     try:
         with get_connection() as conn:
             cursor = conn.execute(
-                "SELECT coin_reward, xp_reward FROM rewards WHERE activity_id = ? "
-                "AND guild_id IN (?, 0) ORDER BY guild_id DESC LIMIT 1",
+                "SELECT coin_reward, xp_reward FROM rewards WHERE activity_id = %s "
+                "AND guild_id IN (%s, 0) ORDER BY guild_id DESC LIMIT 1",
                 (activity_id, int(guild_id)),
             )
             res = cursor.fetchone()
@@ -4440,8 +3426,8 @@ def get_config_id(guild_id: int, config_key: str) -> int | None:
     try:
         with get_connection() as conn:
             cursor = conn.execute(
-                "SELECT config_value FROM server_config WHERE config_key = ? "
-                "AND guild_id IN (?, 0) ORDER BY guild_id DESC LIMIT 1",
+                "SELECT config_value FROM server_config WHERE config_key = %s "
+                "AND guild_id IN (%s, 0) ORDER BY guild_id DESC LIMIT 1",
                 (config_key, int(guild_id)),
             )
             res = cursor.fetchone()
@@ -4474,7 +3460,7 @@ def get_guild_settings(guild_id: int) -> dict[str, dict]:
     """
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT setting_key, value_json, revision FROM guild_settings WHERE guild_id = ?",
+            "SELECT setting_key, value_json, revision FROM guild_settings WHERE guild_id = %s",
             (int(guild_id),),
         ).fetchall()
         instance_rows = conn.execute(
@@ -4502,7 +3488,6 @@ def set_guild_settings(guild_id: int, actor_id: int, changes: list[dict]):
     timestamp = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             results = {}
             for change in changes:
                 if not isinstance(change, dict) or set(change) != {"key", "value", "revision"}:
@@ -4518,11 +3503,11 @@ def set_guild_settings(guild_id: int, actor_id: int, changes: list[dict]):
                 from core.settings_registry import SettingScope
                 instance = definition.scope is SettingScope.INSTANCE
                 table = "instance_settings" if instance else "guild_settings"
-                where = ("setting_key = ?" if instance
-                         else "guild_id = ? AND setting_key = ?")
+                where = ("setting_key = %s" if instance
+                         else "guild_id = %s AND setting_key = %s")
                 identity = (key,) if instance else (int(guild_id), key)
                 existing = conn.execute(
-                    f"SELECT value_json, revision FROM {table} WHERE {where}",
+                    f"SELECT value_json, revision FROM {sql_identifier(table)} WHERE {where}",
                     identity
                 ).fetchone()
                 if existing:
@@ -4532,8 +3517,8 @@ def set_guild_settings(guild_id: int, actor_id: int, changes: list[dict]):
                     if key == "shop_hidden_items":
                         _assert_unhide_has_room(conn, guild_id, old_value, value)
                     conn.execute(
-                        f"UPDATE {table} SET value_json = ?, revision = ?, "
-                        f"updated_by = ?, updated_at = ? WHERE {where}",
+                        f"UPDATE {sql_identifier(table)} SET value_json = %s, revision = %s, "
+                        f"updated_by = %s, updated_at = %s WHERE {where}",
                         (json.dumps(value), revision, int(actor_id), timestamp,
                          *identity),
                     )
@@ -4545,20 +3530,20 @@ def set_guild_settings(guild_id: int, actor_id: int, changes: list[dict]):
                         conn.execute(
                             "INSERT INTO instance_settings "
                             "(setting_key, value_json, revision, updated_by, updated_at) "
-                            "VALUES (?, ?, 1, ?, ?)",
+                            "VALUES (%s, %s, 1, %s, %s)",
                             (key, json.dumps(value), int(actor_id), timestamp),
                         )
                     else:
                         conn.execute(
                             "INSERT INTO guild_settings "
                             "(guild_id, setting_key, value_json, revision, updated_by, updated_at) "
-                            "VALUES (?, ?, ?, 1, ?, ?)",
+                            "VALUES (%s, %s, %s, 1, %s, %s)",
                             (int(guild_id), key, json.dumps(value), int(actor_id), timestamp),
                         )
                 conn.execute(
                     "INSERT INTO settings_audit "
                     "(guild_id, actor_id, action, target_key, old_value_json, "
-                    "new_value_json, created_at) VALUES (?, ?, 'setting.update', ?, ?, ?, ?)",
+                    "new_value_json, created_at) VALUES (%s, %s, 'setting.update', %s, %s, %s, %s)",
                     (int(guild_id), int(actor_id), key,
                      json.dumps(old_value) if old_value is not None else None,
                      json.dumps(value), timestamp),
@@ -4568,7 +3553,7 @@ def set_guild_settings(guild_id: int, actor_id: int, changes: list[dict]):
             return results
     except DatabaseOperationError:
         raise
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Guild settings update failed (guild=%s)", guild_id)
         raise DatabaseOperationError("guild settings update failed") from exc
 
@@ -4593,17 +3578,18 @@ def get_settings_revision() -> int:
 def _audit_rows(guild_id: int, limit: int, actions: tuple[str, ...] = ()) -> list[dict]:
     limit = max(1, min(int(limit), 500))
     action_filter = (
-        f" AND action IN ({', '.join('?' for _ in actions)})" if actions else "")
+        f" AND action IN ({', '.join('%s' for _ in actions)})" if actions else "")
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT audit_id, actor_id, action, target_key, old_value_json, "
-            "new_value_json, created_at FROM settings_audit WHERE guild_id = ?"
-            + action_filter + " ORDER BY audit_id DESC LIMIT ?",
+            "new_value_json, created_at FROM settings_audit WHERE guild_id = %s"
+            + action_filter + " ORDER BY audit_id DESC LIMIT %s",
             (int(guild_id), *actions, limit)
         ).fetchall()
     return [{"audit_id": row[0], "actor_id": str(row[1]), "action": row[2],
              "target_key": row[3], "old_value": json.loads(row[4]) if row[4] else None,
-             "new_value": json.loads(row[5]) if row[5] else None, "created_at": row[6]}
+             "new_value": json.loads(row[5]) if row[5] else None,
+             "created_at": stored_iso(row[6])}
             for row in rows]
 
 
@@ -4636,10 +3622,10 @@ def prune_settings_audit(max_age_days: int) -> int:
     if int(max_age_days) <= 0:
         return 0
     cutoff = (datetime.now(timezone.utc) - timedelta(days=int(max_age_days))).isoformat()
-    placeholders = ",".join("?" * len(PRIVACY_AUDIT_ACTIONS))
+    placeholders = ",".join(["%s"] * len(PRIVACY_AUDIT_ACTIONS))
     with get_connection() as conn:
         return conn.execute(
-            f"DELETE FROM settings_audit WHERE created_at < ? "
+            f"DELETE FROM settings_audit WHERE created_at < %s "
             f"AND action NOT IN ({placeholders})",
             (cutoff, *PRIVACY_AUDIT_ACTIONS),
         ).rowcount
@@ -4661,13 +3647,13 @@ def record_access_invalidations(rows) -> int:
     try:
         with get_connection() as conn:
             conn.execute("DELETE FROM dashboard_access_invalidations "
-                         "WHERE created_at < ?", (cutoff,))
-            conn.executemany(
+                         "WHERE created_at < %s", (cutoff,))
+            conn.cursor().executemany(
                 "INSERT INTO dashboard_access_invalidations "
-                "(guild_id, user_id, created_at) VALUES (?, ?, ?)", values)
+                "(guild_id, user_id, created_at) VALUES (%s, %s, %s)", values)
             conn.commit()
             return len(values)
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Dashboard access invalidation write failed")
         raise DatabaseOperationError("access invalidation write failed") from exc
 
@@ -4678,7 +3664,7 @@ def get_latest_access_invalidation_id() -> int:
             row = conn.execute("SELECT COALESCE(MAX(invalidation_id), 0) "
                                "FROM dashboard_access_invalidations").fetchone()
             return int(row[0])
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Dashboard access invalidation read failed")
         raise DatabaseOperationError("access invalidation read failed") from exc
 
@@ -4689,10 +3675,10 @@ def get_access_invalidations_since(after_id: int) -> list[dict]:
         with get_connection() as conn:
             rows = conn.execute(
                 "SELECT invalidation_id, guild_id, user_id "
-                "FROM dashboard_access_invalidations WHERE invalidation_id > ? "
-                "ORDER BY invalidation_id LIMIT ?",
+                "FROM dashboard_access_invalidations WHERE invalidation_id > %s "
+                "ORDER BY invalidation_id LIMIT %s",
                 (int(after_id), ACCESS_INVALIDATION_READ_LIMIT)).fetchall()
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Dashboard access invalidation read failed")
         raise DatabaseOperationError("access invalidation read failed") from exc
     return [{"invalidation_id": row[0], "guild_id": str(row[1]),
@@ -4931,7 +3917,7 @@ def get_work_responses(guild_id: int) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT response_id, tier, weight, message, enabled, revision, guild_id "
-            "FROM work_responses WHERE guild_id IN (?, ?) "
+            "FROM work_responses WHERE guild_id IN (%s, %s) "
             "ORDER BY guild_id DESC, tier, response_id",
             (int(guild_id), WORK_DEFAULT_GUILD_ID),
         ).fetchall()
@@ -4955,15 +3941,15 @@ def seed_default_work_responses(conn) -> int:
     is a no-op and an operator's edits to the defaults are never overwritten.
     """
     existing = conn.execute(
-        "SELECT COUNT(*) FROM work_responses WHERE guild_id = ?",
+        "SELECT COUNT(*) FROM work_responses WHERE guild_id = %s",
         (WORK_DEFAULT_GUILD_ID,),
     ).fetchone()[0]
     if existing:
         return 0
     timestamp = datetime.now(timezone.utc).isoformat()
-    conn.executemany(
+    conn.cursor().executemany(
         "INSERT INTO work_responses (guild_id, tier, weight, message, enabled, "
-        "revision, updated_at) VALUES (?, ?, 1, ?, 1, 1, ?)",
+        "revision, updated_at) VALUES (%s, %s, 1, %s, 1, 1, %s)",
         [(WORK_DEFAULT_GUILD_ID, tier, message, timestamp)
          for tier, message in WORK_DEFAULT_RESPONSES],
     )
@@ -4979,22 +3965,21 @@ def create_work_response(guild_id: int, actor_id: int, tier: str, message: str,
         raise ValidationError("work_enabled_invalid", "work enabled must be boolean")
     timestamp = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         count = conn.execute(
-            "SELECT COUNT(*) FROM work_responses WHERE guild_id = ? AND tier = ?",
+            "SELECT COUNT(*) FROM work_responses WHERE guild_id = %s AND tier = %s",
             (int(guild_id), tier),
         ).fetchone()[0]
         if count >= WORK_RESPONSES_PER_TIER:
             conn.rollback()
             raise ValidationError("work_response_limit", "work response limit reached",
                                   limit=WORK_RESPONSES_PER_TIER)
-        cursor = conn.execute(
+        response_id = conn.execute(
             "INSERT INTO work_responses (guild_id, tier, weight, message, enabled, "
-            "revision, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+            "revision, updated_by, updated_at) VALUES (%s, %s, %s, %s, %s, 1, %s, %s) "
+            "RETURNING response_id",
             (int(guild_id), tier, weight, message, int(enabled),
              int(actor_id), timestamp),
-        )
-        response_id = cursor.lastrowid
+        ).fetchone()[0]
         write_settings_audit(
             conn, int(guild_id), actor_id, "work_response.create",
             f"work.{tier}.{response_id}", None,
@@ -5018,7 +4003,7 @@ def _adopt_for_shipped_response(conn, guild_id: int, actor_id: int,
     request cannot adopt a tier it did not name.
     """
     shipped = conn.execute(
-        "SELECT tier FROM work_responses WHERE guild_id = ? AND response_id = ?",
+        "SELECT tier FROM work_responses WHERE guild_id = %s AND response_id = %s",
         (WORK_DEFAULT_GUILD_ID, int(response_id)),
     ).fetchone()
     if shipped is None:
@@ -5048,27 +4033,26 @@ def adopt_work_tier(conn, guild_id: int, actor_id: int, tier: str) -> dict:
     """
     tier = validate_work_tier(tier)
     owned = conn.execute(
-        "SELECT COUNT(*) FROM work_responses WHERE guild_id = ? AND tier = ?",
+        "SELECT COUNT(*) FROM work_responses WHERE guild_id = %s AND tier = %s",
         (int(guild_id), tier),
     ).fetchone()[0]
     if owned:
         return {}
     shipped = conn.execute(
         "SELECT response_id, message, weight, enabled FROM work_responses "
-        "WHERE guild_id = ? AND tier = ? ORDER BY response_id",
+        "WHERE guild_id = %s AND tier = %s ORDER BY response_id",
         (WORK_DEFAULT_GUILD_ID, tier),
     ).fetchall()
     timestamp = datetime.now(timezone.utc).isoformat()
     adopted = {}
     for response_id, message, weight, enabled in shipped:
-        cursor = conn.execute(
+        adopted[int(response_id)] = int(conn.execute(
             "INSERT INTO work_responses (guild_id, tier, message, weight, "
             "enabled, revision, updated_by, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+            "VALUES (%s, %s, %s, %s, %s, 1, %s, %s) RETURNING response_id",
             (int(guild_id), tier, message, weight, enabled,
              int(actor_id), timestamp),
-        )
-        adopted[int(response_id)] = int(cursor.lastrowid)
+        ).fetchone()[0])
     if adopted:
         write_settings_audit(
             conn, guild_id, actor_id, "work_response.adopt_tier", tier,
@@ -5087,7 +4071,6 @@ def update_work_response(guild_id: int, actor_id: int, response_id: int,
         raise ValidationError("work_enabled_invalid", "work enabled must be boolean")
     timestamp = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         # Editing a shipped response adopts its whole tier into this guild first
         # and then edits the copy, in this transaction, so a half-adopted tier
         # cannot exist. The operator sees one plain editable list; what actually
@@ -5097,7 +4080,7 @@ def update_work_response(guild_id: int, actor_id: int, response_id: int,
         response_id = resolved
         row = conn.execute(
             "SELECT tier, weight, message, enabled, revision FROM work_responses "
-            "WHERE guild_id = ? AND response_id = ?",
+            "WHERE guild_id = %s AND response_id = %s",
             (int(guild_id), int(response_id)),
         ).fetchone()
         if row is None:
@@ -5115,9 +4098,9 @@ def update_work_response(guild_id: int, actor_id: int, response_id: int,
         previous = {"tier": row[0], "weight": row[1], "message": row[2],
                     "enabled": bool(row[3])}
         conn.execute(
-            "UPDATE work_responses SET tier = ?, weight = ?, message = ?, "
-            "enabled = ?, revision = ?, updated_by = ?, updated_at = ? "
-            "WHERE guild_id = ? AND response_id = ?",
+            "UPDATE work_responses SET tier = %s, weight = %s, message = %s, "
+            "enabled = %s, revision = %s, updated_by = %s, updated_at = %s "
+            "WHERE guild_id = %s AND response_id = %s",
             (tier, weight, message, int(enabled), revision, int(actor_id),
              timestamp, int(guild_id), int(response_id)),
         )
@@ -5134,7 +4117,6 @@ def update_work_response(guild_id: int, actor_id: int, response_id: int,
 def delete_work_response(guild_id: int, actor_id: int, response_id: int,
                          expected_revision: int) -> dict:
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         # Deleting a shipped response means "not that line, in this guild", which
         # needs the guild to own the tier first — otherwise the row is not the
         # guild's to remove and the tier keeps resolving to the shipped set,
@@ -5144,7 +4126,7 @@ def delete_work_response(guild_id: int, actor_id: int, response_id: int,
         response_id = resolved
         row = conn.execute(
             "SELECT tier, weight, message, enabled, revision FROM work_responses "
-            "WHERE guild_id = ? AND response_id = ?",
+            "WHERE guild_id = %s AND response_id = %s",
             (int(guild_id), int(response_id)),
         ).fetchone()
         if row is None:
@@ -5158,7 +4140,7 @@ def delete_work_response(guild_id: int, actor_id: int, response_id: int,
             conn.rollback()
             raise RevisionConflictError("work response revision conflict")
         conn.execute(
-            "DELETE FROM work_responses WHERE guild_id = ? AND response_id = ?",
+            "DELETE FROM work_responses WHERE guild_id = %s AND response_id = %s",
             (int(guild_id), int(response_id)),
         )
         write_settings_audit(
@@ -5249,15 +4231,15 @@ def _banner_pull_status(enabled: bool, starts_at, ends_at, now: str) -> str:
     it: an operator can still force a banner off mid-window, and a
     schedule-less banner (`starts_at`/`ends_at` both `None`) is always
     `"live"` when enabled, exactly as every banner behaved before schema 21.
-    Comparisons are plain string comparisons because both bounds are stored
-    normalized to UTC ISO by `validate_gacha_banner_schedule`, which orders
-    the same as the timestamps they represent.
+    The bounds are compared as instants, so the stored text SQLite returns
+    and the `datetime` PostgreSQL returns order alike.
     """
     if not enabled:
         return "disabled"
-    if starts_at and now < starts_at:
+    moment = parse_stored(now)
+    if starts_at and moment < parse_stored(starts_at):
         return "scheduled"
-    if ends_at and now >= ends_at:
+    if ends_at and moment >= parse_stored(ends_at):
         return "expired"
     return "live"
 
@@ -5291,10 +4273,9 @@ def list_gacha_banners(guild_id: int) -> list[dict]:
     """
     now = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
+        rows = conn.cursor(row_factory=dict_row).execute(
             "SELECT banner_key, display_name, enabled, config_json, revision, "
-            "updated_at, starts_at, ends_at FROM gacha_banners WHERE guild_id = ?",
+            "updated_at, starts_at, ends_at FROM gacha_banners WHERE guild_id = %s",
             (int(guild_id),)
         ).fetchall()
     banners = [_banner_row_dict(row, now) for row in rows]
@@ -5312,18 +4293,20 @@ def list_gacha_banners(guild_id: int) -> list[dict]:
             "pullable": True,
             "is_default": True,
         })
+    # The key is the tiebreaker for two banners of one name: the order SQLite's
+    # primary-key scan gave them, which PostgreSQL does not promise.
     banners.sort(key=lambda banner: (not banner["is_default"],
-                                     banner["display_name"].lower()))
+                                     banner["display_name"].lower(),
+                                     banner["banner_key"]))
     return banners
 
 
 def get_gacha_banner(guild_id: int, banner_key: str = DEFAULT_GACHA_BANNER_KEY) -> dict:
     with get_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
+        row = conn.cursor(row_factory=dict_row).execute(
             "SELECT banner_key, display_name, enabled, config_json, revision, "
             "updated_at, starts_at, ends_at FROM gacha_banners "
-            "WHERE guild_id = ? AND banner_key = ?",
+            "WHERE guild_id = %s AND banner_key = %s",
             (int(guild_id), banner_key)
         ).fetchone()
     if row is None:
@@ -5355,13 +4338,13 @@ def create_lfg_post(guild_id: int, message_id: int, channel_id: int,
             conn.execute(
                 "INSERT INTO lfg_posts (guild_id, message_id, channel_id, "
                 "host_id, game_role_id, game_text, needed, joined_json, "
-                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?)",
+                "created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, '[]', %s)",
                 (int(guild_id), int(message_id), int(channel_id), int(host_id),
                  int(game_role_id) if game_role_id else None, game_text,
                  max(0, int(needed)), timestamp),
             )
             conn.commit()
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Could not record an LFG post (guild=%s, message=%s)",
                             guild_id, message_id)
         raise DatabaseOperationError("lfg post insert failed") from exc
@@ -5377,7 +4360,7 @@ def get_lfg_post(guild_id: int, message_id: int):
         row = conn.execute(
             "SELECT channel_id, host_id, game_role_id, game_text, needed, "
             "joined_json, created_at FROM lfg_posts "
-            "WHERE guild_id = ? AND message_id = ?",
+            "WHERE guild_id = %s AND message_id = %s",
             (int(guild_id), int(message_id)),
         ).fetchone()
     if row is None:
@@ -5401,8 +4384,8 @@ def _set_lfg_party(conn, guild_id: int, message_id: int, expected, party):
     `advance_minigame` does it.
     """
     return conn.execute(
-        "UPDATE lfg_posts SET joined_json = ? "
-        "WHERE guild_id = ? AND message_id = ? AND joined_json = ?",
+        "UPDATE lfg_posts SET joined_json = %s "
+        "WHERE guild_id = %s AND message_id = %s AND joined_json = %s",
         (json.dumps(party), int(guild_id), int(message_id),
          json.dumps(expected)),
     ).rowcount == 1
@@ -5417,10 +4400,9 @@ def join_lfg_post(guild_id: int, message_id: int, user_id: int):
     """
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT host_id, needed, joined_json FROM lfg_posts "
-                "WHERE guild_id = ? AND message_id = ?",
+                "WHERE guild_id = %s AND message_id = %s",
                 (int(guild_id), int(message_id)),
             ).fetchone()
             if row is None:
@@ -5444,7 +4426,7 @@ def join_lfg_post(guild_id: int, message_id: int, user_id: int):
             conn.commit()
             return {"joined": updated, "needed": needed, "host_id": host_id,
                     "full": needed > 0 and len(updated) >= needed}
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("LFG join failed (guild=%s, message=%s)",
                             guild_id, message_id)
         raise DatabaseOperationError("lfg join failed") from exc
@@ -5454,10 +4436,9 @@ def leave_lfg_post(guild_id: int, message_id: int, user_id: int):
     """Remove somebody from a party, or say why not."""
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT needed, joined_json FROM lfg_posts "
-                "WHERE guild_id = ? AND message_id = ?",
+                "WHERE guild_id = %s AND message_id = %s",
                 (int(guild_id), int(message_id)),
             ).fetchone()
             if row is None:
@@ -5475,7 +4456,7 @@ def leave_lfg_post(guild_id: int, message_id: int, user_id: int):
             conn.commit()
             return {"joined": updated, "needed": needed,
                     "full": needed > 0 and len(updated) >= needed}
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("LFG leave failed (guild=%s, message=%s)",
                             guild_id, message_id)
         raise DatabaseOperationError("lfg leave failed") from exc
@@ -5494,7 +4475,7 @@ def get_expired_lfg_posts(guild_id: int, older_than_hours: int) -> list[dict]:
         rows = conn.execute(
             "SELECT message_id, channel_id, host_id, game_role_id, game_text, "
             "needed, joined_json, created_at FROM lfg_posts "
-            "WHERE guild_id = ? AND created_at < ? ORDER BY created_at",
+            "WHERE guild_id = %s AND created_at < %s ORDER BY created_at, message_id",
             (int(guild_id), cutoff),
         ).fetchall()
     posts = []
@@ -5516,12 +4497,12 @@ def delete_lfg_post(guild_id: int, message_id: int) -> bool:
     try:
         with get_connection() as conn:
             removed = conn.execute(
-                "DELETE FROM lfg_posts WHERE guild_id = ? AND message_id = ?",
+                "DELETE FROM lfg_posts WHERE guild_id = %s AND message_id = %s",
                 (int(guild_id), int(message_id)),
             ).rowcount
             conn.commit()
             return removed == 1
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("LFG delete failed (guild=%s, message=%s)",
                             guild_id, message_id)
         raise DatabaseOperationError("lfg delete failed") from exc
@@ -5539,11 +4520,11 @@ def prune_lfg_posts(older_than_days: int = 7) -> int:
     try:
         with get_connection() as conn:
             removed = conn.execute(
-                "DELETE FROM lfg_posts WHERE created_at < ?", (cutoff,)
+                "DELETE FROM lfg_posts WHERE created_at < %s", (cutoff,)
             ).rowcount
             conn.commit()
             return removed
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("LFG prune failed")
         raise DatabaseOperationError("lfg prune failed") from exc
 
@@ -5558,7 +4539,7 @@ def get_minigame_state(guild_id: int, game_key: str) -> dict:
     with get_connection() as conn:
         row = conn.execute(
             "SELECT value, last_user_id, streak, best_streak FROM minigame_state "
-            "WHERE guild_id = ? AND game_key = ?", (int(guild_id), game_key)
+            "WHERE guild_id = %s AND game_key = %s", (int(guild_id), game_key)
         ).fetchone()
     if row is None:
         return {"value": "", "last_user_id": None, "streak": 0, "best_streak": 0}
@@ -5577,8 +4558,9 @@ def _claim_used_value(conn, guild_id: int, game_key: str,
     if value is None:
         return True
     return bool(conn.execute(
-        "INSERT OR IGNORE INTO minigame_used_words "
-        "(guild_id, game_key, word, used_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO minigame_used_words "
+        "(guild_id, game_key, word, used_at) VALUES (%s, %s, %s, %s) "
+        "ON CONFLICT DO NOTHING",
         (int(guild_id), game_key, value, timestamp)).rowcount)
 
 
@@ -5594,12 +4576,13 @@ def advance_minigame(guild_id: int, game_key: str, value: str, user_id: int,
     channel would let the count skip.
 
     `unique_value` is a value this chain may only ever use once, already folded
-    by the caller. Claiming it is an `INSERT OR IGNORE` against a primary key,
-    which means the insert **is** the check: a `SELECT` followed by an `INSERT`
-    would be exactly the read-then-write shape the paragraph above exists to
-    avoid, and two people posting one word in the same instant would both pass
-    it. Word chain passes the word; counting passes nothing, because its values
-    are unique by construction — the chain only ever goes up.
+    by the caller. Claiming it is an `ON CONFLICT DO NOTHING` insert against a
+    primary key, which means the insert **is** the check: a `SELECT` followed
+    by an `INSERT` would be exactly the read-then-write shape the paragraph
+    above exists to avoid, and two people posting one word in the same instant
+    would both pass it. Word chain passes the word; counting passes nothing,
+    because its values are unique by construction — the chain only ever goes
+    up.
 
     Three answers, and a caller has to tell them apart before reading a streak:
     `None` when somebody got there first, `{"duplicate": True}` when the value
@@ -5608,10 +4591,9 @@ def advance_minigame(guild_id: int, game_key: str, value: str, user_id: int,
     timestamp = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT value, streak, best_streak FROM minigame_state "
-                "WHERE guild_id = ? AND game_key = ?", (int(guild_id), game_key)
+                "WHERE guild_id = %s AND game_key = %s", (int(guild_id), game_key)
             ).fetchone()
             if row is None:
                 if expected != "":
@@ -5625,7 +4607,7 @@ def advance_minigame(guild_id: int, game_key: str, value: str, user_id: int,
                 conn.execute(
                     "INSERT INTO minigame_state (guild_id, game_key, value, "
                     "last_user_id, streak, best_streak, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                     (int(guild_id), game_key, value, int(user_id), streak, best,
                      timestamp),
                 )
@@ -5640,15 +4622,15 @@ def advance_minigame(guild_id: int, game_key: str, value: str, user_id: int,
                 streak = row[1] + 1
                 best = max(row[2], streak)
                 conn.execute(
-                    "UPDATE minigame_state SET value = ?, last_user_id = ?, "
-                    "streak = ?, best_streak = ?, updated_at = ? "
-                    "WHERE guild_id = ? AND game_key = ? AND value = ?",
+                    "UPDATE minigame_state SET value = %s, last_user_id = %s, "
+                    "streak = %s, best_streak = %s, updated_at = %s "
+                    "WHERE guild_id = %s AND game_key = %s AND value = %s",
                     (value, int(user_id), streak, best, timestamp,
                      int(guild_id), game_key, expected),
                 )
             conn.commit()
             return {"value": value, "streak": streak, "best_streak": best}
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Minigame turn failed (guild=%s, game=%s)",
                             guild_id, game_key)
         raise DatabaseOperationError("minigame turn failed") from exc
@@ -5661,7 +4643,7 @@ def reset_minigame(guild_id: int, game_key: str) -> None:
         conn.execute(
             "INSERT INTO minigame_state (guild_id, game_key, value, "
             "last_user_id, streak, best_streak, updated_at) "
-            "VALUES (?, ?, '', NULL, 0, 0, ?) "
+            "VALUES (%s, %s, '', NULL, 0, 0, %s) "
             "ON CONFLICT(guild_id, game_key) DO UPDATE SET value = '', "
             "last_user_id = NULL, streak = 0, updated_at = excluded.updated_at",
             (int(guild_id), game_key, timestamp),
@@ -5670,7 +4652,7 @@ def reset_minigame(guild_id: int, game_key: str) -> None:
         # and this is the only escape valve a long chain has.
         conn.execute(
             "DELETE FROM minigame_used_words "
-            "WHERE guild_id = ? AND game_key = ?", (int(guild_id), game_key))
+            "WHERE guild_id = %s AND game_key = %s", (int(guild_id), game_key))
         conn.commit()
 
 
@@ -5688,7 +4670,7 @@ def get_game_patch_state(game_key: str) -> dict | None:
     with get_connection() as conn:
         row = conn.execute(
             "SELECT latest_version, latest_url, latest_title, checked_at "
-            "FROM game_patch_state WHERE game_key = ?", (game_key,)
+            "FROM game_patch_state WHERE game_key = %s", (game_key,)
         ).fetchone()
     if row is None:
         return None
@@ -5704,7 +4686,7 @@ def set_game_patch_state(game_key: str, version: str, url: str, title: str) -> N
         conn.execute(
             "INSERT INTO game_patch_state "
             "(game_key, latest_version, latest_url, latest_title, checked_at) "
-            "VALUES (?, ?, ?, ?, ?) "
+            "VALUES (%s, %s, %s, %s, %s) "
             "ON CONFLICT(game_key) DO UPDATE SET "
             "latest_version = excluded.latest_version, "
             "latest_url = excluded.latest_url, "
@@ -5719,7 +4701,7 @@ def get_guild_patch_announcement(guild_id: int, game_key: str) -> str | None:
     with get_connection() as conn:
         row = conn.execute(
             "SELECT last_announced_version FROM guild_patch_announcements "
-            "WHERE guild_id = ? AND game_key = ?", (int(guild_id), game_key)
+            "WHERE guild_id = %s AND game_key = %s", (int(guild_id), game_key)
         ).fetchone()
     return row[0] if row else None
 
@@ -5735,7 +4717,7 @@ def set_guild_patch_announcement(guild_id: int, game_key: str, version: str) -> 
     with get_connection() as conn:
         conn.execute(
             "INSERT INTO guild_patch_announcements "
-            "(guild_id, game_key, last_announced_version) VALUES (?, ?, ?) "
+            "(guild_id, game_key, last_announced_version) VALUES (%s, %s, %s) "
             "ON CONFLICT(guild_id, game_key) DO UPDATE SET "
             "last_announced_version = excluded.last_announced_version",
             (int(guild_id), game_key, version),
@@ -5758,8 +4740,8 @@ def get_five_star_history(guild_id: int, user_id: int, limit: int = 5) -> list[d
         rows = conn.execute(
             "SELECT banner_key, reward_key, pity_before, hard_pity, featured, "
             "featured_guaranteed, created_at FROM gacha_pulls "
-            "WHERE guild_id = ? AND user_id = ? AND rarity = 5 "
-            "ORDER BY pull_id DESC LIMIT ?",
+            "WHERE guild_id = %s AND user_id = %s AND rarity = 5 "
+            "ORDER BY pull_id DESC LIMIT %s",
             (int(guild_id), int(user_id), limit),
         ).fetchall()
     return [
@@ -5781,16 +4763,16 @@ def get_gacha_pity(guild_id: int, user_id: int,
         row = conn.execute(
             "SELECT pulls_since_five_star, pulls_toward_four_star, "
             "guaranteed_featured_five, guaranteed_featured_four FROM gacha_pity "
-            "WHERE guild_id = ? AND user_id = ? AND banner_key = ?",
+            "WHERE guild_id = %s AND user_id = %s AND banner_key = %s",
             (int(guild_id), int(user_id), banner_key),
         ).fetchone()
         total = conn.execute(
-            "SELECT COUNT(*) FROM gacha_pulls WHERE guild_id = ? AND user_id = ?",
+            "SELECT COUNT(*) FROM gacha_pulls WHERE guild_id = %s AND user_id = %s",
             (int(guild_id), int(user_id)),
         ).fetchone()[0]
         five_stars = conn.execute(
             "SELECT COUNT(*) FROM gacha_pulls "
-            "WHERE guild_id = ? AND user_id = ? AND rarity = 5",
+            "WHERE guild_id = %s AND user_id = %s AND rarity = 5",
             (int(guild_id), int(user_id)),
         ).fetchone()[0]
     return {
@@ -5887,9 +4869,9 @@ def create_gacha_banner(guild_id: int, actor_id: int, banner_key: str,
     starts_at, ends_at = validate_gacha_banner_schedule(starts_at, ends_at)
     timestamp = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         existing = conn.execute(
-            "SELECT COUNT(*), SUM(banner_key = ?) FROM gacha_banners WHERE guild_id = ?",
+            "SELECT COUNT(*), COUNT(CASE WHEN banner_key = %s THEN 1 END) "
+            "FROM gacha_banners WHERE guild_id = %s",
             (banner_key, int(guild_id)),
         ).fetchone()
         if existing[1]:
@@ -5903,7 +4885,7 @@ def create_gacha_banner(guild_id: int, actor_id: int, banner_key: str,
         conn.execute(
             "INSERT INTO gacha_banners (guild_id, banner_key, display_name, enabled, "
             "config_json, revision, updated_by, updated_at, starts_at, ends_at) "
-            "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s)",
             (int(guild_id), banner_key, display_name, int(enabled),
              json.dumps(config_value, sort_keys=True), int(actor_id), timestamp,
              starts_at, ends_at),
@@ -5932,10 +4914,9 @@ def set_gacha_banner(guild_id: int, actor_id: int, enabled: bool,
     starts_at, ends_at = validate_gacha_banner_schedule(starts_at, ends_at)
     timestamp = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT enabled, config_json, revision, display_name FROM gacha_banners "
-            "WHERE guild_id = ? AND banner_key = ?", (int(guild_id), banner_key)
+            "WHERE guild_id = %s AND banner_key = %s", (int(guild_id), banner_key)
         ).fetchone()
         if row:
             if expected_revision != row[2]:
@@ -5947,10 +4928,10 @@ def set_gacha_banner(guild_id: int, actor_id: int, enabled: bool,
             # cannot silently rename the banner.
             stored_name = display_name if display_name is not None else row[3]
             conn.execute(
-                "UPDATE gacha_banners SET enabled = ?, config_json = ?, revision = ?, "
-                "display_name = ?, updated_by = ?, updated_at = ?, "
-                "starts_at = ?, ends_at = ? "
-                "WHERE guild_id = ? AND banner_key = ?",
+                "UPDATE gacha_banners SET enabled = %s, config_json = %s, revision = %s, "
+                "display_name = %s, updated_by = %s, updated_at = %s, "
+                "starts_at = %s, ends_at = %s "
+                "WHERE guild_id = %s AND banner_key = %s",
                 (int(enabled), json.dumps(config_value, sort_keys=True), revision,
                  stored_name, int(actor_id), timestamp, starts_at, ends_at,
                  int(guild_id), banner_key),
@@ -5971,7 +4952,7 @@ def set_gacha_banner(guild_id: int, actor_id: int, enabled: bool,
                 "INSERT INTO gacha_banners "
                 "(guild_id, banner_key, display_name, enabled, config_json, revision, "
                 "updated_by, updated_at, starts_at, ends_at) "
-                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
+                "VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s)",
                 (int(guild_id), banner_key, stored_name, int(enabled),
                  json.dumps(config_value, sort_keys=True), int(actor_id), timestamp,
                  starts_at, ends_at),
@@ -5981,7 +4962,7 @@ def set_gacha_banner(guild_id: int, actor_id: int, enabled: bool,
         conn.execute(
             "INSERT INTO settings_audit "
             "(guild_id, actor_id, action, target_key, old_value_json, new_value_json, created_at) "
-            "VALUES (?, ?, 'gacha.update', ?, ?, ?, ?)",
+            "VALUES (%s, %s, 'gacha.update', %s, %s, %s, %s)",
             (int(guild_id), int(actor_id), f"gacha.{banner_key}",
              json.dumps(old) if old else None, json.dumps(new), timestamp),
         )
@@ -6007,10 +4988,9 @@ def delete_gacha_banner(guild_id: int, actor_id: int, banner_key: str,
         raise ValidationError("gacha_banner_default_undeletable",
                               "the default banner cannot be deleted")
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT revision, display_name, enabled FROM gacha_banners "
-            "WHERE guild_id = ? AND banner_key = ?", (int(guild_id), banner_key)
+            "WHERE guild_id = %s AND banner_key = %s", (int(guild_id), banner_key)
         ).fetchone()
         if row is None:
             conn.rollback()
@@ -6020,7 +5000,7 @@ def delete_gacha_banner(guild_id: int, actor_id: int, banner_key: str,
             conn.rollback()
             raise RevisionConflictError("gacha revision conflict")
         conn.execute(
-            "DELETE FROM gacha_banners WHERE guild_id = ? AND banner_key = ?",
+            "DELETE FROM gacha_banners WHERE guild_id = %s AND banner_key = %s",
             (int(guild_id), banner_key),
         )
         write_settings_audit(
@@ -6060,7 +5040,7 @@ def _voucher_subject_for(conn, guild_id: int, reward_key: str):
         return None
     row = conn.execute(
         "SELECT template_type, config_json FROM shop_item_definitions "
-        "WHERE guild_id = ? AND item_key = ?", (int(guild_id), reward_key)
+        "WHERE guild_id = %s AND item_key = %s", (int(guild_id), reward_key)
     ).fetchone()
     if row is None:
         return None
@@ -6086,22 +5066,22 @@ def _grant_gacha_reward_locked(conn, guild_id: int, user_id: int,
     kind, amount = reward["kind"], reward["amount"]
     granted = {"key": reward["key"], "kind": kind, "amount": amount}
     if kind == "coins":
-        conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, user_id))
+        conn.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s", (amount, user_id))
     elif kind == "item":
         conn.execute(
             "INSERT INTO user_inventory (guild_id, user_id, item_key, quantity, updated_at) "
-            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(guild_id, user_id, item_key) "
-            "DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = excluded.updated_at",
+            "VALUES (%s, %s, %s, %s, %s) ON CONFLICT(guild_id, user_id, item_key) "
+            "DO UPDATE SET quantity = user_inventory.quantity + excluded.quantity, updated_at = excluded.updated_at",
             (guild_id, user_id, reward["key"], amount, timestamp),
         )
     elif kind == "vault":
-        current = conn.execute("SELECT protected_reserve FROM users WHERE user_id = ?", (user_id,)).fetchone()[0]
+        current = conn.execute("SELECT protected_reserve FROM users WHERE user_id = %s", (user_id,)).fetchone()[0]
         if current >= amount:
             compensation = amount * config_value["duplicate_percent"] // 100
-            conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (compensation, user_id))
+            conn.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s", (compensation, user_id))
             granted["duplicate_compensation"] = compensation
         else:
-            conn.execute("UPDATE users SET protected_reserve = ? WHERE user_id = ?", (amount, user_id))
+            conn.execute("UPDATE users SET protected_reserve = %s WHERE user_id = %s", (amount, user_id))
             granted["protected_reserve"] = amount
     else:
         voucher_id = secrets.token_urlsafe(12)
@@ -6112,7 +5092,7 @@ def _grant_gacha_reward_locked(conn, guild_id: int, user_id: int,
             "INSERT INTO reward_vouchers "
             "(voucher_id, guild_id, user_id, reward_key, source_type, "
             "duration_days, subject, acquired_at) "
-            "VALUES (?, ?, ?, ?, 'gacha', ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s, 'gacha', %s, %s, %s)",
             (voucher_id, guild_id, user_id, reward["key"], amount,
              _voucher_subject_for(conn, guild_id, reward["key"]), timestamp),
         )
@@ -6156,7 +5136,7 @@ def _resolve_featured_pools(conn, guild_id: int, banner_key: str,
 
     row = conn.execute(
         "SELECT enabled, config_json, starts_at, ends_at FROM gacha_banners "
-        "WHERE guild_id = ? AND banner_key = ?",
+        "WHERE guild_id = %s AND banner_key = %s",
         (int(guild_id), DEFAULT_GACHA_BANNER_KEY),
     ).fetchone()
     if row is None:
@@ -6194,11 +5174,10 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
     rng, timestamp = rng or secrets.SystemRandom(), datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             banner = conn.execute(
                 "SELECT enabled, config_json, revision, display_name, "
                 "starts_at, ends_at FROM gacha_banners "
-                "WHERE guild_id = ? AND banner_key = ?", (int(guild_id), banner_key)
+                "WHERE guild_id = %s AND banner_key = %s", (int(guild_id), banner_key)
             ).fetchone()
             banner_name = banner_key
             if banner:
@@ -6225,13 +5204,13 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
                 conn.execute(
                     "INSERT INTO gacha_banners "
                     "(guild_id, banner_key, enabled, config_json, revision, updated_at) "
-                    "VALUES (?, ?, 1, ?, 1, ?)",
+                    "VALUES (%s, %s, 1, %s, 1, %s)",
                     (int(guild_id), banner_key, json.dumps(config_value, sort_keys=True), timestamp),
                 )
             _ensure_user(conn, int(user_id), timestamp)
             total_cost = config_value["cost"] * count
             if conn.execute(
-                "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
                 (total_cost, int(user_id), total_cost),
             ).rowcount != 1:
                 conn.rollback()
@@ -6239,7 +5218,7 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
             pity_row = conn.execute(
                 "SELECT pulls_since_five_star, pulls_toward_four_star, "
                 "guaranteed_featured_five, guaranteed_featured_four FROM gacha_pity "
-                "WHERE guild_id = ? AND user_id = ? AND banner_key = ?",
+                "WHERE guild_id = %s AND user_id = %s AND banner_key = %s",
                 (int(guild_id), int(user_id), banner_key),
             ).fetchone()
             pity = pity_row[0] if pity_row else 0
@@ -6319,7 +5298,7 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
                     "(guild_id, user_id, banner_key, banner_revision, rarity, reward_key, "
                     "reward_json, pity_before, soft_pity, hard_pity, "
                     "four_star_guarantee, featured, featured_guaranteed, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     (int(guild_id), int(user_id), banner_key, revision, int(rarity),
                      reward["key"], json.dumps(granted, sort_keys=True), pity_before,
                      int(soft), int(hard), int(four_guarantee), int(featured_hit),
@@ -6338,7 +5317,7 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
                 "(guild_id, user_id, banner_key, pulls_since_five_star, "
                 "pulls_toward_four_star, guaranteed_featured_five, "
                 "guaranteed_featured_four, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
                 "ON CONFLICT(guild_id, user_id, banner_key) "
                 "DO UPDATE SET pulls_since_five_star = excluded.pulls_since_five_star, "
                 "pulls_toward_four_star = excluded.pulls_toward_four_star, "
@@ -6348,7 +5327,7 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
                 (int(guild_id), int(user_id), banner_key, pity, four_counter,
                  int(guaranteed["5"]), int(guaranteed["4"]), timestamp),
             )
-            balance = conn.execute("SELECT balance FROM users WHERE user_id = ?", (int(user_id),)).fetchone()[0]
+            balance = conn.execute("SELECT balance FROM users WHERE user_id = %s", (int(user_id),)).fetchone()[0]
             conn.commit()
             return {"purchased": True, "cost": total_cost, "balance": balance,
                     "pity": pity, "four_star_counter": four_counter,
@@ -6360,7 +5339,7 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
                                             in guaranteed.items() if value},
                     "results": results, "banner_revision": revision,
                     "banner_key": banner_key, "banner_name": banner_name}
-    except (sqlite3.Error, TypeError) as exc:
+    except (EngineError, TypeError) as exc:
         db_logger.exception("Gacha transaction failed (guild=%s, user=%s)", guild_id, user_id)
         raise DatabaseOperationError("gacha transaction failed") from exc
 
@@ -6369,7 +5348,7 @@ def get_user_inventory(guild_id: int, user_id: int) -> dict[str, int]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT item_key, quantity FROM user_inventory "
-            "WHERE guild_id = ? AND user_id = ? AND quantity > 0 ORDER BY item_key",
+            "WHERE guild_id = %s AND user_id = %s AND quantity > 0 ORDER BY item_key",
             (int(guild_id), int(user_id)),
         ).fetchall()
     return dict(rows)
@@ -6379,7 +5358,10 @@ def get_user_vouchers(guild_id: int, user_id: int) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT voucher_id, reward_key, duration_days, status, acquired_at, expires_at "
-            "FROM reward_vouchers WHERE guild_id = ? AND user_id = ? ORDER BY acquired_at DESC",
+            "FROM reward_vouchers WHERE guild_id = %s AND user_id = %s "
+            # A ten-pull grants its vouchers in one instant; they list in the
+            # order granted, as SQLite's rowid kept them (decided 2026-10-31).
+            "ORDER BY acquired_at DESC, insertion_order",
             (int(guild_id), int(user_id)),
         ).fetchall()
     keys = ("voucher_id", "reward_key", "duration_days", "status", "acquired_at", "expires_at")
@@ -6399,8 +5381,8 @@ def _extend_timed_entitlement(conn, guild_id: int, user_id: int,
     """
     active = conn.execute(
         "SELECT entitlement_id, expires_at FROM timed_entitlements "
-        "WHERE guild_id = ? AND user_id = ? AND entitlement_key = ? "
-        "AND status = 'active' ORDER BY expires_at DESC LIMIT 1",
+        "WHERE guild_id = %s AND user_id = %s AND entitlement_key = %s "
+        "AND status = 'active' ORDER BY expires_at DESC, entitlement_id LIMIT 1",
         (int(guild_id), int(user_id), entitlement_key),
     ).fetchone()
     start = now
@@ -6411,14 +5393,14 @@ def _extend_timed_entitlement(conn, guild_id: int, user_id: int,
     expires = (start + timedelta(days=duration_days)).isoformat()
     if active:
         conn.execute(
-            "UPDATE timed_entitlements SET expires_at = ? WHERE entitlement_id = ?",
+            "UPDATE timed_entitlements SET expires_at = %s WHERE entitlement_id = %s",
             (expires, active[0]),
         )
     else:
         conn.execute(
             "INSERT INTO timed_entitlements "
             "(guild_id, user_id, entitlement_key, starts_at, expires_at, "
-            "source_voucher_id) VALUES (?, ?, ?, ?, ?, ?)",
+            "source_voucher_id) VALUES (%s, %s, %s, %s, %s, %s)",
             (int(guild_id), int(user_id), entitlement_key, timestamp, expires,
              voucher_id),
         )
@@ -6430,10 +5412,9 @@ def redeem_voucher(guild_id: int, user_id: int, voucher_id: str) -> dict:
     now = datetime.now(timezone.utc)
     timestamp = now.isoformat()
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT reward_key, duration_days, status, subject FROM reward_vouchers "
-            "WHERE voucher_id = ? AND guild_id = ? AND user_id = ?",
+            "WHERE voucher_id = %s AND guild_id = %s AND user_id = %s",
             (voucher_id, int(guild_id), int(user_id)),
         ).fetchone()
         if row is None:
@@ -6457,8 +5438,8 @@ def redeem_voucher(guild_id: int, user_id: int, voucher_id: str) -> dict:
                 conn, guild_id, user_id, subject, duration_days, now,
                 voucher_id, timestamp)
             conn.execute(
-                "UPDATE reward_vouchers SET status = 'active', redeemed_at = ?, "
-                "expires_at = ? WHERE voucher_id = ?",
+                "UPDATE reward_vouchers SET status = 'active', redeemed_at = %s, "
+                "expires_at = %s WHERE voucher_id = %s",
                 (timestamp, expires, voucher_id),
             )
             conn.commit()
@@ -6475,8 +5456,8 @@ def redeem_voucher(guild_id: int, user_id: int, voucher_id: str) -> dict:
                 conn, guild_id, user_id, "premium", duration_days, now,
                 voucher_id, timestamp)
             conn.execute(
-                "UPDATE reward_vouchers SET status = 'active', redeemed_at = ?, expires_at = ? "
-                "WHERE voucher_id = ?", (timestamp, expires, voucher_id)
+                "UPDATE reward_vouchers SET status = 'active', redeemed_at = %s, expires_at = %s "
+                "WHERE voucher_id = %s", (timestamp, expires, voucher_id)
             )
             result = {"redeemed": True, "kind": "premium", "expires_at": expires}
         else:
@@ -6487,15 +5468,15 @@ def redeem_voucher(guild_id: int, user_id: int, voucher_id: str) -> dict:
             if asset_type not in {"emoji", "sticker", "sound"}:
                 raise ValidationError("voucher_not_redeemable", "voucher cannot be redeemed")
             conn.execute(
-                "UPDATE reward_vouchers SET status = 'pending', redeemed_at = ? "
-                "WHERE voucher_id = ?", (timestamp, voucher_id)
+                "UPDATE reward_vouchers SET status = 'pending', redeemed_at = %s "
+                "WHERE voucher_id = %s", (timestamp, voucher_id)
             )
             request_id = conn.execute(
                 "INSERT INTO fulfillment_requests "
                 "(voucher_id, guild_id, user_id, asset_type, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "VALUES (%s, %s, %s, %s, %s) RETURNING request_id",
                 (voucher_id, int(guild_id), int(user_id), asset_type, timestamp),
-            ).lastrowid
+            ).fetchone()[0]
             result = {"redeemed": True, "kind": "fulfillment", "asset_type": asset_type,
                       "request_id": request_id}
         conn.commit()
@@ -6518,16 +5499,15 @@ def rollback_voucher_redemption(guild_id: int, user_id: int, voucher_id: str,
     is a parameter rather than a second copy of the function.
     """
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         voucher = conn.execute(
-            "SELECT duration_days, status FROM reward_vouchers WHERE voucher_id = ? "
-            "AND guild_id = ? AND user_id = ?",
+            "SELECT duration_days, status FROM reward_vouchers WHERE voucher_id = %s "
+            "AND guild_id = %s AND user_id = %s",
             (voucher_id, int(guild_id), int(user_id)),
         ).fetchone()
         active = conn.execute(
-            "SELECT entitlement_id, expires_at FROM timed_entitlements WHERE guild_id = ? "
-            "AND user_id = ? AND entitlement_key = ? AND status = 'active' "
-            "ORDER BY expires_at DESC LIMIT 1",
+            "SELECT entitlement_id, expires_at FROM timed_entitlements WHERE guild_id = %s "
+            "AND user_id = %s AND entitlement_key = %s AND status = 'active' "
+            "ORDER BY expires_at DESC, entitlement_id LIMIT 1",
             (int(guild_id), int(user_id), entitlement_key),
         ).fetchone()
         if not voucher or voucher[1] != "active" or not active:
@@ -6535,13 +5515,13 @@ def rollback_voucher_redemption(guild_id: int, user_id: int, voucher_id: str,
             return False
         restored = parse_stored(active[1]) - timedelta(days=int(voucher[0]))
         if restored <= datetime.now(timezone.utc) + timedelta(minutes=1):
-            conn.execute("DELETE FROM timed_entitlements WHERE entitlement_id = ?", (active[0],))
+            conn.execute("DELETE FROM timed_entitlements WHERE entitlement_id = %s", (active[0],))
         else:
-            conn.execute("UPDATE timed_entitlements SET expires_at = ? WHERE entitlement_id = ?",
+            conn.execute("UPDATE timed_entitlements SET expires_at = %s WHERE entitlement_id = %s",
                          (restored.isoformat(), active[0]))
         conn.execute(
             "UPDATE reward_vouchers SET status = 'available', redeemed_at = NULL, expires_at = NULL "
-            "WHERE voucher_id = ?", (voucher_id,)
+            "WHERE voucher_id = %s", (voucher_id,)
         )
         conn.commit()
         return True
@@ -6551,7 +5531,7 @@ def get_fulfillment_requests(guild_id: int) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT request_id, voucher_id, user_id, asset_type, status, created_at "
-            "FROM fulfillment_requests WHERE guild_id = ? ORDER BY request_id DESC",
+            "FROM fulfillment_requests WHERE guild_id = %s ORDER BY request_id DESC",
             (int(guild_id),),
         ).fetchall()
     keys = ("request_id", "voucher_id", "user_id", "asset_type", "status", "created_at")
@@ -6566,12 +5546,11 @@ def fulfill_voucher_request(guild_id: int, request_id: int, actor_id: int,
     """Start an asset rental only after staff confirms Discord fulfillment."""
     now = datetime.now(timezone.utc)
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT f.voucher_id, f.asset_type, f.status, v.user_id, v.duration_days, "
             "f.ticket_channel_id "
             "FROM fulfillment_requests f JOIN reward_vouchers v ON v.voucher_id = f.voucher_id "
-            "WHERE f.request_id = ? AND f.guild_id = ?",
+            "WHERE f.request_id = %s AND f.guild_id = %s",
             (int(request_id), int(guild_id)),
         ).fetchone()
         if not row or row[2] != "open":
@@ -6580,19 +5559,19 @@ def fulfill_voucher_request(guild_id: int, request_id: int, actor_id: int,
         voucher_id, asset_type, _, user_id, days, ticket_channel_id = row
         expires = now + timedelta(days=days)
         conn.execute(
-            "UPDATE fulfillment_requests SET status = 'fulfilled', completed_at = ?, "
-            "completed_by = ? WHERE request_id = ?",
+            "UPDATE fulfillment_requests SET status = 'fulfilled', completed_at = %s, "
+            "completed_by = %s WHERE request_id = %s",
             (now.isoformat(), int(actor_id), int(request_id)),
         )
         conn.execute(
-            "UPDATE reward_vouchers SET status = 'fulfilled', fulfilled_at = ?, expires_at = ?, "
-            "discord_item_id = ? WHERE voucher_id = ?",
+            "UPDATE reward_vouchers SET status = 'fulfilled', fulfilled_at = %s, expires_at = %s, "
+            "discord_item_id = %s WHERE voucher_id = %s",
             (now.isoformat(), expires.isoformat(), str(discord_item_id), voucher_id),
         )
         conn.execute(
             "INSERT INTO timed_entitlements "
             "(guild_id, user_id, entitlement_key, starts_at, expires_at, source_voucher_id, "
-            "discord_item_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "discord_item_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (int(guild_id), user_id, asset_type, now.isoformat(), expires.isoformat(),
              voucher_id, str(discord_item_id)),
         )
@@ -6609,8 +5588,8 @@ def link_fulfillment_ticket(guild_id: int, request_id: int, channel_id: int):
     spent (same reasoning `support_tickets.open_ticket` itself documents)."""
     with get_connection() as conn:
         conn.execute(
-            "UPDATE fulfillment_requests SET ticket_channel_id = ? "
-            "WHERE request_id = ? AND guild_id = ?",
+            "UPDATE fulfillment_requests SET ticket_channel_id = %s "
+            "WHERE request_id = %s AND guild_id = %s",
             (int(channel_id), int(request_id), int(guild_id)),
         )
 
@@ -6625,7 +5604,7 @@ def get_open_fulfillment_by_channel(channel_id: int) -> dict | None:
     with get_connection() as conn:
         row = conn.execute(
             "SELECT request_id, guild_id, asset_type FROM fulfillment_requests "
-            "WHERE ticket_channel_id = ? AND status = 'open'",
+            "WHERE ticket_channel_id = %s AND status = 'open'",
             (int(channel_id),),
         ).fetchone()
     if row is None:
@@ -6643,10 +5622,9 @@ def cancel_fulfillment_request(guild_id: int, request_id: int, actor_id: int) ->
     """
     now = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT voucher_id, status, ticket_channel_id FROM fulfillment_requests "
-            "WHERE request_id = ? AND guild_id = ?",
+            "WHERE request_id = %s AND guild_id = %s",
             (int(request_id), int(guild_id)),
         ).fetchone()
         if not row or row[1] != "open":
@@ -6654,12 +5632,12 @@ def cancel_fulfillment_request(guild_id: int, request_id: int, actor_id: int) ->
             return {"cancelled": False, "reason": "unavailable"}
         voucher_id, _, ticket_channel_id = row
         conn.execute(
-            "UPDATE fulfillment_requests SET status = 'cancelled', completed_at = ?, "
-            "completed_by = ? WHERE request_id = ?",
+            "UPDATE fulfillment_requests SET status = 'cancelled', completed_at = %s, "
+            "completed_by = %s WHERE request_id = %s",
             (now, int(actor_id), int(request_id)),
         )
         conn.execute(
-            "UPDATE reward_vouchers SET status = 'cancelled' WHERE voucher_id = ?",
+            "UPDATE reward_vouchers SET status = 'cancelled' WHERE voucher_id = %s",
             (voucher_id,),
         )
         conn.commit()
@@ -6678,10 +5656,9 @@ def revoke_timed_entitlement(guild_id: int, entitlement_id: int, actor_id: int) 
     """
     now = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT user_id, entitlement_key, discord_item_id FROM timed_entitlements "
-            "WHERE entitlement_id = ? AND guild_id = ? AND status = 'active'",
+            "WHERE entitlement_id = %s AND guild_id = %s AND status = 'active'",
             (int(entitlement_id), int(guild_id)),
         ).fetchone()
         if row is None:
@@ -6689,8 +5666,8 @@ def revoke_timed_entitlement(guild_id: int, entitlement_id: int, actor_id: int) 
             return {"revoked": False, "reason": "unavailable"}
         user_id, entitlement_key, discord_item_id = row
         conn.execute(
-            "UPDATE timed_entitlements SET status = 'cancelled', revoked_at = ? "
-            "WHERE entitlement_id = ?",
+            "UPDATE timed_entitlements SET status = 'cancelled', revoked_at = %s "
+            "WHERE entitlement_id = %s",
             (now, int(entitlement_id)),
         )
         conn.commit()
@@ -6720,10 +5697,9 @@ def grant_manual_entitlement(guild_id: int, user_id: int, asset_type: str,
     now = datetime.now(timezone.utc)
     expires = now + timedelta(days=duration_days)
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         duplicate = conn.execute(
-            "SELECT 1 FROM timed_entitlements WHERE guild_id = ? "
-            "AND discord_item_id = ? AND status = 'active'",
+            "SELECT 1 FROM timed_entitlements WHERE guild_id = %s "
+            "AND discord_item_id = %s AND status = 'active'",
             (int(guild_id), str(discord_item_id)),
         ).fetchone()
         if duplicate:
@@ -6733,10 +5709,10 @@ def grant_manual_entitlement(guild_id: int, user_id: int, asset_type: str,
             "INSERT INTO timed_entitlements "
             "(guild_id, user_id, entitlement_key, starts_at, expires_at, "
             "discord_item_id, source_type, granted_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'manual', ?)",
+            "VALUES (%s, %s, %s, %s, %s, %s, 'manual', %s) RETURNING entitlement_id",
             (int(guild_id), int(user_id), asset_type, now.isoformat(),
              expires.isoformat(), str(discord_item_id), int(granted_by)),
-        ).lastrowid
+        ).fetchone()[0]
         conn.commit()
         return {"granted": True, "entitlement_id": entitlement_id,
                 "expires_at": expires.isoformat()}
@@ -6762,8 +5738,8 @@ def get_active_entitlements(guild_id: int, timestamp: str) -> list[dict]:
             "v.reward_key, e.granted_by, e.discord_missing_since "
             "FROM timed_entitlements e "
             "LEFT JOIN reward_vouchers v ON v.voucher_id = e.source_voucher_id "
-            "WHERE e.guild_id = ? AND e.status = 'active' AND e.expires_at > ? "
-            "ORDER BY e.expires_at ASC",
+            "WHERE e.guild_id = %s AND e.status = 'active' AND e.expires_at > %s "
+            "ORDER BY e.expires_at ASC, e.entitlement_id",
             (int(guild_id), timestamp),
         ).fetchall()
     keys = ("entitlement_id", "user_id", "entitlement_key", "starts_at",
@@ -6800,8 +5776,8 @@ def set_entitlement_discord_presence(entitlement_id: int, missing: bool):
     guessing, the same way a refused debit is never discarded as a success."""
     with get_connection() as conn:
         conn.execute(
-            "UPDATE timed_entitlements SET discord_missing_since = ? "
-            "WHERE entitlement_id = ? AND status = 'active'",
+            "UPDATE timed_entitlements SET discord_missing_since = %s "
+            "WHERE entitlement_id = %s AND status = 'active'",
             (datetime.now(timezone.utc).isoformat() if missing else None,
              int(entitlement_id)),
         )
@@ -6814,7 +5790,7 @@ def get_expired_entitlements(timestamp: str) -> list[dict]:
             "e.discord_item_id, COALESCE(e.source_type, v.source_type) "
             "FROM timed_entitlements e LEFT JOIN reward_vouchers v "
             "ON v.voucher_id = e.source_voucher_id "
-            "WHERE e.status = 'active' AND e.expires_at <= ?",
+            "WHERE e.status = 'active' AND e.expires_at <= %s",
             (timestamp,),
         ).fetchall()
     keys = (
@@ -6828,7 +5804,7 @@ def expire_entitlement(entitlement_id: int):
     with get_connection() as conn:
         conn.execute(
             "UPDATE timed_entitlements SET status = 'expired' "
-            "WHERE entitlement_id = ? AND status = 'active'", (int(entitlement_id),)
+            "WHERE entitlement_id = %s AND status = 'active'", (int(entitlement_id),)
         )
 
 
@@ -6836,8 +5812,8 @@ def delete_rental_for_item(guild_id: int, item_type: str, discord_item_id: str):
     """Remove a schema-5 duplicate rental row after entitlement cleanup."""
     with get_connection() as conn:
         conn.execute(
-            "DELETE FROM rented_items WHERE guild_id = ? AND item_type = ? "
-            "AND discord_item_id = ?",
+            "DELETE FROM rented_items WHERE guild_id = %s AND item_type = %s "
+            "AND discord_item_id = %s",
             (int(guild_id), item_type, str(discord_item_id)),
         )
 
@@ -6845,8 +5821,8 @@ def delete_rental_for_item(guild_id: int, item_type: str, discord_item_id: str):
 def consume_inventory_item(guild_id: int, user_id: int, item_key: str) -> bool:
     with get_connection() as conn:
         changed = conn.execute(
-            "UPDATE user_inventory SET quantity = quantity - 1, updated_at = ? "
-            "WHERE guild_id = ? AND user_id = ? AND item_key = ? AND quantity > 0",
+            "UPDATE user_inventory SET quantity = quantity - 1, updated_at = %s "
+            "WHERE guild_id = %s AND user_id = %s AND item_key = %s AND quantity > 0",
             (datetime.now(timezone.utc).isoformat(), int(guild_id), int(user_id), item_key),
         ).rowcount
     return changed == 1
@@ -6874,12 +5850,12 @@ def get_shop_item_definitions(guild_id: int, language: str = None) -> list[dict]
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT item_key, template_type, enabled, price, config_json, revision, "
-            "category FROM shop_item_definitions WHERE guild_id = ? ORDER BY item_key",
+            "category FROM shop_item_definitions WHERE guild_id = %s ORDER BY item_key",
             (int(guild_id),),
         ).fetchall()
         localized = conn.execute(
             "SELECT item_key, language, name, description "
-            "FROM shop_item_localizations WHERE guild_id = ?", (int(guild_id),)
+            "FROM shop_item_localizations WHERE guild_id = %s", (int(guild_id),)
         ).fetchall()
     texts: dict[str, dict[str, dict]] = {}
     for item_key, lang, name, description in localized:
@@ -6919,7 +5895,7 @@ def _shop_section_usage(conn, guild_id: int) -> dict[str, int]:
     usage: dict[str, int] = {}
     rows = conn.execute(
         "SELECT template_type, config_json, category FROM shop_item_definitions "
-        "WHERE guild_id = ?", (int(guild_id),)
+        "WHERE guild_id = %s", (int(guild_id),)
     ).fetchall()
     for template_type, config_json, category in rows:
         try:
@@ -6940,7 +5916,7 @@ def _hidden_shop_items(conn, guild_id: int) -> list[str]:
     """
     row = conn.execute(
         "SELECT value_json FROM guild_settings "
-        "WHERE guild_id = ? AND setting_key = 'shop_hidden_items'",
+        "WHERE guild_id = %s AND setting_key = 'shop_hidden_items'",
         (int(guild_id),)
     ).fetchone()
     if row is None:
@@ -7028,10 +6004,9 @@ def create_shop_item_definition(guild_id: int, actor_id: int, item: dict) -> dic
     timestamp = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
                 "SELECT 1 FROM shop_item_definitions "
-                "WHERE guild_id = ? AND item_key = ?", (int(guild_id), item_key)
+                "WHERE guild_id = %s AND item_key = %s", (int(guild_id), item_key)
             ).fetchone()
             if existing:
                 conn.rollback()
@@ -7044,7 +6019,7 @@ def create_shop_item_definition(guild_id: int, actor_id: int, item: dict) -> dic
             conn.execute(
                 "INSERT INTO shop_item_definitions (guild_id, item_key, "
                 "template_type, category, enabled, price, config_json, revision, "
-                "updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                "updated_by, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, 1, %s, %s)",
                 (int(guild_id), item_key, item["template_type"],
                  item.get("category"), int(item["enabled"]), int(item["price"]),
                  json.dumps(item["config"], sort_keys=True), int(actor_id),
@@ -7052,7 +6027,7 @@ def create_shop_item_definition(guild_id: int, actor_id: int, item: dict) -> dic
             )
             conn.execute(
                 "INSERT INTO shop_item_localizations (guild_id, item_key, language, "
-                "name, description) VALUES (?, ?, ?, ?, ?)",
+                "name, description) VALUES (%s, %s, %s, %s, %s)",
                 (int(guild_id), item_key, CUSTOM_ITEM_LANGUAGE,
                  item["text"]["name"], item["text"]["description"]),
             )
@@ -7065,7 +6040,7 @@ def create_shop_item_definition(guild_id: int, actor_id: int, item: dict) -> dic
                  "category": shelf},
             )
             conn.commit()
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Shop item creation failed (guild=%s, item=%s)",
                             guild_id, item_key)
         raise DatabaseOperationError("shop item creation failed") from exc
@@ -7082,11 +6057,10 @@ def update_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
     timestamp = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT template_type, enabled, price, config_json, revision, "
                 "category FROM shop_item_definitions "
-                "WHERE guild_id = ? AND item_key = ?",
+                "WHERE guild_id = %s AND item_key = %s",
                 (int(guild_id), item_key),
             ).fetchone()
             if row is None:
@@ -7113,10 +6087,10 @@ def update_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
                 usage[was] = max(0, usage.get(was, 0) - 1)
                 _assert_section_has_room(conn, guild_id, shelf, usage)
             conn.execute(
-                "UPDATE shop_item_definitions SET template_type = ?, category = ?, "
-                "enabled = ?, price = ?, config_json = ?, revision = ?, "
-                "updated_by = ?, updated_at = ? "
-                "WHERE guild_id = ? AND item_key = ?",
+                "UPDATE shop_item_definitions SET template_type = %s, category = %s, "
+                "enabled = %s, price = %s, config_json = %s, revision = %s, "
+                "updated_by = %s, updated_at = %s "
+                "WHERE guild_id = %s AND item_key = %s",
                 (item["template_type"], item.get("category"),
                  int(item["enabled"]), int(item["price"]),
                  json.dumps(item["config"], sort_keys=True), revision,
@@ -7125,7 +6099,7 @@ def update_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
             conn.execute(
                 "INSERT INTO shop_item_localizations "
                 "(guild_id, item_key, language, name, description) "
-                "VALUES (?, ?, ?, ?, ?) "
+                "VALUES (%s, %s, %s, %s, %s) "
                 "ON CONFLICT(guild_id, item_key, language) DO UPDATE SET "
                 "name = excluded.name, description = excluded.description",
                 (int(guild_id), item_key, CUSTOM_ITEM_LANGUAGE,
@@ -7137,7 +6111,7 @@ def update_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
             return {"item_key": item_key, "revision": revision}
     except (DatabaseOperationError, LookupError):
         raise
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Shop item update failed (guild=%s, item=%s)", guild_id, item_key)
         raise DatabaseOperationError("shop item update failed") from exc
 
@@ -7147,10 +6121,9 @@ def delete_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
     """Remove one custom item and its localizations under a revision check."""
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT template_type, enabled, price, config_json, revision "
-                "FROM shop_item_definitions WHERE guild_id = ? AND item_key = ?",
+                "FROM shop_item_definitions WHERE guild_id = %s AND item_key = %s",
                 (int(guild_id), item_key),
             ).fetchone()
             if row is None:
@@ -7161,11 +6134,11 @@ def delete_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
             previous = {"template_type": row[0], "enabled": bool(row[1]),
                         "price": row[2], "config": json.loads(row[3])}
             conn.execute(
-                "DELETE FROM shop_item_localizations WHERE guild_id = ? AND item_key = ?",
+                "DELETE FROM shop_item_localizations WHERE guild_id = %s AND item_key = %s",
                 (int(guild_id), item_key),
             )
             conn.execute(
-                "DELETE FROM shop_item_definitions WHERE guild_id = ? AND item_key = ?",
+                "DELETE FROM shop_item_definitions WHERE guild_id = %s AND item_key = %s",
                 (int(guild_id), item_key),
             )
             write_settings_audit(conn, int(guild_id), int(actor_id),
@@ -7174,7 +6147,7 @@ def delete_shop_item_definition(guild_id: int, actor_id: int, item_key: str,
             return {"item_key": item_key}
     except (DatabaseOperationError, LookupError):
         raise
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Shop item deletion failed (guild=%s, item=%s)", guild_id, item_key)
         raise DatabaseOperationError("shop item deletion failed") from exc
 
@@ -7188,10 +6161,9 @@ def delete_dashboard_document(guild_id: int, actor_id: int, document_id: int,
     """
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT document_type, name, content_json, revision FROM dashboard_documents "
-                "WHERE guild_id = ? AND document_id = ?",
+                "WHERE guild_id = %s AND document_id = %s",
                 (int(guild_id), int(document_id)),
             ).fetchone()
             if row is None:
@@ -7202,7 +6174,7 @@ def delete_dashboard_document(guild_id: int, actor_id: int, document_id: int,
             previous = {"document_type": row[0], "name": row[1],
                         "content": json.loads(row[2])}
             conn.execute(
-                "DELETE FROM dashboard_documents WHERE guild_id = ? AND document_id = ?",
+                "DELETE FROM dashboard_documents WHERE guild_id = %s AND document_id = %s",
                 (int(guild_id), int(document_id)),
             )
             write_settings_audit(conn, int(guild_id), int(actor_id),
@@ -7211,7 +6183,7 @@ def delete_dashboard_document(guild_id: int, actor_id: int, document_id: int,
             return {"document_id": int(document_id)}
     except (DatabaseOperationError, LookupError):
         raise
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Document deletion failed (guild=%s, document=%s)",
                             guild_id, document_id)
         raise DatabaseOperationError("document deletion failed") from exc
@@ -7221,10 +6193,9 @@ def purchase_custom_shop_item(guild_id: int, user_id: int, item_key: str) -> dic
     """Purchase one dashboard-defined item using only approved templates."""
     timestamp = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT template_type, enabled, price, config_json FROM shop_item_definitions "
-            "WHERE guild_id = ? AND item_key = ?", (int(guild_id), item_key)
+            "WHERE guild_id = %s AND item_key = %s", (int(guild_id), item_key)
         ).fetchone()
         if not row or not row[1]:
             conn.rollback()
@@ -7234,13 +6205,13 @@ def purchase_custom_shop_item(guild_id: int, user_id: int, item_key: str) -> dic
         if template == "vault":
             reserve = int(config_value["amount"])
             current = conn.execute(
-                "SELECT protected_reserve FROM users WHERE user_id = ?", (int(user_id),)
+                "SELECT protected_reserve FROM users WHERE user_id = %s", (int(user_id),)
             ).fetchone()[0]
             if current >= reserve:
                 conn.rollback()
                 return {"purchased": False, "reason": "already_owned"}
         if conn.execute(
-            "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+            "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
             (price, int(user_id), price),
         ).rowcount != 1:
             conn.rollback()
@@ -7252,15 +6223,15 @@ def purchase_custom_shop_item(guild_id: int, user_id: int, item_key: str) -> dic
         if template == "consumable":
             conn.execute(
                 "INSERT INTO user_inventory (guild_id, user_id, item_key, quantity, updated_at) "
-                "VALUES (?, ?, ?, 1, ?) ON CONFLICT(guild_id, user_id, item_key) "
-                "DO UPDATE SET quantity = quantity + 1, updated_at = excluded.updated_at",
+                "VALUES (%s, %s, %s, 1, %s) ON CONFLICT(guild_id, user_id, item_key) "
+                "DO UPDATE SET quantity = user_inventory.quantity + 1, updated_at = excluded.updated_at",
                 (int(guild_id), int(user_id), config_value["item_key"], timestamp),
             )
         elif template == "vault":
-            conn.execute("UPDATE users SET protected_reserve = ? WHERE user_id = ?",
+            conn.execute("UPDATE users SET protected_reserve = %s WHERE user_id = %s",
                          (int(config_value["amount"]), int(user_id)))
         elif template == "coin_bundle":
-            conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?",
+            conn.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s",
                          (int(config_value["amount"]), int(user_id)))
         elif template == "fulfillment_voucher":
             voucher_id = secrets.token_urlsafe(12)
@@ -7268,7 +6239,7 @@ def purchase_custom_shop_item(guild_id: int, user_id: int, item_key: str) -> dic
             conn.execute(
                 "INSERT INTO reward_vouchers "
                 "(voucher_id, guild_id, user_id, reward_key, source_type, "
-                "duration_days, acquired_at) VALUES (?, ?, ?, ?, 'shop', ?, ?)",
+                "duration_days, acquired_at) VALUES (%s, %s, %s, %s, 'shop', %s, %s)",
                 (voucher_id, int(guild_id), int(user_id), reward_key,
                  int(config_value["duration_days"]), timestamp),
             )
@@ -7277,8 +6248,8 @@ def purchase_custom_shop_item(guild_id: int, user_id: int, item_key: str) -> dic
             entitlement_key = f"role:{int(config_value['role_id'])}"
             active = conn.execute(
                 "SELECT entitlement_id, expires_at FROM timed_entitlements "
-                "WHERE guild_id = ? AND user_id = ? AND entitlement_key = ? "
-                "AND status = 'active' ORDER BY expires_at DESC LIMIT 1",
+                "WHERE guild_id = %s AND user_id = %s AND entitlement_key = %s "
+                "AND status = 'active' ORDER BY expires_at DESC, entitlement_id LIMIT 1",
                 (int(guild_id), int(user_id), entitlement_key),
             ).fetchone()
             base = datetime.now(timezone.utc)
@@ -7289,18 +6260,18 @@ def purchase_custom_shop_item(guild_id: int, user_id: int, item_key: str) -> dic
             expires = base + timedelta(days=int(config_value["duration_days"]))
             if active:
                 conn.execute(
-                    "UPDATE timed_entitlements SET expires_at = ? WHERE entitlement_id = ?",
+                    "UPDATE timed_entitlements SET expires_at = %s WHERE entitlement_id = %s",
                     (expires.isoformat(), active[0]),
                 )
             else:
                 conn.execute(
                     "INSERT INTO timed_entitlements "
                     "(guild_id, user_id, entitlement_key, starts_at, expires_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    "VALUES (%s, %s, %s, %s, %s)",
                     (int(guild_id), int(user_id), entitlement_key, timestamp, expires.isoformat()),
                 )
             result["expires_at"] = expires.isoformat()
-        balance = conn.execute("SELECT balance FROM users WHERE user_id = ?", (int(user_id),)).fetchone()[0]
+        balance = conn.execute("SELECT balance FROM users WHERE user_id = %s", (int(user_id),)).fetchone()[0]
         conn.commit()
         result["balance"] = balance
         return result
@@ -7316,22 +6287,21 @@ def rollback_custom_role_purchase(guild_id: int, user_id: int, charged_price: in
     the debit and the rollback cannot change what is returned.
     """
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?",
+        conn.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s",
                      (int(charged_price), int(user_id)))
         if template_type == "timed_role" and duration_days is not None:
             active = conn.execute(
-                "SELECT entitlement_id, expires_at FROM timed_entitlements WHERE guild_id = ? "
-                "AND user_id = ? AND entitlement_key = ? AND status = 'active' "
-                "ORDER BY expires_at DESC LIMIT 1",
+                "SELECT entitlement_id, expires_at FROM timed_entitlements WHERE guild_id = %s "
+                "AND user_id = %s AND entitlement_key = %s AND status = 'active' "
+                "ORDER BY expires_at DESC, entitlement_id LIMIT 1",
                 (int(guild_id), int(user_id), f"role:{int(role_id)}"),
             ).fetchone()
             if active:
                 restored = parse_stored(active[1]) - timedelta(days=int(duration_days))
                 if restored <= datetime.now(timezone.utc) + timedelta(minutes=1):
-                    conn.execute("DELETE FROM timed_entitlements WHERE entitlement_id = ?", (active[0],))
+                    conn.execute("DELETE FROM timed_entitlements WHERE entitlement_id = %s", (active[0],))
                 else:
-                    conn.execute("UPDATE timed_entitlements SET expires_at = ? WHERE entitlement_id = ?",
+                    conn.execute("UPDATE timed_entitlements SET expires_at = %s WHERE entitlement_id = %s",
                                  (restored.isoformat(), active[0]))
         conn.commit()
 
@@ -7364,18 +6334,18 @@ def list_managed_messages(guild_id: int, kind: str = None) -> list[dict]:
             rows = conn.execute(
                 "SELECT kind, menu_key, display_name, channel_id, message_id, "
                 "title, body, colour, options_json, revision, updated_at "
-                "FROM managed_messages WHERE guild_id = ? ORDER BY kind, menu_key",
+                "FROM managed_messages WHERE guild_id = %s ORDER BY kind, menu_key",
                 (int(guild_id),)).fetchall()
         else:
             rows = conn.execute(
                 "SELECT kind, menu_key, display_name, channel_id, message_id, "
                 "title, body, colour, options_json, revision, updated_at "
-                "FROM managed_messages WHERE guild_id = ? AND kind = ? "
+                "FROM managed_messages WHERE guild_id = %s AND kind = %s "
                 "ORDER BY menu_key", (int(guild_id), kind)).fetchall()
         entries: dict[tuple[str, str], list[dict]] = {}
         for row in conn.execute(
             "SELECT kind, menu_key, label, role_id, emoji FROM "
-            "managed_message_entries WHERE guild_id = ? ORDER BY position",
+            "managed_message_entries WHERE guild_id = %s ORDER BY position, entry_id",
             (int(guild_id),),
         ):
             entries.setdefault((row[0], row[1]), []).append(
@@ -7419,10 +6389,9 @@ def save_managed_message(guild_id: int, actor_id: int, kind: str, menu_key: str,
     timestamp = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT revision FROM managed_messages "
-                "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+                "WHERE guild_id = %s AND kind = %s AND menu_key = %s",
                 (int(guild_id), kind, menu_key)).fetchone()
             if row:
                 if int(expected_revision) != row[0]:
@@ -7430,10 +6399,10 @@ def save_managed_message(guild_id: int, actor_id: int, kind: str, menu_key: str,
                     raise RevisionConflictError("managed message revision conflict")
                 revision = row[0] + 1
                 conn.execute(
-                    "UPDATE managed_messages SET display_name = ?, title = ?, "
-                    "body = ?, colour = ?, options_json = ?, revision = ?, "
-                    "updated_by = ?, updated_at = ? "
-                    "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+                    "UPDATE managed_messages SET display_name = %s, title = %s, "
+                    "body = %s, colour = %s, options_json = %s, revision = %s, "
+                    "updated_by = %s, updated_at = %s "
+                    "WHERE guild_id = %s AND kind = %s AND menu_key = %s",
                     (display_name.strip(), title, body, colour,
                      json.dumps(options or {}, sort_keys=True), revision,
                      int(actor_id), timestamp, int(guild_id), kind, menu_key))
@@ -7445,13 +6414,13 @@ def save_managed_message(guild_id: int, actor_id: int, kind: str, menu_key: str,
                 conn.execute(
                     "INSERT INTO managed_messages (guild_id, kind, menu_key, "
                     "display_name, title, body, colour, options_json, revision, "
-                    "updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                    "updated_by, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s)",
                     (int(guild_id), kind, menu_key, display_name.strip(), title,
                      body, colour, json.dumps(options or {}, sort_keys=True),
                      int(actor_id), timestamp))
             conn.execute(
                 "DELETE FROM managed_message_entries "
-                "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+                "WHERE guild_id = %s AND kind = %s AND menu_key = %s",
                 (int(guild_id), kind, menu_key))
             for position, entry in enumerate(entries):
                 label = str(entry.get("label", "")).strip()
@@ -7463,7 +6432,7 @@ def save_managed_message(guild_id: int, actor_id: int, kind: str, menu_key: str,
                 conn.execute(
                     "INSERT INTO managed_message_entries (guild_id, kind, "
                     "menu_key, position, label, role_id, emoji) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                     (int(guild_id), kind, menu_key, position, label,
                      int(role_id) if role_id else None,
                      str(entry.get("emoji") or "")))
@@ -7474,7 +6443,7 @@ def save_managed_message(guild_id: int, actor_id: int, kind: str, menu_key: str,
             return {"revision": revision}
     except (DatabaseOperationError, RevisionConflictError, ValidationError):
         raise
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Managed message save failed (guild=%s)", guild_id)
         raise DatabaseOperationError("managed message save failed") from exc
 
@@ -7490,8 +6459,8 @@ def record_managed_post(guild_id: int, kind: str, menu_key: str,
     """
     with get_connection() as conn:
         conn.execute(
-            "UPDATE managed_messages SET channel_id = ?, message_id = ? "
-            "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+            "UPDATE managed_messages SET channel_id = %s, message_id = %s "
+            "WHERE guild_id = %s AND kind = %s AND menu_key = %s",
             (int(channel_id) if channel_id else None,
              int(message_id) if message_id else None,
              int(guild_id), kind, menu_key))
@@ -7500,10 +6469,9 @@ def record_managed_post(guild_id: int, kind: str, menu_key: str,
 def delete_managed_message(guild_id: int, actor_id: int, kind: str,
                            menu_key: str, expected_revision: int) -> dict | None:
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT revision, channel_id, message_id FROM managed_messages "
-            "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+            "WHERE guild_id = %s AND kind = %s AND menu_key = %s",
             (int(guild_id), kind, menu_key)).fetchone()
         if row is None:
             conn.rollback()
@@ -7512,10 +6480,10 @@ def delete_managed_message(guild_id: int, actor_id: int, kind: str,
             conn.rollback()
             raise RevisionConflictError("managed message revision conflict")
         conn.execute("DELETE FROM managed_message_entries "
-                     "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+                     "WHERE guild_id = %s AND kind = %s AND menu_key = %s",
                      (int(guild_id), kind, menu_key))
         conn.execute("DELETE FROM managed_messages "
-                     "WHERE guild_id = ? AND kind = ? AND menu_key = ?",
+                     "WHERE guild_id = %s AND kind = %s AND menu_key = %s",
                      (int(guild_id), kind, menu_key))
         write_settings_audit(conn, int(guild_id), actor_id,
                              "managed_message.delete", f"{kind}:{menu_key}")
@@ -7531,10 +6499,9 @@ def save_dashboard_document(guild_id: int, actor_id: int, document_type: str,
         raise ValueError("invalid dashboard document")
     timestamp = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT document_id, revision FROM dashboard_documents "
-            "WHERE guild_id = ? AND document_type = ? AND name = ?",
+            "WHERE guild_id = %s AND document_type = %s AND name = %s",
             (int(guild_id), document_type, name.strip()),
         ).fetchone()
         if row:
@@ -7542,8 +6509,8 @@ def save_dashboard_document(guild_id: int, actor_id: int, document_type: str,
                 raise RevisionConflictError("document revision conflict")
             revision = row[1] + 1
             conn.execute(
-                "UPDATE dashboard_documents SET content_json = ?, revision = ?, "
-                "updated_by = ?, updated_at = ? WHERE document_id = ?",
+                "UPDATE dashboard_documents SET content_json = %s, revision = %s, "
+                "updated_by = %s, updated_at = %s WHERE document_id = %s",
                 (json.dumps(content, sort_keys=True), revision, int(actor_id), timestamp, row[0]),
             )
             document_id = row[0]
@@ -7554,10 +6521,10 @@ def save_dashboard_document(guild_id: int, actor_id: int, document_type: str,
             document_id = conn.execute(
                 "INSERT INTO dashboard_documents "
                 "(guild_id, document_type, name, content_json, revision, updated_by, updated_at) "
-                "VALUES (?, ?, ?, ?, 1, ?, ?)",
+                "VALUES (%s, %s, %s, %s, 1, %s, %s) RETURNING document_id",
                 (int(guild_id), document_type, name.strip(),
                  json.dumps(content, sort_keys=True), int(actor_id), timestamp),
-            ).lastrowid
+            ).fetchone()[0]
         conn.commit()
     return {"document_id": document_id, "revision": revision}
 
@@ -7566,7 +6533,7 @@ def list_dashboard_documents(guild_id: int) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT document_id, document_type, name, content_json, revision, updated_at "
-            "FROM dashboard_documents WHERE guild_id = ? ORDER BY document_type, name",
+            "FROM dashboard_documents WHERE guild_id = %s ORDER BY document_type, name",
             (int(guild_id),),
         ).fetchall()
     return [{"document_id": row[0], "document_type": row[1], "name": row[2],
@@ -7589,10 +6556,11 @@ def queue_control_action(guild_id: int, actor_id: int, action_type: str,
     with get_connection() as conn:
         action_id = conn.execute(
             "INSERT INTO control_actions "
-            "(guild_id, actor_id, action_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
+            "(guild_id, actor_id, action_type, payload_json, created_at) "
+            "VALUES (%s, %s, %s, %s, %s) RETURNING action_id",
             (int(guild_id), int(actor_id), action_type, json.dumps(payload, sort_keys=True),
              datetime.now(timezone.utc).isoformat()),
-        ).lastrowid
+        ).fetchone()[0]
     return action_id
 
 
@@ -7602,7 +6570,7 @@ def get_control_action(guild_id: int, action_id: int) -> dict | None:
         row = conn.execute(
             "SELECT action_id, action_type, status, error_code, created_at, "
             "started_at, completed_at FROM control_actions "
-            "WHERE guild_id = ? AND action_id = ?",
+            "WHERE guild_id = %s AND action_id = %s",
             (int(guild_id), int(action_id)),
         ).fetchone()
     if row is None:
@@ -7623,7 +6591,7 @@ def prune_control_actions(max_age_days: int = 30) -> int:
         return conn.execute(
             "DELETE FROM control_actions WHERE status IN "
             "('completed', 'failed', 'cancelled') AND "
-            "COALESCE(completed_at, started_at, created_at) < ?",
+            "COALESCE(completed_at, started_at, created_at) < %s",
             (cutoff,),
         ).rowcount
 
@@ -7634,8 +6602,8 @@ def renew_control_action_lease(action_id: int) -> None:
                + timedelta(seconds=CONTROL_ACTION_LEASE_SECONDS)).isoformat()
     with get_connection() as conn:
         conn.execute(
-            "UPDATE control_actions SET lease_expires_at = ? "
-            "WHERE action_id = ? AND status = 'running'",
+            "UPDATE control_actions SET lease_expires_at = %s "
+            "WHERE action_id = %s AND status = 'running'",
             (expires, int(action_id)),
         )
 
@@ -7643,7 +6611,6 @@ def renew_control_action_lease(action_id: int) -> None:
 def claim_control_action() -> dict | None:
     """Claim the oldest action so only one bot worker can execute it."""
     with get_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
         now = datetime.now(timezone.utc)
         # Only reclaim an action whose lease actually lapsed. Re-queueing on
         # elapsed time alone meant a slow multi-section publish was executed
@@ -7651,7 +6618,7 @@ def claim_control_action() -> dict | None:
         conn.execute(
             "UPDATE control_actions SET status = 'pending', started_at = NULL, "
             "lease_expires_at = NULL WHERE status = 'running' AND "
-            "COALESCE(lease_expires_at, started_at, created_at) < ?",
+            "COALESCE(lease_expires_at, started_at, created_at) < %s",
             (now.isoformat(),),
         )
         row = conn.execute(
@@ -7663,8 +6630,8 @@ def claim_control_action() -> dict | None:
             return None
         lease = (now + timedelta(seconds=CONTROL_ACTION_LEASE_SECONDS)).isoformat()
         if conn.execute(
-            "UPDATE control_actions SET status = 'running', started_at = ?, "
-            "lease_expires_at = ? WHERE action_id = ? AND status = 'pending'",
+            "UPDATE control_actions SET status = 'running', started_at = %s, "
+            "lease_expires_at = %s WHERE action_id = %s AND status = 'pending'",
             (now.isoformat(), lease, row[0]),
         ).rowcount != 1:
             conn.rollback()
@@ -7677,8 +6644,8 @@ def claim_control_action() -> dict | None:
 def finish_control_action(action_id: int, success: bool, error_code: str | None = None):
     with get_connection() as conn:
         conn.execute(
-            "UPDATE control_actions SET status = ?, completed_at = ?, error_code = ? "
-            "WHERE action_id = ? AND status = 'running'",
+            "UPDATE control_actions SET status = %s, completed_at = %s, error_code = %s "
+            "WHERE action_id = %s AND status = 'running'",
             ("completed" if success else "failed", datetime.now(timezone.utc).isoformat(),
              error_code, int(action_id)),
         )
@@ -7709,89 +6676,147 @@ _AUDIT_SUBJECT_ACTIONS_SQL = ", ".join(f"'{action}'" for action in _AUDIT_SUBJEC
 
 # (table, WHERE clause, number of times the subject id is bound)
 #
-# JSON columns are read with json_each / json_extract behind json_valid, never
-# with LIKE: a LIKE on an id matches every longer id that contains it, and a
-# malformed payload must not turn the whole export into an error.
+# A member's id inside a JSON column is matched in Python, not by the engine's
+# JSON functions, which SQLite and PostgreSQL spell differently. The clause
+# narrows the rows with a LIKE on the id's digits, and SUBJECT_ROW_FILTERS below
+# makes the exact match: a LIKE alone matches every longer id that contains the
+# member's, and a malformed payload must not turn the whole export into an error.
 SUBJECT_TABLES = (
-    ("users", "user_id = ?", 1),
-    ("scoped_accounts", "user_id = ?", 1),
-    ("casino_wagers", "user_id = ?", 1),
-    ("reward_claims", "user_id = ?", 1),
-    ("user_inventory", "user_id = ?", 1),
-    ("gacha_pity", "user_id = ?", 1),
-    ("gacha_pulls", "user_id = ?", 1),
-    ("reward_vouchers", "user_id = ?", 1),
+    ("users", "user_id = %s", 1),
+    ("scoped_accounts", "user_id = %s", 1),
+    ("casino_wagers", "user_id = %s", 1),
+    ("reward_claims", "user_id = %s", 1),
+    ("user_inventory", "user_id = %s", 1),
+    ("gacha_pity", "user_id = %s", 1),
+    ("gacha_pulls", "user_id = %s", 1),
+    ("reward_vouchers", "user_id = %s", 1),
     # The subject may be the recipient or the staff member who manually granted
     # someone else's entitlement, and both are personal data about them --
     # same reasoning as fulfillment_requests just below.
-    ("timed_entitlements", "user_id = ? OR granted_by = ?", 2),
+    ("timed_entitlements", "user_id = %s OR granted_by = %s", 2),
     # The subject may be the requester or the operator who fulfilled someone else's
     # request, and both are personal data about them.
-    ("fulfillment_requests", "user_id = ? OR completed_by = ?", 2),
-    ("warnings", "user_id = ? OR mod_id = ?", 2),
-    ("tickets", "opener_id = ? OR claimer_id = ?", 2),
-    ("voice_settings", "user_id = ?", 1),
-    ("voice_permissions", "owner_id = ? OR target_id = ?", 2),
-    ("active_channels", "owner_id = ?", 1),
-    ("user_identities", "user_id = ?", 1),
-    ("user_sharing_preferences", "user_id = ?", 1),
-    ("activity_events", "user_id = ?", 1),
-    ("dashboard_access_invalidations", "user_id = ?", 1),
+    ("fulfillment_requests", "user_id = %s OR completed_by = %s", 2),
+    ("warnings", "user_id = %s OR mod_id = %s", 2),
+    ("tickets", "opener_id = %s OR claimer_id = %s", 2),
+    ("voice_settings", "user_id = %s", 1),
+    ("voice_permissions", "owner_id = %s OR target_id = %s", 2),
+    ("active_channels", "owner_id = %s", 1),
+    ("user_identities", "user_id = %s", 1),
+    ("user_sharing_preferences", "user_id = %s", 1),
+    ("activity_events", "user_id = %s", 1),
+    ("dashboard_access_invalidations", "user_id = %s", 1),
     # The rolling anti-abuse counter is a record of the member's own play.
-    ("casino_earnings_window", "user_id = ?", 1),
+    ("casino_earnings_window", "user_id = %s", 1),
     # Posts the member hosts, and posts they joined: membership is a JSON list
     # of ids inside the host's row.
-    ("lfg_posts",
-     "host_id = ? OR (json_valid(joined_json) AND EXISTS ("
-     "SELECT 1 FROM json_each(lfg_posts.joined_json) WHERE json_each.value = ?))",
-     2),
+    ("lfg_posts", "host_id = %s OR joined_json LIKE ('%%' || %s || '%%')", 2),
     # Whose turn the counting or word chain last accepted.
-    ("minigame_state", "last_user_id = ?", 1),
+    ("minigame_state", "last_user_id = %s", 1),
     # Changes the member made as an administrator, and a removed warning's
     # payload naming them as its subject or as the moderator who issued it.
     ("settings_audit",
-     f"actor_id = ? OR (action IN ({_AUDIT_SUBJECT_ACTIONS_SQL}) "
-     "AND json_valid(old_value_json) AND ("
-     "json_extract(old_value_json, '$.user_id') = ? "
-     "OR json_extract(old_value_json, '$.moderator_id') = ?))",
-     3),
+     f"actor_id = %s OR (action IN ({_AUDIT_SUBJECT_ACTIONS_SQL}) "
+     "AND old_value_json LIKE ('%%' || %s || '%%'))",
+     2),
     # Outbox rows the member queued as an operator, and rows whose payload is
     # about them: an erasure, or the revocation of one of their grants.
-    ("control_actions",
-     "actor_id = ? OR (json_valid(payload_json) "
-     "AND json_extract(payload_json, '$.user_id') = ?)",
-     2),
+    ("control_actions", "actor_id = %s OR payload_json LIKE ('%%' || %s || '%%')", 2),
 )
+
+
+def _parsed_json(text):
+    """A JSON column's value, or None for NULL or malformed text -- the rows
+    SQLite's json_valid() used to exclude."""
+    if not isinstance(text, str):
+        return None
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
+
+
+def _json_is_id(value, user_id: int) -> bool:
+    """Whether a JSON value is the member's id. Numerically, as SQLite compared
+    a JSON number with a bound integer; a string spelling of the id never
+    matched there and does not match here, and neither does a boolean (SQLite
+    read ``true`` as member 1).
+
+    The LIKE prefilter finds an id by its decimal digits, so a number written in
+    exponent notation would be missed. Nothing writes one: every id in these
+    columns is ``json.dumps`` of a Python int (measured against the old clauses,
+    2026-10-31; docs/subsystems/database.md)."""
+    return (not isinstance(value, (str, bool))) and value == user_id
+
+
+def _lfg_row_names(row: dict, user_id: int) -> bool:
+    """The member hosts the post, or is in its joined list. A JSON object's
+    values and a lone scalar count too, as json_each() iterated them."""
+    if row["host_id"] == user_id:
+        return True
+    joined = _parsed_json(row["joined_json"])
+    members = (joined.values() if isinstance(joined, dict)
+               else joined if isinstance(joined, list) else (joined,))
+    return any(_json_is_id(member, user_id) for member in members)
+
+
+def _audit_row_names(row: dict, user_id: int) -> bool:
+    """The member made the change, or a removed warning names them as its
+    subject or as the moderator who issued it."""
+    if row["actor_id"] == user_id:
+        return True
+    payload = _parsed_json(row["old_value_json"])
+    return (row["action"] in _AUDIT_SUBJECT_ACTIONS and isinstance(payload, dict)
+            and (_json_is_id(payload.get("user_id"), user_id)
+                 or _json_is_id(payload.get("moderator_id"), user_id)))
+
+
+def _control_action_row_names(row: dict, user_id: int) -> bool:
+    """The member queued the action, or its payload is about them."""
+    if row["actor_id"] == user_id:
+        return True
+    payload = _parsed_json(row["payload_json"])
+    return isinstance(payload, dict) and _json_is_id(payload.get("user_id"), user_id)
+
+
+# The exact match for a SUBJECT_TABLES clause that only narrows the rows. A
+# table listed here is read without the export's LIMIT, which applies after the
+# filter, so a crowd of near-miss ids cannot push the member's own rows out.
+SUBJECT_ROW_FILTERS = {
+    "lfg_posts": _lfg_row_names,
+    "settings_audit": _audit_row_names,
+    "control_actions": _control_action_row_names,
+}
 
 # Deleted outright, children before parents. Foreign keys are enforced on runtime
 # connections and neither timed_entitlements.source_voucher_id nor
 # fulfillment_requests.voucher_id declares an ON DELETE action, so this order is
 # required rather than cosmetic.
 ERASE_DELETE_ORDER = (
-    ("fulfillment_requests", "user_id = ?", 1),
-    ("timed_entitlements", "user_id = ?", 1),
-    ("reward_vouchers", "user_id = ?", 1),
-    ("gacha_pulls", "user_id = ?", 1),
-    ("gacha_pity", "user_id = ?", 1),
-    ("user_inventory", "user_id = ?", 1),
-    ("activity_events", "user_id = ?", 1),
-    ("warnings", "user_id = ?", 1),
-    ("tickets", "opener_id = ?", 1),
-    ("voice_permissions", "owner_id = ? OR target_id = ?", 2),
-    ("voice_settings", "user_id = ?", 1),
-    ("active_channels", "owner_id = ?", 1),
-    ("user_sharing_preferences", "user_id = ?", 1),
-    ("user_identities", "user_id = ?", 1),
+    ("fulfillment_requests", "user_id = %s", 1),
+    ("timed_entitlements", "user_id = %s", 1),
+    ("reward_vouchers", "user_id = %s", 1),
+    ("gacha_pulls", "user_id = %s", 1),
+    ("gacha_pity", "user_id = %s", 1),
+    ("user_inventory", "user_id = %s", 1),
+    ("activity_events", "user_id = %s", 1),
+    ("warnings", "user_id = %s", 1),
+    ("tickets", "opener_id = %s", 1),
+    ("voice_permissions", "owner_id = %s OR target_id = %s", 2),
+    ("voice_settings", "user_id = %s", 1),
+    ("active_channels", "owner_id = %s", 1),
+    ("user_sharing_preferences", "user_id = %s", 1),
+    ("user_identities", "user_id = %s", 1),
     # A transient anti-abuse counter, not a record worth keeping once the
     # member it watches is gone.
-    ("casino_earnings_window", "user_id = ?", 1),
+    ("casino_earnings_window", "user_id = %s", 1),
     # A party post whose host is erased has no host; the row goes. Members who
     # *joined* somebody else's post are inside `joined_json` and are scrubbed
     # out of it below rather than deleting the host's post over them.
-    ("lfg_posts", "host_id = ?", 1),
+    ("lfg_posts", "host_id = %s", 1),
     # A day-long signal that the member's dashboard access may have changed;
     # nothing about it needs to outlive them.
-    ("dashboard_access_invalidations", "user_id = ?", 1),
+    ("dashboard_access_invalidations", "user_id = %s", 1),
 )
 
 # Re-keyed to the tombstone instead of deleted. ``users`` and ``scoped_accounts``
@@ -7839,8 +6864,11 @@ ERASE_SCRUBBED_JSON = (
 
 
 def _rows_as_dicts(cursor) -> list[dict]:
+    """The export's rows, every stored timestamp as ISO text so the file
+    encodes as JSON on either engine."""
     columns = [column[0] for column in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    return [{column: stored_iso(value) for column, value in zip(columns, row)}
+            for row in cursor.fetchall()]
 
 
 def export_user_data(user_id: int) -> dict:
@@ -7856,25 +6884,33 @@ def export_user_data(user_id: int) -> dict:
     truncated = []
     with get_connection() as conn:
         for table, clause, bindings in SUBJECT_TABLES:
-            cursor = conn.execute(
-                f"SELECT * FROM {table} WHERE {clause} LIMIT ?",
-                (*(user_id,) * bindings, EXPORT_ROW_LIMIT + 1),
-            )
-            rows = _rows_as_dicts(cursor)
+            row_filter = SUBJECT_ROW_FILTERS.get(table)
+            if row_filter is None:
+                rows = _rows_as_dicts(conn.execute(
+                    f"SELECT * FROM {sql_identifier(table)} WHERE {clause} LIMIT %s",
+                    (*(user_id,) * bindings, EXPORT_ROW_LIMIT + 1),
+                ))
+            else:
+                rows = [row for row in _rows_as_dicts(conn.execute(
+                    f"SELECT * FROM {sql_identifier(table)} WHERE {clause}",
+                    (user_id,) * bindings,
+                )) if row_filter(row, user_id)]
             if len(rows) > EXPORT_ROW_LIMIT:
                 rows = rows[:EXPORT_ROW_LIMIT]
                 truncated.append(table)
             tables[table] = rows
         # rented_items has no user column at all; the only link back to a member is
         # the entitlement that created it, which is the join get_all_rentals uses.
-        # ``IS`` rather than ``=`` on both nullable columns: a legacy row with no
-        # provenance and an entitlement with no Discord asset both hold NULL, and
-        # ``NULL = NULL`` would silently drop them from the export.
+        # Null-safe equality (SQLite's ``IS``) rather than ``=`` on both nullable
+        # columns: a legacy row with no provenance and an entitlement with no
+        # Discord asset both hold NULL, and ``NULL = NULL`` would silently drop
+        # them from the export.
         tables["rented_items"] = _rows_as_dicts(conn.execute(
             "SELECT r.* FROM rented_items r JOIN timed_entitlements e "
-            "ON e.guild_id IS r.guild_id AND e.entitlement_key = r.item_type "
-            "AND e.discord_item_id IS r.discord_item_id "
-            "WHERE e.user_id = ? LIMIT ?",
+            "ON e.guild_id IS NOT DISTINCT FROM r.guild_id "
+            "AND e.entitlement_key = r.item_type "
+            "AND e.discord_item_id IS NOT DISTINCT FROM r.discord_item_id "
+            "WHERE e.user_id = %s LIMIT %s",
             (user_id, EXPORT_ROW_LIMIT),
         ))
     return {
@@ -7897,7 +6933,7 @@ def get_active_entitlements_for_user(user_id: int) -> list[dict]:
         rows = conn.execute(
             "SELECT entitlement_id, guild_id, user_id, entitlement_key, expires_at, "
             "source_voucher_id, discord_item_id, status FROM timed_entitlements "
-            "WHERE user_id = ? AND status = 'active'", (int(user_id),)
+            "WHERE user_id = %s AND status = 'active'", (int(user_id),)
         ).fetchall()
     keys = ("entitlement_id", "guild_id", "user_id", "entitlement_key", "expires_at",
             "source_voucher_id", "discord_item_id", "status")
@@ -7928,16 +6964,16 @@ def _refund_pending_wagers_for_user_locked(conn, user_id: int, resolved_at: str)
     """
     rows = conn.execute(
         "SELECT wager_id, stake FROM casino_wagers "
-        "WHERE user_id = ? AND status = 'pending'", (user_id,)
+        "WHERE user_id = %s AND status = 'pending'", (user_id,)
     ).fetchall()
     for wager_id, stake in rows:
         conn.execute(
-            "UPDATE users SET balance = balance + ? WHERE user_id = ?",
+            "UPDATE users SET balance = balance + %s WHERE user_id = %s",
             (stake, user_id),
         )
         conn.execute(
-            "UPDATE casino_wagers SET status = 'refunded', resolved_at = ?, "
-            "resolution_json = ? WHERE wager_id = ?",
+            "UPDATE casino_wagers SET status = 'refunded', resolved_at = %s, "
+            "resolution_json = %s WHERE wager_id = %s",
             (resolved_at, json.dumps({"reason": "data_erasure"}), wager_id),
         )
     return {"count": len(rows), "amount": sum(row[1] for row in rows)}
@@ -7949,17 +6985,18 @@ def _blank_personal_columns_locked(conn, tombstone_id: int):
     Cooldowns, streaks and activity timestamps describe the person, not the money,
     so they are cleared even though the row survives.
     """
-    cooldowns = ", ".join(f"{column} = NULL" for column in sorted(VALID_COOLDOWN_COLUMNS))
+    cooldowns = ", ".join(f"{sql_identifier(column)} = NULL"
+                          for column in sorted(VALID_COOLDOWN_COLUMNS))
     conn.execute(
         f"UPDATE users SET {cooldowns}, bodyguard_until = NULL, "
         "last_streak_update = NULL, streak_count = 0, last_active = NULL, "
-        "inactive_warned = 0, rules_read_time = NULL WHERE user_id = ?",
+        "inactive_warned = 0, rules_read_time = NULL WHERE user_id = %s",
         (tombstone_id,),
     )
     conn.execute(
         f"UPDATE scoped_accounts SET {cooldowns}, bodyguard_until = NULL, "
         "last_streak_update = NULL, streak_count = 0, last_active = NULL, "
-        "inactive_warned = 0, rules_read_time = NULL WHERE user_id = ?",
+        "inactive_warned = 0, rules_read_time = NULL WHERE user_id = %s",
         (tombstone_id,),
     )
 
@@ -7971,7 +7008,7 @@ def _scrub_audit_payloads_locked(conn, user_id: int, tombstone_id: int) -> int:
     inside settings_audit.old_value_json, and that table is readable by any guild
     administrator, so leaving it would defeat the erasure.
     """
-    placeholders = ",".join("?" * len(_AUDIT_SUBJECT_ACTIONS))
+    placeholders = ",".join(["%s"] * len(_AUDIT_SUBJECT_ACTIONS))
     rows = conn.execute(
         f"SELECT audit_id, old_value_json FROM settings_audit "
         f"WHERE action IN ({placeholders}) AND old_value_json IS NOT NULL",
@@ -7997,7 +7034,7 @@ def _scrub_audit_payloads_locked(conn, user_id: int, tombstone_id: int) -> int:
         payload["reason"] = None
         payload["erased"] = True
         conn.execute(
-            "UPDATE settings_audit SET old_value_json = ? WHERE audit_id = ?",
+            "UPDATE settings_audit SET old_value_json = %s WHERE audit_id = %s",
             (json.dumps(payload, sort_keys=True), audit_id),
         )
         scrubbed += 1
@@ -8013,7 +7050,7 @@ def _scrub_lfg_parties_locked(conn, user_id: int) -> int:
     """
     rows = conn.execute(
         "SELECT guild_id, message_id, joined_json FROM lfg_posts "
-        "WHERE joined_json LIKE ?", (f"%{int(user_id)}%",)
+        "WHERE joined_json LIKE %s", (f"%{int(user_id)}%",)
     ).fetchall()
     scrubbed = 0
     for guild_id, message_id, stored in rows:
@@ -8025,8 +7062,8 @@ def _scrub_lfg_parties_locked(conn, user_id: int) -> int:
             continue  # the LIKE matched a longer id that contains this one
         remaining = [uid for uid in party if uid != int(user_id)]
         conn.execute(
-            "UPDATE lfg_posts SET joined_json = ? "
-            "WHERE guild_id = ? AND message_id = ?",
+            "UPDATE lfg_posts SET joined_json = %s "
+            "WHERE guild_id = %s AND message_id = %s",
             (json.dumps(remaining), guild_id, message_id),
         )
         scrubbed += 1
@@ -8048,10 +7085,11 @@ def _scrub_control_action_payloads_locked(conn, user_id: int,
     which no guild has a member for, and settles as nothing to do — the same
     outcome as the erasure that already withdrew the grant in Discord.
     """
+    # The LIKE narrows the rows; the parse below decides, numerically, exactly
+    # as `_control_action_row_names` does for the export.
     rows = conn.execute(
         "SELECT action_id, payload_json FROM control_actions "
-        "WHERE json_valid(payload_json) "
-        "AND json_extract(payload_json, '$.user_id') = ?",
+        "WHERE payload_json LIKE ('%%' || %s || '%%')",
         (int(user_id),),
     ).fetchall()
     scrubbed = 0
@@ -8064,7 +7102,7 @@ def _scrub_control_action_payloads_locked(conn, user_id: int,
             continue
         payload["user_id"] = tombstone_id
         conn.execute(
-            "UPDATE control_actions SET payload_json = ? WHERE action_id = ?",
+            "UPDATE control_actions SET payload_json = %s WHERE action_id = %s",
             (json.dumps(payload, sort_keys=True), action_id),
         )
         scrubbed += 1
@@ -8085,33 +7123,34 @@ def anonymize_user(user_id: int, actor_id: int, guild_id: int = 0,
     timestamp = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
             tombstone_id = _allocate_tombstone_id(conn)
             refunded = _refund_pending_wagers_for_user_locked(conn, user_id, timestamp)
 
             deleted = {}
             for table, clause, bindings in ERASE_DELETE_ORDER:
                 deleted[table] = conn.execute(
-                    f"DELETE FROM {table} WHERE {clause}",
+                    f"DELETE FROM {sql_identifier(table)} WHERE {clause}",
                     (user_id,) * bindings,
                 ).rowcount
 
             retained = {}
             for table in ERASE_REKEY_SUBJECT:
                 retained[table] = conn.execute(
-                    f"UPDATE {table} SET user_id = ? WHERE user_id = ?",
+                    f"UPDATE {sql_identifier(table)} SET user_id = %s WHERE user_id = %s",
                     (tombstone_id, user_id),
                 ).rowcount
             _blank_personal_columns_locked(conn, tombstone_id)
 
             for table, column in ERASE_NULL_ACTOR:
                 conn.execute(
-                    f"UPDATE {table} SET {column} = NULL WHERE {column} = ?",
+                    f"UPDATE {sql_identifier(table)} SET {sql_identifier(column)} = NULL "
+                    f"WHERE {sql_identifier(column)} = %s",
                     (user_id,),
                 )
             for table, column in ERASE_REKEY_ACTOR:
                 conn.execute(
-                    f"UPDATE {table} SET {column} = ? WHERE {column} = ?",
+                    f"UPDATE {sql_identifier(table)} SET {sql_identifier(column)} = %s "
+                    f"WHERE {sql_identifier(column)} = %s",
                     (tombstone_id, user_id),
                 )
             scrubbed = _scrub_audit_payloads_locked(conn, user_id, tombstone_id)
@@ -8144,7 +7183,7 @@ def anonymize_user(user_id: int, actor_id: int, guild_id: int = 0,
             return receipt
     except ValidationError:
         raise
-    except sqlite3.Error as exc:
+    except EngineError as exc:
         db_logger.exception("Member data erasure failed")
         raise DatabaseOperationError("member data erasure failed") from exc
 
@@ -8160,7 +7199,7 @@ def get_retention_candidates(cutoff_iso: str, limit: int = 25) -> list[int]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT user_id FROM users WHERE user_id > 0 AND last_active IS NOT NULL "
-            "AND last_active < ? ORDER BY last_active ASC LIMIT ?",
+            "AND last_active < %s ORDER BY last_active ASC, user_id LIMIT %s",
             (cutoff_iso, max(1, int(limit))),
         ).fetchall()
     return [row[0] for row in rows]

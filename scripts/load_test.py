@@ -1,4 +1,4 @@
-"""Synthetic write load against a throwaway database, to find where SQLite queues.
+"""Synthetic write load against a throwaway database, to find where the writer queues.
 
 The live guild is too quiet for a week of journal to say anything about
 contention, so the 2026-10-16 "stay on SQLite" recommendation rested on
@@ -8,10 +8,11 @@ executors — `database.run_write` on the one serialized writer, `run_read` on
 the read pool — at rising concurrency, and reports latency as the caller sees
 it, queue time included.
 
-It never touches an existing database. The file is created fresh in a
-temporary directory, migrated with `initialize_database()`, seeded with
-synthetic users, and deleted afterwards unless `--keep` is given. There is no
-option to point it anywhere else, by design: a load test against a real
+It never touches an existing database. A database is created fresh on the
+PostgreSQL server `--server` names (the suite's throwaway one by default,
+docs/development.md §11), migrated with `initialize_database()`, seeded with
+synthetic users, and dropped afterwards unless `--keep` is given. There is no
+option to name an existing database, by design: a load test against a real
 wallet table is a way to lose one.
 
 The workload mix, per operation:
@@ -27,6 +28,7 @@ Usage:
     python scripts/load_test.py
     python scripts/load_test.py --levels 1 16 64 256 --ops 4000 --guilds 20
     python scripts/load_test.py --json
+    python scripts/load_test.py --server "host=127.0.0.1 port=55432 user=potatobot"
 """
 
 import argparse
@@ -37,9 +39,12 @@ import os
 import random
 import statistics
 import sys
-import tempfile
 import time
 from pathlib import Path
+
+import psycopg
+from psycopg import sql
+from psycopg.conninfo import make_conninfo
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -47,6 +52,9 @@ if str(ROOT) not in sys.path:
 
 from core import database  # noqa: E402
 from core.clock import utc_now  # noqa: E402
+
+# The suite's throwaway server (docs/development.md §11); never a real one.
+DEFAULT_SERVER = "postgresql://potatobot@127.0.0.1:55432/potatobot"
 
 GUILD_ID = 1420070400000000001  # synthetic, see publish_public.SYNTHETIC_IDS
 USER_BASE = 1_000_000          # deliberately not snowflake-shaped
@@ -180,10 +188,16 @@ def main() -> int:
                         help="voice ticks per second, one per simulated guild")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--keep", action="store_true", help="keep the database afterwards")
+    parser.add_argument("--server", default=DEFAULT_SERVER,
+                        help="the PostgreSQL server to create the throwaway database on "
+                             f"(default: {DEFAULT_SERVER})")
     arguments = parser.parse_args()
 
-    workdir = Path(tempfile.mkdtemp(prefix="potatobot-load-"))
-    database.DB_PATH = str(workdir / "load.db")
+    name = f"potatobot_load_{os.getpid()}"
+    admin = psycopg.connect(make_conninfo(arguments.server, dbname="postgres"),
+                            autocommit=True)
+    admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    database.DSN = make_conninfo(arguments.server, dbname=name)
     counter = _Counter()
     database.db_logger.addHandler(counter)
 
@@ -205,23 +219,25 @@ def main() -> int:
                       f"p99 {w['p99_ms']:>8}ms  max {w['max_ms']:>8}ms  "
                       f"voice p95 {v.get('p95_ms', '-'):>7}ms  "
                       f"queue-warn {counter.queued}  slow-warn {counter.slow}")
-        size = os.path.getsize(database.DB_PATH)
-        report = {"python": sys.version.split()[0],
-                  "sqlite": database.sqlite3.sqlite_version,
+        with database.get_connection() as conn:
+            size = conn.execute("SELECT pg_database_size(current_database())").fetchone()[0]
+            server = conn.execute("SHOW server_version").fetchone()[0]
+        report = {"python": sys.version.split()[0], "postgresql": server,
                   "users": arguments.users, "guilds": arguments.guilds,
                   "database_bytes": size, "levels": results}
         if arguments.json:
             print(json.dumps(report, indent=2))
         else:
-            print(f"\n  python {report['python']}, sqlite {report['sqlite']}, "
+            print(f"\n  python {report['python']}, postgresql {server}, "
                   f"{arguments.users} users, database {size // 1024} KiB")
     finally:
+        database.close_connection_pool()
         if arguments.keep:
-            print(f"  kept {database.DB_PATH}", file=sys.stderr)
+            print(f"  kept database {name}", file=sys.stderr)
         else:
-            for entry in sorted(workdir.rglob("*"), reverse=True):
-                entry.unlink() if entry.is_file() else entry.rmdir()
-            workdir.rmdir()
+            admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)")
+                          .format(sql.Identifier(name)))
+        admin.close()
     return 0
 
 

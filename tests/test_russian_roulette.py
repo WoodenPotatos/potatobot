@@ -21,6 +21,7 @@ remainder of an uneven split, and never more.
 started, so a member who leaves is refunded, not charged.
 """
 
+import sys
 import os
 import secrets
 import tempfile
@@ -28,6 +29,9 @@ import unittest
 
 from core import database
 from cogs.casino import CASINO_EDGE, RUSSIAN_MAX_PLAYERS
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 
 GUILD = 909
@@ -69,8 +73,9 @@ class RussianRouletteMathTests(unittest.TestCase):
 class RussianRouletteWagerTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "russian.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Roulette Guild")
         self.members = [101, 102, 103, 104]
@@ -78,13 +83,13 @@ class RussianRouletteWagerTests(unittest.TestCase):
             self.set_balance(member, START_BALANCE)
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def set_balance(self, member, amount):
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO users (user_id, balance) VALUES (?, ?) "
+                "INSERT INTO users (user_id, balance) VALUES (%s, %s) "
                 "ON CONFLICT(user_id) DO UPDATE SET balance = excluded.balance",
                 (member, amount))
             conn.commit()

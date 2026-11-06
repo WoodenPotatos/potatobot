@@ -20,9 +20,11 @@ read `CHANGELOG.md` before upgrading, and keep the backups the migration writes.
 | FFmpeg | only for music; everything else works without it |
 | A host | any Linux box that can stay online; the reference deployment is AlmaLinux 10 |
 | HTTPS | required *only* if you want the dashboard — see step 6 |
+| PostgreSQL | 18, on this host or in a container beside the bot (step 5, or 7a) |
 
-SQLite ships with Python. There is no separate database server, no Redis, no
-message bus: the bot and the dashboard coordinate through one SQLite file.
+There is no Redis and no message bus: the bot and the dashboard coordinate
+through the one PostgreSQL database (2.21; earlier versions used one SQLite
+file).
 
 ## 2. Get the code and its dependencies
 
@@ -77,7 +79,10 @@ The minimum for a bot with no dashboard:
 DISCORD_TOKEN=...
 POTATOBOT_DEPLOYMENT_PROFILE=private
 POTATOBOT_DASHBOARD_ENABLED=false
-POTATOBOT_DB_PATH=/opt/potatobot/economy.db
+PGHOST=localhost
+PGDATABASE=potatobot
+PGUSER=potatobot
+PGPASSWORD=the-bot-roles-password
 ```
 
 `private` admits only `ADMIN_DISCORD_ID` to the dashboard. `self_hosted` also
@@ -89,10 +94,10 @@ Delete the `POTATOBOT_LEGACY_GUILD_ID` line that `.env.example` carries. It only
 matters to a database that predates multi-guild storage, and its placeholder is
 not an integer.
 
-**Set `POTATOBOT_DB_PATH` explicitly.** Leaving it out is legal — the path then
-comes from the process's working directory — but it means a command you run by
-hand from the wrong directory quietly creates a second, empty database. The
-reference deployment omitted it and this is the trap it left behind.
+The database is reached through libpq's own `PG*` variables, so nothing in the
+code parses a connection string or logs a password. `PGUSER` is the bot's own
+role from step 5, never the database superuser: the bot needs to own its
+database, not to create databases or roles.
 
 Do not put the same key in twice. `.env` is last-wins, so a stale line above a
 correct one works fine until somebody edits the wrong one; that happened on the
@@ -100,8 +105,26 @@ reference deployment with `DISCORD_REDIRECT_URI`.
 
 ## 5. Create the database
 
+Install PostgreSQL 18 (your distribution's packages, or apt.postgresql.org /
+the PGDG yum repository where the distribution ships an older one). Then, as
+the database superuser, create the bot's role and its database. The locale
+matters: the built-in `C.UTF-8` sorts text by code point, which is what the bot
+is tested against; a glibc locale would order names differently.
+
 ```bash
-(umask 027; POTATOBOT_DB_PATH=/opt/potatobot/economy.db ./venv/bin/python update_db.py)
+sudo -u postgres psql <<'SQL'
+CREATE ROLE potatobot LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD 'the-bot-roles-password';
+CREATE DATABASE potatobot OWNER potatobot TEMPLATE template0 ENCODING 'UTF8'
+    LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8';
+REVOKE ALL ON DATABASE potatobot FROM PUBLIC;
+SQL
+sudo -u postgres psql -Atc "SELECT datlocprovider, datlocale FROM pg_database WHERE datname = 'potatobot'"
+```
+
+The last line must print `b|C.UTF-8`. Then:
+
+```bash
+(umask 027; ./venv/bin/python update_db.py)
 ```
 
 This creates the schema, or upgrades an existing one. It is idempotent: running
@@ -217,7 +240,8 @@ reporting ready.
 
 `container/Containerfile` and `container/compose.yaml` are an alternative to
 steps 2, 5 and 7 above — one image, the bot and the dashboard as two services
-sharing one `/data` volume, because WAL needs both writers on one filesystem.
+sharing one `/data` volume, and PostgreSQL 18 as a third service, `db`, with
+no port open to the host.
 The image runs as an unprivileged `potatobot` account (uid 10001) and publishes
 the dashboard on `127.0.0.1:5000` only; put the same reverse proxy from step 6
 in front of it.
@@ -225,23 +249,25 @@ Steps 1, 3, 4, 6, 8 and 9 are unchanged: a container still needs the Discord
 application, the `.env` values, and the same post-install setup check.
 
 ```bash
-cp .env.example .env   # then fill in real values, ideally including a
-                        # POTATOBOT_DASHBOARD_SESSION_SECRET -- without one,
-                        # the dashboard generates a file beside the database
-                        # on /data, which survives a rebuild but keeps a
-                        # secret with the data
-podman-compose -f container/compose.yaml run --rm bot python update_db.py
+cp .env.example .env   # then fill in real values: PGPASSWORD is the bot
+                        # role's, and ideally a POTATOBOT_DASHBOARD_SESSION_SECRET
+                        # -- without one, the dashboard generates a file in the
+                        # data directory on /data, which survives a rebuild but
+                        # keeps a secret with the data
+printf 'POSTGRES_PASSWORD=%s\nPOTATOBOT_DB_PASSWORD=%s\n' 'superuser-password' 'the-bot-roles-password' > .env.postgres
+chmod 600 .env.postgres # only the db service reads it; POTATOBOT_DB_PASSWORD must equal PGPASSWORD
 podman-compose -f container/compose.yaml up -d
 ```
 
 (`docker compose` works the same way if that is what you have. If you build
 with plain `podman build`, pass `--format docker`: podman's default OCI format
-drops the Containerfile's `HEALTHCHECK`.) Expect
-`Database ready at schema version N (/data/economy.db)` from the migration
-step, then both containers `Up` and the dashboard answering on
-`127.0.0.1:5000`. The database, logs and Everydle's daily state all live on
-the `/data` volume, so a rebuild never resets them; nothing else in the image
-is meant to hold state. There is no container equivalent of the weekly
+drops the Containerfile's `HEALTHCHECK`.) The database initialises once, on
+its empty volume, creating the bot's own non-superuser role; the bot waits for
+it to answer, creates the schema, and logs `Database ready (database=potatobot,
+schema=N, …)`. Expect all three containers `Up` and the dashboard answering on
+`127.0.0.1:5000`. PostgreSQL's data lives on the `pgdata` volume, and logs,
+Everydle's daily state and the pre-migration dumps on `/data`, so a rebuild
+never resets them; nothing else in the image is meant to hold state. There is no container equivalent of the weekly
 Everydle drift timer — run it from the host instead, on the same schedule
 `deploy/potatobot-everydle-drift.timer` uses:
 
@@ -249,20 +275,27 @@ Everydle drift timer — run it from the host instead, on the same schedule
 podman-compose -f container/compose.yaml run --rm bot python scripts/everydle_drift.py
 ```
 
-For an ad-hoc inspection or backup, `sqlite3` ships in the image:
+For an ad-hoc look at the data, `psql` is in the database container:
 
 ```bash
-podman-compose -f container/compose.yaml exec bot sqlite3 -readonly /data/economy.db "PRAGMA integrity_check;"
+podman-compose -f container/compose.yaml exec db psql -U potatobot potatobot
 ```
 
-A single rootless podman container under systemd is the other shape:
-`deploy/potatobot.container` is a Quadlet unit that runs bot and dashboard in
-one process, with the data on a bind mount (`/var/lib/potatobot`), the
-environment in `/etc/potatobot/potatobot.env`, `--umask=0027` and
-`POTATOBOT_TRUSTED_PROXY_HOPS=1` stated explicitly, because a non-loopback bind
-is refused without it. Install it into the service account's
-`~/.config/containers/systemd/` and run `update_db.py` in the image as its own
-step before a start that carries a migration.
+Rootless podman under systemd is the other shape, three Quadlet files:
+`deploy/potatobot.container` runs bot and dashboard in one process,
+`deploy/potatobot-db.container` runs PostgreSQL, and `deploy/potatobot.network`
+is the private network between them. The bot's data is on a bind mount
+(`/var/lib/potatobot/bot`) and PostgreSQL's beside it (`pgdata/`, mode `0755`,
+because the image's entrypoint drops to its own `postgres` user, which must
+pass through it); the bot's
+environment is `/etc/potatobot/potatobot.env` (with `PGPASSWORD`) and the
+database's `/etc/potatobot/potatobot-db.env` (`POSTGRES_PASSWORD` and
+`POTATOBOT_DB_PASSWORD`), so the bot never holds the superuser's password.
+`--umask=0027` and `POTATOBOT_TRUSTED_PROXY_HOPS=1` are stated explicitly,
+because a non-loopback bind is refused without the latter. Install all three
+into the service account's `~/.config/containers/systemd/`, and the init
+script (`deploy/postgres-init/`) where the database unit's comment says; the
+bot starts only once the database is healthy, and migrates on start.
 
 ## 8. Check the guild, then configure it
 
@@ -315,12 +348,16 @@ nothing else.
 
 ## 9. Before you rely on it
 
-- **Back up `economy.db`.** Use `sqlite3 economy.db ".backup out.db"`, not `cp`:
-  it is consistent against a running writer.
-- **Test the restore.** Open the copy and run `PRAGMA integrity_check`. An
+- **Back up the database.** `(umask 077; pg_dump --format=custom > potatobot.dump)`
+  with the bot's `PG*` settings: one consistent snapshot, taken against a
+  running writer.
+- **Test the restore.** `pg_restore --list potatobot.dump` must list the
+  tables, and a real restore into an empty scratch database
+  (`pg_restore --no-owner --dbname scratch potatobot.dump`) must succeed. An
   untested backup is a guess.
-- Migrations write their own timestamped backup before the first upgrade. Keep
-  them; they are the only rollback for a schema change that rebuilds tables.
+- Migrations take their own `pg_dump` into the data directory's `backups/`
+  before the first upgrade, and refuse to run without it. Keep them; they are
+  the rollback for a schema change.
 - **Every backup above lives on this one host.** Set up the offsite copy too:
   1. Install `rclone` (the distribution package, or `curl https://rclone.org/install.sh | sudo bash`).
   2. Run `rclone config` as the service user (`sudo -u potatobot rclone config`)
@@ -348,14 +385,16 @@ nothing else.
      compares it byte for byte before it prunes anything.
   6. Prove you can restore. A backup nobody has restored is a hope. Run
      `rclone copy gdrivecrypt:<newest file> /tmp/restore-test/`, then
-     `sqlite3 /tmp/restore-test/<file> 'PRAGMA integrity_check'`, which must
-     print `ok`. Then delete the test copy.
+     restore it into an empty scratch database
+     (`pg_restore --no-owner --dbname scratch /tmp/restore-test/<file>`),
+     which must succeed. Then drop the scratch database and delete the copy.
 
-  `scripts/offsite_backup.py` copies exactly one file — a snapshot taken
-  through SQLite's own online backup API, the same consistency guarantee as
-  the manual `.backup` above — never the project tree, so it needs no
-  Discord or OAuth secret and is never handed `.env`. It prunes remote
-  copies older than 30 days on every run (`--retention-days`, adjustable).
+  `scripts/offsite_backup.py` copies exactly one file — a `pg_dump`, checked
+  with `pg_restore --list` before it leaves the host — never the project
+  tree, so it needs no Discord or OAuth secret and is never handed `.env`
+  (the database password comes from the service user's `~/.pgpass`). It
+  prunes remote copies older than 30 days on every run (`--retention-days`,
+  adjustable).
 
 ## Upgrading
 
@@ -363,16 +402,25 @@ nothing else.
 sudo systemctl stop potatobot
 git -C /opt/potatobot pull
 ./venv/bin/python -m pip install --require-hashes --requirement requirements.lock   # if it changed
-(umask 027; POTATOBOT_DB_PATH=/opt/potatobot/economy.db ./venv/bin/python update_db.py)
+(umask 027; ./venv/bin/python update_db.py)
 sudo systemctl start potatobot
 ```
 
-Pull **before** rehearsing a migration — `scripts/rehearse_migration.py` runs
-`update_db.py` from its own checkout, so rehearsing first exercises the old code
-and proves nothing. To rehearse, run
-`./venv/bin/python scripts/rehearse_migration.py /opt/potatobot/economy.db`
-before stopping the bot: it migrates a copy, fingerprints it before and after,
-and exits non-zero if any table lost rows.
+The bot also migrates on start, after its own `pg_dump`; running `update_db.py`
+first just makes the migration a step you watch. Pull **before** rehearsing a
+migration — `scripts/rehearse_migration.py` runs `update_db.py` from its own
+checkout, so rehearsing first exercises the old code and proves nothing. To
+rehearse, create an empty scratch database and run
+`./venv/bin/python scripts/rehearse_migration.py --target "dbname=rehearsal"`
+before stopping the bot: it restores a dump of the live database into the
+scratch one, migrates that, fingerprints it before and after, and exits
+non-zero if any table lost or rewrote rows.
+
+**There is no upgrade from SQLite.** Installations on SQLite (2.19.x and
+earlier) are deprecated: keep running the last SQLite stable, 2.19.29 (the
+public repository's `stable-2.19` branch, tag `v2.19.29`), or start a new
+installation on PostgreSQL. A one-time copy tool shipped with the 2.21 betas up
+to 2.21.34b; it is not maintained and later releases do not include it.
 
 Restart even when no Python file changed: the command prefix is read once when
 the bot object is constructed, so changing it in the dashboard does nothing until

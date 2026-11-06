@@ -62,7 +62,7 @@ class LegalDriftTests(unittest.TestCase):
             "30", self.facts["retention_constants"]["scripts/offsite_backup.py:--retention-days"])
 
     def test_a_new_subject_table_is_reported_against_the_export_section(self):
-        widened = tuple(database.SUBJECT_TABLES) + (("member_notes", "user_id = ?", 1),)
+        widened = tuple(database.SUBJECT_TABLES) + (("member_notes", "user_id = %s", 1),)
         with patch.object(database, "SUBJECT_TABLES", widened):
             facts = legal_drift.compute_facts()
         report = dict(legal_drift.drift(self.stamp, facts))
@@ -93,9 +93,9 @@ class LegalDriftTests(unittest.TestCase):
                 self.assertEqual(1, legal_drift.main(["check"]))
 
     def test_the_schema_fact_never_touches_the_configured_database(self):
-        before = database.DB_PATH
+        before = database.DATA_DIR
         legal_drift.compute_facts()
-        self.assertEqual(before, database.DB_PATH)
+        self.assertEqual(before, database.DATA_DIR)
         self.assertFalse(os.path.exists(os.path.join(ROOT, "drift.db")))
 
     def test_a_document_in_force_carries_no_placeholder(self):

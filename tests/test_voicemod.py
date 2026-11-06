@@ -26,6 +26,9 @@ if ROOT not in sys.path:
 
 from core import database
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 # Not imported at module scope: tests.test_cog_loading unloads every cog,
 # which discord.py removes from sys.modules -- a module-level import here
 # would go stale and `patch()` would then patch a *different*, freshly
@@ -69,8 +72,9 @@ class UserActionViewVisibilityTests(unittest.IsolatedAsyncioTestCase):
         self.voicemod = cogs.voicemod
 
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
 
@@ -91,7 +95,7 @@ class UserActionViewVisibilityTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.require_feature_patch.stop()
         self.owns_channel_patch.stop()
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _interaction(self):
@@ -155,8 +159,9 @@ class RejoinPermissionReplayTests(unittest.IsolatedAsyncioTestCase):
         self.voicemod = cogs.voicemod
 
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
 
@@ -170,7 +175,7 @@ class RejoinPermissionReplayTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.is_enabled_patch.stop()
         self.guild_setting_patch.stop()
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     async def test_an_allowed_target_is_visible_in_the_recreated_room(self):

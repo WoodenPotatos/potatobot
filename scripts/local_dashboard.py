@@ -8,15 +8,17 @@ is faking every time.
 
 What it does, in order:
 
-1. Copies the repository's `economy.db` to `.local-dev/economy.dev.db`, so the
-   only copy of real data you have is never the file being migrated. The copy
-   carries its WAL sidecars, because a database checkpointed elsewhere keeps
-   committed rows in them.
-2. Fingerprints the copy, runs `database.initialize_database()` against it, then
+1. Works on a local development database -- `potatobot_dev` on the suite's
+   throwaway PostgreSQL by default (docs/development.md §11) -- never on one
+   something else serves: the database must be on loopback, its name must end in
+   `_dev`, and it may not be the one libpq's PG* environment names. With
+   `--restore DUMP` it is dropped and rebuilt from a `pg_dump` archive (a copy of
+   real data, so the only real copy is never the database being migrated);
+   otherwise an existing one is reused, and a missing one starts empty.
+2. Fingerprints it, runs `database.initialize_database()` against it, then
    fingerprints it again and prints the comparison. That is the same before and
-   after check `scripts/rehearse_migration.py` performs, so a stale copy is also
-   a migration rehearsal: this one is at schema 2, so it exercises every ordered
-   migration including the schema 8 table rebuild.
+   after check `scripts/rehearse_migration.py` performs, so restoring an older
+   dump is also a migration rehearsal.
 3. Builds a stand-in Discord guild from the stored settings and the role-menu
    entries, so a saved channel or role selector resolves to a name instead of
    rendering "unavailable".
@@ -31,17 +33,19 @@ accidentally take.
 
 Usage:
     python scripts/local_dashboard.py
-    python scripts/local_dashboard.py --fresh          # re-copy the database
+    python scripts/local_dashboard.py --restore server.dump    # rebuild from a dump
+    python scripts/local_dashboard.py --fresh                  # rebuild empty
     python scripts/local_dashboard.py --port 5050
-    python scripts/local_dashboard.py --source /path/to/economy.db
+    python scripts/local_dashboard.py --db "host=127.0.0.1 port=55432 dbname=other_dev"
 """
 
 import argparse
 import importlib.util
 import os
 import secrets
-import shutil
+import shlex
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -55,23 +59,30 @@ if str(ROOT) not in sys.path:
 LOCAL_HOST_ID = "1"
 LOCAL_DEV_DIR = ROOT / ".local-dev"
 DEFAULT_PORT = 5001
+DEFAULT_DEV_DSN = "postgresql://potatobot@127.0.0.1:55432/potatobot_dev"
+LOOPBACK_DATABASE_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="Run the dashboard locally against a copy of the database.",
+        description="Run the dashboard locally against a development database.",
     )
     parser.add_argument(
-        "--source", type=Path, default=ROOT / "economy.db",
-        help="Database to copy from (default: ./economy.db).",
+        "--db", default=DEFAULT_DEV_DSN,
+        help="Development database to serve; on loopback, named *_dev "
+             f"(default: {DEFAULT_DEV_DSN}).",
     )
     parser.add_argument(
-        "--db", type=Path, default=LOCAL_DEV_DIR / "economy.dev.db",
-        help="Working copy to serve (default: ./.local-dev/economy.dev.db).",
+        "--restore", type=Path, default=None,
+        help="Drop the development database and rebuild it from this pg_dump archive.",
+    )
+    parser.add_argument(
+        "--restore-command", default="pg_restore",
+        help="pg_restore, reading the archive on stdin (default: pg_restore).",
     )
     parser.add_argument(
         "--fresh", action="store_true",
-        help="Re-copy from --source even if the working copy already exists.",
+        help="Drop the development database and start it empty.",
     )
     parser.add_argument(
         "--port", type=int, default=DEFAULT_PORT,
@@ -83,19 +94,19 @@ def parse_arguments():
     )
     parser.add_argument(
         "--guild", type=int, default=None,
-        help="Guild id to expose. Defaults to every active guild in the copy.",
+        help="Guild id to expose. Defaults to every active guild in the database.",
     )
     parser.add_argument(
         "--skip-migration", action="store_true",
-        help="Serve the copy as-is. Most pages need schema 9 and will fail.",
+        help="Serve the database as-is, without bringing it to the latest schema.",
     )
     return parser.parse_args()
 
 
-# Third-party modules the dashboard needs. `sqlite3` and the rest of the
-# migration path are stdlib, which is why running this with the wrong
-# interpreter used to copy and migrate a database and *then* fail on an import.
-REQUIRED_MODULES = ("flask", "waitress", "discord", "requests")
+# Third-party modules the dashboard needs, checked first: running this with the
+# wrong interpreter used to copy and migrate a database and *then* fail on an
+# import.
+REQUIRED_MODULES = ("flask", "waitress", "discord", "requests", "psycopg", "psycopg_pool")
 # Set on the re-executed process so a broken virtual environment cannot make
 # this loop forever.
 REEXEC_MARKER = "POTATOBOT_LOCAL_DASHBOARD_REEXEC"
@@ -209,25 +220,30 @@ def refuse_unsafe_environment() -> None:
         )
 
 
-def refuse_real_database(source: Path, target: Path) -> None:
-    """The working copy may never be a database something else serves.
+def refuse_real_database(dsn: str) -> None:
+    """The development database may never be one something else serves.
 
-    `copy_database` reuses an existing target, so `--db economy.db` used to
-    migrate and serve the real file in place with OAuth bypassed. The source,
-    the database `POTATOBOT_DB_PATH` names and the default `./economy.db` are
-    refused by resolved path, so a relative spelling cannot slip past.
+    It is served with OAuth bypassed and migrated in place, so it has to be on
+    loopback, named `*_dev`, and not the database libpq's PG* environment names
+    (the installation's own, where one is configured). All three, because a
+    self-hoster's real database can be on localhost too.
     """
-    resolved = target.resolve()
-    protected = {source.resolve(), (ROOT / "economy.db").resolve()}
-    configured = os.getenv("POTATOBOT_DB_PATH", "").strip()
-    if configured:
-        protected.add(Path(configured).resolve())
-    if resolved in protected:
-        raise SystemExit(
-            f"--db {target} is a real database, not a working copy. Refusing to "
-            "migrate and serve it with OAuth bypassed; pick a path under "
-            f"{LOCAL_DEV_DIR}."
-        )
+    from psycopg.conninfo import conninfo_to_dict
+
+    try:
+        parameters = conninfo_to_dict(dsn)
+    except Exception as exc:
+        raise SystemExit(f"--db is not a connection string: {exc}") from exc
+    host = parameters.get("host") or ""
+    name = parameters.get("dbname") or ""
+    if host not in LOOPBACK_DATABASE_HOSTS:
+        raise SystemExit(f"--db must be on loopback, not {host or 'a socket'}; "
+                         "this serves its database with OAuth bypassed.")
+    if not name.endswith("_dev"):
+        raise SystemExit(f"--db must name a development database (*_dev), not {name!r}.")
+    if name == os.getenv("PGDATABASE", "").strip():
+        raise SystemExit(f"--db {name!r} is the database the PG* environment names, "
+                         "which is a real installation's. Refusing.")
 
 
 #: The only `Host` values the injected sign-in answers. The server binds
@@ -236,62 +252,72 @@ def refuse_real_database(source: Path, target: Path) -> None:
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost"}
 
 
-def copy_database(source: Path, target: Path, fresh: bool) -> bool:
-    """Put a working copy in place. Returns True when it was (re-)copied.
+def prepare_database(dsn: str, restore: Path | None, restore_command: str,
+                     fresh: bool) -> None:
+    """Rebuild the development database from a dump, start it empty, or reuse it."""
+    import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
-    The WAL and shared-memory sidecars are copied with the database: a file
-    checkpointed by another process keeps committed rows in `-wal`, so copying
-    the main file alone can silently lose the most recent writes.
-    """
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() and not fresh:
-        print(f"  reusing existing working copy {target}")
-        return False
-    if not source.exists():
-        raise SystemExit(f"source database not found: {source}")
-    for suffix in ("", "-wal", "-shm"):
-        candidate = Path(str(source) + suffix)
-        if candidate.exists():
-            shutil.copy2(candidate, Path(str(target) + suffix))
-            print(f"  copied {candidate.name} -> {Path(str(target) + suffix).name}")
-    return True
+    name = conninfo_to_dict(dsn)["dbname"]
+    admin_dsn = make_conninfo(dsn, dbname="postgres")
+    if restore is not None and not restore.is_file():
+        raise SystemExit(f"dump not found: {restore}")
+    with psycopg.connect(admin_dsn, autocommit=True) as admin:
+        exists = admin.execute("SELECT 1 FROM pg_database WHERE datname = %s",
+                               (name,)).fetchone() is not None
+        if exists and not (fresh or restore):
+            print(f"  reusing existing development database {name}")
+            return
+        identifier = sql.Identifier(name)
+        admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(identifier))
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(identifier))
+    if restore is None:
+        print(f"  created empty development database {name}")
+        return
+    with restore.open("rb") as archive:
+        completed = subprocess.run(
+            [*shlex.split(restore_command), "--no-owner", "--no-privileges",
+             "--exit-on-error", "--dbname", dsn], stdin=archive, check=False)
+    if completed.returncode != 0:
+        raise SystemExit(f"restoring {restore.name} failed; the development database "
+                         "is incomplete. Run again with --restore.")
+    print(f"  restored {restore.name} into {name}")
 
 
-def fingerprint(path: Path) -> dict:
+def fingerprint(dsn: str) -> dict:
     from db_snapshot import record
-    return record(path)
+    return record(dsn)
 
 
-def migrate_and_report(path: Path) -> None:
-    """Migrate the working copy and print the before/after comparison."""
+def migrate_and_report(dsn: str) -> None:
+    """Migrate the development database and print the before/after comparison."""
     from db_snapshot import compare
 
     from core import database
 
-    before = fingerprint(path)
+    before = fingerprint(dsn)
     print(f"  before: schema {before['schema_version']}, "
-          f"integrity {before['integrity_check']}, "
           f"{sum(before['table_counts'].values())} rows in "
           f"{len(before['table_counts'])} tables")
 
     database.initialize_database()
 
-    after = fingerprint(path)
+    after = fingerprint(dsn)
     print(f"  after:  schema {after['schema_version']}, "
-          f"integrity {after['integrity_check']}, "
           f"{sum(after['table_counts'].values())} rows in "
           f"{len(after['table_counts'])} tables")
     print("  comparison:")
     # `compare` reports any row-count change as a problem and prints FAILED,
-    # which is the right default for a real rehearsal. On a throwaway copy it is
-    # informational, and one change is expected rather than suspicious: seeding
-    # the built-in shop items adds `shop_prices` rows for items that did not
-    # exist when the copy was taken.
+    # which is the right default for a real rehearsal. Here it is informational,
+    # and changes are expected rather than suspicious: an empty database gains
+    # the whole schema and the seeded defaults, and seeding a built-in shop
+    # item adds `shop_prices` rows for items a restored dump predates.
     problems = compare(before, after)
     if problems:
-        print("  (on this working copy a row-count change is expected: the "
-              "built-in shop item seeding adds shop_prices rows. Integrity and "
-              "column checks above are the ones that matter.)")
+        print("  (on a development database a row-count change is expected: the "
+              "schema and the shipped defaults are seeded. Lost rows or columns "
+              "are the ones that matter.)")
 
 
 # --------------------------------------------------------------- stand-in Discord
@@ -351,7 +377,7 @@ class DevRole:
     Every attribute the real code reads must be here: the resource list grew
     `color`, this did not, and every page load's resource fetch raised — which
     aborted `loadGuild` and left the dashboard running with no feature state.
-    `LocalDashboardStandInTests` drives both readers through these classes.
+    `LocalDevelopmentDashboardTests` drives the readers through these classes.
     """
 
     def __init__(self, role_id, name, position, managed=False, default=False):
@@ -407,12 +433,21 @@ class DevGuild:
         self.me = me
         self._channels = {channel.id: channel for channel in channels}
         self._roles = {role.id: role for role in roles}
+        # No emoji, sticker or sound exists here; the entitlements page asks
+        # for each granted item's name and shows the stored id instead.
+        self.emojis = self.stickers = self.soundboard_sounds = []
 
     def get_channel(self, channel_id):
         return self._channels.get(channel_id)
 
     def get_role(self, role_id):
         return self._roles.get(role_id)
+
+    def get_emoji(self, _emoji_id):
+        return None
+
+    def get_soundboard_sound(self, _sound_id):
+        return None
 
     def get_member(self, _user_id):
         # No members are cached here; `DevBot.get_user` answers for the host.
@@ -551,7 +586,7 @@ def install_session_injection(dashboard_api, guild_ids) -> None:
 
 
 def active_guild_ids(requested):
-    """The guilds to expose, preferring what the copy actually has."""
+    """The guilds to expose, preferring what the database actually has."""
     from core import database
 
     stored = database.get_active_guild_ids()
@@ -561,11 +596,11 @@ def active_guild_ids(requested):
         return [requested]
     if stored:
         return sorted(stored)
-    # An empty copy still has to show something, or the page opens on the
+    # An empty database still has to show something, or the page opens on the
     # no-guilds state and nothing else can be reviewed.
     placeholder = 1
     database.register_guild(placeholder, "Local dev guild")
-    print(f"  no active guild in the copy; registered placeholder {placeholder}")
+    print(f"  no active guild in the database; registered placeholder {placeholder}")
     return [placeholder]
 
 
@@ -579,17 +614,20 @@ def main() -> int:
     print("Preflight")
     refuse_unsafe_environment()
     ensure_dependencies()
-    refuse_real_database(arguments.source, arguments.db)
+    refuse_real_database(arguments.db)
     port = resolve_port(arguments.port, arguments.auto_port)
     print(f"  interpreter {sys.executable}")
     print(f"  serving on 127.0.0.1:{port}")
 
     print("\nDatabase")
-    copy_database(arguments.source, arguments.db, arguments.fresh)
+    prepare_database(arguments.db, arguments.restore, arguments.restore_command,
+                     arguments.fresh)
 
     # Every module below reads its configuration at import time, so the
-    # environment has to be complete before the first import.
-    os.environ["POTATOBOT_DB_PATH"] = str(arguments.db)
+    # environment has to be complete before the first import. The session
+    # secret and card backgrounds stay in .local-dev, never beside a database.
+    LOCAL_DEV_DIR.mkdir(exist_ok=True)
+    os.environ["POTATOBOT_DATA_DIR"] = str(LOCAL_DEV_DIR)
     os.environ["POTATOBOT_DASHBOARD_HOST"] = "127.0.0.1"
     os.environ["POTATOBOT_DASHBOARD_PORT"] = str(port)
     os.environ["ADMIN_DISCORD_ID"] = LOCAL_HOST_ID
@@ -603,18 +641,20 @@ def main() -> int:
     # nothing and survives the script growing a path that does.
     os.environ["POTATOBOT_LEGACY_GUILD_ID"] = "0"
     sys.path.insert(0, str(ROOT / "scripts"))
+    from core import database
+    database.DSN = arguments.db
+    database.DATA_DIR = str(LOCAL_DEV_DIR)
 
     if arguments.skip_migration:
         print("  migration skipped at your request")
     else:
-        from core import database
         try:
             migrate_and_report(arguments.db)
         except (database.DatabaseOperationError, SystemExit) as error:
             raise SystemExit(
                 f"migrating the working copy failed: {error}\n"
-                "The copy may be from an interrupted run. Re-copy it with:\n"
-                "  python scripts/local_dashboard.py --fresh"
+                "The database may be from an interrupted run. Rebuild it with:\n"
+                "  python scripts/local_dashboard.py --fresh   (or --restore DUMP)"
             ) from error
 
     print("\nDiscord stand-ins")
@@ -631,7 +671,7 @@ def main() -> int:
     print("  - channel overwrites are permissive, so overwrite findings cannot")
     print("    appear; role hierarchy findings can")
     print("  - queued Discord publishes stay pending; no bot consumes the outbox")
-    print("  - saves are written to the working copy, not to the server")
+    print("  - saves are written to the development database, not to the server")
 
     print("\n" + "=" * 72)
     print(f"Open http://127.0.0.1:{port}/")

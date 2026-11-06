@@ -1,11 +1,14 @@
 # Secrets. Never commit these.
 .env
+.env.postgres
 .dashboard_session_secret
 
 # Databases, including the timestamped pre-migration backups that
 # initialize_database() writes and the WAL sidecars beside them.
 *.db*
 *.sqlite3
+# A pg_dump is every member's data, wherever it was left.
+*.dump
 backups/
 
 # Runtime state the bot writes into the tree. Everydle persists its daily deck

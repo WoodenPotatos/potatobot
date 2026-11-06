@@ -28,6 +28,10 @@ from core import settings_cache
 from core.settings_registry import (FEATURE_DEFINITIONS, SETTING_DEFINITIONS,
                                     validate_setting_value)
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
+
 GUILD_ID = 123
 MEMBER_ID = 9
 BOT_ID = 1
@@ -811,8 +815,9 @@ class TestSendRouteTests(unittest.TestCase):
         import dashboard_api
         self.database, self.api = database, dashboard_api
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "dashboard.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD_ID, "Test Guild")
         dashboard_api.app.config.update(TESTING=True)
@@ -832,7 +837,7 @@ class TestSendRouteTests(unittest.TestCase):
 
     def tearDown(self):
         self.api.ADMIN_ID = self.original_admin_id
-        self.database.DB_PATH = self.original_path
+        self.database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_a_known_event_is_queued(self):
@@ -886,17 +891,15 @@ class AnnouncementToolsHarnessTests(unittest.TestCase):
 
     def test_the_editor_previews_and_refuses_to_test_unsaved_edits(self):
         import json
-        import shutil
         import subprocess
 
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         from core import database
         import dashboard_api
         with tempfile.TemporaryDirectory() as temp_dir:
-            original_path, original_admin = database.DB_PATH, dashboard_api.ADMIN_ID
-            database.DB_PATH = os.path.join(temp_dir, "fixture.db")
+            original_path, original_admin = database.DATA_DIR, dashboard_api.ADMIN_ID
+            database.DATA_DIR = temp_dir
+            pg_harness.fresh_database()
             dashboard_api.ADMIN_ID = "42"
             settings_cache.invalidate()
             try:
@@ -934,7 +937,7 @@ class AnnouncementToolsHarnessTests(unittest.TestCase):
                     "placeholders": registry["announcement_placeholders"],
                 }
             finally:
-                database.DB_PATH = original_path
+                database.DATA_DIR = original_path
                 dashboard_api.ADMIN_ID = original_admin
                 settings_cache.invalidate()
             fixture_path = os.path.join(temp_dir, "fixture.json")

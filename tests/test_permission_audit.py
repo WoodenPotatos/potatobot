@@ -5,8 +5,8 @@ what lets these tests drive it with stand-ins instead of a live Discord guild.
 """
 
 import json
-import shutil
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -16,6 +16,8 @@ from core import permission_audit
 from core.settings_registry import FEATURE_DEFINITIONS
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import node_harness  # noqa: E402
 
 
 def permissions(**granted) -> discord.Permissions:
@@ -482,9 +484,7 @@ class PermissionRepairButtonTests(unittest.TestCase):
     of the rule in Python."""
 
     def test_only_the_bots_own_finding_gets_a_repair_button(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         script = ROOT / "tests" / "js" / "permission_repair.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)

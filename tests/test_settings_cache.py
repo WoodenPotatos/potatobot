@@ -7,17 +7,15 @@ maintenance failing closed instead of open turns an unreadable setting into an
 outage — it is one line away from `is_enabled`, which must fail the other way.
 """
 
+import sys
 import ast
 import asyncio
 import json
 import re
 import subprocess
-import shutil
 import os
-import sqlite3
 import tempfile
 import unittest
-from contextlib import closing
 
 from pathlib import Path
 
@@ -32,6 +30,10 @@ from core.settings_registry import (
     SettingValueType,
     validate_setting_value,
 )
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,14 +58,15 @@ class InstanceScopeTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "One")
         database.register_guild(222, "Two")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
         settings_cache.invalidate()
 
@@ -79,7 +82,7 @@ class InstanceScopeTests(unittest.TestCase):
     def test_an_instance_write_lands_in_the_table_with_no_guild_column(self):
         database.set_guild_settings(
             111, 9, [{"key": "maintenance", "value": True, "revision": 0}])
-        with closing(sqlite3.connect(database.DB_PATH)) as conn:
+        with database.get_connection() as conn:
             self.assertEqual(
                 0,
                 conn.execute("SELECT COUNT(*) FROM guild_settings "
@@ -105,48 +108,21 @@ class InstanceScopeTests(unittest.TestCase):
         self.assertIn("ticket_logs", database.get_guild_settings(111))
         self.assertNotIn("ticket_logs", database.get_guild_settings(222))
 
-    def test_an_instance_row_stored_per_guild_is_promoted_once(self):
-        """The pre-schema-11 shape, and the collision it can carry."""
-        with closing(sqlite3.connect(database.DB_PATH)) as conn:
-            conn.execute("DELETE FROM instance_settings")
-            conn.executemany(
-                "INSERT INTO guild_settings (guild_id, setting_key, value_json, "
-                "revision, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                [(111, "language", '"hu"', 3, 1, "2026-01-01"),
-                 (222, "language", '"en"', 1, 1, "2026-05-01")],
-            )
-            conn.execute("PRAGMA user_version = 10")
-            conn.commit()
-
-        database.initialize_database()
-
-        # The most recently updated row wins; there is only one right answer for
-        # an installation-wide value and picking silently would be worse.
-        self.assertEqual("en", database.get_instance_settings()["language"]["value"])
-        with closing(sqlite3.connect(database.DB_PATH)) as conn:
-            self.assertEqual(
-                0,
-                conn.execute("SELECT COUNT(*) FROM guild_settings "
-                             "WHERE setting_key = 'language'").fetchone()[0],
-            )
-        # And re-running it changes nothing.
-        database.initialize_database()
-        self.assertEqual("en", database.get_instance_settings()["language"]["value"])
-
 
 class CacheFallbackTests(unittest.TestCase):
     """What the cache answers when it does not know."""
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "One")
         settings_cache.invalidate()
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
         settings_cache.invalidate()
 
@@ -632,13 +608,8 @@ class RowEditorReportsCleanTests(unittest.TestCase):
     are plain data.
     """
 
-    def _node(self):
-        return shutil.which("node")
-
     def test_no_shape_reports_a_change_it_did_not_make(self):
-        node = self._node()
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
 
         import dashboard_api
 
@@ -872,13 +843,8 @@ class SupportedGameQuickPickTests(unittest.TestCase):
     `document`.
     """
 
-    def _node(self):
-        return shutil.which("node")
-
     def test_the_matching_and_option_list_behave(self):
-        node = self._node()
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
 
         from core.supported_games import SUPPORTED_GAME_KEYS
 

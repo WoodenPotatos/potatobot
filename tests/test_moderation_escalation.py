@@ -6,9 +6,9 @@ that reads the count on a second connection lets two moderators both miss the
 threshold. And a filter that acts on its own staff is worse than no filter.
 """
 
+import sys
 import ast
 import os
-import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -25,6 +25,9 @@ from core.settings_registry import (
     WARN_DEFAULT_TAG,
     WARN_TAGS,
 )
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -107,33 +110,34 @@ class StreakFreezeTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         self.guild, self.user = 55, 7
         self.now = datetime(2026, 6, 20)
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _set_streak(self, count, days_ago):
         when = (self.now - timedelta(days=days_ago)).isoformat()
-        with sqlite3.connect(database.DB_PATH) as conn:
-            conn.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+        with database.get_connection() as conn:
+            conn.execute("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING",
                          (self.user,))
             conn.execute(
-                "UPDATE users SET streak_count = ?, last_streak_update = ?, "
-                "last_valdle = NULL, last_dbdle_killer = NULL WHERE user_id = ?",
+                "UPDATE users SET streak_count = %s, last_streak_update = %s, "
+                "last_valdle = NULL, last_dbdle_killer = NULL WHERE user_id = %s",
                 (count, when, self.user))
 
     def _give(self, quantity):
-        with sqlite3.connect(database.DB_PATH) as conn:
+        with database.get_connection() as conn:
             conn.execute(
                 "INSERT INTO user_inventory (guild_id, user_id, item_key, "
-                "quantity, updated_at) VALUES (?, ?, 'streak_freeze', ?, ?) "
+                "quantity, updated_at) VALUES (%s, %s, 'streak_freeze', %s, %s) "
                 "ON CONFLICT(guild_id, user_id, item_key) "
-                "DO UPDATE SET quantity = ?",
+                "DO UPDATE SET quantity = %s",
                 (self.guild, self.user, quantity, "now", quantity))
 
     def _held(self):

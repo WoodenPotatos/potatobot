@@ -27,10 +27,8 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -119,28 +117,18 @@ def _erasure_lists():
 
 
 def _schema():
-    """Every table and its columns, from a database built fresh in a temp dir.
+    """Every table holding data, and its columns, from `core/schema_types.py`.
 
-    `database.DB_PATH` is a module global read at call time for exactly this, so
-    the live file is never touched.
+    The map is held to the real PostgreSQL schema -- the baseline and every
+    migration -- by `BaselineSchemaTests`, so reading it needs no database
+    server here, in CI or in the publisher. `schema_migrations` is bookkeeping
+    with no member data and is not a fact the policy describes.
     """
-    import sqlite3
-    from core import database
-    original = database.DB_PATH
-    with tempfile.TemporaryDirectory() as tmp:
-        database.DB_PATH = os.path.join(tmp, "drift.db")
-        try:
-            database.initialize_database()
-            with sqlite3.connect(database.DB_PATH) as conn:
-                tables = [row[0] for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'table' "
-                    "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
-                return {
-                    table: [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
-                    for table in tables
-                }
-        finally:
-            database.DB_PATH = original
+    from core import schema_types
+    tables = {table: list(columns) for table, columns in schema_types.COLUMN_KINDS.items()}
+    for table, columns in schema_types.POSTGRES_ONLY_COLUMNS.items():
+        tables.setdefault(table, []).extend(columns)
+    return {table: tables[table] for table in sorted(tables)}
 
 
 def _ast(path: Path) -> ast.Module:

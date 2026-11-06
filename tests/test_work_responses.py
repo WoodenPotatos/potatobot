@@ -12,6 +12,7 @@ tier overrides only that tier. And operator-authored text is escaped and
 substituted safely before it can reach message content.
 """
 
+import sys
 import json
 import os
 import re
@@ -23,19 +24,23 @@ from core import database
 from cogs import casino
 from core.settings_registry import SETTING_DEFINITIONS
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class WorkResponseStorageTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "work.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(7, "Work Guild")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_a_guild_with_no_rows_of_its_own_sees_the_installation_defaults(self):

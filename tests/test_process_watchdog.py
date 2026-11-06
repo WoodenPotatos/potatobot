@@ -172,9 +172,14 @@ kept = [n for n in tree.body
         if (isinstance(n, ast.FunctionDef) and n.name in wanted)
         or (isinstance(n, ast.Assign)
             and any(getattr(t, "id", None) in wanted for t in n.targets))]
+# A logger that writes nowhere, as the deployment's console is with
+# POTATOBOT_LOG_CONSOLE=false: the reason must reach stderr by itself.
+silent = logging.getLogger("PotatoBot")
+silent.addHandler(logging.NullHandler())
+silent.propagate = False
 mod = types.ModuleType("w")
-mod.__dict__.update(math=math, os=os, time=time, logging=logging,
-                    bot_logger=logging.getLogger("PotatoBot"),
+mod.__dict__.update(math=math, os=os, sys=sys, time=time, logging=logging,
+                    bot_logger=silent,
                     _loop_heartbeat=time.monotonic())
 exec(compile(ast.Module(body=kept, type_ignores=[]), "main.py", "exec"), mod.__dict__)
 
@@ -215,14 +220,16 @@ sys.exit(0)
         exit would leave the bot dead exactly as it was."""
         result = self.run_watchdog("down")
         self.assertEqual(1, result.returncode, f"{result.stdout}\n{result.stderr}")
-        self.assertIn("gateway", (result.stdout + result.stderr).lower())
+        self.assertIn("gateway", result.stderr.lower())
+        self.assertIn("Watchdog:", result.stderr)
 
     def test_a_wedged_loop_exits_non_zero(self):
         """The other failure in the family, and the one an in-loop watchdog
         could never catch."""
         result = self.run_watchdog("wedged")
         self.assertEqual(1, result.returncode, f"{result.stdout}\n{result.stderr}")
-        self.assertIn("event loop", (result.stdout + result.stderr).lower())
+        self.assertIn("event loop", result.stderr.lower())
+        self.assertIn("Watchdog:", result.stderr)
 
     def test_a_healthy_bot_is_left_running(self):
         """Or a watchdog that always exits would pass both tests above while

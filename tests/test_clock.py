@@ -6,6 +6,7 @@ rows carry no offset and mean the host's local time. Reading one as UTC would
 move every existing cooldown by the offset, once, silently.
 """
 
+import sys
 import os
 import tempfile
 import time
@@ -13,7 +14,10 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from core import database
-from core.clock import local_date, local_time, parse_stored, utc_now
+from core.clock import local_date, local_time, parse_stored, stored_iso, utc_now
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 
 class LocalZone:
@@ -79,29 +83,69 @@ class ClockTests(unittest.TestCase):
             parse_stored("not a time")
 
 
+class EngineNeutralTimestampTests(unittest.TestCase):
+    """SQLite reads a stored timestamp back as text, PostgreSQL's `timestamptz`
+    as an aware `datetime`; the clock's helpers take either (2.20.9a)."""
+
+    INSTANT = datetime(2026, 10, 31, 20, 41, 33, 436625, tzinfo=timezone.utc)
+
+    def test_parse_stored_takes_the_datetime_postgresql_returns(self):
+        self.assertEqual(self.INSTANT, parse_stored(self.INSTANT))
+        budapest = self.INSTANT.astimezone(timezone(timedelta(hours=1)))
+        parsed = parse_stored(budapest)
+        self.assertEqual(self.INSTANT, parsed)
+        self.assertEqual(timedelta(0), parsed.utcoffset())
+
+    def test_both_spellings_of_one_instant_parse_equal(self):
+        self.assertEqual(parse_stored(self.INSTANT.isoformat()), parse_stored(self.INSTANT))
+
+    def test_stored_iso_leaves_text_untouched(self):
+        """What SQLite returns leaves byte-identical, whatever its spelling."""
+        for text in ("2026-10-31T20:41:33.436625+00:00", "2026-07-01T14:00:00",
+                     "2026-10-31"):
+            self.assertIs(text, stored_iso(text))
+        self.assertIsNone(stored_iso(None))
+
+    def test_stored_iso_writes_a_datetime_as_iso(self):
+        self.assertEqual("2026-10-31T20:41:33.436625+00:00", stored_iso(self.INSTANT))
+
+
 class LegacyRowsKeepTheirCooldownsTests(unittest.TestCase):
-    """The rows already in the database are read as what they were."""
+    """The rows already in the database are read as what they were.
+
+    On SQLite a legacy row held the naive local text itself. PostgreSQL holds
+    no naive text -- a `timestamptz` column is an instant -- so keeping these
+    cooldowns is the copy's job: it reads each naive value as host-local time,
+    exactly as `parse_stored` does, and writes the instant (todo.md §2, the
+    ETL's `--legacy-timezone`). These tests store the legacy value the way the
+    copy will and check the cooldown still holds.
+    """
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "clock.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         with database.get_connection() as conn:
             conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 100)")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _set(self, column, value):
         with database.get_connection() as conn:
-            conn.execute(f"UPDATE users SET {column} = ? WHERE user_id = 1", (value,))
+            conn.execute(f"UPDATE users SET {column} = %s WHERE user_id = 1", (value,))
+
+    def _set_legacy(self, column, naive_local_text):
+        """Store a legacy naive value as the copy writes it: host-local time."""
+        self._set(column, parse_stored(naive_local_text))
 
     def test_a_naive_work_stamp_ten_minutes_ago_still_blocks(self):
         with LocalZone():
             legacy = (datetime.now() - timedelta(minutes=10)).isoformat()  # naive, local
-            self._set("last_job", legacy)
+            self._set_legacy("last_job", legacy)
             result = database.claim_timed_reward(
                 1, "last_job", utc_now().isoformat(), 50, 5, interval_seconds=15 * 60)
         self.assertFalse(result["claimed"])
@@ -109,7 +153,7 @@ class LegacyRowsKeepTheirCooldownsTests(unittest.TestCase):
     def test_a_naive_work_stamp_twenty_minutes_ago_has_expired(self):
         with LocalZone():
             legacy = (datetime.now() - timedelta(minutes=20)).isoformat()
-            self._set("last_job", legacy)
+            self._set_legacy("last_job", legacy)
             result = database.claim_timed_reward(
                 1, "last_job", utc_now().isoformat(), 50, 5, interval_seconds=15 * 60)
         self.assertTrue(result["claimed"])
@@ -118,7 +162,7 @@ class LegacyRowsKeepTheirCooldownsTests(unittest.TestCase):
         with LocalZone():
             yesterday = (datetime.now() - timedelta(days=1)).isoformat()
             self._set("streak_count", 4)
-            self._set("last_streak_update", yesterday)
+            self._set_legacy("last_streak_update", yesterday)
             result = database.claim_everydle_reward(
                 1, "last_valdle", utc_now().isoformat(), 500, 100)
         self.assertTrue(result["claimed"])
@@ -127,7 +171,7 @@ class LegacyRowsKeepTheirCooldownsTests(unittest.TestCase):
     def test_a_daily_claimed_earlier_today_local_time_is_refused(self):
         with LocalZone():
             earlier = datetime.now().replace(hour=0, minute=5, second=0).isoformat()
-            self._set("last_daily", earlier)
+            self._set_legacy("last_daily", earlier)
             result = database.claim_timed_reward(
                 1, "last_daily", utc_now().isoformat(), 500, 50, once_per_day=True)
         self.assertFalse(result["claimed"])

@@ -2,7 +2,6 @@ import ast
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,6 +15,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.settings_registry import FEATURE_DEFINITIONS, SETTING_DEFINITIONS  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 PYTHON_SOURCES = [
     *ROOT.glob("*.py"),
     # `core/` holds the shared modules; the root keeps only the entry points.
@@ -290,9 +293,7 @@ class LocaleLookupTests(unittest.TestCase):
     """
 
     def driver(self, body):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         start = source.index("const tr = (path) => {")
         extracted = source[start:source.index("\n};", start) + 3]
@@ -395,40 +396,93 @@ class JavaScriptIsActuallyRunTests(unittest.TestCase):
         "tests.test_shop_items.TierImportTests",
     }
 
-    def test_every_node_driven_class_is_listed(self):
-        """Every class that can skip for want of Node is in `NODE_DRIVEN`,
-        and everything in it still can: a class that skips directly, or calls
-        a module-level helper that does."""
+    #: Calls by which a test can skip itself. Only `node_harness.require_node`
+    #: may contain one, and it skips for exactly one reason.
+    SKIP_CALLS = {"skipTest", "SkipTest", "skip", "skipIf", "skipUnless",
+                  "expectedFailure"}
+
+    @staticmethod
+    def _node_driven_sources():
+        """Every class that calls `node_harness.require_node`, directly or
+        through a module-level helper, with the source of that class and of
+        the helpers in its module."""
         import ast
 
-        marker = "node is not installed"
-        found = set()
+        marker = "node_harness.require_node("
         for path in sorted((ROOT / "tests").glob("test_*.py")):
             source = path.read_text(encoding="utf-8")
             if marker not in source:
                 continue
             tree = ast.parse(source)
-            helpers = {node.name for node in tree.body
+            helpers = [node for node in tree.body
                        if isinstance(node, ast.FunctionDef)
-                       and marker in ast.get_source_segment(source, node)}
+                       and marker in ast.get_source_segment(source, node)]
+            names = {helper.name for helper in helpers}
             for node in tree.body:
-                if not isinstance(node, ast.ClassDef) or node.name == type(self).__name__:
+                if (not isinstance(node, ast.ClassDef)
+                        or node.name == "JavaScriptIsActuallyRunTests"):
                     continue
                 segment = ast.get_source_segment(source, node)
-                if marker in segment or any(f"{name}(" in segment for name in helpers):
-                    found.add(f"tests.{path.stem}.{node.name}")
+                if marker in segment or any(f"{name}(" in segment for name in names):
+                    yield f"tests.{path.stem}.{node.name}", [node, *helpers]
+
+    def test_every_node_driven_class_is_listed(self):
+        """Every class that runs Node is in `NODE_DRIVEN`, and everything in it
+        still does: a class that calls the helper directly, or calls a
+        module-level helper that does."""
+        found = {name for name, _ in self._node_driven_sources()}
         self.assertEqual(sorted(self.NODE_DRIVEN), sorted(found))
 
     def test_the_skip_is_the_only_reason_they_would_not_run(self):
-        """If Node is here, none of them may skip — a skip then means the
-        harness broke rather than that the environment lacks a runtime."""
-        if shutil.which("node") is None:
-            self.skipTest("node is not installed")
-        suite = unittest.defaultTestLoader.loadTestsFromNames(sorted(self.NODE_DRIVEN))
-        result = unittest.TestResult()
-        suite.run(result)
-        self.assertEqual([], [str(case) for case, _ in result.skipped])
-        self.assertEqual([], [str(case) for case, _ in result.errors + result.failures])
+        """No Node-driven class can skip except through `require_node`, which
+        skips only when Node is absent. Proven from the source rather than by
+        running all of them a second time, which cost 52 s of every suite run:
+        they run in their own modules anyway, and a skip there is reported."""
+        import ast
+
+        offenders = []
+        for name, nodes in self._node_driven_sources():
+            for tree in nodes:
+                for node in ast.walk(tree):
+                    called = None
+                    if isinstance(node, ast.Call):
+                        called = node.func
+                    elif isinstance(node, ast.Raise) and node.exc is not None:
+                        called = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
+                    if called is None:
+                        continue
+                    label = (called.attr if isinstance(called, ast.Attribute)
+                             else getattr(called, "id", None))
+                    if label in self.SKIP_CALLS:
+                        offenders.append(f"{name}:{node.lineno} {label}")
+                for decorated in ast.walk(tree):
+                    for decorator in getattr(decorated, "decorator_list", []):
+                        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                        label = (target.attr if isinstance(target, ast.Attribute)
+                                 else getattr(target, "id", None))
+                        if label in self.SKIP_CALLS:
+                            offenders.append(f"{name}:{decorator.lineno} @{label}")
+        self.assertEqual([], offenders)
+
+    def test_with_node_present_the_helper_never_skips(self):
+        """`require_node` skips only for want of Node. With Node here it
+        returns it, and a missing jsdom fails the test rather than skipping."""
+        node_harness.require_node(self)  # the one legitimate skip
+
+        class Probe(unittest.TestCase):
+            def runTest(self):
+                pass
+
+        # A SkipTest escaping from the probe would skip *this* test, which is
+        # the silence being guarded against; it is turned into a failure.
+        try:
+            self.assertTrue(node_harness.require_node(Probe(), jsdom=True))
+            with tempfile.TemporaryDirectory() as empty, \
+                    patch.object(node_harness, "ROOT", Path(empty)):
+                with self.assertRaises(AssertionError):
+                    node_harness.require_node(Probe(), jsdom=True)
+        except unittest.SkipTest as skipped:
+            self.fail(f"require_node skipped with Node installed: {skipped}")
 
 
 class OperatorAndMemberLanguageTests(unittest.TestCase):
@@ -448,8 +502,9 @@ class OperatorAndMemberLanguageTests(unittest.TestCase):
         import dashboard_api
         self.database, self.api, self.cache = database, dashboard_api, settings_cache
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "language.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
         settings_cache.invalidate()
@@ -474,7 +529,7 @@ class OperatorAndMemberLanguageTests(unittest.TestCase):
 
     def tearDown(self):
         self.api.ADMIN_ID = self.original_admin_id
-        self.database.DB_PATH = self.original_path
+        self.database.DATA_DIR = self.original_path
         self.cache.invalidate()
         self.temp_dir.cleanup()
 

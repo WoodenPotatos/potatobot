@@ -1,8 +1,9 @@
+import sys
 import ast
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
-import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,10 @@ from core.settings_registry import (
     SettingValueType,
 )
 from core.settings_registry import DataCategory, DataScopeType
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 
 class DeploymentSettingsTests(unittest.TestCase):
@@ -111,8 +116,9 @@ class InstanceSettingAuthorityTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "authority.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Guild")
         from core import settings_cache
@@ -124,7 +130,7 @@ class InstanceSettingAuthorityTests(unittest.IsolatedAsyncioTestCase):
         self.environment.stop()
         from core import settings_cache
         settings_cache.invalidate()
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     async def test_a_staff_member_cannot_write_an_instance_setting(self):
@@ -186,13 +192,14 @@ class FailClosedWithoutGuildTests(unittest.TestCase):
 class FeaturePersistenceTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "features.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_missing_rows_use_registry_defaults(self):
@@ -273,7 +280,7 @@ class FeaturePersistenceTests(unittest.TestCase):
                 INSERT INTO scoped_accounts
                     (scope_type, scope_id, user_id, balance, xp, level,
                      created_at, updated_at)
-                VALUES ('guild', 123, 9, 750, 10, 2, ?, ?)
+                VALUES ('guild', 123, 9, 750, 10, 2, %s, %s)
                 """,
                 (now, now),
             )
@@ -306,15 +313,19 @@ class FeaturePersistenceTests(unittest.TestCase):
             database.set_user_sharing_preference(9, 123, "moderation", True)
 
     def test_legacy_adoption_seeds_guild_and_instance_once(self):
+        # Two distinct instants, so a copied-through value cannot pass as the
+        # other one; they read back as aware datetimes, equal by instant.
+        DAILY = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        ACTIVE = datetime(2026, 1, 6, 7, 8, 9, tzinfo=timezone.utc)
         with database.get_connection() as conn:
             conn.execute(
                 "INSERT INTO users "
                 "(user_id, balance, xp, level, last_daily, last_active) "
-                "VALUES (9, 777, 250, 6, 'daily-marker', 'activity-marker')"
+                "VALUES (9, 777, 250, 6, %s, %s)", (DAILY.isoformat(), ACTIVE.isoformat()),
             )
             conn.execute(
                 "INSERT INTO warnings (user_id, mod_id, reason, date) "
-                "VALUES (9, 42, 'test', 'warning-date')"
+                "VALUES (9, 42, 'test', '2026-01-03T00:00:00+00:00')"
             )
 
         first = database.adopt_legacy_database(123)
@@ -344,12 +355,12 @@ class FeaturePersistenceTests(unittest.TestCase):
         self.assertEqual(
             states,
             [
-                ("guild", 123, 777, 250, 6, "daily-marker", "activity-marker"),
-                ("instance", 0, 777, 250, 6, "daily-marker", "activity-marker"),
+                ("guild", 123, 777, 250, 6, DAILY, ACTIVE),
+                ("instance", 0, 777, 250, 6, DAILY, ACTIVE),
             ],
         )
         self.assertEqual(
-            legacy, (777, 250, 6, "daily-marker", "activity-marker")
+            legacy, (777, 250, 6, DAILY, ACTIVE)
         )
         self.assertEqual(warning_guild, 123)
         self.assertEqual(event_count, 1)
@@ -915,11 +926,7 @@ class FeatureCascadePromptTests(unittest.TestCase):
     """
 
     def test_each_cascaded_feature_names_what_pulls_it(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         script = ROOT / "tests" / "js" / "feature_cascade_prompt.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)

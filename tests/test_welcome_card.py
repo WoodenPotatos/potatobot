@@ -4,6 +4,7 @@ The bot's half (attaching the card to an announcement) is in
 `tests/test_announcements.py`, beside the rest of that cog's tests.
 """
 
+import sys
 import base64
 import io
 import os
@@ -17,6 +18,9 @@ from PIL import Image
 from core import database
 from core import settings_cache
 from core import welcome_card
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
 
 GUILD_ID = 1420070400000000051
 
@@ -89,11 +93,12 @@ class UploadTests(unittest.TestCase):
 class StorageTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_a_background_lives_beside_the_database_and_is_not_world_readable(self):
@@ -127,8 +132,9 @@ class CardRouteTests(unittest.TestCase):
         import dashboard_api
         self.api = dashboard_api
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "dashboard.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD_ID, "Test Guild")
         settings_cache.invalidate()
@@ -150,7 +156,7 @@ class CardRouteTests(unittest.TestCase):
 
     def tearDown(self):
         self.api.ADMIN_ID = self.original_admin_id
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         settings_cache.invalidate()
         self.temp_dir.cleanup()
 

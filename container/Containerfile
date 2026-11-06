@@ -2,12 +2,13 @@
 #
 # One image serves both roles. The bot is the default; the dashboard is the same
 # image started with a different command, which is what lets the two run as
-# separate supervised services against one shared database volume.
+# separate supervised services against one PostgreSQL database (2.21), which
+# runs in its own container (deploy/potatobot-db.container, compose's `db`).
 #
-# Build (from the repository root):  podman build -t potatobot:2.19.29a -f container/Containerfile .
-# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.19.29a
+# Build (from the repository root):  podman build -t potatobot:2.21.37a -f container/Containerfile .
+# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.21.37a
 # Panel:  podman run --env-file .env -v potatobot-data:/data -p 127.0.0.1:5000:5000 \
-#             potatobot:2.19.29a python dashboard_api.py
+#             potatobot:2.21.37a python dashboard_api.py
 
 # Pinned by digest, not tag: `3.13-slim` is a moving name, and an image that
 # changes under the same tag is a supply-chain change nobody reviewed.
@@ -15,13 +16,16 @@
 # 2026-09-01. Bump the digest deliberately, with the date.
 FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS base
 
-# ffmpeg is required for music playback; sqlite3 is the operator's own tool
-# for an ad-hoc `podman exec` backup or inspection the way
-# docs/deployment_host.md already describes for the bare-metal host --
-# nothing in the running code shells out to it, only Python's built-in
-# module, used below by the healthcheck. The rest keeps the layer small.
+# ffmpeg is required for music playback. The PostgreSQL 18 client is what the
+# bot's pre-migration backup runs (`pg_dump` must be at least the server's
+# version, and Debian trixie ships 17), so it comes from PostgreSQL's own apt
+# repository, set up by Debian's `postgresql-common`, whose bundled signing key
+# is the trust anchor -- no key is fetched over the network here.
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ffmpeg ca-certificates sqlite3 \
+    && apt-get install --yes --no-install-recommends ffmpeg ca-certificates \
+        postgresql-common \
+    && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
+    && apt-get install --yes --no-install-recommends postgresql-client-18 \
     && rm -rf /var/lib/apt/lists/*
 
 # Never run as root, and give the account a real home so caches land somewhere
@@ -36,14 +40,15 @@ RUN python -m pip install --no-cache-dir --require-hashes --requirement requirem
 
 # Root-owned and read-only to the runtime user: code the process can rewrite
 # is code a compromise can persist in. Everything the bot writes at runtime
-# is pointed at the volume below instead -- the database, the logs, the
-# Everydle deck and (beside the database) the dashboard's session secret.
+# is pointed at the volume below instead -- the logs, the Everydle deck, the
+# pre-migration dumps, and the dashboard's session secret and welcome-card
+# backgrounds in the data directory. The database itself is PostgreSQL's.
 COPY . .
 
-# The database lives on a volume, never in the image, so an upgrade cannot
-# replace it and a rollback cannot lose it. The other two paths default into
-# `/app`, which this image does not let the runtime user write.
-ENV POTATOBOT_DB_PATH=/data/economy.db \
+# Mutable state lives on a volume, never in the image, so an upgrade cannot
+# replace it and a rollback cannot lose it; these paths would otherwise
+# default into `/app`, which this image does not let the runtime user write.
+ENV POTATOBOT_DATA_DIR=/data \
     POTATOBOT_LOG_DIR=/data/logs \
     POTATOBOT_EVERYDLE_STATE_PATH=/data/everydle_state.json \
     PYTHONUNBUFFERED=1 \
@@ -53,10 +58,11 @@ VOLUME ["/data"]
 
 USER potatobot
 
-# Fails the container if the schema cannot be opened, which is the failure that
-# matters most on startup.
-HEALTHCHECK --interval=60s --timeout=10s --start-period=20s --retries=3 \
-    CMD python -c "import os, sqlite3; sqlite3.connect('file:' + os.environ['POTATOBOT_DB_PATH'] + '?mode=ro', uri=True).execute('PRAGMA user_version')"
+# Fails the container if PostgreSQL cannot be reached with the bot's own
+# credentials (libpq's PG* environment), which is the failure that matters
+# most on startup. The start period covers `wait_for_database`'s minute.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=75s --retries=3 \
+    CMD python -c "import psycopg; psycopg.connect('', connect_timeout=5).execute('SELECT 1')"
 
 # Files the process creates are owner and group only. The Quadlet unit passes
 # `--umask=0027`, but compose has no portable key for it, so a compose-run bot

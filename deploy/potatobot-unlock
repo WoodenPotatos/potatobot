@@ -1,0 +1,64 @@
+#!/bin/sh
+# Open PotatoBot's encrypted data volume, mount it, and start the bot.
+#
+# Run by the maintainer after every boot, over SSH:
+#   sudo /usr/local/sbin/potatobot-unlock
+# (the full path: `sudo`'s secure_path on AlmaLinux leaves out /usr/local/sbin)
+# cryptsetup asks for the passphrase on this terminal and nothing stores it,
+# which is the point: the disk of a host that is switched off holds no
+# readable member data. `--mount-only` opens and mounts without starting
+# anything (the data move, the reboot drill).
+#
+# Install root:root 0755:
+#   sudo install -m 0755 deploy/potatobot-unlock /usr/local/sbin/potatobot-unlock
+#
+# The guard is the bare mountpoint, not systemd. A rootless user manager knows
+# only the mounts that exist, so `RequiresMountsFor=` in the bot's user unit is
+# satisfied by `/` while the volume is closed (measured 2026-11-01). The bare
+# directory is root 0000 and immutable (`chattr +i`): with the volume closed,
+# `bot/` does not exist, podman refuses the bind mount, and nothing can be
+# written to the plain disk underneath. Anything found there is refused.
+#
+# The paths can be overridden only for the tests: `sudo` resets the
+# environment, so an installed copy always uses the defaults.
+set -eu
+
+VAULT=${POTATOBOT_VAULT_FILE:-/home/potatobot-vault/vault.luks}
+NAME=${POTATOBOT_VAULT_NAME:-potatobot-vault}
+MOUNTPOINT=${POTATOBOT_VAULT_MOUNTPOINT:-/var/lib/potatobot}
+SERVICE_USER=potatobot
+
+start=1
+case "${1:-}" in
+  "") ;;
+  --mount-only) start=0 ;;
+  *) echo "usage: potatobot-unlock [--mount-only]" >&2; exit 2 ;;
+esac
+
+if [ "$(id -u)" != 0 ]; then
+  echo "potatobot-unlock: run it with sudo" >&2
+  exit 2
+fi
+
+if mountpoint -q "$MOUNTPOINT"; then
+  echo "potatobot-unlock: $MOUNTPOINT is already mounted"
+else
+  if [ -n "$(ls -A "$MOUNTPOINT")" ]; then
+    echo "potatobot-unlock: refusing, $MOUNTPOINT is not empty underneath:" \
+         "something wrote to the plain disk" >&2
+    exit 1
+  fi
+  [ -e "/dev/mapper/$NAME" ] || cryptsetup open --type luks2 "$VAULT" "$NAME"
+  mount -o nodev,nosuid,noexec "/dev/mapper/$NAME" "$MOUNTPOINT"
+  echo "potatobot-unlock: mounted $MOUNTPOINT"
+fi
+
+[ "$start" = 1 ] || exit 0
+# A start at boot found no bot/ and gave up after StartLimitBurst; clear that
+# first, or systemd refuses this start too. One unit per call: an unknown unit
+# (the database's, before 2.21) fails the whole call.
+for unit in potatobot-db potatobot; do
+  systemctl --user -M "$SERVICE_USER@" reset-failed "$unit" 2>/dev/null || true
+done
+systemctl --user -M "$SERVICE_USER@" start potatobot
+systemctl --user -M "$SERVICE_USER@" is-active potatobot

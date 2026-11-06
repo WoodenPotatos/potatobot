@@ -7,12 +7,15 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now potatobot-offsite-backup.timer
 #
-# This runs `scripts/offsite_backup.py`, which copies exactly one file — a
-# consistent snapshot of the database, taken through SQLite's own online
-# backup API — never the project tree. A prior attempt (`backup.sh`, deleted
-# 2026-05-20) copied the whole tree and would have swept `.env` into the
-# destination; this unit is deliberately given no access to `.env` at all,
-# since the backup script needs no Discord/OAuth secret to do its job.
+# This runs `scripts/offsite_backup.py`, which copies exactly one file -- a
+# `pg_dump` of the database, checked with `pg_restore --list` -- never the
+# project tree. A prior attempt (`backup.sh`, deleted 2026-05-20) copied the
+# whole tree and would have swept `.env` into the destination; this unit is
+# deliberately given no access to `.env` at all, since the backup needs no
+# Discord or OAuth secret. The database password comes from the service
+# user's `~/.pgpass` (0600), which libpq reads by itself; the host, database
+# and role are the `PG*` settings below. Needs a `pg_dump`/`pg_restore` at
+# least as new as the server.
 #
 # `ProtectHome=read-only` rather than `true`: rclone reads its remote
 # configuration from the service user's `~/.config/rclone/rclone.conf` by
@@ -23,17 +26,8 @@
 # via `systemctl show potatobot.service -p User`), matching the other unit
 # in this directory (see `potatobot-everydle-drift.service`'s own note).
 #
-# `ReadWritePaths=/opt/potatobot`, even though this script never writes to
-# `economy.db` itself: any connection to a WAL-mode database, including one
-# opened `mode=ro`, still needs OS-level write access to the `-shm`/`-wal`
-# sidecar files beside it, purely to register itself as a reader -- a real
-# SQLite/WAL requirement, confirmed 2026-09-25 when `ProtectSystem=strict`
-# alone made even a read-only backup fail with "unable to open database
-# file". `mode=ro` in `scripts/offsite_backup.py` still fully prevents this
-# process from writing actual data -- SQLite enforces that at the SQL level
-# regardless of what the OS permits -- so this widens *filesystem* access to
-# the one directory, not what the script can actually do to it. Same pattern
-# `potatobot-dashboard.service` already uses, for the same underlying reason.
+# `ReadWritePaths=/opt/potatobot`: the prune deletes the pre-migration dumps
+# in `backups/`, and nothing else. The dump itself goes to a private temporary directory.
 #
 # `ReadWritePaths=/home/woody/.config/rclone`: rclone periodically tries to
 # rewrite its own config file (observed 2026-09-27, most likely persisting a
@@ -72,9 +66,12 @@ Type=oneshot
 User=woody
 Group=woody
 WorkingDirectory=/opt/potatobot
+Environment=PGHOST=localhost
+Environment=PGDATABASE=potatobot
+Environment=PGUSER=potatobot
 # `--prune-local-backups-days 90`: the retention docs/legal/PRIVACY.md §7
-# promises for the pre-migration copies beside the database.
-ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py /opt/potatobot/economy.db gdrivecrypt: --prune-local-backups-days 90
+# promises for the pre-migration copies, the bot's dumps.
+ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py gdrivecrypt: --backups-dir /opt/potatobot/backups --prune-local-backups-days 90
 SyslogIdentifier=potatobot-offsite-backup
 
 NoNewPrivileges=true

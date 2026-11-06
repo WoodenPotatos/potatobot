@@ -23,10 +23,11 @@ import time
 from email.message import EmailMessage
 
 from core.bounded import BoundedTimestampMap
+from core.deployment import _environment_bool
 
 # Two levels up: this module lives in `core/` and the log directory belongs
 # beside the entry points at the repository root -- unless a deployment
-# overrides it, the way `POTATOBOT_DB_PATH` already lets the database move.
+# overrides it, the way `POTATOBOT_DATA_DIR` moves the installation's files.
 # A container's root filesystem should hold nothing mutable, so the override
 # points this at the same `/data` volume the database already lives on.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -156,9 +157,17 @@ def _shared_handlers():
         backupCount=10,
     )
     file_handler.setFormatter(LOG_FORMAT)
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(LOG_FORMAT)
-    handlers = [file_handler, console_handler]
+    handlers = [file_handler]
+    # The console is the journal under systemd, and the journal lives wherever
+    # the host keeps it: on this deployment the plain disk, outside the
+    # encrypted volume that holds `bot.log`, and log lines name members
+    # (PRIVACY §9). `POTATOBOT_LOG_CONSOLE=false` keeps them in the file alone.
+    # stderr is untouched, so a crash traceback, a `faulthandler` dump and the
+    # watchdog's exit line still reach the journal; none of them names a member.
+    if _environment_bool("POTATOBOT_LOG_CONSOLE", True):
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(LOG_FORMAT)
+        handlers.append(console_handler)
     alert_handler = _alert_email_handler()
     if alert_handler is not None:
         handlers.append(alert_handler)

@@ -6,9 +6,9 @@ feature and settings payloads come from the real API on a temporary database,
 so the stub the harness serves cannot drift from what the server sends.
 """
 
+import sys
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import time
@@ -16,6 +16,10 @@ import unittest
 from pathlib import Path
 
 from core import settings_cache
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,18 +32,15 @@ CUSTOM_ROLE = "1420070400000000014"
 
 class GamesPageHarnessTests(unittest.TestCase):
     def test_the_games_editor_round_trips_and_draws_each_row_correctly(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         from core import database
         import dashboard_api
         from core.supported_games import SUPPORTED_GAME_KEYS
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            original_path, original_admin = database.DB_PATH, dashboard_api.ADMIN_ID
-            database.DB_PATH = os.path.join(temp_dir, "fixture.db")
+            original_path, original_admin = database.DATA_DIR, dashboard_api.ADMIN_ID
+            database.DATA_DIR = temp_dir
+            pg_harness.fresh_database()
             dashboard_api.ADMIN_ID = "42"
             settings_cache.invalidate()
             try:
@@ -86,7 +87,7 @@ class GamesPageHarnessTests(unittest.TestCase):
                     },
                 }
             finally:
-                database.DB_PATH = original_path
+                database.DATA_DIR = original_path
                 dashboard_api.ADMIN_ID = original_admin
                 settings_cache.invalidate()
             fixture_path = os.path.join(temp_dir, "fixture.json")

@@ -11,24 +11,22 @@ cogs, and nothing drove the page.
 step and no runtime dependencies; nothing in `package.json` ships.
 """
 
-import shutil
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import node_harness  # noqa: E402
 SCRIPT = ROOT / "tests" / "js" / "boot_dashboard.js"
 STALE_SCRIPT = ROOT / "tests" / "js" / "stale_client.js"
 
 
 class DashboardBootTests(unittest.TestCase):
     def test_the_shell_starts_and_every_page_opens(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         result = subprocess.run(
             [node, str(SCRIPT), str(ROOT)], capture_output=True, text=True,
             cwd=str(ROOT), timeout=120,
@@ -42,11 +40,7 @@ class DashboardBootTests(unittest.TestCase):
 
     def test_the_sidebar_tree_opens_remembers_and_hides_with_its_parent(self):
         """Sub-pages under a branch: see `tests/js/nav_branches.js`."""
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         result = subprocess.run(
             [node, str(ROOT / "tests" / "js" / "nav_branches.js"), str(ROOT)],
             capture_output=True, text=True, cwd=str(ROOT), timeout=120,
@@ -72,11 +66,7 @@ class StaleClientNoticeTests(unittest.TestCase):
     ]
 
     def test_the_notice_matches_what_the_tokens_imply(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         for server, loaded in self.CASES:
             with self.subTest(server=server, loaded=loaded):
                 result = subprocess.run(
@@ -97,11 +87,7 @@ class ApiErrorRoutingTests(unittest.TestCase):
     """
 
     def test_only_a_401_shows_the_login_card(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         script = ROOT / "tests" / "js" / "api_error_routing.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)

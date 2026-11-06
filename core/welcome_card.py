@@ -58,11 +58,12 @@ class CardImageError(ValueError):
 # --- storage ----------------------------------------------------------------
 
 def background_path(guild_id: int, event: str) -> Path:
-    """Where a guild's background for one card lives. Read at call time from
-    `database.DB_PATH`, so a test or a copy points it elsewhere by construction."""
+    """Where a guild's background for one card lives: `cards/` in the data
+    directory, read at call time from `database.data_dir()`, so a test or a
+    copy points it elsewhere by construction."""
     if event not in CARD_BACKGROUNDS:
         raise ValueError("no card for this event")
-    return Path(database.DB_PATH).resolve().parent / "cards" / f"{int(guild_id)}-{event}.png"
+    return Path(database.data_dir()) / "cards" / f"{int(guild_id)}-{event}.png"
 
 
 def load_background(guild_id: int, event: str) -> bytes | None:

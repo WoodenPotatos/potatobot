@@ -6,6 +6,193 @@ stable. A build keeps its number across channels, so `2.18.3a` publishes as
 2026-10-22 by adding the old beta serial to z (`2.18.0-beta.1` is `2.18.1b`);
 the public repository's git tags keep their original names.
 
+## 2.21.37
+
+- **SQLite support is removed.** Installations still on SQLite (2.19.x and
+  earlier) stay on the last SQLite stable, 2.19.29, which the public
+  repository keeps on the `stable-2.19` branch; there is no upgrade path from
+  it.
+  The one-time copy tool, `POTATOBOT_DB_PATH` and the offsite backup's
+  `--legacy-sqlite` are gone. Unset `POTATOBOT_DATA_DIR` now means beside the
+  code, where the session secret and card backgrounds already sat by default;
+  an installation that set only `POTATOBOT_DB_PATH` sets `POTATOBOT_DATA_DIR`
+  to that file's directory instead.
+
+## 2.21.34b
+
+- **Privacy Policy 1.1: your data is encrypted at rest.** The database, its
+  backups on the server and the bot's log file now sit on an encrypted disk
+  volume, memory the server pages out stays in compressed RAM, and no log line
+  naming you goes to the system journal any more; the older ones expire within
+  about two months. Nothing the bot collects or shares changed. (English and
+  Hungarian, sections 7, 9 and 14.)
+- **Keep member-naming log lines out of the system journal (operators).** A
+  new `POTATOBOT_LOG_CONSOLE` setting (default `true`, see `.env.example`):
+  set it to `false` and the bot writes its log lines only to `bot.log` in its
+  data directory, so a journal on an unencrypted disk no longer holds them.
+  Crash traces and stack dumps still reach the journal. The reference Quadlet
+  unit sets it, `deploy/potatobot-db.container` makes PostgreSQL log errors
+  without their values, and `deploy/potatobot-log` is a small reader for the
+  log file that a sudoers rule can grant without wider access.
+- **The nightly offsite backup can stage its dump on the encrypted volume.**
+  `scripts/offsite_backup.py --workdir DIR` writes the plaintext dump and its
+  verification copy there instead of the system temporary directory, and
+  refuses to run if the directory is missing. The reference unit passes it and
+  no longer passes `--legacy-sqlite` or sets `POTATOBOT_DB_PATH`.
+- **Faster test suite for contributors.** Each test resets its database with
+  ordered deletes instead of `TRUNCATE`, and `scripts/run_tests_parallel.py`
+  runs the suite across several PostgreSQL databases for quick iteration (the
+  serial run stays the gate).
+
+## 2.21.16b
+
+- **The PostgreSQL move begins (2.20).** The bot still runs on SQLite and
+  behaves the same; the 2.20 line first makes the code independent of the
+  database engine, one step at a time, and then switches engines. First step:
+  every write connection now opens its transaction, and takes the database's
+  write lock, as soon as it is created, in one place instead of fifty-four.
+  Writes that used to take the lock only at their first statement now take it
+  up front too, which matters only when the dashboard runs as its own process.
+- **Database errors are caught under engine-neutral names.** Every handler
+  that caught SQLite's own exception types now catches `EngineError` or
+  `IntegrityError` from the database module, so the engine switch repoints two
+  names instead of fifty-four handlers. Nothing a member or operator sees
+  changes.
+- **Conflicting inserts use the portable form.** SQLite's `INSERT OR IGNORE`
+  and `INSERT OR REPLACE` became `ON CONFLICT DO NOTHING` and
+  `ON CONFLICT … DO UPDATE`, which PostgreSQL also understands. Re-opening a
+  non-support ticket on a channel that already has a row still replaces it
+  completely, including clearing its claimer.
+- **New rows report their id with `RETURNING`.** The eight inserts that hand
+  back the id of what they created (realms, warnings, work responses and
+  adopted tiers, fulfillment requests, manual entitlements, dashboard
+  documents, queued Discord actions) read it from `RETURNING` instead of
+  SQLite's `lastrowid`; the ids are the same.
+- **`/mydata` and erasure find a member inside stored lists in Python.** Party
+  lists, removed-warning records and queued Discord actions used SQLite's own
+  JSON functions to find the member's id. They now narrow the rows in SQL and
+  decide in Python, so the same rows are exported and scrubbed on either
+  engine. The Privacy Policy's statements are unchanged; its review record was
+  re-stamped after re-reading the sections it names.
+- **Two aggregate queries no longer depend on SQLite.** Creating a gacha
+  banner counts a duplicate key in a form PostgreSQL accepts, and the gacha
+  luck leaderboard's average is always a plain number. Nothing visible
+  changes.
+- **Sorted lists say how to break a tie.** Leaderboards, the No. 1 role,
+  timed grants, party clean-up, role-menu buttons and the guild list now
+  name a final sort key and where an empty value goes, reproducing the order
+  SQLite already gave. On PostgreSQL a member with no recorded XP would
+  otherwise have topped the leaderboard.
+- **A member with no recorded XP, balance or streak no longer empties a
+  leaderboard.** One such row made the board's merge fail, and the board
+  showed nobody. Such a member is now simply not ranked. No current data
+  has one; it was found while auditing sort order.
+- **Stored times are handled as moments, not as text.** Code that compared
+  or forwarded a stored timestamp as a string now reads it as a moment and
+  writes it out as ISO text, so it works whether the database returns text
+  (SQLite) or a date-time value (PostgreSQL). The dashboard's responses,
+  `/mydata` and the staff audit feed carry the same text as before.
+- **Table and column names built into a query pass one check.** Every name
+  the code inserts into SQL (cooldown columns, erasure and export tables,
+  voice settings, reward columns) goes through a single function that only
+  accepts a plain lowercase identifier. Each was already safe; now nothing
+  else can get through.
+- **`POTATOBOT_DATA_DIR` names where the installation keeps its own files.**
+  The dashboard's session secret and the welcome-card backgrounds used to be
+  placed beside the database file, which PostgreSQL will not have. Unset, they
+  stay exactly where they are; the container image sets it to `/data`, where
+  they already were. Nobody is logged out and no card moves.
+- **Every database column has its PostgreSQL type written down.** A new map
+  says what each of the 352 columns becomes on PostgreSQL (a moment in time,
+  JSON text, an on/off flag, a number or text), checked against the real
+  schema by the test suite. This completes the preparation on SQLite; the
+  engine switch itself comes next.
+- **The engine switch begins (2.21, on its own branch until the cutover).**
+  The PostgreSQL driver and its connection pool join the dependencies; the
+  bot does not use them yet.
+- **The PostgreSQL schema exists.** A baseline equal to today's schema,
+  generated from it column by column, is checked on a real PostgreSQL server
+  by the test suite, which CI now provides. The bot still runs on SQLite.
+- **The bot runs on PostgreSQL** (on this branch, until the cutover). The
+  database layer connects through a connection pool, every write takes one
+  installation-wide lock exactly as SQLite's writer did, and the whole test
+  suite runs against a real PostgreSQL server. The bot waits up to a minute
+  for its database at startup, and a schema change backs the database up
+  first. Nothing a member sees changes.
+- **The maintenance tools work with PostgreSQL.** The database fingerprint
+  now also notices rows rewritten in place; a migration rehearsal restores a
+  dump into a scratch database and migrates that; the nightly offsite backup
+  sends a checked `pg_dump` and keeps pruning old copies after 90 days; the
+  local development dashboard and the load test each work on a database of
+  their own that can never be the real one.
+- **PostgreSQL gets its own container, for systemd and for compose.** The
+  database runs beside the bot on a private network with no port open to the
+  host, under its own role that cannot create databases or roles, with the
+  superuser's password kept out of the bot's environment. The bot starts only
+  once the database answers, the image carries the tools its backups need,
+  and the nightly backup dumps the database from inside its container.
+- **The documentation describes PostgreSQL.** The installation guide creates
+  the database and the bot's own role, covers the containers, backups and
+  restore tests, and says how upgrading from 2.20 will work. The Privacy
+  Policy's hosting section names the PostgreSQL server in its own container,
+  in both languages; what is collected, shared and kept is unchanged.
+- **The one-time copy from SQLite to PostgreSQL.** A new script copies a 2.20
+  database into an empty PostgreSQL database. It refuses anything it cannot
+  account for before writing a byte, reads old timestamps in the host's own
+  time zone, and proves every row and every balance identical before it
+  commits; a failed proof commits nothing, and the SQLite file is only read.
+- **The copy leaves four retired leftovers behind, and checks they hold
+  nothing.** An installation that started before the per-guild price and
+  reward tables still carries an old `economy_settings` table and three
+  columns no code has read since (`faction_group`, `last_dbdle`,
+  `last_loldle`). The copy skips them, but refuses if a column holds a value
+  or an old price or reward differs from the one the bot uses, so nothing is
+  dropped that anything still meant.
+- **The local development dashboard opens the entitlements page.** Its
+  stand-in guild had no stickers, so a database holding a sticker grant made
+  that page fail; the stand-in now has empty emoji, sticker and sound lists.
+- **Self-hosting: the container's data sits in `bot/` under
+  `/var/lib/potatobot`.** The Quadlet unit and the podman offsite-backup unit
+  read `/var/lib/potatobot/bot`, so `/var/lib/potatobot` can be an encrypted
+  volume's mount, with PostgreSQL's data beside `bot/`. If you install the new
+  unit, move your data into `bot/` first.
+- **The encrypted data volume, and an honest guard for it.** A new
+  `deploy/potatobot-unlock` opens the volume mounted at `/var/lib/potatobot`
+  after a boot, with a typed passphrase, and starts the bot. The units no
+  longer list `RequiresMountsFor=`, which looked like it kept the bot and its
+  database off the plain disk while the volume was closed but did not: a
+  rootless user manager only knows mounts that exist. The guard is that `bot/`
+  and `pgdata/` exist only on the volume, so neither container can start
+  without it.
+- **`potatobot-unlock` is called by its full path.** `sudo` on AlmaLinux does
+  not search `/usr/local/sbin`, so the script's usage line and the runbook
+  now say `sudo /usr/local/sbin/potatobot-unlock`.
+- **PostgreSQL's data directory has to be `0755`.** The official image starts
+  as root and then switches to its own `postgres` user, which must be able to
+  pass through the mounted directory; at `0750` the database never started.
+  The unit and the installation guide say so.
+- **The runbook records the reboot drill and the PostgreSQL preparation.** The
+  encrypted volume refused every start until it was unlocked, and PostgreSQL
+  ran empty beside the bot, ready for the move.
+- **The PostgreSQL work joins the main line (2.21).** The engine switch, kept
+  on its own branch until now, is merged for the cutover. An installation on
+  SQLite (2.19.29, or any 2.20 build) upgrades with the one-time copy, never by
+  starting 2.21 on its SQLite file; the steps are in the installation guide.
+- **The runbook carries the cutover's exact commands.** A dry run of the copy
+  against the live, empty database while the bot still runs, then the stop,
+  the copy, the start, the smoke list and a rollback that loses nothing
+  before reopening.
+- **The reboot drill checks the dashboard's tunnel too.** The first drill
+  proved the bot waited for the unlock but never looked at the tunnel, which
+  stayed down until the next check; the runbook's step C now includes it.
+- **A clean stop no longer marks the bot's unit `failed`.** The bot ends on
+  the stop's SIGTERM, which exits 143; the Quadlet unit now counts that as
+  success. A crash, the watchdog's exit and a forced kill still restart it.
+- **The operator's notes describe a database outage.** What a lost PostgreSQL
+  looks like in the journal, measured: each connection fails once, then every
+  call waits 30 seconds, and the bot recovers on its own about 25 seconds
+  after the database is back, so it needs no restart.
+
 ## 2.19.29
 
 - **A stable release channel exists.** The public repository now has a

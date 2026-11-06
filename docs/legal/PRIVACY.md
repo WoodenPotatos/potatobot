@@ -1,8 +1,8 @@
 # PotatoBot Privacy Policy
 
-**Effective date:** 2026-10-31
-**Last updated:** 2026-10-31
-**Version:** 1.0
+**Effective date:** 2026-11-06
+**Last updated:** 2026-11-06
+**Version:** 1.1
 
 This document is written in English and Hungarian. The English text is the
 binding one; the Hungarian text (`PRIVACY.hu.md`) is a translation provided
@@ -206,7 +206,9 @@ service, no advertising network, no AI provider and no update telemetry.
 The bot and dashboard run on hardware we own, in **Hungary**, inside
 a rootless container under a dedicated system account, reachable for
 administration only over a private network with SSH keys. The database is a
-single SQLite file readable by that account alone.
+PostgreSQL server in its own container under that same account, reachable
+only from the bot's container over a private network, and readable by that
+account alone.
 
 ### 6.4 International transfers
 
@@ -245,9 +247,9 @@ transfer Discord makes under its own terms, not one we make.
 | Dashboard access-change markers | 24 hours. |
 | Queued Discord actions (the "outbox") | 30 days after they complete. An erasure replaces your ID in any queued action about you with the anonymous ID. |
 | Staff audit history (dashboard changes, warning removals) | Deleted after the audit window (`audit_retention_days`; 0 means indefinitely; **this installation: 90 days**). While kept, the acting administrator's ID is replaced by an anonymous ID on erasure and a removed warning's reason blanked. **Erasure records are exempt** and kept indefinitely: they name only the anonymous ID and are the proof of what was deleted. |
-| Operational logs (section 9) | The system journal is capped by size at 500 MB on this host, which currently holds about two months; the bot's own log file rotates at 10 × 5 MB (about 55 MB). |
+| Operational logs (section 9) | The bot's log file rotates at 10 × 5 MB (about 55 MB). The system journal is capped by size at 500 MB on this host, about two months; the log lines naming members it held until November 2026 expire under that cap. |
 | Off-site encrypted backups | 30 days, then deleted automatically. |
-| Pre-migration backups on the server | A full copy taken before each database upgrade, kept beside the database as the rollback artefact. An erasure does not reach them. The nightly backup job deletes each one once it is older than the window, after that night's off-site copy has been verified. **This installation: 90 days after the migration they protect.** |
+| Pre-migration backups on the server | A full copy taken before each database upgrade, kept on the server as the rollback artefact. An erasure does not reach them. The nightly backup job deletes each one once it is older than the window, after that night's off-site copy has been verified. **This installation: 90 days after the migration they protect.** |
 | In-memory data (music queue, invite snapshot, cooldown maps, dashboard tokens and rate-limit counters) | Lost on restart; dashboard tokens at most 12 hours. |
 
 Erasing your data does not reach into backups. A backup restored after your
@@ -338,8 +340,11 @@ section 1.1.
 
 ## 9. Logs
 
-The bot and dashboard write operational logs to the system journal and to a
-rotating file. These logs contain:
+The bot and dashboard write operational logs to a rotating file on the
+encrypted volume (section 14). The system journal receives only what the
+process prints when it fails (a crash trace, a stack dump, the reason for an
+automatic restart) and the database server's errors without their values;
+none of these names you. The log file contains:
 
 - the bot's own account name and ID, server IDs, channel IDs, command names,
   timings and error types;
@@ -459,10 +464,13 @@ write to us and we will erase it.
 - Off-site backups are encrypted before leaving the server.
 - Administration happens over a private network with SSH keys only; the
   dashboard is reachable only through HTTPS.
-- **The database file itself is not encrypted at rest.** The host disk is not
-  encrypted; protection relies on file permissions and physical control of the
-  hardware. We state this plainly because Discord's Developer Terms expect
-  encryption at rest and we have not yet achieved it.
+- **Your data is encrypted at rest.** The database, the copies taken before
+  each upgrade, the nightly backup while it is being prepared, and the bot's
+  log file are kept on an encrypted volume (LUKS2), which is unlocked by hand
+  after the server starts. Memory the operating system pages out goes to
+  compressed RAM, never to disk. Since November 2026 no log line naming you is
+  written to the system journal, which is outside that volume; older ones
+  expire under its size limit (section 7).
 - Should we learn of unauthorised access to your data, we will notify the
   supervisory authority within 72 hours where the GDPR requires it, notify
   Discord as its Developer Terms require, and inform affected members through

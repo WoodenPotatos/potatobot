@@ -1,0 +1,84 @@
+# PotatoBot's PostgreSQL as a rootless podman container, through Quadlet (2.21).
+#
+# Install, as the `potatobot` system account, with the network and the bot's
+# unit (docs/podman_runbook.md has the full order):
+#   install -m 0644 deploy/potatobot-db.container deploy/potatobot.network \
+#       ~potatobot/.config/containers/systemd/
+#   install -d -m 0755 ~potatobot/.config/potatobot/postgres-init
+#   install -m 0755 deploy/postgres-init/10-potatobot-role.sh \
+#       ~potatobot/.config/potatobot/postgres-init/
+#   systemctl --user daemon-reload && systemctl --user start potatobot-db
+#
+# Trialled 2026-11-01 under these flags on a private network: the init script
+# created a non-superuser `potatobot` role owning its database, the bot image
+# migrated it to schema 26 with that role alone, and the role was refused
+# CREATE DATABASE, CREATE ROLE and pg_authid.
+
+[Unit]
+Description=PotatoBot PostgreSQL (rootless podman)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=potatobot-db
+# Pinned by digest, as CI's service is, so the server the suite tests against
+# is the server the deployment runs. Bump both together, deliberately.
+Image=docker.io/library/postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
+Network=potatobot.network
+# No PublishPort: nothing outside the network reaches the database.
+
+# The image keeps its data under /var/lib/postgresql/18/docker.
+# A subdirectory of the encrypted volume's mount, never the mount itself: with
+# the volume closed `pgdata/` does not exist, podman refuses to start, and no
+# database is initialised on the plain disk underneath (`deploy/potatobot-unlock`
+# explains why `RequiresMountsFor=` in a user unit would not stop it).
+# The host directory must be 0755: the entrypoint drops from container root to
+# its own `postgres` user, which has to pass through it; at 0750 every start
+# failed with "mkdir: cannot create directory '/var/lib/postgresql'".
+Volume=/var/lib/potatobot/pgdata:/var/lib/postgresql:Z
+# Runs once, on an empty data directory: the bot's own role and database.
+Volume=%h/.config/potatobot/postgres-init:/docker-entrypoint-initdb.d:ro,Z
+
+# The superuser's password and the bot role's, root:potatobot 0640, read only
+# by this container: the bot's own environment file never holds the former.
+EnvironmentFile=/etc/potatobot/potatobot-db.env
+# The built-in C.UTF-8 locale sorts text by code point, exactly as SQLite did
+# and as the suite's server does (BaselineSchemaTests). Quoted whole: systemd
+# splits an unquoted value at its spaces, which silently dropped the locale
+# flags in the first draft (seen in `quadlet -dryrun`, 2026-11-01).
+Environment="POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8"
+
+# The server logs to the journal, which is on the plain disk, so no error
+# line may carry a member's id. `terse` drops the DETAIL line, which for a
+# constraint violation is `Key (user_id)=(…)`; `log_min_error_statement=panic`
+# drops the STATEMENT line, whose text holds any value a query inlined rather
+# than bound. Both measured on this image 2026-11-02. The bot's own bot.log
+# names the operation that failed.
+Exec=postgres -c log_error_verbosity=terse -c log_min_error_statement=panic
+
+# Over TCP on purpose: during initialisation the image runs a temporary server
+# on its Unix socket only, and a socket probe called that healthy (measured
+# 2026-11-01). Ready, for systemd, means healthy, so the bot starts after it.
+HealthCmd=pg_isready -h 127.0.0.1 -U potatobot -d potatobot
+HealthInterval=10s
+HealthStartPeriod=60s
+Notify=healthy
+
+NoNewPrivileges=true
+ReadOnly=true
+# No `--umask=0027` here, unlike the bot: the image's entrypoint creates the
+# data directories as root and then switches to `postgres`, and under that
+# umask it could not enter them (measured 2026-11-01: "Permission denied" on
+# the first start). PostgreSQL needs no umask for privacy: it creates its data
+# directory 0700 and every file 0600 itself.
+Timezone=local
+
+[Service]
+Restart=on-failure
+RestartSec=10s
+# A clean shutdown checkpoints; give it the time rather than SIGKILL.
+TimeoutStopSec=90
+SyslogIdentifier=potatobot-db
+
+[Install]
+WantedBy=default.target

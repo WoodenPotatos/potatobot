@@ -7,10 +7,10 @@ JSON long after the managed-message builders had been brought under a
 declaration. These are the three checks that pattern uses.
 """
 
+import sys
 import json
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import time
@@ -21,6 +21,10 @@ import dashboard_api
 from core import settings_cache
 from core import database
 from core import item_catalog
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,9 +102,7 @@ class TemplateRoundTripTests(unittest.TestCase):
     """
 
     def test_every_template_round_trips(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         script = Path(__file__).parent / "js" / "item_template_roundtrip.js"
         result = subprocess.run([node, str(script), str(SCRIPT)],
                                 capture_output=True, text=True)
@@ -125,11 +127,7 @@ class CustomRewardPoolFreshnessTests(unittest.TestCase):
     """
 
     def test_a_new_item_reaches_the_reward_picker(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         script = ROOT / "tests" / "js" / "gacha_custom_reward_refresh.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)
@@ -155,8 +153,9 @@ class DashboardItemTestCase(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "items.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Guild")
         dashboard_api.app.config.update(TESTING=True)
@@ -170,7 +169,7 @@ class DashboardItemTestCase(unittest.TestCase):
         dashboard_api._permission_cache._entries.clear()
         # And so is the settings cache. A test here writes `shop_hidden_items`,
         # and left behind it answers for the next test — the same discipline
-        # `database.DB_PATH` needs, and the failure only shows in a full run.
+        # `database.DATA_DIR` needs, and the failure only shows in a full run.
         settings_cache.invalidate()
         with self.client.session_transaction() as session:
             session["logged_in"] = True
@@ -185,7 +184,7 @@ class DashboardItemTestCase(unittest.TestCase):
 
     def tearDown(self):
         dashboard_api.ADMIN_ID = self.original_admin_id
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         settings_cache.invalidate()
         self.temp_dir.cleanup()
 
@@ -206,11 +205,7 @@ class TemplateFieldsFollowTheChoiceTests(unittest.TestCase):
     """
 
     def test_every_template_asks_for_its_own_fields(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         script = ROOT / "tests" / "js" / "item_editor_templates.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)
@@ -221,11 +216,7 @@ class TemplateFieldsFollowTheChoiceTests(unittest.TestCase):
         """The other half of the per-section cap: the interface has to be able
         to say which shelf is full before a save is refused, or the API's rule
         arrives as an unexplained rejection."""
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         script = ROOT / "tests" / "js" / "shop_sections.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)
@@ -657,8 +648,9 @@ class CustomRewardLabelTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "labels.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
         database.create_shop_item_definition(1, 42, {
@@ -668,7 +660,7 @@ class CustomRewardLabelTests(unittest.TestCase):
             "text": {"name": "Extra vault", "description": "d"}})
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _custom_items(self):
@@ -725,9 +717,7 @@ class ItemConfigWireFormatTests(DashboardItemTestCase):
     ROLE_ID = 1420070400000000001
 
     def packed_configs(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         script = Path(__file__).parent / "js" / "item_config_wire.js"
         result = subprocess.run([node, str(script), str(SCRIPT)],
                                 capture_output=True, text=True, timeout=120)

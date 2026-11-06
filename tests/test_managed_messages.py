@@ -10,7 +10,6 @@ rules panel renders as one message rather than one per section.
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -33,6 +32,10 @@ from core import managed_messages
 from core import settings_cache
 from core.feature_access import refresh_feature_cache
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
+
 
 class MarkdownPreviewTests(unittest.TestCase):
     """The preview renders Discord's emphasis, including nested.
@@ -42,9 +45,7 @@ class MarkdownPreviewTests(unittest.TestCase):
     """
 
     def test_emphasis_renders_as_discord_does(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         script = ROOT / "tests" / "js" / "markdown_render.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)
@@ -53,8 +54,9 @@ class MarkdownPreviewTests(unittest.TestCase):
 class ManagedMessageRouteTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "dashboard.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
         dashboard_api.app.config.update(TESTING=True)
@@ -75,7 +77,7 @@ class ManagedMessageRouteTests(unittest.TestCase):
 
     def tearDown(self):
         dashboard_api.ADMIN_ID = self.original_admin_id
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def save(self, kind, **changes):
@@ -266,8 +268,9 @@ class RenderTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "render.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
         settings_cache.invalidate()
@@ -285,7 +288,7 @@ class RenderTests(unittest.TestCase):
         self.guild = Guild()
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def stored(self, kind, **changes):
@@ -363,8 +366,9 @@ class ButtonLabelTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "labels.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
         settings_cache.invalidate()
@@ -377,7 +381,7 @@ class ButtonLabelTests(unittest.TestCase):
         self.guild = Guild()
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def stored(self, kind, options):
@@ -562,9 +566,7 @@ class CreatorRoundTripTests(unittest.TestCase):
     """
 
     def test_every_kind_round_trips_into_the_payload_the_api_demands(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
 
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         start = source.index("const MANAGED_FIELDS = {")
@@ -636,9 +638,7 @@ class CreatorRoundTripTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
     def test_the_preview_resolves_known_mentions_and_leaves_others_literal(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
 
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         element_start = source.index("function element(tag, className, text) {")
@@ -686,9 +686,7 @@ class CreatorAcceptedByTheApiTests(ManagedMessageRouteTests):
     """
 
     def client_payloads(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         spec = source[source.index("const MANAGED_FIELDS = {"):
                       source.index("let managedItems = [];")]
@@ -975,8 +973,9 @@ class PublishEditsThePostedMessageWhereItIsTests(unittest.IsolatedAsyncioTestCas
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "publish.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "Guild")
         refresh_feature_cache(111)
@@ -986,7 +985,7 @@ class PublishEditsThePostedMessageWhereItIsTests(unittest.IsolatedAsyncioTestCas
         database.record_managed_post(111, "ticket", "help", 1, 5001)
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _channel(self, channel_id):

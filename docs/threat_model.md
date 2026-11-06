@@ -38,7 +38,8 @@ authentication.
 - Unauthorized guild changes: Discord permission-aware OAuth, guild-scoped
   authorization on every route, host-only instance settings, optimistic
   revisions, typed setting and feature keys, and audit records.
-- Duplicate or lost money: serialized SQLite writes, conditional debits, atomic
+- Duplicate or lost money: serialized writes (one advisory lock across
+  processes), conditional debits, atomic
   claims, persistent interactive-wager identities, compare-and-set settlement,
   and startup refunds.
 - Cross-guild data disclosure: guild-scoped configuration and guild-filtered
@@ -56,8 +57,9 @@ authentication.
 
 ## Residual risks
 
-SQLite is local single-host state and is not protected from an attacker who
-controls the service account. Economy state (balances, XP, cooldowns) has no
+The database is single-host state (PostgreSQL in a container under the
+service account, reachable only on its private network) and is not protected
+from an attacker who controls the service account. Economy state (balances, XP, cooldowns) has no
 guild dimension yet, so one wallet per Discord account serves every guild the bot
 is in; do not run one installation for unrelated communities until per-guild
 wallets ship. The `DataContext`/`scoped_accounts` foundation for that is tested

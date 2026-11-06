@@ -15,10 +15,14 @@
 # from `git ls-files` rather than from disk.
 .git
 .env
+# The database container's superuser password (compose's `db` service).
+.env.postgres
 *.db
 *.db-wal
 *.db-shm
 *.db.backup*
+# A pg_dump is every member's data, wherever it was left.
+*.dump
 backups/
 logs/
 venv/

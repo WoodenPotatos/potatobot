@@ -1,85 +1,76 @@
-"""Record or compare a SQLite database fingerprint.
+"""Record or compare a PostgreSQL database fingerprint.
 
-The backlog requires a checksum, integrity result, schema version and table
-counts before and after every migration. Nothing else in the repository produced
-those, so a rehearsal had no way to prove that data survived.
+The backlog requires a schema version and table counts before and after every
+migration, and a migration must rewrite no row. A fingerprint records, per
+table, the row count, the columns and a content hash computed in the server,
+so a rehearsal can prove that data survived and was left alone.
 
 Usage:
-    python scripts/db_snapshot.py record economy.db > before.json
-    python scripts/db_snapshot.py record economy.db > after.json
+    python scripts/db_snapshot.py record > before.json          # libpq's PG* env
+    python scripts/db_snapshot.py record "dbname=rehearsal" > after.json
     python scripts/db_snapshot.py compare before.json after.json
 
-`compare` exits non-zero when any table's row count changed, which is what makes
-it usable as a gate in a rehearsal script or a release checklist.
+`compare` exits non-zero when a table lost rows or columns, disappeared, or had
+its rows rewritten, which is what makes it usable as a gate in a rehearsal
+script or a release checklist. The fingerprint names the database and host,
+never a password.
 """
 
 import argparse
-import hashlib
 import json
-import sqlite3
 import sys
-from contextlib import closing
 from pathlib import Path
 
-
-def file_checksum(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+import psycopg
+from psycopg import sql
 
 
-def record(path: Path) -> dict:
-    """Fingerprint a database without modifying it."""
-    if not path.exists():
-        raise SystemExit(f"database not found: {path}")
+def record(dsn: str = "") -> dict:
+    """Fingerprint a database without modifying it.
 
-    # Read-only so a snapshot can never be the thing that changes the file.
-    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
-        version = conn.execute("PRAGMA user_version").fetchone()[0]
-        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
-        foreign_keys = [
-            list(row) for row in conn.execute("PRAGMA foreign_key_check")
-        ]
-        tables = sorted(
-            row[0] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table' "
-                "AND name NOT LIKE 'sqlite_%'"
-            )
-        )
-        counts = {}
-        columns = {}
+    One `REPEATABLE READ, READ ONLY` transaction, so every table is read at the
+    same instant and the snapshot can never be the thing that changes the data.
+    A table's content hash is order-independent: the md5 of its rows' sorted
+    md5s, over each row's text form.
+    """
+    with psycopg.connect(dsn) as conn:
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        tables = [row[0] for row in conn.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' "
+            "ORDER BY table_name")]
+        version = None
+        if "schema_migrations" in tables:
+            version = conn.execute(
+                "SELECT MAX(version) FROM schema_migrations").fetchone()[0]
+        counts, columns, hashes = {}, {}, {}
         for table in tables:
+            name = sql.Identifier(table)
             counts[table] = conn.execute(
-                f'SELECT COUNT(*) FROM "{table}"'
-            ).fetchone()[0]
-            columns[table] = sorted(
-                row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')
-            )
-
-    return {
-        "path": str(path),
-        "schema_version": version,
-        "integrity_check": integrity,
-        "foreign_key_violations": foreign_keys,
-        "file_sha256": file_checksum(path),
-        "table_counts": counts,
-        "table_columns": columns,
-    }
+                sql.SQL("SELECT COUNT(*) FROM {}").format(name)).fetchone()[0]
+            columns[table] = [row[0] for row in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s "
+                "ORDER BY column_name", (table,))]
+            hashes[table] = conn.execute(sql.SQL(
+                "SELECT md5(COALESCE(string_agg(h, '' ORDER BY h), '')) "
+                "FROM (SELECT md5(t::text) AS h FROM {} AS t) AS rows"
+            ).format(name)).fetchone()[0]
+        return {
+            "database": conn.info.dbname,
+            "host": conn.info.host,
+            "server_version": conn.info.server_version,
+            "schema_version": version,
+            "table_counts": counts,
+            "table_columns": columns,
+            "table_hashes": hashes,
+        }
 
 
 def compare(before: dict, after: dict) -> int:
     """Report what changed between two snapshots. Returns a process exit code."""
     problems = []
     notes = []
-
-    if after["integrity_check"] != "ok":
-        problems.append(f"integrity_check is {after['integrity_check']!r}")
-    if after["foreign_key_violations"]:
-        problems.append(
-            f"{len(after['foreign_key_violations'])} foreign key violations"
-        )
 
     if before["schema_version"] != after["schema_version"]:
         notes.append(
@@ -95,20 +86,23 @@ def compare(before: dict, after: dict) -> int:
 
     for table in sorted(set(before["table_counts"]) & set(after["table_counts"])):
         old, new = before["table_counts"][table], after["table_counts"][table]
-        if old != new:
+        if table == "schema_migrations" and new > old:
+            notes.append(f"{table}: {new - old} migration(s) recorded")
+        elif old != new:
             problems.append(f"{table}: {old} -> {new} rows")
-        new_columns = sorted(
-            set(after["table_columns"].get(table, []))
-            - set(before["table_columns"].get(table, []))
-        )
-        lost_columns = sorted(
-            set(before["table_columns"].get(table, []))
-            - set(after["table_columns"].get(table, []))
-        )
-        if new_columns:
-            notes.append(f"{table}: columns added {', '.join(new_columns)}")
-        if lost_columns:
-            problems.append(f"{table}: columns removed {', '.join(lost_columns)}")
+        old_columns = set(before["table_columns"].get(table, []))
+        new_columns = set(after["table_columns"].get(table, []))
+        if new_columns - old_columns:
+            notes.append(f"{table}: columns added {', '.join(sorted(new_columns - old_columns))}")
+        if old_columns - new_columns:
+            problems.append(f"{table}: columns removed {', '.join(sorted(old_columns - new_columns))}")
+        if table == "schema_migrations":
+            continue  # a migration adds its own row, noted above
+        if old_columns == new_columns and old == new \
+                and before["table_hashes"][table] != after["table_hashes"][table]:
+            # Same rows, same columns, different content: something rewrote
+            # rows, which a migration must not do.
+            problems.append(f"{table}: rows rewritten (content hash changed)")
 
     for note in notes:
         print(f"  note    {note}")
@@ -129,7 +123,9 @@ def main() -> int:
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     record_parser = subcommands.add_parser("record", help="print a snapshot as JSON")
-    record_parser.add_argument("database", type=Path)
+    record_parser.add_argument(
+        "dsn", nargs="?", default="",
+        help="a libpq connection string; empty uses the PG* environment")
 
     compare_parser = subcommands.add_parser("compare", help="diff two snapshots")
     compare_parser.add_argument("before", type=Path)
@@ -137,7 +133,7 @@ def main() -> int:
 
     arguments = parser.parse_args()
     if arguments.command == "record":
-        json.dump(record(arguments.database), sys.stdout, indent=2, sort_keys=True)
+        json.dump(record(arguments.dsn), sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
         return 0
 
