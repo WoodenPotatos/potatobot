@@ -30,6 +30,7 @@ from core.settings_registry import (FEATURE_DEFINITIONS, SETTING_DEFINITIONS,
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 GUILD_ID = 123
 MEMBER_ID = 9
@@ -890,12 +891,9 @@ class AnnouncementToolsHarnessTests(unittest.TestCase):
 
     def test_the_editor_previews_and_refuses_to_test_unsaved_edits(self):
         import json
-        import shutil
         import subprocess
 
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         from core import database
         import dashboard_api
         with tempfile.TemporaryDirectory() as temp_dir:

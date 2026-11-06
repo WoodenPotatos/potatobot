@@ -29,8 +29,9 @@
 # script changes; a deploy that rebuilds the image does not touch it.
 #
 # `ReadWritePaths=/var/lib/potatobot/bot`: the prune deletes the bot's
-# pre-migration dumps in `backups/` and 2.20's SQLite copies beside
-# `economy.db`, and nothing else.
+# pre-migration dumps in `backups/`, and the dump is staged in `offsite-tmp/`;
+# nothing else. (No `--legacy-sqlite`: F4 deleted the SQLite file and its
+# copies, so there is nothing of 2.20's left to prune.)
 #
 # `ReadWritePaths=/home/potatobot/.config/rclone`: rclone rewrites its config
 # by temp file and rename, so the directory must be writable under
@@ -57,7 +58,12 @@ Environment=XDG_RUNTIME_DIR=/run/user/984
 # pre-migration copies go 90 days after the migration they protect; this flag
 # is what keeps the promise, after the night's offsite copy has verified.
 # Changing the number means changing the policy, both languages.
-ExecStart=/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py gdrivecrypt: --dump-command "podman exec potatobot-db pg_dump --format=custom -U potatobot potatobot" --restore-command "podman exec -i potatobot-db pg_restore" --backups-dir /var/lib/potatobot/bot/backups --legacy-sqlite /var/lib/potatobot/bot/economy.db --prune-local-backups-days 90
+# `--workdir`: the night's plaintext dump, and the copy the check downloads
+# back, are staged inside the encrypted volume, never in /tmp on the plain
+# root disk (PRIVACY §14 claims encryption at rest for the database and its
+# copies). The directory must exist (`potatobot`, 0700); a missing one is
+# refused rather than created, so the night fails loudly instead.
+ExecStart=/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py gdrivecrypt: --dump-command "podman exec potatobot-db pg_dump --format=custom -U potatobot potatobot" --restore-command "podman exec -i potatobot-db pg_restore" --backups-dir /var/lib/potatobot/bot/backups --prune-local-backups-days 90 --workdir /var/lib/potatobot/bot/offsite-tmp
 SyslogIdentifier=potatobot-offsite-backup
 
 NoNewPrivileges=true

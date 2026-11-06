@@ -11,7 +11,6 @@ import sys
 import json
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import time
@@ -25,6 +24,7 @@ from core import item_catalog
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,9 +102,7 @@ class TemplateRoundTripTests(unittest.TestCase):
     """
 
     def test_every_template_round_trips(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         script = Path(__file__).parent / "js" / "item_template_roundtrip.js"
         result = subprocess.run([node, str(script), str(SCRIPT)],
                                 capture_output=True, text=True)
@@ -129,11 +127,7 @@ class CustomRewardPoolFreshnessTests(unittest.TestCase):
     """
 
     def test_a_new_item_reaches_the_reward_picker(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         script = ROOT / "tests" / "js" / "gacha_custom_reward_refresh.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)
@@ -211,11 +205,7 @@ class TemplateFieldsFollowTheChoiceTests(unittest.TestCase):
     """
 
     def test_every_template_asks_for_its_own_fields(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         script = ROOT / "tests" / "js" / "item_editor_templates.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)
@@ -226,11 +216,7 @@ class TemplateFieldsFollowTheChoiceTests(unittest.TestCase):
         """The other half of the per-section cap: the interface has to be able
         to say which shelf is full before a save is refused, or the API's rule
         arrives as an unexplained rejection."""
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         script = ROOT / "tests" / "js" / "shop_sections.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)
@@ -731,9 +717,7 @@ class ItemConfigWireFormatTests(DashboardItemTestCase):
     ROLE_ID = 1420070400000000001
 
     def packed_configs(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         script = Path(__file__).parent / "js" / "item_config_wire.js"
         result = subprocess.run([node, str(script), str(SCRIPT)],
                                 capture_output=True, text=True, timeout=120)

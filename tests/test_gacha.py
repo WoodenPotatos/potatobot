@@ -2,7 +2,6 @@ import sys
 import asyncio
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -15,6 +14,7 @@ from core.clock import parse_stored
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1220,9 +1220,7 @@ class FeaturedChanceFormulaTests(unittest.TestCase):
     """
 
     def test_the_displayed_chance_formula_holds(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         script = Path(__file__).parent / "js" / "featured_chance.js"
         result = subprocess.run([node, str(script)], capture_output=True, text=True)
         self.assertEqual(0, result.returncode,

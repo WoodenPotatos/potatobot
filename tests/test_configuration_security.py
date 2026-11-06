@@ -2,6 +2,7 @@ import ast
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import unittest
@@ -850,7 +851,11 @@ class QuadletUnitTests(unittest.TestCase):
         # `bot/` on the LUKS mount; PostgreSQL's `pgdata/` sits beside it.
         self.assertEqual(["/var/lib/potatobot/bot:/data:Z"], self.values("Volume"))
         environment = self.values("Environment")
-        for path in ("POTATOBOT_DB_PATH=/data/economy.db",
+        # No POTATOBOT_DB_PATH since F4: it existed only so the copy script
+        # found 2.20's SQLite file (the image still sets it for operators who
+        # have yet to copy). POTATOBOT_DATA_DIR is what places the bot's files.
+        self.assertNotIn("POTATOBOT_DB_PATH=/data/economy.db", environment)
+        for path in ("POTATOBOT_DATA_DIR=/data",
                      "POTATOBOT_LOG_DIR=/data/logs",
                      "POTATOBOT_EVERYDLE_STATE_PATH=/data/everydle_state.json"):
             with self.subTest(path=path):
@@ -858,6 +863,12 @@ class QuadletUnitTests(unittest.TestCase):
 
     def test_new_files_are_not_world_readable(self):
         self.assertIn("--umask=0027", self.values("PodmanArgs"))
+
+    def test_log_lines_stay_in_the_encrypted_volume(self):
+        """The journal is on the host's plain disk and log lines name members
+        (PRIVACY §9, §14): they go to /data/logs alone, and
+        `deploy/potatobot-log` is how they are read."""
+        self.assertIn("POTATOBOT_LOG_CONSOLE=false", self.values("Environment"))
 
     def test_the_image_sets_the_umask_for_every_way_it_is_started(self):
         """Compose has no umask key, and a run without the Quadlet's
@@ -931,8 +942,8 @@ class QuadletUnitTests(unittest.TestCase):
             ['/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py gdrivecrypt: '
              '--dump-command "podman exec potatobot-db pg_dump --format=custom -U potatobot potatobot" '
              '--restore-command "podman exec -i potatobot-db pg_restore" '
-             '--backups-dir /var/lib/potatobot/bot/backups '
-             '--legacy-sqlite /var/lib/potatobot/bot/economy.db --prune-local-backups-days 90'],
+             '--backups-dir /var/lib/potatobot/bot/backups --prune-local-backups-days 90 '
+             '--workdir /var/lib/potatobot/bot/offsite-tmp'],
             values("ExecStart"))
         self.assertEqual(["/var/lib/potatobot/bot", "/home/potatobot/.config/rclone",
                           "/home/potatobot/.local/share/containers", "/run/user/984"],
@@ -959,6 +970,14 @@ class DatabaseUnitTests(unittest.TestCase):
     def values(self, key, section=None):
         entries = self.db[section] if section else self.container
         return [value for name, value in entries if name == key]
+
+    def test_no_error_line_in_the_journal_carries_a_value(self):
+        """The server logs to the journal on the plain disk: no DETAIL (a
+        constraint's `Key (user_id)=(…)`) and no STATEMENT text. Measured on
+        the pinned image 2026-11-02."""
+        self.assertEqual(
+            ["postgres -c log_error_verbosity=terse -c log_min_error_statement=panic"],
+            self.values("Exec"))
 
     def test_the_server_is_the_one_ci_tests_against(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
@@ -1210,6 +1229,53 @@ class PinnedDependencyTests(unittest.TestCase):
                 self.assertTrue(installs, f"no lockfile install found in {path}")
                 self.assertEqual([], [line for line in installs
                                       if "--require-hashes" not in line])
+
+
+
+class LogReaderScriptTests(unittest.TestCase):
+    """`deploy/potatobot-log`, run through sudo as `potatobot`: the one way the
+    maintainer's account reads the bot's log once it is out of the journal.
+    It must take nothing but a line count, refuse to run as anyone else, and
+    print the rotations in time order."""
+
+    SCRIPT = ROOT / "deploy" / "potatobot-log"
+
+    def run_script(self, *args, user=None, log_dir=None):
+        import getpass
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+        if log_dir is not None:
+            env["POTATOBOT_LOG_READER_DIR"] = str(log_dir)
+        # `id -un` is the identity check; a stand-in `id` plays `potatobot`.
+        if user is not None:
+            import tempfile
+            stub = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, stub)
+            with open(os.path.join(stub, "id"), "w") as handle:
+                handle.write(f"#!/bin/sh\necho {user}\n")
+            os.chmod(os.path.join(stub, "id"), 0o755)
+            env["PATH"] = stub + os.pathsep + env["PATH"]
+        self.assertNotEqual("potatobot", getpass.getuser())
+        return subprocess.run(["sh", str(self.SCRIPT), *args], env=env,
+                              capture_output=True, text=True)
+
+    def test_it_refuses_anyone_but_potatobot(self):
+        self.assertEqual(2, self.run_script("10").returncode)
+
+    def test_it_takes_only_a_line_count(self):
+        for args in (["abc"], ["-1"], ["0"], ["100001"], ["5", "6"], ["5;id"]):
+            with self.subTest(args=args):
+                self.assertEqual(2, self.run_script(*args, user="potatobot").returncode)
+
+    def test_it_reads_the_rotations_oldest_first(self):
+        import tempfile
+        logs = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, logs)
+        (logs / "bot.log.2").write_text("a\nb\n")
+        (logs / "bot.log.1").write_text("c\n")
+        (logs / "bot.log").write_text("d\ne\n")
+        result = self.run_script("4", user="potatobot", log_dir=logs)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("b\nc\nd\ne\n", result.stdout)
 
 
 if __name__ == "__main__":

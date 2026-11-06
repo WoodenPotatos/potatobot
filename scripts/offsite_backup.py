@@ -190,7 +190,22 @@ def main(argv=None) -> int:
                          help="also delete the pre-migration copies whose name-stamp "
                               "is older than this many days, after the offsite copy "
                               "has been verified (default: 0, keep them all)")
+    parser.add_argument("--workdir", type=Path, default=None,
+                        help="an existing directory to stage the night's dump in "
+                             "(default: the system temporary directory)")
     arguments = parser.parse_args(argv)
+
+    # The dump is every member's data in plaintext, and so is the copy the
+    # check downloads back. Where the database sits on an encrypted volume,
+    # staging them in /tmp puts a nightly plaintext copy on the plain disk
+    # (deleted, but its blocks stay), so the deployed unit names a directory
+    # inside the volume. Refused rather than created: a mistyped path must not
+    # quietly become a directory on the wrong disk, and TMPDIR is no
+    # substitute, because tempfile falls back to /tmp in silence.
+    workdir_parent = arguments.workdir
+    if workdir_parent is not None and (
+            workdir_parent.is_symlink() or not workdir_parent.is_dir()):
+        raise SystemExit(f"--workdir {workdir_parent} is not an existing directory")
 
     dump_command = shlex.split(arguments.dump_command)
     restore_command = shlex.split(arguments.restore_command)
@@ -199,7 +214,7 @@ def main(argv=None) -> int:
             raise SystemExit(f"{tool} not found on PATH")
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    with tempfile.TemporaryDirectory() as workdir:
+    with tempfile.TemporaryDirectory(dir=workdir_parent) as workdir:
         snapshot = Path(workdir) / f"potatobot-{stamp}.dump"
         take_dump(dump_command, snapshot)
         check_dump(restore_command, snapshot)

@@ -92,8 +92,8 @@ the host can queue the same erasure from the dashboard's Privacy page.
 | What | Where | Content | Retention |
 | --- | --- | --- | --- |
 | Bot log | `LOG_DIR/bot.log` (`/data/logs` in the container) | see §3 | `RotatingFileHandler` 5 MB × 10 |
-| stdout → journald | host journal | same lines | host `SystemMaxUse=500M`; about two months on the reference host |
-| Pre-migration backups | `backups/potatobot-v{n}-{timestamp}.dump` in the data directory (a `pg_dump`, mode 0600, since 2.21), and 2.20's `{DB_PATH}.backup-v{n}-{timestamp}` SQLite copies until they are archived | full database copy | deleted by `scripts/offsite_backup.py --prune-local-backups-days N` (both kinds) after the night's offsite copy verifies, by the date in the file name; the deployed units pass 90; the flag defaults to 0 (keep) |
+| stdout → journald | host journal | same lines, unless `POTATOBOT_LOG_CONSOLE=false` (the reference host since F4): then only stderr (crash tracebacks, `faulthandler` dumps, the watchdog's reason, ffmpeg's own stderr) and PostgreSQL's errors without DETAIL or STATEMENT | host `SystemMaxUse=500M`; about two months on the reference host |
+| Pre-migration backups | `backups/potatobot-v{n}-{timestamp}.dump` in the data directory (a `pg_dump`, mode 0600, since 2.21), and, until F4 deleted them with the SQLite file, 2.20's `{DB_PATH}.backup-v{n}-{timestamp}` SQLite copies | full database copy | deleted by `scripts/offsite_backup.py --prune-local-backups-days N` (both kinds) after the night's offsite copy verifies, by the date in the file name; the deployed units pass 90; the flag defaults to 0 (keep) |
 | Offsite backup | `rclone crypt` remote on Google Drive | full database dump (`pg_dump`), encrypted before upload | `--retention-days` 30 |
 | Everydle state | `data/everydle_state.json` or `POTATOBOT_EVERYDLE_STATE_PATH` | daily target ids | no member data |
 | Welcome-card backgrounds | `cards/` in the data directory (`POTATOBOT_DATA_DIR`, else beside the database; `core/welcome_card.py` `background_path`) | operator-uploaded PNG per guild | until replaced or deleted from the dashboard |
@@ -114,8 +114,8 @@ Format `time | level | logger | message`; INFO and above; loggers `discord`,
   URLs (the extractor reduces errors to the exception class), IP addresses,
   OAuth data, dashboard bodies, query strings or sessions.
 - **Edge cases**: `cogs/music.py` logs the raw playback error, and ffmpeg's
-  own stderr (`-loglevel warning`) is not scrubbed, so a stream URL can reach
-  the journal; `main.py`'s unhandled-command-error line includes the exception
+  own stderr (`-loglevel warning`) is not scrubbed, so a stream URL (no member
+  data) can reach the journal even with the console off; `main.py`'s unhandled-command-error line includes the exception
   text, which can contain argument values; discord.py's default error handler
   logs tracebacks for slash and component errors.
 - **Dashboard**: no access log; slow requests (method, path, status, ms),
@@ -207,8 +207,10 @@ both:
    tidiness).
 5. `PRIVACY_AUDIT_ACTIONS` lists `user.retention_sweep` but the sweep writes
    `user.erase` with reason `retention_policy`.
-6. The host disk is unencrypted; Discord Developer Terms 5(c) expect
-   encryption at rest. Disclosed in §14.
+6. Encryption at rest (Discord Developer Terms 5(c)), closed by F4: the
+   database, its pre-migration copies, the staged nightly dump and `bot.log`
+   are on the LUKS2 volume; swap is zram; the journal (plain disk) receives no
+   member-naming line, and the lines it held before F4 expire under its cap.
 
 Closed the same day: the export now reaches `casino_earnings_window`,
 `lfg_posts` (host or party member), `minigame_state`, `settings_audit` (actor

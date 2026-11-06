@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, `deploy/` holds the systemd units and a rootless podman Quadlet unit, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.21.16b** &nbsp;·&nbsp; channel `beta`
+**Version 2.21.34b** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -186,6 +186,13 @@ matrices — is in [docs/development.md](docs/development.md).
 
 ## Recent releases
 
+### 2.21.34b
+
+- **Privacy Policy 1.1: your data is encrypted at rest.** The database, its backups on the server and the bot's log file now sit on an encrypted disk volume, memory the server pages out stays in compressed RAM, and no log line naming you goes to the system journal any more; the older ones expire within about two months. Nothing the bot collects or shares changed. (English and Hungarian, sections 7, 9 and 14.)
+- **Keep member-naming log lines out of the system journal (operators).** A new `POTATOBOT_LOG_CONSOLE` setting (default `true`, see `.env.example`): set it to `false` and the bot writes its log lines only to `bot.log` in its data directory, so a journal on an unencrypted disk no longer holds them. Crash traces and stack dumps still reach the journal. The reference Quadlet unit sets it, `deploy/potatobot-db.container` makes PostgreSQL log errors without their values, and `deploy/potatobot-log` is a small reader for the log file that a sudoers rule can grant without wider access.
+- **The nightly offsite backup can stage its dump on the encrypted volume.** `scripts/offsite_backup.py --workdir DIR` writes the plaintext dump and its verification copy there instead of the system temporary directory, and refuses to run if the directory is missing. The reference unit passes it and no longer passes `--legacy-sqlite` or sets `POTATOBOT_DB_PATH`.
+- **Faster test suite for contributors.** Each test resets its database with ordered deletes instead of `TRUNCATE`, and `scripts/run_tests_parallel.py` runs the suite across several PostgreSQL databases for quick iteration (the serial run stays the gate).
+
 ### 2.21.16b
 
 - **The PostgreSQL move begins (2.20).** The bot still runs on SQLite and behaves the same; the 2.20 line first makes the code independent of the database engine, one step at a time, and then switches engines. First step: every write connection now opens its transaction, and takes the database's write lock, as soon as it is created, in one place instead of fifty-four. Writes that used to take the lock only at their first statement now take it up front too, which matters only when the dashboard runs as its own process.
@@ -202,18 +209,6 @@ matrices — is in [docs/development.md](docs/development.md).
 
 - **A stable release channel exists.** The public repository now has a `stable` branch beside `beta`. A stable release is the last published beta copied with its letter stripped (`2.19.26b` becomes `2.19.26`, and `/version` reports the channel as stable), so the code is byte-identical to a beta that has already been out; betas keep landing on `beta`.
 - **The README below the introduction is generated from the code.** It said the schema was at version 24 (it is 26) and that LoLdle's hard mode was Hungarian-only (English has been complete since September), and the stable release shipped saying so. Only the maintainer's introduction is written by hand now; the version, the Python range, the intents, the schema version, the read-worker bounds, the gacha pity numbers, the game and feature counts, the documentation list and the recent releases are read from the code and the repository each time, and the build fails when the file disagrees.
-
-### 2.19.26
-
-- **A Privacy Policy and Terms of Service now ship with the bot**, in `docs/legal/`, in English (binding) and Hungarian, written from a line-by-line inventory of every table, log line, Discord post and outbound network call the software makes (`docs/data_inventory.md`). They describe what is stored under a member's Discord id and for how long, what `/mydata` returns and `/deletemydata` keeps, which third parties receive anything (Discord, Cloudflare in front of the dashboard, encrypted nightly backups to Google Drive, a music search's text to YouTube), the dashboard's cookie, and the automatic moderation actions a server can configure. The operator's identity, the effective date and three deployment facts were filled in over the same day; both documents are in force from 2026-10-31 as version 1.0, and reach their public addresses with this release.
-- **`/version` and the dashboard's sign-in card link the Privacy Policy and the Terms of Service**, so both are reachable from inside the bot and from the dashboard as Discord's Developer Terms require. Both read the same two addresses, so when the documents move to the planned `welcome.potatobot.win` pages, one edit moves every link.
-- **`/mydata` now returns everything an erasure touches.** It missed five places: the casino earnings counter, group-search posts you host or joined, the last turn you took in a counting or word-chain channel, staff audit rows where you are the administrator or the subject of a removed warning, and queued Discord actions about you.
-- **Erasure now scrubs every queued Discord action that names you.** It rewrote only the erasure's own queue entry; a revocation of one of your grants queued from the dashboard kept your id for up to 30 days afterwards. Any queued action whose payload names you is re-keyed to the anonymous id.
-- **The Privacy Policy is now held to the code by the test suite.** `scripts/legal_drift.py` records the facts the policy describes (which tables hold a member, which hosts the bot contacts, which log lines carry a user id, which loops act on their own, how long a dashboard session lives) and CI fails when any of them changes until the policy has been re-read and re-stamped, naming the section to look at.
-- **Members who leave are forgotten after a year.** The maintainer set the installation's data retention to 365 days: a member whose last activity is older than that and who is in none of the bot's servers is erased by the daily sweep, with their balance kept under an anonymous record as always. The Privacy Policy now states the window, and that error-alert email is not enabled on this installation.
-- **The Privacy Policy and Terms name their operator**, Máté Domina, resident in Hungary, with the bot hosted in Hungary and Hungarian law governing the terms. The contact address is `privacy@potatobot.win`, forwarded through Cloudflare Email Routing, which the policy's Cloudflare entry now says. The Discord contact is `@woodenpotato`, pre-migration database backups are promised deleted 90 days after their migration, the planned public application is left out until it exists, and the policy keeps the sentence that the host disk is not encrypted.
-- **The dashboard's audit history is no longer kept forever.** A new installation-wide setting, "Audit history retention (days)" on the Administration page, deletes staff audit rows (setting changes, warning removals) older than the window each day; it ships at 90, and 0 keeps them forever as before. Data-erasure records are never pruned: they name only the anonymous replacement id and are the proof of what was deleted.
-- …and 1 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 

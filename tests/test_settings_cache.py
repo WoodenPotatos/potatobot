@@ -13,7 +13,6 @@ import asyncio
 import json
 import re
 import subprocess
-import shutil
 import os
 import tempfile
 import unittest
@@ -34,6 +33,7 @@ from core.settings_registry import (
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -608,13 +608,8 @@ class RowEditorReportsCleanTests(unittest.TestCase):
     are plain data.
     """
 
-    def _node(self):
-        return shutil.which("node")
-
     def test_no_shape_reports_a_change_it_did_not_make(self):
-        node = self._node()
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
 
         import dashboard_api
 
@@ -848,13 +843,8 @@ class SupportedGameQuickPickTests(unittest.TestCase):
     `document`.
     """
 
-    def _node(self):
-        return shutil.which("node")
-
     def test_the_matching_and_option_list_behave(self):
-        node = self._node()
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
 
         from core.supported_games import SUPPORTED_GAME_KEYS
 

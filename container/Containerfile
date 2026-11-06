@@ -5,10 +5,10 @@
 # separate supervised services against one PostgreSQL database (2.21), which
 # runs in its own container (deploy/potatobot-db.container, compose's `db`).
 #
-# Build (from the repository root):  podman build -t potatobot:2.21.16a -f container/Containerfile .
-# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.21.16a
+# Build (from the repository root):  podman build -t potatobot:2.21.34a -f container/Containerfile .
+# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.21.34a
 # Panel:  podman run --env-file .env -v potatobot-data:/data -p 127.0.0.1:5000:5000 \
-#             potatobot:2.21.16a python dashboard_api.py
+#             potatobot:2.21.34a python dashboard_api.py
 
 # Pinned by digest, not tag: `3.13-slim` is a moving name, and an image that
 # changes under the same tag is a supply-chain change nobody reviewed.

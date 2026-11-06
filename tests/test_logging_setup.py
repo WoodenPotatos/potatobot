@@ -10,6 +10,7 @@ call site itself.
 """
 
 import logging
+import logging.handlers
 import os
 import sys
 import unittest
@@ -149,6 +150,52 @@ class AlertEmailHandlerBehaviorTests(unittest.TestCase):
                 handler.close()
         smtp_instance.login.assert_not_called()
         smtp_instance.send_message.assert_called_once()
+
+
+class ConsoleHandlerTests(unittest.TestCase):
+    """`POTATOBOT_LOG_CONSOLE` decides whether log lines also go to stdout,
+    which under systemd is the journal on the host's plain disk. Unset keeps
+    them (a self-hoster changes nothing); `false` leaves the file alone; a
+    malformed value is refused rather than guessed."""
+
+    def setUp(self):
+        import tempfile
+        self.saved = logging_setup._handlers
+        self.saved_dir = logging_setup.LOG_DIR
+        self.tmp = tempfile.TemporaryDirectory()
+        logging_setup.LOG_DIR = self.tmp.name
+
+    def tearDown(self):
+        for handler in logging_setup._handlers or ():
+            if handler not in (self.saved or ()):
+                handler.close()
+        logging_setup._handlers = self.saved
+        logging_setup.LOG_DIR = self.saved_dir
+        self.tmp.cleanup()
+
+    def handlers_with(self, value):
+        logging_setup._handlers = None
+        env = {} if value is None else {"POTATOBOT_LOG_CONSOLE": value}
+        with patch.dict(os.environ, env, clear=True):
+            return logging_setup._shared_handlers()
+
+    @staticmethod
+    def console(handlers):
+        return [h for h in handlers if type(h) is logging.StreamHandler
+                and h.stream is sys.stdout]
+
+    def test_unset_keeps_the_console(self):
+        self.assertEqual(1, len(self.console(self.handlers_with(None))))
+
+    def test_false_leaves_only_the_file(self):
+        handlers = self.handlers_with("false")
+        self.assertEqual([], self.console(handlers))
+        self.assertEqual(1, len([h for h in handlers if isinstance(
+            h, logging.handlers.RotatingFileHandler)]))
+
+    def test_a_malformed_value_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.handlers_with("sometimes")
 
 
 if __name__ == "__main__":

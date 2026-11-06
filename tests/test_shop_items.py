@@ -11,7 +11,6 @@ only one of them knew.
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,6 +28,7 @@ from core.settings_registry import SETTING_DEFINITIONS
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 
 class ShippedRewardPoolTests(unittest.TestCase):
@@ -105,11 +105,7 @@ class TierImportTests(unittest.TestCase):
     """
 
     def test_a_tier_can_be_imported_from_the_shipped_table(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (Path(ROOT) / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         script = Path(ROOT) / "tests" / "js" / "gacha_tier_import.js"
         result = subprocess.run([node, str(script), ROOT],
                                 capture_output=True, text=True, timeout=120)

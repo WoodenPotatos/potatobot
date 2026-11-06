@@ -238,6 +238,32 @@ class MainTests(unittest.TestCase):
                     run_main(tools, ["r:"])
                 self.assertEqual([], tools.rclone_calls)
 
+    def test_the_dump_is_staged_in_the_named_workdir(self):
+        """Where the database is encrypted at rest, the plaintext dump must not
+        be staged on the plain disk: it lands under `--workdir`, and nothing is
+        left there afterwards."""
+        tools = StandInTools(self)
+        staging = Path(tools.workdir.name) / "offsite-tmp"
+        staging.mkdir()
+        run_main(tools, ["r:", "--workdir", str(staging)])
+        upload = tools.rclone_calls[0]
+        self.assertEqual(staging, Path(upload[2]).parent.parent)
+        self.assertEqual([], list(staging.iterdir()))
+
+    def test_a_missing_or_symlinked_workdir_is_refused_before_anything_runs(self):
+        tools = StandInTools(self)
+        missing = Path(tools.workdir.name) / "no-such-dir"
+        link = Path(tools.workdir.name) / "link"
+        link.symlink_to(tools.workdir.name)
+        for path in (missing, link):
+            with self.subTest(path=path.name), \
+                    patch("scripts.offsite_backup.take_dump") as dump:
+                with self.assertRaisesRegex(SystemExit, "not an existing directory"):
+                    offsite_backup.main(["r:", "--workdir", str(path)])
+                dump.assert_not_called()
+        self.assertEqual([], tools.rclone_calls)
+        self.assertFalse(missing.exists(), "a missing workdir must not be created")
+
     def test_a_missing_tool_is_refused_before_anything_runs(self):
         tools = StandInTools(self)
         (tools.bin / "rclone").unlink()

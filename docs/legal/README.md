@@ -96,7 +96,7 @@ needs a person:
    | Discord Developer Terms and Developer Policy (sections 5(a)–(c)) | support-dev.discord.com | 2026-10-31 (effective 2024-07-08) |
    | EU-US Data Privacy Framework status of Google LLC and Cloudflare, Inc. | dataprivacyframework.gov; providers' own pages | 2026-10-31 (providers' statements only) |
    | NAIH postal address, phone and email | naih.hu | 2026-10-31 |
-   | Host disk encryption | the host | 2026-10-31: none |
+   | Host disk encryption | the host | 2026-10-31: none. 2026-11-06, after F4 (measured that day, swap again after a reboot): the data volume is LUKS2 (`/dev/mapper/potatobot-vault` on `/var/lib/potatobot`: PostgreSQL's `pgdata/`, the bot's `bot/` with `logs/`, `backups/`, `offsite-tmp/`); swap is zram only; the plain-disk rollback and every SQLite copy are deleted; the root disk and the journal stay unencrypted and receive no member-naming log line (`POTATOBOT_LOG_CONSOLE=false`, PostgreSQL `terse`) |
    | `data_retention_days` live value; alert email on or off | the instance settings and `potatobot.env` | 2026-10-31: 365 days (set that day, from 0); alert email not configured |
 
 The Hungarian files are hand-translated; the English text prevails, so a

@@ -48,6 +48,14 @@ EnvironmentFile=/etc/potatobot/potatobot-db.env
 # flags in the first draft (seen in `quadlet -dryrun`, 2026-11-01).
 Environment="POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8"
 
+# The server logs to the journal, which is on the plain disk, so no error
+# line may carry a member's id. `terse` drops the DETAIL line, which for a
+# constraint violation is `Key (user_id)=(…)`; `log_min_error_statement=panic`
+# drops the STATEMENT line, whose text holds any value a query inlined rather
+# than bound. Both measured on this image 2026-11-02. The bot's own bot.log
+# names the operation that failed.
+Exec=postgres -c log_error_verbosity=terse -c log_min_error_statement=panic
+
 # Over TCP on purpose: during initialisation the image runs a temporary server
 # on its Unix socket only, and a socket probe called that healthy (measured
 # 2026-11-01). Ready, for systemd, means healthy, so the bot starts after it.

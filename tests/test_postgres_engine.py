@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import psycopg
+from psycopg import sql
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_harness  # noqa: E402
@@ -160,3 +161,50 @@ class SessionBehaviourTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FreshDatabaseTests(unittest.TestCase):
+    """`pg_harness.fresh_database` is every database test's starting point, so
+    a reset that leaves a row or an advanced identity behind makes tests depend
+    on the order they run in, and passes alone what fails in the full suite."""
+
+    def setUp(self):
+        self.original_dsn = database.DSN
+
+    def tearDown(self):
+        database.DSN = self.original_dsn
+
+    def test_every_table_is_emptied_and_every_identity_restarted(self):
+        dsn = pg_harness.fresh_database()
+        database.initialize_database()
+        database.register_guild(10, "Harness Guild")
+        database.record_warning(20, 30, "reason", "2026-11-02T12:00:00+00:00", 10, "spam")
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            tables = [row[0] for row in conn.execute(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+                "AND tablename <> 'schema_migrations'")]
+            sequences = [row[0] for row in conn.execute(
+                "SELECT sequencename FROM pg_sequences WHERE schemaname = 'public'")]
+            for name in sequences:
+                conn.execute("SELECT nextval(%s)", (name,))
+            filled = [t for t in tables if conn.execute(
+                sql.SQL("SELECT EXISTS (SELECT 1 FROM {})").format(
+                    sql.Identifier(t))).fetchone()[0]]
+        # Prove the check can fail: the setup above must leave rows behind.
+        self.assertGreaterEqual(len(filled), 3, filled)
+        self.assertTrue(sequences)
+
+        pg_harness.fresh_database()
+
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            for table in tables:
+                count = conn.execute(sql.SQL("SELECT count(*) FROM {}").format(
+                    sql.Identifier(table))).fetchone()[0]
+                self.assertEqual(count, 0, f"{table} kept {count} row(s)")
+            advanced = [row[0] for row in conn.execute(
+                "SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' "
+                "AND last_value IS NOT NULL")]
+            self.assertEqual(advanced, [])
+            self.assertTrue(conn.execute(
+                "SELECT EXISTS (SELECT 1 FROM schema_migrations)").fetchone()[0],
+                "schema_migrations must survive, or initialize_database rebuilds")

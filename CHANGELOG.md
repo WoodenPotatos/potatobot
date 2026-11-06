@@ -6,6 +6,32 @@ stable. A build keeps its number across channels, so `2.18.3a` publishes as
 2026-10-22 by adding the old beta serial to z (`2.18.0-beta.1` is `2.18.1b`);
 the public repository's git tags keep their original names.
 
+## 2.21.34b
+
+- **Privacy Policy 1.1: your data is encrypted at rest.** The database, its
+  backups on the server and the bot's log file now sit on an encrypted disk
+  volume, memory the server pages out stays in compressed RAM, and no log line
+  naming you goes to the system journal any more; the older ones expire within
+  about two months. Nothing the bot collects or shares changed. (English and
+  Hungarian, sections 7, 9 and 14.)
+- **Keep member-naming log lines out of the system journal (operators).** A
+  new `POTATOBOT_LOG_CONSOLE` setting (default `true`, see `.env.example`):
+  set it to `false` and the bot writes its log lines only to `bot.log` in its
+  data directory, so a journal on an unencrypted disk no longer holds them.
+  Crash traces and stack dumps still reach the journal. The reference Quadlet
+  unit sets it, `deploy/potatobot-db.container` makes PostgreSQL log errors
+  without their values, and `deploy/potatobot-log` is a small reader for the
+  log file that a sudoers rule can grant without wider access.
+- **The nightly offsite backup can stage its dump on the encrypted volume.**
+  `scripts/offsite_backup.py --workdir DIR` writes the plaintext dump and its
+  verification copy there instead of the system temporary directory, and
+  refuses to run if the directory is missing. The reference unit passes it and
+  no longer passes `--legacy-sqlite` or sets `POTATOBOT_DB_PATH`.
+- **Faster test suite for contributors.** Each test resets its database with
+  ordered deletes instead of `TRUNCATE`, and `scripts/run_tests_parallel.py`
+  runs the suite across several PostgreSQL databases for quick iteration (the
+  serial run stays the gate).
+
 ## 2.21.16b
 
 - **The PostgreSQL move begins (2.20).** The bot still runs on SQLite and

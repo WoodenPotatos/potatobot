@@ -1,0 +1,41 @@
+#!/bin/sh
+# Print the last LINES lines (default 200) of the bot's own log, in time order
+# across its rotations: bot.log.10 (oldest) ... bot.log.1, bot.log.
+#
+# Why it exists: the deployment sets POTATOBOT_LOG_CONSOLE=false, because the
+# journal is on the host's plain disk and the bot's log lines name members
+# (PRIVACY §9, §14), so they live only in bot.log inside the encrypted volume.
+# This is how the maintainer's login account, and an assistant working through
+# it, still reads them without a password and without any wider access.
+#
+# Install (the maintainer's, docs/podman_runbook.md F4):
+#   sudo install -o root -g root -m 0755 deploy/potatobot-log /usr/local/sbin/potatobot-log
+#   echo 'woody ALL=(potatobot) NOPASSWD: /usr/local/sbin/potatobot-log' \
+#     | sudo tee /etc/sudoers.d/potatobot-log >/dev/null
+#   sudo chmod 0440 /etc/sudoers.d/potatobot-log && sudo visudo -c
+# Use (by full path: sudo's secure_path lacks /usr/local/sbin):
+#   sudo -n -u potatobot /usr/local/sbin/potatobot-log 500
+#
+# It runs as `potatobot`, never root, so it reads only what the bot itself can:
+# the bot can write its log directory, and a root reader could be pointed by a
+# symlink at any file on the host. It reads nothing else and takes nothing but
+# a line count.
+set -eu
+
+usage() { echo "usage: sudo -n -u potatobot $0 [LINES]  (1-100000, default 200)" >&2; exit 2; }
+
+[ "$#" -le 1 ] || usage
+lines=${1:-200}
+case $lines in ''|*[!0-9]*) usage ;; esac
+[ "$lines" -ge 1 ] && [ "$lines" -le 100000 ] || usage
+[ "$(id -un)" = potatobot ] || usage
+
+dir=${POTATOBOT_LOG_READER_DIR:-/var/lib/potatobot/bot/logs}
+[ -d "$dir" ] || { echo "no log directory at $dir (is the volume unlocked?)" >&2; exit 1; }
+
+{
+    for n in 10 9 8 7 6 5 4 3 2 1; do
+        if [ -f "$dir/bot.log.$n" ]; then cat -- "$dir/bot.log.$n"; fi
+    done
+    if [ -f "$dir/bot.log" ]; then cat -- "$dir/bot.log"; fi
+} | tail -n "$lines"

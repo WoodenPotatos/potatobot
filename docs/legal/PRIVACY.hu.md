@@ -1,8 +1,8 @@
 # PotatoBot Adatkezelési tájékoztató
 
-**Hatálybalépés:** 2026-10-31
-**Utolsó frissítés:** 2026-10-31
-**Verzió:** 1.0
+**Hatálybalépés:** 2026-11-06
+**Utolsó frissítés:** 2026-11-06
+**Verzió:** 1.1
 
 Ez a dokumentum angol és magyar nyelven készült. Az angol szöveg
 (`PRIVACY.md`) az irányadó; a magyar fordítás a könnyebb megértést szolgálja.
@@ -262,7 +262,7 @@ Discord végez a saját feltételei alapján, nem mi.
 | Irányítópult-hozzáférés változásjelzői | 24 óra. |
 | Sorba állított Discord-műveletek (a „kimenő sor”) | Befejezésük után 30 nap. A törlés a rád vonatkozó sorba állított műveletekben az azonosítódat az anonim azonosítóval váltja fel. |
 | Stáb-naplóelőzmények (irányítópult-módosítások, figyelmeztetés-eltávolítások) | A naplózási időablak letelte után törlődnek (`audit_retention_days`; 0 = határozatlan; **ez a telepítés: 90 nap**). Amíg megvannak, törléskor az eljáró adminisztrátor azonosítóját anonim azonosító váltja fel, és az eltávolított figyelmeztetés indoklása kiürül. **Az adattörlési bejegyzések kivételek**, és határozatlan ideig megmaradnak: csak az anonim azonosítót nevezik meg, és ezek igazolják, mi törlődött. |
-| Működési naplók (9. pont) | A rendszernaplót ezen a gépen 500 MB-os méretkorlát határolja, amely jelenleg körülbelül két hónapot tartalmaz; a bot saját naplófájlja 10 × 5 MB-onként rotálódik (kb. 55 MB). |
+| Működési naplók (9. pont) | A bot naplófájlja 10 × 5 MB-onként rotálódik (kb. 55 MB). A rendszernaplót ezen a gépen 500 MB-os méretkorlát határolja, kb. két hónap; a tagokat megnevező sorok, amelyeket 2026 novemberéig tartalmazott, e korlát szerint járnak le. |
 | Külső helyszíni titkosított mentések | 30 nap, utána automatikusan törlődnek. |
 | Migráció előtti mentések a szerveren | Minden adatbázis-frissítés előtt készült teljes másolat, a szerveren tárolva visszaállítási céllal. A törlés nem éri el őket. Az éjszakai mentési feladat törli mindegyiket, amint az időablaknál régebbi, miután az aznapi külső másolat ellenőrzése sikerült. **Ez a telepítés: az általuk védett migráció után 90 nappal.** |
 | Memóriában tartott adatok (lejátszási sor, meghívó-pillanatkép, időkorlát-térképek, irányítópult-tokenek és sebességkorlát-számlálók) | Újraindításkor elvesznek; az irányítópult-tokenek legfeljebb 12 óra. |
@@ -359,8 +359,11 @@ megadott címen.
 
 ## 9. Naplók
 
-A bot és az irányítópult működési naplókat ír a rendszernaplóba és egy
-rotálódó fájlba. Ezek a naplók tartalmazzák:
+A bot és az irányítópult működési naplókat ír egy rotálódó fájlba a
+titkosított köteten (14. pont). A rendszernaplóba csak az kerül, amit a
+folyamat hiba esetén kiír (hibakövetés, veremkiírás, egy automatikus
+újraindítás oka), valamint az adatbázis-szerver hibái az értékeik nélkül;
+ezek egyike sem nevez meg téged. A naplófájl tartalmazza:
 
 - a bot saját fióknevét és azonosítóját, szerverazonosítókat,
   csatornaazonosítókat, parancsneveket, időzítéseket és hibatípusokat;
@@ -485,10 +488,14 @@ személy adatait. Ha úgy véled, hogy e korhatár alatti gyermek adatait őrizz
 - A külső helyszíni mentéseket a szerver elhagyása előtt titkosítjuk.
 - Az adminisztráció kizárólag SSH-kulcsos privát hálózaton történik; az
   irányítópult csak HTTPS-en érhető el.
-- **Maga az adatbázisfájl nyugalmi állapotban nincs titkosítva.** A gép lemeze
-  nem titkosított; a védelem a fájljogosultságokon és a hardver fizikai
-  ellenőrzésén alapul. Ezt nyíltan kimondjuk, mert a Discord fejlesztői
-  feltételei nyugalmi titkosítást várnak el, és ezt még nem értük el.
+- **Az adataid nyugalmi állapotban titkosítva vannak.** Az adatbázis, az
+  egyes frissítések előtt készült másolatok, az éjszakai mentés, amíg
+  elkészül, és a bot naplófájlja egy titkosított köteten (LUKS2) vannak,
+  amelyet a szerver indulása után kézzel nyitunk meg. Az operációs rendszer
+  által kilapozott memória tömörített RAM-ba kerül, soha nem lemezre. 2026
+  novembere óta nem kerül téged megnevező naplósor a rendszernaplóba, amely
+  ezen a köteten kívül van; a régebbiek a méretkorlátja szerint járnak le
+  (7. pont).
 - Ha tudomást szerzünk az adataidhoz való jogosulatlan hozzáférésről, 72 órán
   belül értesítjük a felügyeleti hatóságot, ahol a GDPR ezt előírja,
   értesítjük a Discordot a fejlesztői feltételei szerint, és tájékoztatjuk az

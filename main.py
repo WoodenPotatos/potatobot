@@ -290,6 +290,11 @@ def watch_for_a_wedged_process(client, interval=WATCHDOG_INTERVAL_SECONDS,
             "Watchdog: %s. Exiting so the service manager can restart the bot.",
             reason,
         )
+        # Also to stderr, which reaches the journal even when the log lines go
+        # to the file alone (POTATOBOT_LOG_CONSOLE=false): a restart the
+        # journal cannot explain looks like a crash. The reason names no member.
+        print(f"Watchdog: {reason}. Exiting so the service manager can restart "
+              "the bot.", file=sys.stderr, flush=True)
         # Flush by hand: `os._exit` runs no handlers, and a watchdog whose own
         # explanation never reached the journal would be indistinguishable from
         # the crash it is reporting.

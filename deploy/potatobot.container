@@ -62,9 +62,12 @@ Environment=PGHOST=potatobot-db
 Environment=PGDATABASE=potatobot
 Environment=PGUSER=potatobot
 Environment=POTATOBOT_DATA_DIR=/data
-# Where 2.20's SQLite file sits, which the copy script reads at the cutover.
-Environment=POTATOBOT_DB_PATH=/data/economy.db
 Environment=POTATOBOT_LOG_DIR=/data/logs
+# Log lines name members (PRIVACY §9) and the journal is on the plain disk, so
+# they go to /data/logs/bot.log in the encrypted volume alone; read them with
+# `sudo -n -u potatobot /usr/local/sbin/potatobot-log` (deploy/potatobot-log).
+# stderr still reaches the journal: tracebacks, stack dumps, the watchdog.
+Environment=POTATOBOT_LOG_CONSOLE=false
 Environment=POTATOBOT_EVERYDLE_STATE_PATH=/data/everydle_state.json
 Environment=POTATOBOT_DASHBOARD_ENABLED=true
 # Inside the container's own network namespace; the host side is loopback.

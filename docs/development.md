@@ -449,7 +449,12 @@ venv/bin/bandit -r . -c pyproject.toml --severity-level high
 That is what `.github/workflows/ci.yml` runs on Python 3.12, 3.13 and 3.14,
 plus a container job that only builds the image and a separate gitleaks job.
 Iterate on one module (`venv/bin/python -m unittest tests.test_gacha -v`)
-rather than the whole suite.
+rather than the whole suite. `scripts/run_tests_parallel.py` runs every module
+in its own process, CPU-count at a time (measured 2026-11-02 on 12 threads:
+63 s against 204 s serial, same 1,785 tests). It is for iteration only: a
+module alone cannot meet another module's leftovers, so the serial `discover`
+stays the gate and runs before a handoff. Its tail is `test_casino_items`,
+whose measured-distribution tests play thousands of real wagers by design.
 
 `mypy` is scoped to `core/` only (`[tool.mypy]` in `pyproject.toml`), not the
 whole repository. Checking `cogs/` was tried and produces mostly noise from
@@ -485,6 +490,7 @@ steps on their own. Never point either at the live file while the bot runs.
 | `rehearse_migration.py` | `pg_dump`s a database, restores it into an empty scratch database you name (`--target`), migrates that through `update_db.py` and compares fingerprints; every refusal (target is the source, target not empty, tools missing) fires before anything is written, and the bot's own pre-migration dump lands in the rehearsal's workdir, never the live backups. Needs version-18 `pg_dump`/`pg_restore`, which the image carries. |
 | `db_snapshot.py` | `record [DSN]` prints a fingerprint as JSON in one read-only transaction: schema version, and per table the row count, columns and an order-independent content hash; `compare` diffs two and fails on lost rows, lost columns, a dropped table or rows rewritten in place. Names the database and host, never a password. |
 | `load_test.py` | Synthetic write load through the bot's own executors against a throwaway database it creates on `--server` (the suite's local PostgreSQL by default) and drops, reporting latency (queue time included) at rising concurrency. `--levels`, `--ops`, `--users`, `--guilds`, `--json`, `--keep`. It has no option to target an existing database, by design. |
+| `run_tests_parallel.py` | The suite one module per process (`discover -s tests -p <file>`), `-j N` at a time, largest file first; optional name filters. A module that ran no test fails. Iteration only, never the gate (section 11). |
 | `local_dashboard.py` | The dashboard on loopback against a development database (section 10): loopback, named `*_dev`, never the one the `PG*` environment names; `--restore DUMP` rebuilds it from a `pg_dump` archive, `--fresh` starts it empty. |
 | `everydle_sources.py` | Upstream adapters for the Everydle datasets; `record <directory>` re-records the test fixtures. |
 | `everydle_drift.py` | Read-only drift report against upstream; exits 1 on drift and 2 when a source is unreachable. `--fixtures`, `--json`. |

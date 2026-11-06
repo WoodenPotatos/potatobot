@@ -4,7 +4,6 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +35,7 @@ from core.settings_registry import DataCategory, DataScopeType
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 
 class DeploymentSettingsTests(unittest.TestCase):
@@ -926,11 +926,7 @@ class FeatureCascadePromptTests(unittest.TestCase):
     """
 
     def test_each_cascaded_feature_names_what_pulls_it(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (ROOT / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         script = ROOT / "tests" / "js" / "feature_cascade_prompt.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)

@@ -10,7 +10,6 @@ rules panel renders as one message rather than one per section.
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,6 +34,7 @@ from core.feature_access import refresh_feature_cache
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 
 class MarkdownPreviewTests(unittest.TestCase):
@@ -45,9 +45,7 @@ class MarkdownPreviewTests(unittest.TestCase):
     """
 
     def test_emphasis_renders_as_discord_does(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         script = ROOT / "tests" / "js" / "markdown_render.js"
         result = subprocess.run([node, str(script), str(ROOT)],
                                 capture_output=True, text=True, timeout=120)
@@ -568,9 +566,7 @@ class CreatorRoundTripTests(unittest.TestCase):
     """
 
     def test_every_kind_round_trips_into_the_payload_the_api_demands(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
 
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         start = source.index("const MANAGED_FIELDS = {")
@@ -642,9 +638,7 @@ class CreatorRoundTripTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
     def test_the_preview_resolves_known_mentions_and_leaves_others_literal(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
 
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         element_start = source.index("function element(tag, className, text) {")
@@ -692,9 +686,7 @@ class CreatorAcceptedByTheApiTests(ManagedMessageRouteTests):
     """
 
     def client_payloads(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
+        node = node_harness.require_node(self)
         source = (ROOT / "dashboard" / "script.js").read_text(encoding="utf-8")
         spec = source[source.index("const MANAGED_FIELDS = {"):
                       source.index("let managedItems = [];")]

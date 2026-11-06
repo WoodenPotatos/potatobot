@@ -9,7 +9,6 @@ was a legal value in three CHECK constraints (`reward_vouchers`,
 """
 
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,6 +25,7 @@ from core import database
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_harness  # noqa: E402
+import node_harness  # noqa: E402
 
 GUILD = 1
 MEMBER = 7
@@ -412,11 +412,7 @@ class RedeemsPageActionsTests(unittest.TestCase):
     avoid."""
 
     def test_the_buttons_send_the_right_delete_requests(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not installed")
-        if not (Path(ROOT) / "node_modules" / "jsdom").is_dir():
-            self.skipTest("jsdom is not installed; run `npm install`")
+        node = node_harness.require_node(self, jsdom=True)
         script = Path(ROOT) / "tests" / "js" / "redeem_actions.js"
         # A zone off UTC, so a UTC timestamp shown raw cannot pass as local.
         env = {**os.environ, "TZ": "Europe/Budapest"}
