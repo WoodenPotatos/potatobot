@@ -55,7 +55,10 @@ class InitializeDatabaseTests(unittest.TestCase):
         with database.get_connection() as conn:
             self.assertEqual(seeded, conn.execute(
                 "SELECT COUNT(*) FROM shop_prices WHERE guild_id = 0").fetchone()[0])
-            self.assertEqual(1, conn.execute(
+            # One row per migration file: a second start applies nothing.
+            migration_files = len(list(
+                (Path(database.__file__).parent / "schema").glob("[0-9]*.sql")))
+            self.assertEqual(migration_files, conn.execute(
                 "SELECT COUNT(*) FROM schema_migrations").fetchone()[0])
         self.assertGreater(seeded, 0)
 

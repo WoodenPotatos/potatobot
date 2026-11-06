@@ -63,8 +63,8 @@ class LeaderboardViewTests(unittest.IsolatedAsyncioTestCase):
     def seed(self, user_id, balance=0, xp=0, streak_count=0):
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO users (user_id, balance, xp, streak_count) "
-                "VALUES (%s, %s, %s, %s)", (user_id, balance, xp, streak_count),
+                "INSERT INTO users (guild_id, user_id, balance, xp, streak_count) "
+                "VALUES (%s, %s, %s, %s, %s)", (GUILD, user_id, balance, xp, streak_count),
             )
 
     def seed_five_star(self, user_id, pity_before, banner_key=None):

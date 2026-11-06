@@ -100,7 +100,6 @@ feature_refresh_task = None
 event_loop_watchdog_task = None
 dashboard_action_task = None
 process_watchdog_thread = None
-legacy_adoption_checked = False
 commands_synchronized = False
 # Any `?word` in chat is an unknown command, and the reply had no cooldown, so
 # `?a ?b ?c` from one member made the bot post three times. The anti-spam check
@@ -335,7 +334,7 @@ bot.setup_hook = load_cogs  # type: ignore[method-assign]
 async def on_ready():
     global feature_refresh_task, event_loop_watchdog_task
     global dashboard_action_task
-    global legacy_adoption_checked, commands_synchronized
+    global commands_synchronized
     bot_logger.info("Connected as %s (ID: %s)", bot.user, bot.user.id)
 
     for guild in bot.guilds:
@@ -375,38 +374,10 @@ async def on_ready():
             control_actions.control_action_worker(bot), name="dashboard-control-actions"
         )
 
-    if deployment_settings.profile.value == "private" and not legacy_adoption_checked:
-        legacy_adoption_checked = True
-        configured_legacy_guild = os.getenv("POTATOBOT_LEGACY_GUILD_ID")
-        if configured_legacy_guild:
-            try:
-                legacy_guild_id = int(configured_legacy_guild)
-            except ValueError:
-                bot_logger.critical("POTATOBOT_LEGACY_GUILD_ID must be an integer")
-                legacy_guild_id = None
-        elif len(bot.guilds) == 1:
-            legacy_guild_id = next(iter(bot.guilds)).id
-        else:
-            legacy_guild_id = None
-        if legacy_guild_id and bot.get_guild(legacy_guild_id):
-            adoption = await database_layer.run_write(
-                database_layer.adopt_legacy_database, legacy_guild_id
-            )
-            if adoption["adopted"]:
-                bot_logger.info(
-                    "Legacy user state seeded into guild and instance scopes "
-                    "(users=%s)",
-                    adoption["user_count"],
-                )
-        elif legacy_guild_id:
-            bot_logger.critical(
-                "Legacy guild is not connected (guild_id=%s)", legacy_guild_id
-            )
-        else:
-            bot_logger.critical(
-                "Legacy scope adoption requires POTATOBOT_LEGACY_GUILD_ID "
-                "when more than one guild is connected"
-            )
+    # `adopt_legacy_database` no longer runs (3.0.0): it copied one wallet per
+    # member into the dormant 3.x scope tables, and with a wallet per guild it
+    # would duplicate every guild's row. Schema 27 attributes the old wallets
+    # instead, and `repair_warning_provenance` does its NULL back-fill.
 
     if not commands_synchronized:
         try:

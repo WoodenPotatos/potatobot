@@ -21,6 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TransactionTests(unittest.TestCase):
+    GUILD = 10  # the guild whose wallet every test below uses
+
     def setUp(self):
         # Always redirect the shared database module before destructive setup.
         # Test modules are imported together, so setting an environment variable
@@ -31,7 +33,8 @@ class TransactionTests(unittest.TestCase):
         pg_harness.fresh_database()
         database.initialize_database()
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 100)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (%s, 1, 100)",
+                (self.GUILD,))
 
     def tearDown(self):
         database.DATA_DIR = self.original_path
@@ -43,24 +46,24 @@ class TransactionTests(unittest.TestCase):
             return list(pool.map(lambda _: callable_(), range(count)))
 
     def test_wager_cannot_spend_one_balance_more_than_once(self):
-        results = self.run_parallel(lambda: database.reserve_wager(1, 40))
+        results = self.run_parallel(lambda: database.reserve_wager(self.GUILD, 1, 40))
         self.assertEqual(sum(result is not None for result in results), 2)
-        self.assertEqual(database.get_user_balance(1), 20)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 20)
 
     def test_instant_wager_reserves_and_settles_atomically(self):
         results = self.run_parallel(
-            lambda: database.resolve_instant_wager(1, 40, loss_inc=1)
+            lambda: database.resolve_instant_wager(self.GUILD, 1, 40, loss_inc=1)
         )
         self.assertEqual(sum(result is not None for result in results), 2)
-        self.assertEqual(database.get_user_balance(1), 20)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 20)
 
     def test_reserved_wager_payout_preserves_net_game_result(self):
-        self.assertEqual(database.reserve_wager(1, 10), 90)
-        result = database.settle_wager(1, credit=20, win_inc=1)
+        self.assertEqual(database.reserve_wager(self.GUILD, 1, 10), 90)
+        result = database.settle_wager(self.GUILD, 1, credit=20, win_inc=1)
         self.assertEqual(result["stats"][0], 110)
 
     def test_interactive_wager_settles_exactly_once(self):
-        reservation = database.begin_interactive_wager("wager-1", 10, 1, "mines", 20)
+        reservation = database.begin_interactive_wager("wager-1", self.GUILD, 1, "mines", 20)
         self.assertEqual(reservation["balance"], 80)
         # No item asked for, so none was spent.
         self.assertFalse(reservation["consumed"])
@@ -70,49 +73,52 @@ class TransactionTests(unittest.TestCase):
             )
         )
         self.assertEqual(sum(result is not None for result in results), 1)
-        self.assertEqual(database.get_user_balance(1), 120)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 120)
 
     def test_restart_recovery_refunds_pending_wager_once(self):
-        database.begin_interactive_wager("wager-2", 10, 1, "blackjack", 30)
+        database.begin_interactive_wager("wager-2", self.GUILD, 1, "blackjack", 30)
         first = database.refund_pending_wagers()
         second = database.refund_pending_wagers()
         self.assertEqual(first, {"count": 1, "amount": 30})
         self.assertEqual(second, {"count": 0, "amount": 0})
-        self.assertEqual(database.get_user_balance(1), 100)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 100)
 
     def test_double_down_increases_recoverable_stake(self):
-        database.begin_interactive_wager("wager-3", 10, 1, "blackjack", 20)
+        database.begin_interactive_wager("wager-3", self.GUILD, 1, "blackjack", 20)
         self.assertEqual(database.increase_interactive_wager("wager-3", 1, 20), 60)
         recovered = database.refund_pending_wagers()
         self.assertEqual(recovered, {"count": 1, "amount": 40})
-        self.assertEqual(database.get_user_balance(1), 100)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 100)
 
     def test_periodic_reward_is_atomic_and_guild_local(self):
         results = self.run_parallel(
-            lambda: database.claim_periodic_reward(10, 1, "server_boost", 50, 30)
+            lambda: database.claim_periodic_reward(self.GUILD, 1, "server_boost", 50, 30)
         )
         self.assertEqual(sum(result is not None for result in results), 1)
-        self.assertEqual(database.get_user_balance(1), 150)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 150)
         self.assertIsNotNone(
             database.claim_periodic_reward(11, 1, "server_boost", 50, 30)
         )
-        self.assertEqual(database.get_user_balance(1), 200)
+        # Wallets are per guild (schema 27): the second guild's claim pays that
+        # guild's own wallet, which starts empty, and leaves this one alone.
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 150)
+        self.assertEqual(database.get_user_balance(11, 1), 50)
 
     def test_transfer_is_atomic_and_preserves_total_balance(self):
-        results = self.run_parallel(lambda: database.transfer_balance(1, 2, 40))
+        results = self.run_parallel(lambda: database.transfer_balance(self.GUILD, 1, 2, 40))
         self.assertEqual(sum(result is not None for result in results), 2)
-        self.assertEqual(database.get_user_balance(1), 20)
-        self.assertEqual(database.get_user_balance(2), 180)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 20)
+        self.assertEqual(database.get_user_balance(self.GUILD, 2), 180)
 
     def test_batch_award_updates_every_member_once(self):
-        count = database.apply_batch_balance([1, 2, 2, 3], 50)
+        count = database.apply_batch_balance(self.GUILD, [1, 2, 2, 3], 50)
         self.assertEqual(count, 3)
-        self.assertEqual(database.get_user_balance(1), 150)
-        self.assertEqual(database.get_user_balance(2), 150)
-        self.assertEqual(database.get_user_balance(3), 150)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 150)
+        self.assertEqual(database.get_user_balance(self.GUILD, 2), 150)
+        self.assertEqual(database.get_user_balance(self.GUILD, 3), 150)
 
     def test_batch_rewards_apply_balance_and_xp_once(self):
-        results = database.apply_batch_user_deltas([(1, 5, 20), (2, 10, 40)])
+        results = database.apply_batch_user_deltas(self.GUILD, [(1, 5, 20), (2, 10, 40)])
         self.assertEqual(results[1]["stats"][:3], (105, 20, 2))
         self.assertEqual(results[2]["stats"][:3], (110, 40, 3))
         self.assertTrue(results[1]["xp_changed"])
@@ -121,68 +127,73 @@ class TransactionTests(unittest.TestCase):
         now = datetime.now(timezone.utc).isoformat()
         results = self.run_parallel(
             lambda: database.claim_timed_reward(
-                1, "last_daily", now, 500, 50, once_per_day=True
+                self.GUILD, 1, "last_daily", now, 500, 50, once_per_day=True
             )
         )
         self.assertEqual(sum(result["claimed"] for result in results), 1)
-        self.assertEqual(database.get_user_balance(1), 600)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 600)
 
     def test_everydle_reward_and_streak_are_claimed_once(self):
         now = datetime.now(timezone.utc).isoformat()
         results = self.run_parallel(
             lambda: database.claim_everydle_reward(
-                1, "last_valdle", now, 500, 100
+                self.GUILD, 1, "last_valdle", now, 500, 100
             )
         )
         self.assertEqual(sum(result["claimed"] for result in results), 1)
-        self.assertEqual(database.get_user_balance(1), 605)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 605)
         with database.get_connection() as conn:
             streak = conn.execute(
-                "SELECT streak_count FROM users WHERE user_id = 1"
+                "SELECT streak_count FROM users WHERE guild_id = %s AND user_id = 1",
+                (self.GUILD,)
             ).fetchone()[0]
         self.assertEqual(streak, 1)
 
     def test_multiple_everydle_modes_do_not_increment_streak_twice(self):
         now = datetime.now(timezone.utc).isoformat()
-        first = database.claim_everydle_reward(1, "last_valdle", now, 500, 100)
-        second = database.claim_everydle_reward(1, "last_dbdle_killer", now, 500, 100)
+        first = database.claim_everydle_reward(self.GUILD, 1, "last_valdle", now, 500, 100)
+        second = database.claim_everydle_reward(self.GUILD, 1, "last_dbdle_killer", now, 500, 100)
         self.assertTrue(first["claimed"])
         self.assertTrue(second["claimed"])
         with database.get_connection() as conn:
             streak = conn.execute(
-                "SELECT streak_count FROM users WHERE user_id = 1"
+                "SELECT streak_count FROM users WHERE guild_id = %s AND user_id = 1",
+                (self.GUILD,)
             ).fetchone()[0]
         self.assertEqual(streak, 1)
 
     def test_robbery_cooldown_and_transfer_are_atomic(self):
         with database.get_connection() as conn:
-            conn.execute("UPDATE users SET balance = 10000 WHERE user_id = 1")
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 10000)")
+            conn.execute("UPDATE users SET balance = 10000 WHERE guild_id = %s AND user_id = 1",
+                         (self.GUILD,))
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (%s, 2, 10000)",
+                         (self.GUILD,))
         now = datetime.now(timezone.utc).isoformat()
         results = self.run_parallel(
-            lambda: database.resolve_robbery(1, 2, now, 1.0, 1.0, 0.0, 0.10)
+            lambda: database.resolve_robbery(self.GUILD, 1, 2, now, 1.0, 1.0, 0.0, 0.10)
         )
         self.assertEqual(sum(result["resolved"] for result in results), 1)
-        self.assertEqual(database.get_user_balance(1) + database.get_user_balance(2), 20000)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1) + database.get_user_balance(self.GUILD, 2), 20000)
 
     def test_critical_write_failures_are_raised(self):
         with pg_harness.unreachable_database():
             with self.assertLogs("PotatoBot.Database", level="ERROR"):
                 with self.assertRaises(database.DatabaseOperationError):
-                    database.reserve_wager(1, 10)
+                    database.reserve_wager(self.GUILD, 1, 10)
 
     def test_lockpick_purchase_is_atomic(self):
         """A lockpick is a stackable inventory item, so concurrent buys must each
         either debit and grant one, or do neither — never one without the other."""
         with database.get_connection() as conn:
-            conn.execute("UPDATE users SET balance = 200 WHERE user_id = 1")
+            conn.execute("UPDATE users SET balance = 200 WHERE guild_id = %s AND user_id = 1",
+                         (self.GUILD,))
         results = self.run_parallel(
-            lambda: database.purchase_inventory_item(10, 1, 80, "lockpick")
+            lambda: database.purchase_inventory_item(self.GUILD, 1, 80, "lockpick")
         )
         bought = sum(result["purchased"] for result in results)
         self.assertEqual(bought, 2)
-        self.assertEqual(database.get_user_balance(1), 200 - bought * 80)
-        self.assertEqual(database.get_user_inventory(10, 1)["lockpick"], bought)
+        self.assertEqual(database.get_user_balance(self.GUILD, 1), 200 - bought * 80)
+        self.assertEqual(database.get_user_inventory(self.GUILD, 1)["lockpick"], bought)
 
     def test_cooldown_reset_uses_current_schema(self):
         now = datetime.now(timezone.utc).isoformat()
@@ -191,14 +202,15 @@ class TransactionTests(unittest.TestCase):
                 """
                 UPDATE users
                 SET last_daily = %s, last_loldle_easy = %s, last_dbdle_killer = %s
-                WHERE user_id = 1
+                WHERE guild_id = %s AND user_id = 1
                 """,
-                (now, now, now),
+                (now, now, now, self.GUILD),
             )
-        database.reset_user_cooldowns(1)
+        database.reset_user_cooldowns(self.GUILD, 1)
         with database.get_connection() as conn:
             values = conn.execute(
-                "SELECT last_daily, last_loldle_easy, last_dbdle_killer FROM users WHERE user_id = 1"
+                "SELECT last_daily, last_loldle_easy, last_dbdle_killer FROM users "
+                "WHERE guild_id = %s AND user_id = 1", (self.GUILD,)
             ).fetchone()
         self.assertEqual(values, (None, None, None))
 
@@ -221,6 +233,7 @@ class EverydleStreakPayoutTests(unittest.TestCase):
     variable survived, so these assert coins.
     """
 
+    GUILD = 1
     BASE_COIN = 5000
     BASE_XP = 100
 
@@ -239,7 +252,7 @@ class EverydleStreakPayoutTests(unittest.TestCase):
     def claim(self, offset_days=0, column="last_valdle"):
         when = (self.day + timedelta(days=offset_days)).isoformat()
         return database.claim_everydle_reward(
-            1, column, when, self.BASE_COIN, self.BASE_XP)
+            self.GUILD, 1, column, when, self.BASE_COIN, self.BASE_XP)
 
     def expected(self, streak):
         return int(self.BASE_COIN * (1.0 + min(streak, 100) / 100.0))
@@ -273,10 +286,12 @@ class EverydleStreakPayoutTests(unittest.TestCase):
 
     def test_the_bonus_is_capped(self):
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id) VALUES (1) ON CONFLICT DO NOTHING")
+            conn.execute("INSERT INTO users (guild_id, user_id) VALUES (%s, 1) "
+                "ON CONFLICT DO NOTHING", (self.GUILD,))
             conn.execute(
                 "UPDATE users SET streak_count = 150, last_streak_update = %s "
-                "WHERE user_id = 1", ((self.day - timedelta(days=1)).isoformat(),))
+                "WHERE guild_id = %s AND user_id = 1",
+                ((self.day - timedelta(days=1)).isoformat(), self.GUILD))
         result = self.claim(0)
         self.assertEqual(151, result["streak"])
         self.assertEqual(self.expected(100), result["reward"],
@@ -292,6 +307,7 @@ class AmountBoundTests(unittest.TestCase):
     """
 
     HUGE = 10**19
+    GUILD = 1
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -301,15 +317,17 @@ class AmountBoundTests(unittest.TestCase):
         database.initialize_database()
         database.register_guild(1, "Guild")
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 500)")
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 500)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) "
+                         "VALUES (%s, 1, 500)", (self.GUILD,))
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) "
+                         "VALUES (%s, 2, 500)", (self.GUILD,))
 
     def tearDown(self):
         database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_an_instant_stake_past_the_bound_is_refused_not_raised(self):
-        self.assertIsNone(database.resolve_instant_wager(1, self.HUGE))
+        self.assertIsNone(database.resolve_instant_wager(self.GUILD, 1, self.HUGE))
         self.assertIsNone(database.resolve_dice_wager(1, 1, self.HUGE, 1, 1, 1))
         self.assertIsNone(database.resolve_wheel_wager(1, 1, self.HUGE))
         self.assertIsNone(database.resolve_slots_wager(1, 1, self.HUGE))
@@ -318,17 +336,17 @@ class AmountBoundTests(unittest.TestCase):
         self.assertIsNone(database.begin_interactive_wager("w", 1, 1, "bj", self.HUGE))
 
     def test_a_transfer_past_the_bound_is_refused(self):
-        self.assertIsNone(database.transfer_balance(1, 2, self.HUGE))
-        self.assertEqual(500, database.get_user_balance(2))
+        self.assertIsNone(database.transfer_balance(self.GUILD, 1, 2, self.HUGE))
+        self.assertEqual(500, database.get_user_balance(self.GUILD, 2))
 
     def test_a_raw_delta_past_the_bound_names_the_reason(self):
         with self.assertRaises(database.ValidationError) as caught:
-            database.apply_user_delta(1, self.HUGE)
+            database.apply_user_delta(self.GUILD, 1, self.HUGE)
         self.assertEqual("amount_out_of_range", caught.exception.reason)
-        self.assertEqual(500, database.get_user_balance(1))
+        self.assertEqual(500, database.get_user_balance(self.GUILD, 1))
 
     def test_the_bound_is_generous_enough_for_any_real_balance(self):
-        result = database.apply_user_delta(1, database.MAX_AMOUNT)
+        result = database.apply_user_delta(self.GUILD, 1, database.MAX_AMOUNT)
         self.assertEqual(500 + database.MAX_AMOUNT, result["stats"][0])
 
 
@@ -888,22 +906,26 @@ class OrderingContractTests(unittest.TestCase):
         self.addCleanup(self.temp_dir.cleanup)
         self.addCleanup(setattr, database, "DATA_DIR", self.original_path)
 
+    GUILD = 1
+
     def _users(self, rows):
         with database.get_connection() as conn:
             conn.cursor().executemany(
-                "INSERT INTO users (user_id, xp, balance) VALUES (%s, %s, %s)", rows)
+                "INSERT INTO users (guild_id, user_id, xp, balance) "
+                "VALUES (%s, %s, %s, %s)",
+                [(self.GUILD, *row) for row in rows])
 
     def test_leaderboard_ties_rank_by_id_and_null_is_never_first(self):
         # SQLite put NULL last in a descending sort; PostgreSQL puts it first,
         # which would rank a NULL above everyone and break the merge's sort.
         self._users([(9, 5, 5), (3, 5, 5), (7, 5, 5), (1, 8, 8), (5, None, None)])
         members = [1, 3, 5, 7, 9]
-        self.assertEqual([1, 3, 7], [row[0] for row in database.get_top_levels(members, 3)])
-        self.assertEqual([1, 3, 7], [row[0] for row in database.get_top_balances(members, 3)])
+        self.assertEqual([1, 3, 7], [row[0] for row in database.get_top_levels(self.GUILD, members, 3)])
+        self.assertEqual([1, 3, 7], [row[0] for row in database.get_top_balances(self.GUILD, members, 3)])
 
     def test_the_top_xp_tie_goes_to_the_lower_id(self):
         self._users([(7, 10, 0), (3, 10, 0), (4, None, 0)])
-        self.assertEqual(3, database.get_top_xp_user([3, 4, 7]))
+        self.assertEqual(3, database.get_top_xp_user(self.GUILD, [3, 4, 7]))
 
     def test_a_guild_without_a_name_lists_first(self):
         for guild_id, name in ((30, "Beta"), (10, "Alpha"), (20, None)):
@@ -944,12 +966,13 @@ class OrderingContractTests(unittest.TestCase):
         off it instead (2.20.8a)."""
         with database.get_connection() as conn:
             conn.cursor().executemany(
-                "INSERT INTO users (user_id, xp, balance, streak_count) VALUES (%s, %s, %s, %s)",
-                [(1, 5, 50, 2), (2, None, None, None)])
-        self.assertEqual([1], [row[0] for row in database.get_top_levels([1, 2], 10)])
-        self.assertEqual([1], [row[0] for row in database.get_top_balances([1, 2], 10)])
-        self.assertEqual([1], [row[0] for row in database.get_top_streaks([1, 2], 10)])
-        self.assertEqual(1, database.get_top_xp_user([1, 2]))
+                "INSERT INTO users (guild_id, user_id, xp, balance, streak_count) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                [(self.GUILD, 1, 5, 50, 2), (self.GUILD, 2, None, None, None)])
+        self.assertEqual([1], [row[0] for row in database.get_top_levels(self.GUILD, [1, 2], 10)])
+        self.assertEqual([1], [row[0] for row in database.get_top_balances(self.GUILD, [1, 2], 10)])
+        self.assertEqual([1], [row[0] for row in database.get_top_streaks(self.GUILD, [1, 2], 10)])
+        self.assertEqual(1, database.get_top_xp_user(self.GUILD, [1, 2]))
 
 
 class BannerScheduleInstantTests(unittest.TestCase):

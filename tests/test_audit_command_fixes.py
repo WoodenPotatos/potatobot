@@ -81,7 +81,7 @@ class CooldownReadTests(unittest.TestCase):
     def test_a_database_error_is_raised_not_read_as_no_cooldown(self):
         with pg_harness.unreachable_database():
             with self.assertRaises(database.DatabaseOperationError):
-                database.get_cooldown(1, "last_valdle")
+                database.get_cooldown(1, 1, "last_valdle")
 
     def test_the_log_lines_are_english(self):
         source = (ROOT / "core" / "database.py").read_text(encoding="utf-8")

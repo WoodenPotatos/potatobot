@@ -37,8 +37,8 @@ class GachaTests(unittest.TestCase):
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 1000000)")
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 100000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (10, 1, 1000000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (10, 2, 100000)")
 
     def tearDown(self):
         database.DATA_DIR = self.original_path
@@ -79,40 +79,40 @@ class GachaTests(unittest.TestCase):
 
     def test_ten_pull_is_all_or_nothing(self):
         with database.get_connection() as conn:
-            conn.execute("UPDATE users SET balance = 49999 WHERE user_id = 1")
+            conn.execute("UPDATE users SET balance = 49999 WHERE guild_id = 10 AND user_id = 1")
         result = database.perform_gacha_pulls(10, 1, 10, rng=QueueRng())
         self.assertFalse(result["purchased"])
-        self.assertEqual(database.get_user_balance(1), 49999)
+        self.assertEqual(database.get_user_balance(10, 1), 49999)
         with database.get_connection() as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM gacha_pulls").fetchone()[0], 0)
 
     def test_duplicate_vault_grants_configured_compensation(self):
         with database.get_connection() as conn:
-            conn.execute("UPDATE users SET protected_reserve = 500000 WHERE user_id = 1")
+            conn.execute("UPDATE users SET protected_reserve = 500000 WHERE guild_id = 10 AND user_id = 1")
             conn.execute(
                 "INSERT INTO gacha_pity "
                 "(guild_id, user_id, banner_key, pulls_since_five_star, "
                 "pulls_toward_four_star, updated_at) VALUES (10, 1, 'standard', 99, 0, %s)",
                 (datetime.now(timezone.utc).isoformat(),),
             )
-        before = database.get_user_balance(1)
+        before = database.get_user_balance(10, 1)
         result = database.perform_gacha_pulls(10, 1, 1, rng=QueueRng(0))
         reward = result["results"][0]
         # The banner awards vaults under the shop's item keys, so the same key
         # always means the same protected reserve whichever system granted it.
         self.assertEqual(reward["key"], "big_vault")
         self.assertEqual(reward["duplicate_compensation"], 50000)
-        self.assertEqual(database.get_user_balance(1), before - 5000 + 50000)
+        self.assertEqual(database.get_user_balance(10, 1), before - 5000 + 50000)
 
     def test_glove_exposes_one_quarter_of_protected_reserve_and_is_consumed(self):
         with database.get_connection() as conn:
-            conn.execute("UPDATE users SET protected_reserve = 100000 WHERE user_id = 2")
+            conn.execute("UPDATE users SET protected_reserve = 100000 WHERE guild_id = 10 AND user_id = 2")
             conn.execute(
                 "INSERT INTO user_inventory VALUES (10, 1, 'vault_glove', 1, %s)",
                 (datetime.now(timezone.utc).isoformat(),),
             )
         result = database.resolve_robbery(
-            1, 2, datetime.now(timezone.utc).isoformat(), 1.0, 1.0, 0.0, 0.10, 10
+            10, 1, 2, datetime.now(timezone.utc).isoformat(), 1.0, 1.0, 0.0, 0.10
         )
         self.assertEqual(result["amount"], 2500)
         self.assertTrue(result["consumed_glove"])
@@ -281,10 +281,10 @@ class GachaTests(unittest.TestCase):
                 "'{\"role_id\": 555}', %s)",
                 (datetime.now(timezone.utc).isoformat(),),
             )
-        before = database.get_user_balance(1)
+        before = database.get_user_balance(10, 1)
         purchase = database.purchase_custom_shop_item(10, 1, "vip_role")
         self.assertEqual(purchase["price"], 1000)
-        self.assertEqual(database.get_user_balance(1), before - 1000)
+        self.assertEqual(database.get_user_balance(10, 1), before - 1000)
 
         # An administrator raising the price between debit and rollback must not
         # change what the compensating refund returns.
@@ -297,7 +297,7 @@ class GachaTests(unittest.TestCase):
             10, 1, purchase["price"], purchase["template_type"], 555,
             purchase["config"].get("duration_days"),
         )
-        self.assertEqual(database.get_user_balance(1), before)
+        self.assertEqual(database.get_user_balance(10, 1), before)
 
     def test_timed_role_rollback_restores_the_previous_expiry(self):
         with database.get_connection() as conn:
@@ -431,7 +431,7 @@ class GachaBannerTests(unittest.TestCase):
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 1000000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (10, 1, 1000000)")
 
     def tearDown(self):
         database.DATA_DIR = self.original_path
@@ -488,7 +488,7 @@ class GachaBannerTests(unittest.TestCase):
             self.assertEqual(
                 1000000,
                 conn.execute(
-                    "SELECT balance FROM users WHERE user_id = 1"
+                    "SELECT balance FROM users WHERE guild_id = 10 AND user_id = 1"
                 ).fetchone()[0],
             )
 
@@ -584,7 +584,7 @@ class GachaBannerScheduleTests(unittest.TestCase):
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 1000000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (10, 1, 1000000)")
 
     def tearDown(self):
         database.DATA_DIR = self.original_path
@@ -807,7 +807,7 @@ class FeaturedSplitTests(unittest.TestCase):
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 100000000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (10, 1, 100000000)")
 
     def tearDown(self):
         database.DATA_DIR = self.original_path
@@ -1117,7 +1117,7 @@ class FeaturedSplitRateTests(unittest.TestCase):
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 100000000000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (10, 1, 100000000000)")
 
     def tearDown(self):
         database.DATA_DIR = self.original_path
@@ -1249,7 +1249,7 @@ class PityHistoryTests(unittest.TestCase):
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 100000000000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (10, 1, 100000000000)")
 
     def tearDown(self):
         database.DATA_DIR = self.original_path

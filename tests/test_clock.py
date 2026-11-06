@@ -19,6 +19,8 @@ from core.clock import local_date, local_time, parse_stored, stored_iso, utc_now
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_harness  # noqa: E402
 
+GUILD = 4242  # synthetic guild id; wallets are per guild since schema 27
+
 
 class LocalZone:
     """Pin the process to a zone with a spring clock change, then put it back.
@@ -128,7 +130,8 @@ class LegacyRowsKeepTheirCooldownsTests(unittest.TestCase):
         pg_harness.fresh_database()
         database.initialize_database()
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 100)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (%s, 1, 100)",
+                (GUILD,))
 
     def tearDown(self):
         database.DATA_DIR = self.original_path
@@ -136,7 +139,7 @@ class LegacyRowsKeepTheirCooldownsTests(unittest.TestCase):
 
     def _set(self, column, value):
         with database.get_connection() as conn:
-            conn.execute(f"UPDATE users SET {column} = %s WHERE user_id = 1", (value,))
+            conn.execute(f"UPDATE users SET {column} = %s WHERE guild_id = %s AND user_id = 1", (value, GUILD))
 
     def _set_legacy(self, column, naive_local_text):
         """Store a legacy naive value as the copy writes it: host-local time."""
@@ -147,7 +150,7 @@ class LegacyRowsKeepTheirCooldownsTests(unittest.TestCase):
             legacy = (datetime.now() - timedelta(minutes=10)).isoformat()  # naive, local
             self._set_legacy("last_job", legacy)
             result = database.claim_timed_reward(
-                1, "last_job", utc_now().isoformat(), 50, 5, interval_seconds=15 * 60)
+                GUILD, 1, "last_job", utc_now().isoformat(), 50, 5, interval_seconds=15 * 60)
         self.assertFalse(result["claimed"])
 
     def test_a_naive_work_stamp_twenty_minutes_ago_has_expired(self):
@@ -155,7 +158,7 @@ class LegacyRowsKeepTheirCooldownsTests(unittest.TestCase):
             legacy = (datetime.now() - timedelta(minutes=20)).isoformat()
             self._set_legacy("last_job", legacy)
             result = database.claim_timed_reward(
-                1, "last_job", utc_now().isoformat(), 50, 5, interval_seconds=15 * 60)
+                GUILD, 1, "last_job", utc_now().isoformat(), 50, 5, interval_seconds=15 * 60)
         self.assertTrue(result["claimed"])
 
     def test_a_naive_streak_stamp_from_yesterday_continues_the_streak(self):
@@ -164,7 +167,7 @@ class LegacyRowsKeepTheirCooldownsTests(unittest.TestCase):
             self._set("streak_count", 4)
             self._set_legacy("last_streak_update", yesterday)
             result = database.claim_everydle_reward(
-                1, "last_valdle", utc_now().isoformat(), 500, 100)
+                GUILD, 1, "last_valdle", utc_now().isoformat(), 500, 100)
         self.assertTrue(result["claimed"])
         self.assertEqual(5, result["streak"])
 
@@ -173,7 +176,7 @@ class LegacyRowsKeepTheirCooldownsTests(unittest.TestCase):
             earlier = datetime.now().replace(hour=0, minute=5, second=0).isoformat()
             self._set_legacy("last_daily", earlier)
             result = database.claim_timed_reward(
-                1, "last_daily", utc_now().isoformat(), 500, 50, once_per_day=True)
+                GUILD, 1, "last_daily", utc_now().isoformat(), 500, 50, once_per_day=True)
         self.assertFalse(result["claimed"])
 
 

@@ -6,7 +6,34 @@ stable. A build keeps its number across channels, so `2.18.3a` publishes as
 2026-10-22 by adding the old beta serial to z (`2.18.0-beta.1` is `2.18.1b`);
 the public repository's git tags keep their original names.
 
-## 2.21.37b
+## 3.0.5b
+
+- **3.0.0: every server has its own economy.** Your coin balance, experience,
+  level, cooldowns, `/daily`, Everydle streaks and casino limits are now kept
+  separately in each server the bot is in, so coins earned in one server
+  cannot be spent in another and a member of two servers no longer earns
+  twice into one wallet. Everything you had is kept, in the server where you
+  earned it; in any server you join later you start at 0 (a brand-new account
+  still gets its starting coins in its first server). Leaderboards, `/profile`
+  and robbery read the current server's wallets.
+- **Privacy Policy 1.2.** Sections 2, 4, 7 and 8 say that this data is kept
+  per server, that `/mydata` and `/deletemydata` cover every server, and that
+  the retention sweep only removes a member inactive in every server.
+- **Operators: schema 27, the first migration that cannot be undone by
+  running an older version.** It adds `guild_id` to every wallet and keys
+  `users` and `casino_earnings_window` by (`guild_id`, `user_id`). Existing
+  wallets are attributed to the one guild the installation served: the
+  `POTATOBOT_LEGACY_GUILD_ID` environment value if set, otherwise the single
+  active guild, otherwise the guild recorded by the 2.x scope adoption. If
+  none of those answers, the bot refuses to start and changes nothing; set
+  `POTATOBOT_LEGACY_GUILD_ID` and start again. Rolling back means restoring
+  the `pg_dump` the bot takes before migrating, which loses every coin earned
+  after the upgrade. `adopt_legacy_database` no longer runs at start.
+- **The casino rate-limit alert no longer misses its first post after a
+  reboot.** For the length of the window after the host started, the first
+  throttle of each member was silently not reported to staff.
+
+## 2.21.37
 
 - **SQLite support is removed.** Installations still on SQLite (2.19.x and
   earlier) stay on the last SQLite stable, 2.19.29, which the public

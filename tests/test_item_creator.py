@@ -428,13 +428,13 @@ class FreeFormVaultTests(DashboardItemTestCase):
     def test_buying_it_protects_exactly_that_amount(self):
         self.create_item(self.make("vault_extra", 300000, price=500))
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (7, 900000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (123, 7, 900000)")
             conn.commit()
         result = database.purchase_custom_shop_item(123, 7, "vault_extra")
         self.assertTrue(result["purchased"])
         with database.get_connection() as conn:
             reserve = conn.execute(
-                "SELECT protected_reserve FROM users WHERE user_id = 7"
+                "SELECT protected_reserve FROM users WHERE guild_id = 123 AND user_id = 7"
             ).fetchone()[0]
         self.assertEqual(300000, reserve)
 
@@ -443,13 +443,13 @@ class FreeFormVaultTests(DashboardItemTestCase):
         self.create_item(self.make("vault_extra", 300000, price=500))
         self.create_item(self.make("vault_tiny", 25000, price=100))
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (7, 900000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (123, 7, 900000)")
             conn.commit()
         database.purchase_custom_shop_item(123, 7, "vault_extra")
         database.purchase_custom_shop_item(123, 7, "vault_tiny")
         with database.get_connection() as conn:
             reserve = conn.execute(
-                "SELECT protected_reserve FROM users WHERE user_id = 7"
+                "SELECT protected_reserve FROM users WHERE guild_id = 123 AND user_id = 7"
             ).fetchone()[0]
         self.assertEqual(300000, reserve)
 

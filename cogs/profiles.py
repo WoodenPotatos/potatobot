@@ -83,7 +83,7 @@ class LeaderboardView(discord.ui.View):
 
     async def _wealth_embed(self):
         results = await database.run(
-            database.get_top_balances, guild_member_ids(self.guild), 10
+            database.get_top_balances, self.guild.id, guild_member_ids(self.guild), 10
         )
 
         if not results:
@@ -103,7 +103,7 @@ class LeaderboardView(discord.ui.View):
 
     async def _levels_embed(self):
         results = await database.run(
-            database.get_top_levels, guild_member_ids(self.guild), 10
+            database.get_top_levels, self.guild.id, guild_member_ids(self.guild), 10
         )
 
         if not results:
@@ -118,7 +118,7 @@ class LeaderboardView(discord.ui.View):
 
     async def _streaks_embed(self):
         results = await database.run(
-            database.get_top_streaks, guild_member_ids(self.guild), 10
+            database.get_top_streaks, self.guild.id, guild_member_ids(self.guild), 10
         )
 
         if not results:
@@ -199,14 +199,15 @@ class ProfileView(discord.ui.View):
         self.add_item(btn_refresh)
 
     async def generate_embed(self):
-        result = await database.run(database.get_user_profile, self.member.id)
+        result = await database.run(database.get_user_profile, self.member.guild.id, self.member.id)
         
         if not result:
             return None 
             
         lvl, xp, bal, wins, losses, streak_count, last_streak_update = result
         rank = await database.run(
-            database.get_user_rank, xp, guild_member_ids(self.member.guild)
+            database.get_user_rank, self.member.guild.id, xp,
+            guild_member_ids(self.member.guild)
         )
 
         prev_lvl_xp = 10 * ((lvl - 1) ** 2)

@@ -121,15 +121,17 @@ class StreakFreezeTests(unittest.TestCase):
         database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
-    def _set_streak(self, count, days_ago):
+    def _set_streak(self, count, days_ago, guild=None):
+        guild = self.guild if guild is None else guild
         when = (self.now - timedelta(days=days_ago)).isoformat()
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING",
-                         (self.user,))
+            conn.execute("INSERT INTO users (guild_id, user_id) VALUES (%s, %s) "
+                         "ON CONFLICT DO NOTHING", (guild, self.user))
             conn.execute(
                 "UPDATE users SET streak_count = %s, last_streak_update = %s, "
-                "last_valdle = NULL, last_dbdle_killer = NULL WHERE user_id = %s",
-                (count, when, self.user))
+                "last_valdle = NULL, last_dbdle_killer = NULL "
+                "WHERE guild_id = %s AND user_id = %s",
+                (count, when, guild, self.user))
 
     def _give(self, quantity):
         with database.get_connection() as conn:
@@ -144,9 +146,9 @@ class StreakFreezeTests(unittest.TestCase):
         return database.get_user_inventory(self.guild, self.user).get(
             "streak_freeze", 0)
 
-    def _claim(self, guild_id=None, column="last_valdle"):
+    def _claim(self, guild_id, column="last_valdle"):
         return database.claim_everydle_reward(
-            self.user, column, self.now.isoformat(), 500, 100, guild_id)
+            guild_id, self.user, column, self.now.isoformat(), 500, 100)
 
     def test_the_item_is_one_catalog_entry_reachable_from_both_systems(self):
         from core import item_catalog
@@ -202,17 +204,19 @@ class StreakFreezeTests(unittest.TestCase):
         self.assertEqual(0, self._held())
 
     def test_inventory_is_guild_local_so_another_guild_cannot_spend_it(self):
-        self._set_streak(10, 3)
+        self._set_streak(10, 3, guild=999)
         self._give(1)
         result = self._claim(999)
         self.assertEqual(1, result["streak"])
         self.assertEqual(1, self._held())
 
-    def test_no_guild_context_behaves_exactly_as_before(self):
+    def test_no_guild_context_is_refused_and_spends_nothing(self):
+        # Wallets are per guild, so a claim with no guild has no wallet to
+        # read or credit; it is refused rather than guessing one.
         self._set_streak(10, 3)
         self._give(1)
-        result = self._claim(None)
-        self.assertEqual(1, result["streak"])
+        with self.assertRaises(database.DatabaseOperationError):
+            self._claim(None)
         self.assertEqual(1, self._held())
 
 

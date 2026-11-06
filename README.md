@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, `deploy/` holds the systemd units and a rootless podman Quadlet unit, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.21.37b** &nbsp;·&nbsp; channel `beta`
+**Version 3.0.5b** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -106,10 +106,10 @@ Important environment variables are documented in `.env.example`. In particular:
 - `POTATOBOT_DATA_DIR` selects where the dashboard session secret and welcome-card backgrounds live; unset, they sit beside the database.
 - `POTATOBOT_DB_READ_WORKERS` selects 2–8 concurrent read workers; the default is 4.
 - `POTATOBOT_DEPLOYMENT_PROFILE` accepts `private`, `managed`, or `self_hosted`.
-- `POTATOBOT_LEGACY_GUILD_ID` identifies the original guild when a legacy private database is connected to multiple guilds.
+- `POTATOBOT_LEGACY_GUILD_ID` names the guild a 2.x database's wallets belong to when schema 27 cannot tell (more than one active guild and no adoption marker).
 - Dashboard OAuth requires matching HTTPS values for `POTATOBOT_DASHBOARD_EXTERNAL_URL` and `DISCORD_REDIRECT_URI`, with the latter ending in `/api/callback`.
 
-The schema is at version 26. Prices, rewards, voice preferences, leaderboards, ranks, rental cleanup, `/work` responses and gacha banners are per guild, with `guild_id` 0 holding the installation default; installation-wide settings live in their own table with no guild dimension at all. Wallets are not: `users` is still keyed by Discord user ID alone, so the live economy is not multi-guild-safe yet and cooldowns are deliberately installation-wide. Per-guild wallets are planned for 3.0.0, and economies shared between guilds for 3.x. The dashboard has one host, `ADMIN_DISCORD_ID`; under the `self_hosted` profile each guild's owner, administrators and Manage Server holders can also manage that guild.
+The schema is at version 27. Prices, rewards, voice preferences, leaderboards, ranks, rental cleanup, `/work` responses and gacha banners are per guild, with `guild_id` 0 holding the installation default; installation-wide settings live in their own table with no guild dimension at all. Wallets are not: `users` is still keyed by Discord user ID alone, so the live economy is not multi-guild-safe yet and cooldowns are deliberately installation-wide. Per-guild wallets are planned for 3.0.0, and economies shared between guilds for 3.x. The dashboard has one host, `ADMIN_DISCORD_ID`; under the `self_hosted` profile each guild's owner, administrators and Manage Server holders can also manage that guild.
 
 Members can export their data with `/mydata` and erase it with `/deletemydata`; the host can erase on a member's behalf from the dashboard. Erasure keeps the economy row under an anonymous tombstone so installation totals never change silently. See `docs/privacy.md` for the design and `docs/legal/` for the policy members read.
 
@@ -186,7 +186,14 @@ matrices — is in [docs/development.md](docs/development.md).
 
 ## Recent releases
 
-### 2.21.37b
+### 3.0.5b
+
+- **3.0.0: every server has its own economy.** Your coin balance, experience, level, cooldowns, `/daily`, Everydle streaks and casino limits are now kept separately in each server the bot is in, so coins earned in one server cannot be spent in another and a member of two servers no longer earns twice into one wallet. Everything you had is kept, in the server where you earned it; in any server you join later you start at 0 (a brand-new account still gets its starting coins in its first server). Leaderboards, `/profile` and robbery read the current server's wallets.
+- **Privacy Policy 1.2.** Sections 2, 4, 7 and 8 say that this data is kept per server, that `/mydata` and `/deletemydata` cover every server, and that the retention sweep only removes a member inactive in every server.
+- **Operators: schema 27, the first migration that cannot be undone by running an older version.** It adds `guild_id` to every wallet and keys `users` and `casino_earnings_window` by (`guild_id`, `user_id`). Existing wallets are attributed to the one guild the installation served: the `POTATOBOT_LEGACY_GUILD_ID` environment value if set, otherwise the single active guild, otherwise the guild recorded by the 2.x scope adoption. If none of those answers, the bot refuses to start and changes nothing; set `POTATOBOT_LEGACY_GUILD_ID` and start again. Rolling back means restoring the `pg_dump` the bot takes before migrating, which loses every coin earned after the upgrade. `adopt_legacy_database` no longer runs at start.
+- **The casino rate-limit alert no longer misses its first post after a reboot.** For the length of the window after the host started, the first throttle of each member was silently not reported to staff.
+
+### 2.21.37
 
 - **SQLite support is removed.** Installations still on SQLite (2.19.x and earlier) stay on the last SQLite stable, 2.19.29, which the public repository keeps on the `stable-2.19` branch; there is no upgrade path from it. The one-time copy tool, `POTATOBOT_DB_PATH` and the offsite backup's `--legacy-sqlite` are gone. Unset `POTATOBOT_DATA_DIR` now means beside the code, where the session secret and card backgrounds already sat by default; an installation that set only `POTATOBOT_DB_PATH` sets `POTATOBOT_DATA_DIR` to that file's directory instead.
 
@@ -196,18 +203,6 @@ matrices — is in [docs/development.md](docs/development.md).
 - **Keep member-naming log lines out of the system journal (operators).** A new `POTATOBOT_LOG_CONSOLE` setting (default `true`, see `.env.example`): set it to `false` and the bot writes its log lines only to `bot.log` in its data directory, so a journal on an unencrypted disk no longer holds them. Crash traces and stack dumps still reach the journal. The reference Quadlet unit sets it, `deploy/potatobot-db.container` makes PostgreSQL log errors without their values, and `deploy/potatobot-log` is a small reader for the log file that a sudoers rule can grant without wider access.
 - **The nightly offsite backup can stage its dump on the encrypted volume.** `scripts/offsite_backup.py --workdir DIR` writes the plaintext dump and its verification copy there instead of the system temporary directory, and refuses to run if the directory is missing. The reference unit passes it and no longer passes `--legacy-sqlite` or sets `POTATOBOT_DB_PATH`.
 - **Faster test suite for contributors.** Each test resets its database with ordered deletes instead of `TRUNCATE`, and `scripts/run_tests_parallel.py` runs the suite across several PostgreSQL databases for quick iteration (the serial run stays the gate).
-
-### 2.21.16b
-
-- **The PostgreSQL move begins (2.20).** The bot still runs on SQLite and behaves the same; the 2.20 line first makes the code independent of the database engine, one step at a time, and then switches engines. First step: every write connection now opens its transaction, and takes the database's write lock, as soon as it is created, in one place instead of fifty-four. Writes that used to take the lock only at their first statement now take it up front too, which matters only when the dashboard runs as its own process.
-- **Database errors are caught under engine-neutral names.** Every handler that caught SQLite's own exception types now catches `EngineError` or `IntegrityError` from the database module, so the engine switch repoints two names instead of fifty-four handlers. Nothing a member or operator sees changes.
-- **Conflicting inserts use the portable form.** SQLite's `INSERT OR IGNORE` and `INSERT OR REPLACE` became `ON CONFLICT DO NOTHING` and `ON CONFLICT … DO UPDATE`, which PostgreSQL also understands. Re-opening a non-support ticket on a channel that already has a row still replaces it completely, including clearing its claimer.
-- **New rows report their id with `RETURNING`.** The eight inserts that hand back the id of what they created (realms, warnings, work responses and adopted tiers, fulfillment requests, manual entitlements, dashboard documents, queued Discord actions) read it from `RETURNING` instead of SQLite's `lastrowid`; the ids are the same.
-- **`/mydata` and erasure find a member inside stored lists in Python.** Party lists, removed-warning records and queued Discord actions used SQLite's own JSON functions to find the member's id. They now narrow the rows in SQL and decide in Python, so the same rows are exported and scrubbed on either engine. The Privacy Policy's statements are unchanged; its review record was re-stamped after re-reading the sections it names.
-- **Two aggregate queries no longer depend on SQLite.** Creating a gacha banner counts a duplicate key in a form PostgreSQL accepts, and the gacha luck leaderboard's average is always a plain number. Nothing visible changes.
-- **Sorted lists say how to break a tie.** Leaderboards, the No. 1 role, timed grants, party clean-up, role-menu buttons and the guild list now name a final sort key and where an empty value goes, reproducing the order SQLite already gave. On PostgreSQL a member with no recorded XP would otherwise have topped the leaderboard.
-- **A member with no recorded XP, balance or streak no longer empties a leaderboard.** One such row made the board's merge fail, and the board showed nobody. Such a member is now simply not ranked. No current data has one; it was found while auditing sort order.
-- …and 23 more, in [CHANGELOG.md](CHANGELOG.md).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 

@@ -278,14 +278,14 @@ async def purchase_item(guild, member, key, item) -> PurchaseResult:
                 return PurchaseResult(False, t("shop.soundboard_limit"))
 
         purchase = await database.run(
-            database.purchase_upgrade, user_id, item["price"], "debit")
+            database.purchase_upgrade, guild.id, user_id, item["price"], "debit")
         if not purchase["purchased"]:
             return PurchaseResult(False, t("shop.not_enough_money"))
         ticket_name = f"{item['ticket_prefix']}-{member.name.lower()}"
         channel = await open_ticket(guild, member, ticket_name, "rental")
         if channel is None:
             await database.run_write(
-                database.refund_balance, user_id, item["price"])
+                database.refund_balance, guild.id, user_id, item["price"])
             return PurchaseResult(False, t("shop.ticket_failed"))
         try:
             embed = discord.Embed(
@@ -314,20 +314,20 @@ async def purchase_item(guild, member, key, item) -> PurchaseResult:
         if role in member.roles:
             return PurchaseResult(False, t("shop.already_have_role"))
         purchase = await database.run(
-            database.purchase_upgrade, user_id, item["price"], "debit")
+            database.purchase_upgrade, guild.id, user_id, item["price"], "debit")
         if not purchase["purchased"]:
             return PurchaseResult(False, t("shop.not_enough_money"))
         try:
             await member.add_roles(role)
         except discord.Forbidden:
-            await database.run(database.refund_balance, user_id, item["price"])
+            await database.run(database.refund_balance, guild.id, user_id, item["price"])
             return PurchaseResult(False, t("shop.bot_role_hierarchy_error"))
         except Exception:
-            await database.run(database.refund_balance, user_id, item["price"])
+            await database.run(database.refund_balance, guild.id, user_id, item["price"])
             raise
     elif item_type == "vault":
         purchase = await database.run(
-            database.purchase_upgrade, user_id, item["price"], "vault",
+            database.purchase_upgrade, guild.id, user_id, item["price"], "vault",
             item["value"])
     elif item_type == "inventory":
         # The same stackable, guild-local row Potato Gacha grants, so a bought
@@ -338,7 +338,7 @@ async def purchase_item(guild, member, key, item) -> PurchaseResult:
     elif item_type == "rent":
         expire_time = (utc_now() + timedelta(hours=24)).isoformat()
         purchase = await database.run(
-            database.purchase_upgrade, user_id, item["price"], "bodyguard",
+            database.purchase_upgrade, guild.id, user_id, item["price"], "bodyguard",
             expire_time)
     else:
         shop_logger.error("Unknown shop item type (item_key=%s, type=%r)",

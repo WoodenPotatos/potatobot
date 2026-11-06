@@ -304,8 +304,7 @@
     "core/database.py: f'Failed to save voice-room user limit: {e}'",
     "core/support_tickets.py: Could not open a ticket (guild_id=%s, user_id=%s, kind=%s)",
     "dashboard_api.py: Discord user guild request failed.",
-    "dashboard_api.py: Discord user identity request failed.",
-    "main.py: Legacy user state seeded into guild and instance scopes (users=%s)"
+    "dashboard_api.py: Discord user identity request failed."
   ],
   "loops": [
     "cogs/gacha.py:entitlement_cleanup",
@@ -553,6 +552,7 @@
       "created_at"
     ],
     "casino_earnings_window": [
+      "guild_id",
       "user_id",
       "window_started_at",
       "window_total"
@@ -920,6 +920,7 @@
       "updated_at"
     ],
     "users": [
+      "guild_id",
       "user_id",
       "balance",
       "xp",

@@ -189,8 +189,7 @@ class LoldleHardModal(discord.ui.Modal):
                 base_xp = 0
             now_iso = utc_now().isoformat()
             result = await database.run(database.claim_everydle_reward,
-                interaction.user.id, "last_loldle_hard", now_iso, base_coin, base_xp,
-                interaction.guild_id
+                interaction.guild_id, interaction.user.id, "last_loldle_hard", now_iso, base_coin, base_xp
             )
             if not result["claimed"]:
                 for child in v.children: child.disabled = True
@@ -323,8 +322,7 @@ class LoldleModal(discord.ui.Modal):
                 base_xp = 0
             now_iso = utc_now().isoformat()
             result = await database.run(database.claim_everydle_reward,
-                interaction.user.id, col_name, now_iso, base_coin, base_xp,
-                interaction.guild_id
+                interaction.guild_id, interaction.user.id, col_name, now_iso, base_coin, base_xp
             )
             if not result["claimed"]:
                 for child in v.children: child.disabled = True
@@ -400,8 +398,7 @@ class ValdleModal(discord.ui.Modal):
                 base_xp = 0
             now_iso = utc_now().isoformat()
             result = await database.run(database.claim_everydle_reward,
-                interaction.user.id, "last_valdle", now_iso, base_coin, base_xp,
-                interaction.guild_id
+                interaction.guild_id, interaction.user.id, "last_valdle", now_iso, base_coin, base_xp
             )
             if not result["claimed"]:
                 for child in v.children: child.disabled = True
@@ -494,9 +491,8 @@ class GenshindleModal(discord.ui.Modal):
                 base_xp = 0
             now_iso = utc_now().isoformat()
             result = await database.run(
-                database.claim_everydle_reward, interaction.user.id,
-                "last_genshindle", now_iso, base_coin, base_xp,
-                interaction.guild_id,
+                database.claim_everydle_reward, interaction.guild_id, interaction.user.id,
+                "last_genshindle", now_iso, base_coin, base_xp
             )
             if not result["claimed"]:
                 for child in v.children:
@@ -618,8 +614,7 @@ class DbdleModal(discord.ui.Modal):
                 base_xp = 0
             now_iso = utc_now().isoformat()
             result = await database.run(database.claim_everydle_reward,
-                interaction.user.id, "last_dbdle_killer", now_iso, base_coin, base_xp,
-                interaction.guild_id
+                interaction.guild_id, interaction.user.id, "last_dbdle_killer", now_iso, base_coin, base_xp
             )
             if not result["claimed"]:
                 for child in v.children: child.disabled = True
@@ -680,7 +675,7 @@ class Everydle(commands.Cog):
 
         col_name = f"last_loldle_{difficulty}"
 
-        last_play_str = await database.run(database.get_cooldown, user_id, col_name)
+        last_play_str = await database.run(database.get_cooldown, ctx.guild.id, user_id, col_name)
         if last_play_str:
             last_play = parse_stored(last_play_str)
             if local_date(last_play) == local_date(now):
@@ -730,7 +725,7 @@ class Everydle(commands.Cog):
         user_id = ctx.author.id
         now = utc_now()
 
-        last_play_str = await database.run(database.get_cooldown, user_id, "last_valdle")
+        last_play_str = await database.run(database.get_cooldown, ctx.guild.id, user_id, "last_valdle")
         if last_play_str:
             last_play = parse_stored(last_play_str)
             if local_date(last_play) == local_date(now):
@@ -755,7 +750,7 @@ class Everydle(commands.Cog):
         now = utc_now()
 
         last_play_str = await database.run(
-            database.get_cooldown, user_id, "last_genshindle")
+            database.get_cooldown, ctx.guild.id, user_id, "last_genshindle")
         if last_play_str:
             last_play = parse_stored(last_play_str)
             if local_date(last_play) == local_date(now):
@@ -779,7 +774,7 @@ class Everydle(commands.Cog):
         if not DBDLE_DATA["killer"]:
             return await ctx.send(t("everydle.err_dbdle_json"), ephemeral=True)
 
-        last_play_str = await database.run(database.get_cooldown, user_id, "last_dbdle_killer")
+        last_play_str = await database.run(database.get_cooldown, ctx.guild.id, user_id, "last_dbdle_killer")
         if last_play_str:
             last_play = parse_stored(last_play_str)
             if local_date(last_play) == local_date(now):

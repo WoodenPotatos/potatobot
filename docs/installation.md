@@ -91,8 +91,9 @@ or Manage Server there. `managed` is an architectural foundation, not a
 supported hosting mode.
 
 Delete the `POTATOBOT_LEGACY_GUILD_ID` line that `.env.example` carries. It only
-matters to a database that predates multi-guild storage, and its placeholder is
-not an integer.
+matters when a 2.x database upgrades to 3.0 (schema 27) and cannot tell which
+guild its wallets belong to; its placeholder is not an integer, so it is
+ignored anyway.
 
 The database is reached through libpq's own `PG*` variables, so nothing in the
 code parses a connection string or logs a password. `PGUSER` is the bot's own

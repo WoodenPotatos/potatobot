@@ -28,6 +28,8 @@ from core import database
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_harness  # noqa: E402
 
+GUILD = 10  # synthetic guild whose wallets these tests read and write
+
 
 def strip_comments(source: str) -> str:
     """Source without comment lines.
@@ -91,7 +93,7 @@ class SetUserExperienceTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_it_sets_the_xp_and_the_level_that_follows(self):
-        result = database.set_user_experience(7, database.xp_for_level(12))
+        result = database.set_user_experience(GUILD, 7, database.xp_for_level(12))
         self.assertEqual(1210, result["stats"][1])
         self.assertEqual(12, result["stats"][2])
         self.assertEqual(1, result["old_level"])
@@ -100,36 +102,37 @@ class SetUserExperienceTests(unittest.TestCase):
     def test_the_level_column_matches_the_xp_that_was_written(self):
         """The whole reason this writes XP: a level that disagreed with the XP
         would be corrected away by the member's next message."""
-        database.set_user_experience(7, 1210)
+        database.set_user_experience(GUILD, 7, 1210)
         with database.get_connection() as conn:
             xp, level = conn.execute(
-                "SELECT xp, level FROM users WHERE user_id = 7").fetchone()
+                "SELECT xp, level FROM users WHERE guild_id = %s AND user_id = 7",
+                (GUILD,)).fetchone()
         self.assertEqual(1210, xp)
         self.assertEqual(database.level_for_xp(xp), level)
 
     def test_a_negative_target_is_clamped_to_zero(self):
-        database.set_user_experience(7, 500)
-        result = database.set_user_experience(7, -100)
+        database.set_user_experience(GUILD, 7, 500)
+        result = database.set_user_experience(GUILD, 7, -100)
         self.assertEqual(0, result["stats"][1])
         self.assertEqual(1, result["stats"][2])
         self.assertEqual(500, result["old_xp"])
 
     def test_it_creates_a_member_who_has_never_been_seen(self):
-        result = database.set_user_experience(999, 40)
+        result = database.set_user_experience(GUILD, 999, 40)
         self.assertEqual(3, result["stats"][2])
-        self.assertTrue(database.get_user_profile(999))
+        self.assertTrue(database.get_user_profile(GUILD, 999))
 
     def test_it_leaves_the_balance_alone(self):
         """Correcting a level must not touch somebody's money."""
-        database.apply_user_delta(7, 250, 0)
-        before = database.get_user_profile(7)[2]
-        result = database.set_user_experience(7, 1210)
+        database.apply_user_delta(GUILD, 7, 250, 0)
+        before = database.get_user_profile(GUILD, 7)[2]
+        result = database.set_user_experience(GUILD, 7, 1210)
         self.assertEqual(before, result["stats"][0])
-        self.assertEqual(before, database.get_user_profile(7)[2])
+        self.assertEqual(before, database.get_user_profile(GUILD, 7)[2])
 
     def test_setting_the_same_xp_reports_no_change(self):
-        database.set_user_experience(7, 1210)
-        self.assertFalse(database.set_user_experience(7, 1210)["xp_changed"])
+        database.set_user_experience(GUILD, 7, 1210)
+        self.assertFalse(database.set_user_experience(GUILD, 7, 1210)["xp_changed"])
 
     def test_it_is_not_classified_as_a_read(self):
         """`run_read_sync` refuses anything outside `READ_ONLY_OPERATIONS`, and a
@@ -154,8 +157,8 @@ class DeltaReportsOldExperienceTests(unittest.TestCase):
     def test_a_clamped_negative_delta_still_reports_the_real_old_value(self):
         """Subtracting the delta back off the new total is wrong exactly when
         the change hit the floor: 0 - (-500) is 500, and they had 100."""
-        database.apply_user_delta(7, 0, 100)
-        result = database.apply_user_delta(7, 0, -500)
+        database.apply_user_delta(GUILD, 7, 0, 100)
+        result = database.apply_user_delta(GUILD, 7, 0, -500)
         self.assertEqual(100, result["old_xp"])
         self.assertEqual(0, result["stats"][1])
 

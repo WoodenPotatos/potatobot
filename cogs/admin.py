@@ -260,7 +260,7 @@ class RuleAcceptView(discord.ui.View):
         # Store completion time for moderation analytics after the role change succeeds.
         time_taken = discord.utils.utcnow() - interaction.user.joined_at
         seconds_taken = int(time_taken.total_seconds())
-        await database.run(database.set_rules_read_time, interaction.user.id, seconds_taken)
+        await database.run(database.set_rules_read_time, interaction.guild_id, interaction.user.id, seconds_taken)
         
 class EnterServerView(discord.ui.View):
     """The entry gate's button. Same label contract as `RuleAcceptView`.
@@ -363,10 +363,10 @@ class Admin(commands.Cog):
     async def testreset(self, ctx, member: discord.Member = None):
         target = member or ctx.author
     
-        if not await database.run(database.user_exists, target.id):
+        if not await database.run(database.user_exists, ctx.guild.id, target.id):
             return await ctx.send(t("admin.user_not_in_db", user=target.display_name), ephemeral=True)
 
-        await database.run(database.reset_user_cooldowns, target.id)
+        await database.run(database.reset_user_cooldowns, ctx.guild.id, target.id)
 
         embed = discord.Embed(
             title=t("admin.timers_reset_title"),
@@ -635,7 +635,7 @@ class Admin(commands.Cog):
 
         reason = discord.utils.escape_mentions(reason)[:512] if reason else None
         result = await database.run_write(
-            database.set_user_experience, member.id,
+            database.set_user_experience, member.guild.id, member.id,
             database.xp_for_level(level))
         roles_applied = await apply_admin_level_change(member, result)
         await self._report_level_change(ctx, member, result, reason,
@@ -659,7 +659,7 @@ class Admin(commands.Cog):
 
         reason = discord.utils.escape_mentions(reason)[:512] if reason else None
         result = await database.run_write(
-            database.apply_user_delta, member.id, 0, amount)
+            database.apply_user_delta, member.guild.id, member.id, 0, amount)
         roles_applied = await apply_admin_level_change(member, result)
         await self._report_level_change(ctx, member, result, reason,
                                         roles_applied)
@@ -681,7 +681,8 @@ class Admin(commands.Cog):
         count = 0
         for start in range(0, len(member_ids), AWARDALL_CHUNK):
             count += await database.run(
-                database.apply_batch_balance, member_ids[start:start + AWARDALL_CHUNK], amount)
+                database.apply_batch_balance, ctx.guild.id,
+                member_ids[start:start + AWARDALL_CHUNK], amount)
             
         embed = discord.Embed(
             title=t("admin.awardall_title"), 

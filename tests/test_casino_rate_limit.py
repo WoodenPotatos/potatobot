@@ -72,8 +72,8 @@ class RateLimitDatabaseBehaviorTests(unittest.TestCase):
         database.register_guild(GUILD, "Casino Guild")
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO users (user_id, balance) VALUES (%s, %s)",
-                (MEMBER, 10_000_000_000),
+                "INSERT INTO users (guild_id, user_id, balance) VALUES (%s, %s, %s)",
+                (GUILD, MEMBER, 10_000_000_000),
             )
 
     def tearDown(self):
@@ -84,7 +84,7 @@ class RateLimitDatabaseBehaviorTests(unittest.TestCase):
         with database.get_connection() as conn:
             return conn.execute(
                 "SELECT window_started_at, window_total FROM casino_earnings_window "
-                "WHERE user_id = %s", (MEMBER,),
+                "WHERE guild_id = %s AND user_id = %s", (GUILD, MEMBER),
             ).fetchone()
 
     def test_no_rate_limit_argument_touches_no_window_row(self):
@@ -127,8 +127,8 @@ class RateLimitDatabaseBehaviorTests(unittest.TestCase):
         with database.get_connection() as conn:
             conn.execute(
                 "UPDATE casino_earnings_window SET window_started_at = %s "
-                "WHERE user_id = %s",
-                ("2000-01-01T00:00:00+00:00", MEMBER),
+                "WHERE guild_id = %s AND user_id = %s",
+                ("2000-01-01T00:00:00+00:00", GUILD, MEMBER),
             )
         result = database.resolve_wheel_wager(
             GUILD, MEMBER, 100, rng=_FixedRng(), casino_rate_limit=(300, 2000))
@@ -182,6 +182,33 @@ class RateLimitConfigResolutionTests(unittest.TestCase):
         feature_access.seed_cached_feature(GUILD, "casino_rate_limit", True)
         self._set(300, 10_000)
         self.assertEqual((300, 10_000), _casino_rate_limit_config(GUILD))
+
+
+class RateLimitAlertDebounceTests(unittest.IsolatedAsyncioTestCase):
+    """The alert is debounced per (guild, member): since schema 27 the window
+    counts per guild, so a throttle in one guild must still alert in another.
+    The monotonic clock is pinned *younger than the window*, as on a freshly
+    booted host or CI runner, where a first alert was once swallowed."""
+
+    def _member(self, guild_id, channel):
+        from unittest.mock import MagicMock
+        guild = MagicMock(id=guild_id)
+        guild.get_channel.return_value = channel
+        return MagicMock(id=MEMBER, guild=guild, mention="<@1>")
+
+    async def test_a_throttle_in_another_guild_still_alerts(self):
+        from unittest.mock import AsyncMock, patch
+        import cogs.casino  # inside the test: tests/test_cog_loading.py reloads cogs
+
+        channel = AsyncMock()
+        with patch.object(cogs.casino, "guild_setting_sync", return_value=99), \
+                patch.object(cogs.casino, "rate_limit_alert_times", {}), \
+                patch.object(cogs.casino.time, "monotonic", return_value=42.0):
+            await cogs.casino._alert_casino_rate_limit(self._member(GUILD, channel), 300, 5)
+            await cogs.casino._alert_casino_rate_limit(self._member(GUILD, channel), 300, 5)
+            await cogs.casino._alert_casino_rate_limit(self._member(GUILD + 1, channel), 300, 5)
+        # Once for GUILD (the repeat is debounced), once for the other guild.
+        self.assertEqual(2, channel.send.await_count)
 
 
 if __name__ == "__main__":

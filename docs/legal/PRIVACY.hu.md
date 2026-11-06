@@ -2,7 +2,7 @@
 
 **Hatálybalépés:** 2026-11-06
 **Utolsó frissítés:** 2026-11-06
-**Verzió:** 1.1
+**Verzió:** 1.2
 
 Ez a dokumentum angol és magyar nyelven készült. Az angol szöveg
 (`PRIVACY.md`) az irányadó; a magyar fordítás a könnyebb megértést szolgálja.
@@ -68,6 +68,9 @@ adatkezelésért az üzemeltető marad az adatkezelő.
   időbélyegeit, a neked adott figyelmeztetéseket, az általad nyitott
   jegyeket és az ideiglenes hangszobád beállításait. A teljes lista a 4.
   pontban található.
+- Az érmeegyenleged, a tapasztalati pontod, a szinted, az időkorlátaid, a
+  sorozatod és az utolsó aktivitásod **szerverenként külön** tárolódik: amit
+  az egyik szerveren szerzel, azt egy másikon nem költheted el.
 - **Nem** tároljuk a felhasználóneved, a megjelenített neved, az e-mail-címed,
   az IP-címed vagy a profilképed. **Nem** tároljuk az üzeneteid szövegét, két
   apró, az 5. pontban leírt kivétellel (szólánc-szavak és a számlálás aktuális
@@ -114,7 +117,7 @@ jogos érdekünk, és **(c)** jogi kötelezettség.
 
 | Funkció | Tárolt adat (mindig a Discord felhasználói azonosítód alatt) | Cél | Jogalap | Megőrzés |
 | --- | --- | --- | --- | --- |
-| **Fiók és gazdaság** (telepítésszintű) | Érmeegyenleg, tapasztalati pont, szint, blackjack győzelmek/vereségek száma, megvásárolt módosítók (rablási bónusz, rablás elleni védelem, széfvédelem, védett tartalék), testőr lejárata; az utolsó napi jutalom, utolsó munka, utolsó rablás, utolsó sorozatfrissítés és utolsó aktivitás időbélyege; sorozatszámláló; hogy az inaktivitási jelentés említett-e már. | A gazdaság és a játékok működtetése; dupla kifizetések megelőzése. | (b); visszaélés elleni védelem (f) | Törlésig vagy a megőrzési söprésig (7. pont). Az egyenleg és a szint a törlés után anonim azonosító alatt marad meg (8.3 pont). |
+| **Fiók és gazdaság** (szerverenként: minden szerveren külön pénztárca, és egy új fiók csak az első szerverén kapja meg a kezdő érméit) | Érmeegyenleg, tapasztalati pont, szint, blackjack győzelmek/vereségek száma, megvásárolt módosítók (rablási bónusz, rablás elleni védelem, széfvédelem, védett tartalék), testőr lejárata; az utolsó napi jutalom, utolsó munka, utolsó rablás, utolsó sorozatfrissítés és utolsó aktivitás időbélyege; sorozatszámláló; hogy az inaktivitási jelentés említett-e már. | A gazdaság és a játékok működtetése; dupla kifizetések megelőzése. | (b); visszaélés elleni védelem (f) | Törlésig vagy a megőrzési söprésig (7. pont). Az egyenleg és a szint a törlés után anonim azonosító alatt marad meg (8.3 pont). |
 | **Aktivitáskövetés** | Egyetlen „utoljára aktív” időbélyeg, naponta legfeljebb egyszer frissül, amikor üzenetet küldesz vagy hangcsatornába lépsz. Tartalom nélkül. | Chat- és hangjutalmak; inaktivitási jelentés; megőrzési söprés. | (b); (f) közösség működtetése | Mint fent; törléskor kiürítjük. |
 | **Szintek és szerepkörök** | A tapasztalati pontból származtatott. A szerepkör-változtatások a Discordon történnek, nem tárolódnak. | Szintjutalmak. | (b) | Mint fent. |
 | **Kaszinójátékok** | Minden tét: játék, tét összege, kimenetel, jóváírás, mikor tették meg és mikor zárult le; gördülő nyereményszámláló a rendellenes nyereményráta észlelésére. | A tétek biztonságos lezárása újraindításokon át; kihasználások észlelése. | (b); (f) a játék integritása | A tétsorok a törlés után anonim azonosító alatt maradnak (8.3 pont); a számláló törlődik. |
@@ -256,7 +259,7 @@ Discord végez a saját feltételei alapján, nem mi.
 
 | Adat | Megőrzés |
 | --- | --- |
-| Minden, ami a felhasználói azonosítód alatt tárolódik (4. pont) | Amíg nem törlöd (`/deletemydata`), az üzemeltető a kérésedre nem törli, vagy a **megőrzési söprés** el nem távolítja. A söprés naponta fut, ha az üzemeltető megőrzési időablakot állított be (`data_retention_days`; 0 = határozatlan; **ez a telepítés: 365 nap**), és egy tagot csak akkor töröl, ha az utolsó rögzített aktivitása régebbi az időablaknál **és** már egyetlen, a telepítés által kiszolgált szerveren sincs jelen. Aki kilép, és egy éven belül visszatér, megtartja az előrehaladását; azután tiszta lappal indul. |
+| Minden, ami a felhasználói azonosítód alatt tárolódik (4. pont) | Amíg nem törlöd (`/deletemydata`), az üzemeltető a kérésedre nem törli, vagy a **megőrzési söprés** el nem távolítja. A söprés naponta fut, ha az üzemeltető megőrzési időablakot állított be (`data_retention_days`; 0 = határozatlan; **ez a telepítés: 365 nap**), és egy tagot csak akkor töröl, ha bármelyik szerveren mért legutóbbi aktivitása is régebbi az időablaknál **és** már egyetlen, a telepítés által kiszolgált szerveren sincs jelen. Aki kilép, és egy éven belül visszatér, megtartja az előrehaladását; azután tiszta lappal indul. |
 | Gazdasági sor, lezárt tétek és jutalomigénylési rekordok | Törlés után anonim negatív azonosító alatt maradnak, minden viselkedési oszlop kiürítve (8.3 pont). |
 | Csapatkereső hirdetések | Nyolc nap. |
 | Irányítópult-hozzáférés változásjelzői | 24 óra. |
@@ -295,7 +298,8 @@ figyelmeztetés alanyaként neveznek meg, valamint a rád vonatkozó, sorba
 
 Futtasd a `/deletemydata` parancsot, olvasd el a figyelmeztetést, és 60
 másodpercen belül nyomd meg a megerősítő gombot. A törlés azonnali és
-**telepítésszintű**, mert a gazdaságnak nincs szerverenkénti másolata.
+**telepítésszintű**: a telepítés által kiszolgált összes szerveren lévő
+soraidra kiterjed, az egyes szerverek pénztárcáit is beleértve.
 Igazolást kapsz arról, mi törlődött és mi maradt meg. Kérheted az üzemeltetőt
 is a törlésre, és az üzemeltető az irányítópultról a Discord-fiókod jelenléte
 nélkül is elvégezheti.
@@ -306,17 +310,17 @@ A törlés anonimizálás. Minden személyes adatot törlünk, és három dolgot
 tartunk meg egy friss, véletlenszerű, negatív azonosító alatt, amely soha nem
 lehet Discord-azonosító:
 
-- **a gazdasági sorodat** (egyenleg, tapasztalati pont, szint,
-  blackjack-számlálók, megvásárolt módosítók), minden időbélyeg, időkorlát és
-  sorozat kiürítve;
+- **a gazdasági soraidat**, szerverenként egyet (egyenleg, tapasztalati pont,
+  szint, blackjack-számlálók, megvásárolt módosítók), minden időbélyeg,
+  időkorlát és sorozat kiürítve;
 - **a lezárt kaszinótéteket**;
 - **a jutalomigénylési rekordokat**.
 
 Ezeket azért őrizzük meg, hogy a telepítés teljes érmekészletéről igazolható
 legyen, hogy a törlés nem változtatta meg, és hogy egy visszatérő tagnak ne
 lehessen kétszer kifizetni egy egyszeri jutalmat. Semmi nem köti vissza hozzád
-az anonim azonosítót. A függőben lévő téteket előbb visszatérítjük az
-egyenlegre. Az aktív prémium szerepköröket és bérleteket a rekordjaik törlése
+az anonim azonosítót. A függőben lévő téteket előbb visszatérítjük, annak a
+szervernek az egyenlegére, ahol a tétet megtették. Az aktív prémium szerepköröket és bérleteket a rekordjaik törlése
 előtt visszavonjuk a Discordon. Ahol más tagok sorai rád mutattak (egy általad
 kiadott figyelmeztetés, egy általad átvett jegy, egy hanglista, amelyen
 szerepeltél), a mutatót eltávolítjuk vagy az anonim azonosítóval helyettesítjük.

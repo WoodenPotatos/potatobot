@@ -88,7 +88,7 @@ class ServerEvents(commands.Cog):
         today_str = local_date(now).isoformat()
 
         if is_enabled(message.guild.id, "inactivity") and self._daily_activity_pending(activity_key, today_str):
-            await database.run(database.update_last_active, user_id, now.isoformat())
+            await database.run(database.update_last_active, message.guild.id, user_id, now.isoformat())
             self.daily_activity_cache[activity_key] = today_str
 
         if not is_enabled(message.guild.id, "chat_rewards"):
@@ -113,7 +113,7 @@ class ServerEvents(commands.Cog):
         
         activity_key = (member.guild.id, member.id)
         if is_enabled(member.guild.id, "inactivity") and self._daily_activity_pending(activity_key, today_str):
-            await database.run(database.update_last_active, member.id, now.isoformat())
+            await database.run(database.update_last_active, member.guild.id, member.id, now.isoformat())
             self.daily_activity_cache[activity_key] = today_str
 
     @tasks.loop(hours=24)
@@ -147,12 +147,12 @@ class ServerEvents(commands.Cog):
                 }
                 if member.id in ignored_users: continue
 
-                result = await database.run(database.get_inactivity_data, member.id)
+                result = await database.run(database.get_inactivity_data, member.guild.id, member.id)
 
                 if result:
                     last_active_str, warned = result
                     if not last_active_str:
-                        await database.run(database.update_last_active, member.id, now.isoformat())
+                        await database.run(database.update_last_active, member.guild.id, member.id, now.isoformat())
                     else:
                         last_active = parse_stored(last_active_str)
                         diff = now - last_active
@@ -166,9 +166,9 @@ class ServerEvents(commands.Cog):
                             embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
                             await admin_channel.send(embed=embed)
 
-                            await database.run(database.set_inactive_warned, member.id)
+                            await database.run(database.set_inactive_warned, member.guild.id, member.id)
                 else:
-                    await database.run(database.create_new_user, member.id, now.isoformat())
+                    await database.run(database.create_new_user, member.guild.id, member.id, now.isoformat())
 
     @inactivity_scanner.before_loop
     async def before_inactivity_scanner(self):
@@ -230,7 +230,7 @@ class ServerEvents(commands.Cog):
             if not deltas:
                 continue
             results = await database.run_write(
-                database.apply_batch_user_deltas, deltas
+                database.apply_batch_user_deltas, guild.id, deltas
             )
             for user_id, result in results.items():
                 member = members.get(user_id)
@@ -256,10 +256,10 @@ class ServerEvents(commands.Cog):
         arrival = member_arrival(member.guild.id, member.id)
         returning = False
         try:
-            returning = await database.run(database.user_exists, member.id)
+            returning = await database.run(database.user_exists, member.guild.id, member.id)
             if not returning:
                 await database.run(
-                    database.create_new_user, member.id, utc_now().isoformat()
+                    database.create_new_user, member.guild.id, member.id, utc_now().isoformat()
                 )
                 event_logger.info("Registered new user ID %s.", member.id)
             else:

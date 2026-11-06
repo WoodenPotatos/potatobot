@@ -89,13 +89,13 @@ class RussianRouletteWagerTests(unittest.TestCase):
     def set_balance(self, member, amount):
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO users (user_id, balance) VALUES (%s, %s) "
-                "ON CONFLICT(user_id) DO UPDATE SET balance = excluded.balance",
-                (member, amount))
+                "INSERT INTO users (guild_id, user_id, balance) VALUES (%s, %s, %s) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET balance = excluded.balance",
+                (GUILD, member, amount))
             conn.commit()
 
     def balances(self):
-        return {member: database.get_user_balance(member)
+        return {member: database.get_user_balance(GUILD, member)
                 for member in self.members}
 
     def join(self, member):
@@ -109,7 +109,7 @@ class RussianRouletteWagerTests(unittest.TestCase):
         before = self.balances()
         wager_id = self.join(self.members[0])
         self.assertEqual(before[self.members[0]] - ANTE,
-                         database.get_user_balance(self.members[0]))
+                         database.get_user_balance(GUILD, self.members[0]))
         database.refund_interactive_wager(wager_id, "left_lobby")
         self.assertEqual(before, self.balances())
 
@@ -119,7 +119,7 @@ class RussianRouletteWagerTests(unittest.TestCase):
         before = self.balances()
         for member in self.members:
             self.join(member)
-        self.assertTrue(all(database.get_user_balance(member) < before[member]
+        self.assertTrue(all(database.get_user_balance(GUILD, member) < before[member]
                             for member in self.members))
         summary = database.refund_pending_wagers("process_restart")
         self.assertEqual(len(self.members), summary["count"])
@@ -153,25 +153,25 @@ class RussianRouletteWagerTests(unittest.TestCase):
         share = survivor_share(ANTE, 2)
         self.assertIsNotNone(database.resolve_interactive_wager(
             wager_id, self.members[0], credit=share, win_inc=1))
-        paid = database.get_user_balance(self.members[0])
+        paid = database.get_user_balance(GUILD, self.members[0])
         self.assertIsNone(database.resolve_interactive_wager(
             wager_id, self.members[0], credit=share, win_inc=1))
-        self.assertEqual(paid, database.get_user_balance(self.members[0]))
+        self.assertEqual(paid, database.get_user_balance(GUILD, self.members[0]))
 
     def test_a_member_who_cannot_afford_the_ante_is_refused(self):
         self.set_balance(self.members[0], ANTE - 1)
         self.assertIsNone(database.begin_interactive_wager(
             secrets.token_urlsafe(24), GUILD, self.members[0], "russian", ANTE))
-        self.assertEqual(ANTE - 1, database.get_user_balance(self.members[0]))
+        self.assertEqual(ANTE - 1, database.get_user_balance(GUILD, self.members[0]))
 
     def test_a_resolved_round_does_not_refund_on_the_next_start(self):
         """Settled rows are not pending, so recovery must leave them alone."""
         wager_id = self.join(self.members[0])
         database.resolve_interactive_wager(wager_id, self.members[0],
                                            loss_inc=1, outcome="shot")
-        settled = database.get_user_balance(self.members[0])
+        settled = database.get_user_balance(GUILD, self.members[0])
         database.refund_pending_wagers("process_restart")
-        self.assertEqual(settled, database.get_user_balance(self.members[0]))
+        self.assertEqual(settled, database.get_user_balance(GUILD, self.members[0]))
 
 
 if __name__ == "__main__":

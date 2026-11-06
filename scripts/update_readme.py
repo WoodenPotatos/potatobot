@@ -288,8 +288,8 @@ def render_configuration() -> str:
         f" the default is {default}.",
         "- `POTATOBOT_DEPLOYMENT_PROFILE` accepts "
         + ", ".join(f"`{p}`" for p in profiles[:-1]) + f", or `{profiles[-1]}`.",
-        "- `POTATOBOT_LEGACY_GUILD_ID` identifies the original guild when a legacy private"
-        " database is connected to multiple guilds.",
+        "- `POTATOBOT_LEGACY_GUILD_ID` names the guild a 2.x database's wallets belong to"
+        " when schema 27 cannot tell (more than one active guild and no adoption marker).",
         "- Dashboard OAuth requires matching HTTPS values for `POTATOBOT_DASHBOARD_EXTERNAL_URL`"
         " and `DISCORD_REDIRECT_URI`, with the latter ending in `/api/callback`.",
         "",

@@ -208,9 +208,10 @@ def get_dashboard_locale_catalog(lang: str = None) -> dict:
 def guild_member_ids(guild) -> list[int]:
     """Return the human members of one guild, for guild-filtered rankings.
 
-    Wallets are still installation-wide, so a leaderboard is scoped by asking who
-    is present rather than by partitioning the economy. The members intent is
-    enabled, so this reads from the cache rather than hitting Discord.
+    A leaderboard reads this guild's wallets and also filters by who is
+    present, so a member who left drops off the board while keeping their
+    wallet. The members intent is enabled, so this reads from the cache rather
+    than hitting Discord.
     """
     return [member.id for member in guild.members if not member.bot]
 
@@ -397,7 +398,7 @@ async def guild_settings_many(guild_id: int, keys) -> dict:
 
 async def update_top_ranker_role(guild):
     top_user_id = await database.run_read(
-        database.get_top_xp_user, guild_member_ids(guild)
+        database.get_top_xp_user, guild.id, guild_member_ids(guild)
     )
     if not top_user_id: return
 
@@ -475,9 +476,11 @@ async def update_user_data(member, balance_change=0, xp_change=0, win_inc=0, los
         from core.feature_access import is_enabled
         if not is_enabled(member.guild.id if member.guild else None, "levels"):
             xp_change = 0
+    # The wallet is the member's guild's (schema 27); a member object always
+    # carries one, since every command is guild-only.
     result = await database.run_write(
         database.apply_user_delta,
-        member.id, balance_change, xp_change, win_inc, loss_inc,
+        member.guild.id, member.id, balance_change, xp_change, win_inc, loss_inc,
     )
     return await apply_database_result(member, result)
 
@@ -492,10 +495,10 @@ async def apply_database_result(member, result):
         mark_top_ranker_dirty(member.guild)
     return stats
 
-async def update_streak(user_id):
+async def update_streak(guild_id, user_id):
     now = utc_now()
     today = local_date(now)
-    result = await database.run_read(database.get_streak_data, user_id)
+    result = await database.run_read(database.get_streak_data, guild_id, user_id)
 
     if not result:
         return
@@ -517,7 +520,7 @@ async def update_streak(user_id):
             streak_count = 1
 
     await database.run_write(
-        database.save_streak_data, user_id, streak_count, now.isoformat()
+        database.save_streak_data, guild_id, user_id, streak_count, now.isoformat()
     )
 
 def level_milestones(configured) -> dict[int, object]:

@@ -87,26 +87,27 @@ def _percentile(samples, fraction):
 
 def seed(users: int) -> list[int]:
     ids = [USER_BASE + index for index in range(users)]
-    database.apply_batch_user_deltas([(user_id, 10_000, 0) for user_id in ids])
+    database.apply_batch_user_deltas(
+        GUILD_ID, [(user_id, 10_000, 0) for user_id in ids])
     return ids
 
 
 async def one_operation(kind: str, users: list[int], rng: random.Random):
     user = rng.choice(users)
     if kind == "chat_xp":
-        await database.run_write(database.apply_user_delta, user, 0, rng.randint(5, 15))
+        await database.run_write(database.apply_user_delta, GUILD_ID, user, 0, rng.randint(5, 15))
     elif kind == "daily":
         await database.run_write(
-            database.claim_timed_reward, user, "last_daily",
+            database.claim_timed_reward, GUILD_ID, user, "last_daily",
             utc_now().isoformat(), 100, 10, None, True)
     elif kind == "transfer":
         other = rng.choice(users)
         if other != user:
-            await database.run_write(database.transfer_balance, user, other, 1)
+            await database.run_write(database.transfer_balance, GUILD_ID, user, other, 1)
     elif kind == "slots":
         await database.run_write(database.resolve_slots_wager, GUILD_ID, user, 10)
     else:
-        await database.run_read(database.get_user_balance, user)
+        await database.run_read(database.get_user_balance, GUILD_ID, user)
 
 
 async def voice_ticks(guilds: int, users: list[int], stop: asyncio.Event,
@@ -116,7 +117,7 @@ async def voice_ticks(guilds: int, users: list[int], stop: asyncio.Event,
         for _ in range(guilds):
             batch = [(user, 2, 3) for user in rng.sample(users, min(VOICE_BATCH, len(users)))]
             started = time.perf_counter()
-            await database.run_write(database.apply_batch_user_deltas, batch)
+            await database.run_write(database.apply_batch_user_deltas, GUILD_ID, batch)
             latencies.append(time.perf_counter() - started)
         try:
             await asyncio.wait_for(stop.wait(), timeout=1.0)

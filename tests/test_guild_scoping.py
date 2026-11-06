@@ -131,53 +131,59 @@ class GuildScopingTests(unittest.TestCase):
                 (1, 100, 10, 3), (2, 500, 50, 9), (3, 900, 90, 1),
             ):
                 conn.execute(
-                    "INSERT INTO users (user_id, balance, xp, streak_count) "
-                    "VALUES (%s, %s, %s, %s)", (user_id, balance, xp, streak),
+                    "INSERT INTO users (guild_id, user_id, balance, xp, streak_count) "
+                    "VALUES (111, %s, %s, %s, %s)", (user_id, balance, xp, streak),
+                )
+                # The same member in another guild holds a different wallet,
+                # which must never reach guild 111's boards.
+                conn.execute(
+                    "INSERT INTO users (guild_id, user_id, balance, xp, streak_count) "
+                    "VALUES (222, %s, 999999, 999999, 99)", (user_id,),
                 )
 
     def test_leaderboards_only_rank_the_members_of_the_calling_guild(self):
         self._seed_users()
         self.assertEqual(
-            [row[0] for row in database.get_top_levels([1, 2], 10)], [2, 1]
+            [row[0] for row in database.get_top_levels(111, [1, 2], 10)], [2, 1]
         )
         self.assertEqual(
-            [row[0] for row in database.get_top_balances([1, 3], 10)], [3, 1]
+            [row[0] for row in database.get_top_balances(111, [1, 3], 10)], [3, 1]
         )
         self.assertEqual(
-            [row[0] for row in database.get_top_streaks([1, 2], 10)], [2, 1]
+            [row[0] for row in database.get_top_streaks(111, [1, 2], 10)], [2, 1]
         )
-        self.assertEqual(database.get_top_xp_user([1, 2]), 2)
-        self.assertEqual(database.get_top_xp_user([1]), 1)
+        self.assertEqual(database.get_top_xp_user(111, [1, 2]), 2)
+        self.assertEqual(database.get_top_xp_user(111, [1]), 1)
 
     def test_rank_counts_only_fellow_members(self):
         self._seed_users()
-        # User 1 is last of three installation-wide but second of two here.
-        self.assertEqual(database.get_user_rank(10, [1, 2]), 2)
-        self.assertEqual(database.get_user_rank(10, [1]), 1)
+        # User 1 is last of three in the guild but second of the two listed here.
+        self.assertEqual(database.get_user_rank(111, 10, [1, 2]), 2)
+        self.assertEqual(database.get_user_rank(111, 10, [1]), 1)
 
     def test_an_empty_guild_ranks_nobody_rather_than_everybody(self):
         self._seed_users()
-        self.assertEqual(database.get_top_levels([], 10), [])
-        self.assertEqual(database.get_top_balances([], 10), [])
-        self.assertIsNone(database.get_top_xp_user([]))
-        self.assertEqual(database.get_user_rank(10, []), 1)
+        self.assertEqual(database.get_top_levels(111, [], 10), [])
+        self.assertEqual(database.get_top_balances(111, [], 10), [])
+        self.assertIsNone(database.get_top_xp_user(111, []))
+        self.assertEqual(database.get_user_rank(111, 10, []), 1)
 
     def test_a_member_list_beyond_one_chunk_is_ranked_correctly(self):
         """The id list is chunked for SQLite, so the merge must not lose the top."""
         with database.get_connection() as conn:
             for user_id in range(1, 2001):
                 conn.execute(
-                    "INSERT INTO users (user_id, balance, xp) VALUES (%s, %s, %s)",
+                    "INSERT INTO users (guild_id, user_id, balance, xp) VALUES (111, %s, %s, %s)",
                     (user_id, user_id, user_id),
                 )
         member_ids = list(range(1, 2001))
         self.assertGreater(len(member_ids), database._MEMBER_ID_CHUNK)
         self.assertEqual(
-            [row[0] for row in database.get_top_levels(member_ids, 3)],
+            [row[0] for row in database.get_top_levels(111, member_ids, 3)],
             [2000, 1999, 1998],
         )
-        self.assertEqual(database.get_top_xp_user(member_ids), 2000)
-        self.assertEqual(database.get_user_rank(1998, member_ids), 3)
+        self.assertEqual(database.get_top_xp_user(111, member_ids), 2000)
+        self.assertEqual(database.get_user_rank(111, 1998, member_ids), 3)
 
     # -- rentals -----------------------------------------------------------
 

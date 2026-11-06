@@ -57,15 +57,21 @@ def _casino_rate_limit_config(guild_id: int):
 
 async def _alert_casino_rate_limit(member, window: int, max_coins: int):
     """Posts the throttled member's guild's rate-limit alert, debounced to
-    once per window per user -- the window itself is one shared wallet's, so
-    the debounce key is the member alone, not (guild, member). Called from
+    once per window per member *in this guild*: since schema 27 the window
+    counts per guild, so a throttle in one guild must not silence the alert
+    for another, and the debounce key is (guild, member). Called from
     `apply_database_result`, which already sees every casino payout's
     `casino_rate_limited` flag, so one hook covers every game rather than
     repeating this at each resolver call site."""
     now = time.monotonic()
-    if now - rate_limit_alert_times.get(member.id, 0) < window:
+    key = (member.guild.id, member.id)
+    # A key never seen always alerts. Defaulting it to 0 compared the window
+    # against the monotonic clock's age, which is the time since boot, so a
+    # freshly booted host (or CI runner) swallowed every first alert.
+    last = rate_limit_alert_times.get(key)
+    if last is not None and now - last < window:
         return
-    rate_limit_alert_times[member.id] = now
+    rate_limit_alert_times[key] = now
 
     guild = member.guild
     channel_id = guild_setting_sync(guild.id, "casino_rate_limit_alert_channel")
@@ -327,7 +333,7 @@ async def start_bj_game(ctx_or_int, bet):
         consume_item="stacked_deck",
     )
     if reservation is None:
-        bal = await database.run(database.get_user_balance, user.id)
+        bal = await database.run(database.get_user_balance, ctx_or_int.guild.id, user.id)
         msg = t("casino.err_poor", bal=bal)
         if isinstance(ctx_or_int, discord.Interaction):
             return await ctx_or_int.response.send_message(msg, ephemeral=True)
@@ -571,7 +577,7 @@ class BlackjackView(discord.ui.View):
 
 async def start_dice_game(ctx_or_int, bet_input):
     user = ctx_or_int.user if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.author
-    bal = await database.run(database.get_user_balance, user.id)
+    bal = await database.run(database.get_user_balance, ctx_or_int.guild.id, user.id)
     try:
         amount = bal if str(bet_input).lower() == "all" else int(bet_input)
     except ValueError:
@@ -592,7 +598,7 @@ async def start_dice_game(ctx_or_int, bet_input):
         casino_rate_limit=_casino_rate_limit_config(guild.id),
     )
     if result is None:
-        bal = await database.run(database.get_user_balance, user.id)
+        bal = await database.run(database.get_user_balance, ctx_or_int.guild.id, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True) if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.send(msg, ephemeral=True))
     player_roll, bot_roll = result["player_roll"], result["bot_roll"]
@@ -647,7 +653,7 @@ async def start_roulette_game(ctx_or_int, bet, choice):
         casino_rate_limit=_casino_rate_limit_config(ctx_or_int.guild.id),
     )
     if result is None:
-        bal = await database.run(database.get_user_balance, user.id)
+        bal = await database.run(database.get_user_balance, ctx_or_int.guild.id, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True) if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.send(msg, ephemeral=True))
     result_num, result_color, payout = (
@@ -697,7 +703,7 @@ async def start_slots_game(ctx_or_int, bet):
         casino_rate_limit=_casino_rate_limit_config(ctx_or_int.guild.id),
     )
     if result is None:
-        bal = await database.run(database.get_user_balance, user.id)
+        bal = await database.run(database.get_user_balance, ctx_or_int.guild.id, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True) if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.send(msg, ephemeral=True))
     s1, s2, s3 = result["reels"]
@@ -954,7 +960,7 @@ async def start_hilo_game(ctx_or_int, bet):
         user.id, "hilo", bet, consume_item="marked_card",
     )
     if reservation is None:
-        bal = await database.run(database.get_user_balance, user.id)
+        bal = await database.run(database.get_user_balance, ctx_or_int.guild.id, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True)
                       if isinstance(ctx_or_int, discord.Interaction)
@@ -1165,7 +1171,7 @@ async def start_crash_game(ctx_or_int, bet):
         user.id, "crash", bet, consume_item="parachute",
     )
     if reservation is None:
-        bal = await database.run(database.get_user_balance, user.id)
+        bal = await database.run(database.get_user_balance, ctx_or_int.guild.id, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True)
                       if isinstance(ctx_or_int, discord.Interaction)
@@ -1273,7 +1279,7 @@ class RussianRouletteView(discord.ui.View):
                 interaction.guild.id, interaction.user.id, "russian", self.ante)
             if reservation is None:
                 bal = await database.run(database.get_user_balance,
-                                         interaction.user.id)
+                                         interaction.guild.id, interaction.user.id)
                 return await interaction.response.send_message(
                     t("casino.err_invalid_bet_bal", bal=bal), ephemeral=True)
             self.players[interaction.user.id] = (interaction.user, wager_id)
@@ -1379,7 +1385,7 @@ async def start_russian_game(ctx_or_int, bet):
         database.begin_interactive_wager, wager_id, ctx_or_int.guild.id,
         user.id, "russian", bet)
     if reservation is None:
-        bal = await database.run(database.get_user_balance, user.id)
+        bal = await database.run(database.get_user_balance, ctx_or_int.guild.id, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True)
                       if isinstance(ctx_or_int, discord.Interaction)
@@ -1413,7 +1419,7 @@ async def start_wheel_game(ctx_or_int, bet):
         casino_rate_limit=_casino_rate_limit_config(ctx_or_int.guild.id),
     )
     if result is None:
-        bal = await database.run(database.get_user_balance, user.id)
+        bal = await database.run(database.get_user_balance, ctx_or_int.guild.id, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True)
                       if isinstance(ctx_or_int, discord.Interaction)
@@ -1663,7 +1669,7 @@ async def start_mines_game(ctx_or_int, bet):
         consume_item="metal_detector",
     )
     if reservation is None:
-        bal = await database.run(database.get_user_balance, user.id)
+        bal = await database.run(database.get_user_balance, ctx_or_int.guild.id, user.id)
         msg = t("casino.err_invalid_bet_bal", bal=bal)
         return await (ctx_or_int.response.send_message(msg, ephemeral=True) if isinstance(ctx_or_int, discord.Interaction) else ctx_or_int.send(msg, ephemeral=True))
 
@@ -1827,7 +1833,7 @@ class Casino(commands.Cog):
     @commands.hybrid_command(name="bal", description=t("general.cmd_bal"))
     @is_channel("economy_channels")
     async def bal(self, ctx):
-        result = await database.run(database.get_full_user_data, ctx.author.id)
+        result = await database.run(database.get_full_user_data, ctx.guild.id, ctx.author.id)
     
         if result:
             balance = result[0]
@@ -1856,7 +1862,7 @@ class Casino(commands.Cog):
             xp_rw = 0
 
         result = await database.run(
-            database.claim_timed_reward, ctx.author.id, "last_daily",
+            database.claim_timed_reward, ctx.guild.id, ctx.author.id, "last_daily",
             now.isoformat(), coin_rw, xp_rw, once_per_day=True,
         )
         if not result["claimed"]:
@@ -1918,7 +1924,7 @@ class Casino(commands.Cog):
             xp_reward = 0
 
         result = await database.run(
-            database.claim_timed_reward, user_id, "last_job", now.isoformat(),
+            database.claim_timed_reward, ctx.guild.id, user_id, "last_job", now.isoformat(),
             earnings, xp_reward, interval_seconds=15 * 60,
         )
         if not result["claimed"]:
@@ -1957,9 +1963,8 @@ class Casino(commands.Cog):
         base_chance = 0.75 if is_premium(ctx.author) else 0.5
         passive_def = 0.85 if is_premium(victim) else 1.0
         result = await database.run(
-            database.resolve_robbery, user_id, victim.id, now.isoformat(),
+            database.resolve_robbery, ctx.guild.id, user_id, victim.id, now.isoformat(),
             base_chance, passive_def, RNG.random(), RNG.uniform(0.02, 0.10),
-            ctx.guild.id,
         )
         if not result["resolved"]:
             reason = result["reason"]
@@ -2012,9 +2017,10 @@ class Casino(commands.Cog):
             return await ctx.send(
                 t("casino.err_amount_range", limit=MAX_STAKE), ephemeral=True)
 
-        result = await database.run(database.transfer_balance, ctx.author.id, member.id, amount, sender_xp=2)
+        result = await database.run(database.transfer_balance, ctx.guild.id, ctx.author.id, member.id, amount,
+                                    sender_xp=2)
         if result is None:
-            author_bal = await database.run(database.get_user_balance, ctx.author.id)
+            author_bal = await database.run(database.get_user_balance, ctx.guild.id, ctx.author.id)
             return await ctx.send(t("casino.pay_err_poor", bal=author_bal), ephemeral=True)
         author_bal, _, _, _, _ = await apply_database_result(ctx.author, result)
 

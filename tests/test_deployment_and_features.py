@@ -320,8 +320,8 @@ class FeaturePersistenceTests(unittest.TestCase):
         with database.get_connection() as conn:
             conn.execute(
                 "INSERT INTO users "
-                "(user_id, balance, xp, level, last_daily, last_active) "
-                "VALUES (9, 777, 250, 6, %s, %s)", (DAILY.isoformat(), ACTIVE.isoformat()),
+                "(guild_id, user_id, balance, xp, level, last_daily, last_active) "
+                "VALUES (123, 9, 777, 250, 6, %s, %s)", (DAILY.isoformat(), ACTIVE.isoformat()),
             )
             conn.execute(
                 "INSERT INTO warnings (user_id, mod_id, reason, date) "
@@ -342,7 +342,7 @@ class FeaturePersistenceTests(unittest.TestCase):
             ).fetchall()
             legacy = conn.execute(
                 "SELECT balance, xp, level, last_daily, last_active "
-                "FROM users WHERE user_id = 9"
+                "FROM users WHERE guild_id = 123 AND user_id = 9"
             ).fetchone()
             warning_guild = conn.execute(
                 "SELECT guild_id FROM warnings WHERE user_id = 9"

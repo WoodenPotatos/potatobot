@@ -41,8 +41,9 @@ command says so rather than posting the file in a channel.
 ## Deletion
 
 `/deletemydata` erases the member after one explicit confirmation. Deletion is
-**installation-wide**, because wallets are keyed by Discord user id alone and there
-is no per-guild copy to erase.
+**installation-wide**: it re-keys the member's wallet in every guild (one row per
+guild since schema 27) to one tombstone, because the request is about the
+person, not about one server.
 
 Deletion is an *anonymisation*, not a wipe, and the distinction is deliberate:
 

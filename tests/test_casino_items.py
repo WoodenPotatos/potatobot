@@ -50,9 +50,9 @@ class CasinoItemTestCase(unittest.TestCase):
     def set_balance(self, amount):
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO users (user_id, balance) VALUES (%s, %s) "
-                "ON CONFLICT(user_id) DO UPDATE SET balance = excluded.balance",
-                (MEMBER, amount),
+                "INSERT INTO users (guild_id, user_id, balance) VALUES (%s, %s, %s) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET balance = excluded.balance",
+                (GUILD, MEMBER, amount),
             )
 
     def give(self, item_key, quantity):

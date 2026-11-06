@@ -183,32 +183,32 @@ class MechanicReachesTheGameTests(unittest.TestCase):
 
     def test_a_drill_exposes_the_share_the_operator_chose(self):
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance, protected_reserve) "
-                         "VALUES (1, 100000, 80000)")
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 5000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance, protected_reserve) "
+                         "VALUES (1, 1, 100000, 80000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (1, 2, 5000)")
             conn.execute(
                 "INSERT INTO user_inventory (guild_id, user_id, item_key, "
                 "quantity, updated_at) VALUES (1, 2, 'vault_glove', 1, '2026-01-01')")
             conn.commit()
         self.override({"vault_glove": 0.50})
         result = database.resolve_robbery(
-            2, 1, "2026-01-01T00:00:00+00:00", 0.9, 1.0, 0.0, 1.0, guild_id=1)
+            1, 2, 1, "2026-01-01T00:00:00+00:00", 0.9, 1.0, 0.0, 1.0)
         # 20,000 accessible plus half of the 80,000 reserve. The shipped 0.25
         # would have exposed 20,000 and taken 40,000.
         self.assertEqual(60000, result["amount"])
 
     def test_the_shipped_share_applies_with_no_override(self):
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance, protected_reserve) "
-                         "VALUES (1, 100000, 80000)")
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 5000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance, protected_reserve) "
+                         "VALUES (1, 1, 100000, 80000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (1, 2, 5000)")
             conn.execute(
                 "INSERT INTO user_inventory (guild_id, user_id, item_key, "
                 "quantity, updated_at) VALUES (1, 2, 'vault_glove', 1, '2026-01-01')")
             conn.commit()
         asyncio.run(settings_cache.refresh([1], force=True))
         result = database.resolve_robbery(
-            2, 1, "2026-01-01T00:00:00+00:00", 0.9, 1.0, 0.0, 1.0, guild_id=1)
+            1, 2, 1, "2026-01-01T00:00:00+00:00", 0.9, 1.0, 0.0, 1.0)
         self.assertEqual(40000, result["amount"])
 
     def test_an_unreadable_setting_falls_back_rather_than_raising(self):

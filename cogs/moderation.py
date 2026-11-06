@@ -595,7 +595,7 @@ class Moderation(commands.Cog):
             visible_to_staff = False
 
         warnings = await database.run(database.get_warnings, member.id, ctx.guild.id)
-        user_intel = await database.run(database.get_user_intel, member.id)
+        user_intel = await database.run(database.get_user_intel, member.guild.id, member.id)
     
         embed = discord.Embed(title=t("moderation.modlogs_title", user=member.display_name), color=discord.Color.blue())
         embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)

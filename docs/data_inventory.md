@@ -26,12 +26,12 @@ re-keyed to the tombstone, **–** holds no member id.
 
 | Table | Member-identifying columns | Free text / behaviour | Erasure | Export |
 | --- | --- | --- | --- | --- |
-| `users` (installation-wide) | `user_id` PK | balance, xp, level, bj wins/losses, rob/vault modifiers, `bodyguard_until`; TS: `last_daily`, `last_job`, `last_rob`, `last_loldle_*`, `last_valdle`, `last_genshindle`, `last_dbdle_*`, `last_streak_update`, `last_active`; `streak_count`, `inactive_warned`, `rules_read_time` | R (every TS, cooldown, streak and `rules_read_time` blanked) | yes |
+| `users` (per guild since schema 27, 3.0.0) | (`guild_id`, `user_id`) PK; a member has one row per guild | balance, xp, level, bj wins/losses, rob/vault modifiers, `bodyguard_until`; TS: `last_daily`, `last_job`, `last_rob`, `last_loldle_*`, `last_valdle`, `last_genshindle`, `last_dbdle_*`, `last_streak_update`, `last_active`; `streak_count`, `inactive_warned`, `rules_read_time` | R (every TS, cooldown, streak and `rules_read_time` blanked) | yes |
 | `scoped_accounts` | `user_id` + scope | same columns as `users` | R | yes |
 | `voice_settings` | `user_id`, `guild_id` | FREE TEXT `channel_name`; limit, lock, bitrate | D | yes |
 | `voice_permissions` | `owner_id`, `target_id` | allow/deny flag | D (either side) | yes |
 | `active_channels` | `owner_id` | channel id | D | yes |
-| `casino_earnings_window` | `user_id` | TS `window_started_at`, total | D | yes |
+| `casino_earnings_window` | (`guild_id`, `user_id`) PK, per guild since schema 27 | TS `window_started_at`, total | D | yes |
 | `warnings` | `user_id`, `mod_id`, `guild_id` | FREE TEXT `reason` (staff); `tag`, `date` | D as subject, N as moderator | yes (both roles) |
 | `rented_items` | none directly; reached via `timed_entitlements` | item type, Discord item id, expiry | untouched (orphans after the entitlement is deleted) | yes via join |
 | `tickets` | `opener_id`, `claimer_id` | `created_at` TS, `ticket_type`, channel id; **no ticket text** | D as opener, N as claimer | yes |

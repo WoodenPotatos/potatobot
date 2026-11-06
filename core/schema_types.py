@@ -75,6 +75,7 @@ COLUMN_KINDS = {
         "created_at": INSTANT,
     },
     "casino_earnings_window": {
+        "guild_id": BIGINT,
         "user_id": BIGINT,
         "window_started_at": INSTANT,
         "window_total": BIGINT,
@@ -441,6 +442,7 @@ COLUMN_KINDS = {
         "updated_at": INSTANT,
     },
     "users": {
+        "guild_id": BIGINT,
         "user_id": BIGINT,
         "balance": BIGINT,
         "xp": BIGINT,

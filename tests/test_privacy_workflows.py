@@ -38,11 +38,11 @@ class PrivacyWorkflowTests(unittest.TestCase):
         """One row in every table the subject can appear in."""
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO users (user_id, balance, xp, last_active, streak_count, "
-                "last_daily) VALUES (7, 5000, 120, '2020-01-01T00:00:00+00:00', 4, "
+                "INSERT INTO users (guild_id, user_id, balance, xp, last_active, streak_count, "
+                "last_daily) VALUES (111, 7, 5000, 120, '2020-01-01T00:00:00+00:00', 4, "
                 "'2020-01-02T00:00:00+00:00')"
             )
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (8, 100)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (111, 8, 100)")
             conn.execute(
                 "INSERT INTO scoped_accounts (scope_type, scope_id, user_id, balance, "
                 "xp, level, created_at, updated_at) "
@@ -156,8 +156,8 @@ class PrivacyWorkflowTests(unittest.TestCase):
                              "moderator_id": 8, "source_guild_id": 111}),),
             )
             conn.execute(
-                "INSERT INTO casino_earnings_window (user_id, window_started_at, "
-                "window_total) VALUES (7, 'now', 500)"
+                "INSERT INTO casino_earnings_window (guild_id, user_id, window_started_at, "
+                "window_total) VALUES (111, 7, 'now', 500)"
             )
         # Written through the accessors, after the fixture connection has
         # committed: each opens its own write connection.
@@ -449,8 +449,8 @@ class PrivacyWorkflowTests(unittest.TestCase):
 
     def test_a_returning_member_starts_from_a_fresh_account(self):
         database.anonymize_user(7, actor_id=8, guild_id=111)
-        database.apply_user_delta(7, balance_change=0)
-        self.assertEqual(database.get_user_balance(7), 100)
+        database.apply_user_delta(111, 7, balance_change=0)
+        self.assertEqual(database.get_user_balance(111, 7), 100)
 
     def test_erasure_refuses_a_non_snowflake_subject(self):
         for subject in (0, -1):
@@ -463,13 +463,13 @@ class PrivacyWorkflowTests(unittest.TestCase):
         tombstone = receipt["tombstone_id"]
         member_ids = [tombstone, 8]
         self.assertEqual(
-            [row[0] for row in database.get_top_balances(member_ids, 10)], [8]
+            [row[0] for row in database.get_top_balances(111, member_ids, 10)], [8]
         )
         self.assertEqual(
-            [row[0] for row in database.get_top_levels(member_ids, 10)], [8]
+            [row[0] for row in database.get_top_levels(111, member_ids, 10)], [8]
         )
-        self.assertEqual(database.get_top_xp_user(member_ids), 8)
-        self.assertEqual(database.get_user_rank(0, member_ids), 1)
+        self.assertEqual(database.get_top_xp_user(111, member_ids), 8)
+        self.assertEqual(database.get_user_rank(111, 0, member_ids), 1)
 
     # -- entitlements and retention ----------------------------------------
 
@@ -504,8 +504,8 @@ class PrivacyWorkflowTests(unittest.TestCase):
         with database.get_connection() as conn:
             for user_id in range(100, 140):
                 conn.execute(
-                    "INSERT INTO users (user_id, last_active) "
-                    "VALUES (%s, '2020-01-01T00:00:00+00:00')", (user_id,)
+                    "INSERT INTO users (guild_id, user_id, last_active) "
+                    "VALUES (111, %s, '2020-01-01T00:00:00+00:00')", (user_id,)
                 )
         self.assertEqual(
             len(database.get_retention_candidates("2021-01-01T00:00:00+00:00", 25)), 25
@@ -640,8 +640,8 @@ class ErasureReachesLateTablesTests(unittest.TestCase):
         database.initialize_database()
         database.register_guild(111, "Guild")
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (7, 10)")
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (8, 10)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (111, 7, 10)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (111, 8, 10)")
         # 7 hosts one post and has joined 8's post.
         database.create_lfg_post(111, 1001, 5, host_id=7, needed=0)
         database.create_lfg_post(111, 1002, 5, host_id=8, needed=0)

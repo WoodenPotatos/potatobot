@@ -323,8 +323,8 @@ class SharedItemPurchaseTests(unittest.TestCase):
         database.initialize_database()
         database.register_guild(10, "Shop Guild")
         with database.get_connection() as conn:
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 1000000)")
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 100000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (10, 1, 1000000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (10, 2, 100000)")
 
     def tearDown(self):
         database.DATA_DIR = self.original_path
@@ -335,7 +335,7 @@ class SharedItemPurchaseTests(unittest.TestCase):
         result = database.purchase_inventory_item(10, 1, 10000, "loaded_die")
         self.assertTrue(result["purchased"])
         self.assertEqual(database.get_user_inventory(10, 1)["loaded_die"], 2)
-        self.assertEqual(database.get_user_balance(1), 1000000 - 20000)
+        self.assertEqual(database.get_user_balance(10, 1), 1000000 - 20000)
 
     def test_a_bought_lockpick_and_a_pulled_one_share_one_row(self):
         database.purchase_inventory_item(10, 1, 5000, "lockpick")
@@ -352,7 +352,7 @@ class SharedItemPurchaseTests(unittest.TestCase):
         result = database.purchase_inventory_item(10, 2, 500000, "vault_glove")
         self.assertFalse(result["purchased"])
         self.assertEqual(result["reason"], "insufficient_funds")
-        self.assertEqual(database.get_user_balance(2), 100000)
+        self.assertEqual(database.get_user_balance(10, 2), 100000)
         self.assertEqual(database.get_user_inventory(10, 2), {})
 
     def test_only_catalog_inventory_items_can_be_purchased(self):
@@ -368,15 +368,15 @@ class SharedItemPurchaseTests(unittest.TestCase):
     def test_duplicate_vault_refuses_a_purchase_but_compensates_a_pull(self):
         reserve = item_catalog.VAULT_ITEMS["big_vault"].value
         price = 250000
-        database.purchase_upgrade(1, price, "vault", reserve)
-        self.assertEqual(database.get_user_balance(1), 1000000 - price)
+        database.purchase_upgrade(10, 1, price, "vault", reserve)
+        self.assertEqual(database.get_user_balance(10, 1), 1000000 - price)
 
         # The shop's rule: nothing is charged for something already owned.
-        before = database.get_user_balance(1)
-        refused = database.purchase_upgrade(1, price, "vault", reserve)
+        before = database.get_user_balance(10, 1)
+        refused = database.purchase_upgrade(10, 1, price, "vault", reserve)
         self.assertFalse(refused["purchased"])
         self.assertEqual(refused["reason"], "already_owned")
-        self.assertEqual(database.get_user_balance(1), before)
+        self.assertEqual(database.get_user_balance(10, 1), before)
 
         # The gacha's rule: a duplicate pays the configured percentage instead.
         with database.get_connection() as conn:
@@ -386,14 +386,14 @@ class SharedItemPurchaseTests(unittest.TestCase):
                 database.DEFAULT_GACHA_CONFIG, datetime.now(timezone.utc).isoformat(),
             )
         self.assertEqual(granted["duplicate_compensation"], reserve // 10)
-        self.assertEqual(database.get_user_balance(1), before + reserve // 10)
+        self.assertEqual(database.get_user_balance(10, 1), before + reserve // 10)
 
     def test_the_same_vault_key_protects_the_same_reserve_from_either_system(self):
         definition = item_catalog.VAULT_ITEMS["med_vault"]
-        database.purchase_upgrade(1, 0, "vault", definition.value)
+        database.purchase_upgrade(10, 1, 0, "vault", definition.value)
         with database.get_connection() as conn:
             bought = conn.execute(
-                "SELECT protected_reserve FROM users WHERE user_id = 1"
+                "SELECT protected_reserve FROM users WHERE guild_id = 10 AND user_id = 1"
             ).fetchone()[0]
             database._grant_gacha_reward_locked(
                 conn, 10, 2,
@@ -401,7 +401,7 @@ class SharedItemPurchaseTests(unittest.TestCase):
                 database.DEFAULT_GACHA_CONFIG, datetime.now(timezone.utc).isoformat(),
             )
             pulled = conn.execute(
-                "SELECT protected_reserve FROM users WHERE user_id = 2"
+                "SELECT protected_reserve FROM users WHERE guild_id = 10 AND user_id = 2"
             ).fetchone()[0]
         self.assertEqual(bought, definition.value)
         self.assertEqual(pulled, definition.value)
@@ -424,9 +424,9 @@ class LegacyLockpickTests(unittest.TestCase):
         database.register_guild(10, "Legacy Guild")
         with database.get_connection() as conn:
             conn.execute(
-                "INSERT INTO users (user_id, balance, rob_bonus) VALUES (1, 100000, 0.15)"
+                "INSERT INTO users (guild_id, user_id, balance, rob_bonus) VALUES (10, 1, 100000, 0.15)"
             )
-            conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 100000)")
+            conn.execute("INSERT INTO users (guild_id, user_id, balance) VALUES (10, 2, 100000)")
 
     def tearDown(self):
         database.DATA_DIR = self.original_path
@@ -435,20 +435,20 @@ class LegacyLockpickTests(unittest.TestCase):
     def test_a_legacy_bonus_still_applies_and_is_then_cleared(self):
         # chance_roll 0.14 succeeds only with the stored +0.15 on top of 0.0.
         result = database.resolve_robbery(
-            1, 2, datetime.now(timezone.utc).isoformat(), 0.0, 1.0, 0.14, 0.10, 10
+            10, 1, 2, datetime.now(timezone.utc).isoformat(), 0.0, 1.0, 0.14, 0.10
         )
         self.assertTrue(result["resolved"])
         self.assertTrue(result["won"])
         self.assertTrue(result["consumed_lockpick"])
         with database.get_connection() as conn:
             remaining = conn.execute(
-                "SELECT rob_bonus FROM users WHERE user_id = 1"
+                "SELECT rob_bonus FROM users WHERE guild_id = 10 AND user_id = 1"
             ).fetchone()[0]
         self.assertEqual(remaining, 0.0)
 
     def test_nothing_writes_the_legacy_column_any_more(self):
         with self.assertRaises(ValueError):
-            database.purchase_upgrade(1, 100, "lockpick", 0.15)
+            database.purchase_upgrade(10, 1, 100, "lockpick", 0.15)
         for removed in ("buy_lockpick", "break_lockpick", "get_user_rob_bonus"):
             self.assertFalse(hasattr(database, removed),
                              f"{removed} was removed with the column-backed lockpick")

@@ -2,7 +2,7 @@
 
 **Effective date:** 2026-11-06
 **Last updated:** 2026-11-06
-**Version:** 1.1
+**Version:** 1.2
 
 This document is written in English and Hungarian. The English text is the
 binding one; the Hungarian text (`PRIVACY.hu.md`) is a translation provided
@@ -65,6 +65,9 @@ described here.
   level, game and gacha history, inventory, cooldown and last-activity
   timestamps, warnings issued to you, tickets you opened, and the settings of
   your temporary voice room. The full list is in section 4.
+- Your coin balance, experience, level, cooldowns, streak and last activity
+  are kept **separately for each server**: what you earn in one server cannot
+  be spent in another.
 - We **do not** store your username, display name, email address, IP address
   or avatar. We **do not** store the text of your messages, with two small
   exceptions described in section 5 (word-chain words and the current
@@ -107,7 +110,7 @@ each row, and **(c)** a legal obligation.
 
 | Feature | Data stored (always under your Discord user ID) | Purpose | Basis | Kept until |
 | --- | --- | --- | --- | --- |
-| **Account and economy** (installation-wide) | Coin balance, experience, level, blackjack win/loss counts, purchased modifiers (rob bonus, rob defence, vault protection, protected reserve), bodyguard expiry; timestamps of your last daily claim, last work, last robbery, last streak update and last activity; streak count; whether the inactivity report has mentioned you. | Running the economy and the games; preventing double payouts. | (b); anti-abuse (f) | Erasure or the retention sweep (section 7). The balance and level survive erasure under an anonymous ID (section 8.3). |
+| **Account and economy** (per server: one wallet in each server, and a new account receives its starting coins only in the first one) | Coin balance, experience, level, blackjack win/loss counts, purchased modifiers (rob bonus, rob defence, vault protection, protected reserve), bodyguard expiry; timestamps of your last daily claim, last work, last robbery, last streak update and last activity; streak count; whether the inactivity report has mentioned you. | Running the economy and the games; preventing double payouts. | (b); anti-abuse (f) | Erasure or the retention sweep (section 7). The balance and level survive erasure under an anonymous ID (section 8.3). |
 | **Activity tracking** | One "last active" timestamp, updated at most once a day when you send a message or join a voice channel. No content. | Chat and voice rewards; the inactivity report; the retention sweep. | (b); (f) running a community | As above; blanked on erasure. |
 | **Levels and roles** | Derived from experience. Role changes are made in Discord, not stored. | Level rewards. | (b) | As above. |
 | **Casino games** | Every wager: game, stake, outcome, credit, when placed and settled; a rolling winnings counter used to detect abnormal earning rates. | Settling bets safely across restarts; detecting exploits. | (b); (f) game integrity | Wager rows are kept under an anonymous ID after erasure (section 8.3); the counter is deleted. |
@@ -241,7 +244,7 @@ transfer Discord makes under its own terms, not one we make.
 
 | Data | Retention |
 | --- | --- |
-| Everything stored under your user ID (section 4) | Until you erase it (`/deletemydata`), the operator erases it at your request, or the **retention sweep** removes it. The sweep runs daily when the operator has set a retention window (`data_retention_days`; 0 means indefinitely; **this installation: 365 days**), and erases a member only if their last recorded activity is older than the window **and** they are no longer in any server the installation serves. A member who leaves and returns within a year keeps their progress; after that they start afresh. |
+| Everything stored under your user ID (section 4) | Until you erase it (`/deletemydata`), the operator erases it at your request, or the **retention sweep** removes it. The sweep runs daily when the operator has set a retention window (`data_retention_days`; 0 means indefinitely; **this installation: 365 days**), and erases a member only if their most recent activity in any server is older than the window **and** they are no longer in any server the installation serves. A member who leaves and returns within a year keeps their progress; after that they start afresh. |
 | Economy row, settled wagers and reward-claim records | Kept after erasure under an anonymous negative ID with every behavioural column blanked (section 8.3). |
 | Looking-for-group posts | Eight days. |
 | Dashboard access-change markers | 24 hours. |
@@ -277,8 +280,9 @@ the queued Discord actions about you.
 ### 8.2 Erasure: `/deletemydata`
 
 Run `/deletemydata`, read the warning, and press the confirmation button
-within 60 seconds. Erasure is immediate and **installation-wide**, because the
-economy has no per-server copy. You receive a receipt listing what was
+within 60 seconds. Erasure is immediate and **installation-wide**: it covers
+your rows in every server the installation serves, each server's wallet
+included. You receive a receipt listing what was
 deleted and what was kept. You can also ask the operator to erase you, and
 the operator can do it from the dashboard without your Discord account being
 present.
@@ -288,15 +292,16 @@ present.
 Erasure is an anonymisation. We delete everything personal and keep three
 things under a fresh, random, negative ID that can never be a Discord ID:
 
-- **your economy row** (balance, experience, level, blackjack counts,
-  purchased modifiers) with every timestamp, cooldown and streak blanked;
+- **your economy rows**, one per server (balance, experience, level,
+  blackjack counts, purchased modifiers), with every timestamp, cooldown and
+  streak blanked;
 - **settled casino wagers**;
 - **reward-claim records**.
 
 These are kept so the installation's total coin supply can be shown to be
 unchanged by an erasure, and so a returning member cannot be paid a one-off
 reward twice. Nothing links the anonymous ID back to you. Any wager still
-pending is refunded to the balance first. Active premium roles and rentals
+pending is refunded first, to the balance in the server it was placed in. Active premium roles and rentals
 are withdrawn in Discord before their records go. Where other members' rows
 pointed at you (a warning you issued, a ticket you claimed, a voice list you
 were on), the pointer is removed or replaced by the anonymous ID.

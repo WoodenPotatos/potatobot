@@ -579,6 +579,13 @@ def initialize_database():
             if current and pending and conn.execute(
                     "SELECT EXISTS (SELECT 1 FROM users)").fetchone()[0]:
                 _pre_migration_backup(current)
+            # Schema 27 attributes the existing wallets to one guild and reads
+            # the operator's answer, if any, from this transaction-local
+            # setting (core/schema/0027_per_guild_wallets.sql).
+            conn.execute(
+                "SELECT set_config('potatobot.legacy_guild_id', %s, true)",
+                (os.environ.get("POTATOBOT_LEGACY_GUILD_ID", "").strip(),),
+            )
             for version, path in pending:
                 with open(path, encoding="utf-8") as schema_file:
                     conn.execute(schema_file.read())
@@ -609,17 +616,35 @@ def initialize_database():
     except EngineError as exc:
         db_logger.exception("Database migration failed")
         raise DatabaseOperationError("database migration failed") from exc
-def _ensure_user(conn, user_id: int, timestamp: str = None):
+NEW_ACCOUNT_BALANCE = 100
+
+
+def _ensure_user(conn, guild_id: int, user_id: int, timestamp: str = None):
+    """Create this member's wallet in this guild if it does not exist yet.
+
+    A wallet is per guild since schema 27 (3.0.0). A genuinely new account gets
+    the new-account balance in its *first* guild only; every later guild starts
+    at 0, so joining a second server is not a way to mint coins (decided
+    2026-08-27). There is no installation-default wallet: guild 0 would park
+    money where no command can reach it, so a falsy guild is refused.
+    """
+    if not guild_id:
+        raise ValueError("a wallet needs a guild")
     conn.execute(
         """
         INSERT INTO users (
-            user_id, balance, xp, level, bj_wins, bj_losses,
+            guild_id, user_id, balance, xp, level, bj_wins, bj_losses,
             rob_bonus, rob_defense, vault_protection, last_active,
             inactive_warned
-        ) VALUES (%s, 100, 0, 1, 0, 0, 0.0, 1.0, 0.0, %s, 0)
+        )
+        SELECT %s, %s,
+               CASE WHEN EXISTS (SELECT 1 FROM users WHERE user_id = %s)
+                    THEN 0 ELSE %s END,
+               0, 1, 0, 0, 0.0, 1.0, 0.0, %s, 0
         ON CONFLICT DO NOTHING
         """,
-        (user_id, timestamp or utc_now().isoformat()),
+        (guild_id, user_id, user_id, NEW_ACCOUNT_BALANCE,
+         timestamp or utc_now().isoformat()),
     )
 
 
@@ -645,7 +670,7 @@ def xp_for_level(level: int) -> int:
     return 10 * (max(1, level) - 1) ** 2
 
 
-def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
+def _apply_stats_locked(conn, guild_id: int, user_id: int, balance_change: int = 0,
                         xp_change: int = 0, win_inc: int = 0,
                         loss_inc: int = 0, clamp_balance: bool = True,
                         casino_rate_limit: tuple[int, int] | None = None):
@@ -659,10 +684,11 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
     if abs(balance_change) > MAX_AMOUNT or abs(xp_change) > MAX_AMOUNT:
         raise ValidationError("amount_out_of_range",
                               "balance or xp change exceeds MAX_AMOUNT")
-    _ensure_user(conn, user_id)
+    _ensure_user(conn, guild_id, user_id)
     row = conn.execute(
-        "SELECT balance, xp, level, bj_wins, bj_losses FROM users WHERE user_id = %s",
-        (user_id,),
+        "SELECT balance, xp, level, bj_wins, bj_losses FROM users "
+        "WHERE guild_id = %s AND user_id = %s",
+        (guild_id, user_id),
     ).fetchone()
     old_balance, old_xp, old_level, old_wins, old_losses = row
 
@@ -672,8 +698,8 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
         now = utc_now()
         window_row = conn.execute(
             "SELECT window_started_at, window_total FROM casino_earnings_window "
-            "WHERE user_id = %s",
-            (user_id,),
+            "WHERE guild_id = %s AND user_id = %s",
+            (guild_id, user_id),
         ).fetchone()
         if window_row is None:
             window_total, window_start = 0, now
@@ -692,13 +718,15 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
             balance_change = remaining
         conn.execute(
             """
-            INSERT INTO casino_earnings_window (user_id, window_started_at, window_total)
-            VALUES (%s, %s, %s)
-            ON CONFLICT(user_id) DO UPDATE SET
+            INSERT INTO casino_earnings_window
+                (guild_id, user_id, window_started_at, window_total)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
                 window_started_at = excluded.window_started_at,
                 window_total = excluded.window_total
             """,
-            (user_id, window_start.isoformat(), window_total + balance_change),
+            (guild_id, user_id, window_start.isoformat(),
+             window_total + balance_change),
         )
 
     new_balance = old_balance + balance_change
@@ -715,9 +743,9 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
         """
         UPDATE users
         SET balance = %s, xp = %s, level = %s, bj_wins = %s, bj_losses = %s
-        WHERE user_id = %s
+        WHERE guild_id = %s AND user_id = %s
         """,
-        (new_balance, new_xp, new_level, new_wins, new_losses, user_id),
+        (new_balance, new_xp, new_level, new_wins, new_losses, guild_id, user_id),
     )
     return {
         "stats": (new_balance, new_xp, new_level, new_wins, new_losses),
@@ -736,13 +764,13 @@ def _apply_stats_locked(conn, user_id: int, balance_change: int = 0,
     }
 
 
-def apply_user_delta(user_id: int, balance_change: int = 0, xp_change: int = 0,
-                     win_inc: int = 0, loss_inc: int = 0):
-    """Atomically applies a user's balance, XP, and game-stat changes."""
+def apply_user_delta(guild_id: int, user_id: int, balance_change: int = 0,
+                     xp_change: int = 0, win_inc: int = 0, loss_inc: int = 0):
+    """Atomically applies a member's balance, XP, and game-stat changes in one guild."""
     try:
         with get_connection() as conn:
             result = _apply_stats_locked(
-                conn, user_id, balance_change, xp_change, win_inc, loss_inc
+                conn, guild_id, user_id, balance_change, xp_change, win_inc, loss_inc
             )
             conn.commit()
             return result
@@ -751,7 +779,7 @@ def apply_user_delta(user_id: int, balance_change: int = 0, xp_change: int = 0,
         raise DatabaseOperationError("atomic user update failed") from exc
 
 
-def set_user_experience(user_id: int, new_xp: int):
+def set_user_experience(guild_id: int, user_id: int, new_xp: int):
     """Set a member's XP outright, and with it the level it works out to.
 
     The correction tool `/setlevel` and `/givexp` need, and the reason it writes
@@ -769,17 +797,18 @@ def set_user_experience(user_id: int, new_xp: int):
     """
     try:
         with get_connection() as conn:
-            _ensure_user(conn, user_id)
+            _ensure_user(conn, guild_id, user_id)
             row = conn.execute(
                 "SELECT balance, xp, level, bj_wins, bj_losses FROM users "
-                "WHERE user_id = %s", (user_id,),
+                "WHERE guild_id = %s AND user_id = %s", (guild_id, user_id),
             ).fetchone()
             balance, old_xp, old_level, wins, losses = row
             target_xp = max(0, int(new_xp))
             target_level = level_for_xp(target_xp)
             conn.execute(
-                "UPDATE users SET xp = %s, level = %s WHERE user_id = %s",
-                (target_xp, target_level, user_id),
+                "UPDATE users SET xp = %s, level = %s "
+                "WHERE guild_id = %s AND user_id = %s",
+                (target_xp, target_level, guild_id, user_id),
             )
             conn.commit()
             return {
@@ -793,22 +822,24 @@ def set_user_experience(user_id: int, new_xp: int):
         raise DatabaseOperationError("setting experience failed") from exc
 
 
-def reserve_wager(user_id: int, amount: int):
+def reserve_wager(guild_id: int, user_id: int, amount: int):
     """Atomically deducts a wager, returning the remaining balance or None."""
     if amount <= 0:
         return None
     try:
         with get_connection() as conn:
-            _ensure_user(conn, user_id)
+            _ensure_user(conn, guild_id, user_id)
             changed = conn.execute(
-                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
-                (amount, user_id, amount),
+                "UPDATE users SET balance = balance - %s "
+                "WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (amount, guild_id, user_id, amount),
             ).rowcount
             if changed != 1:
                 conn.rollback()
                 return None
             balance = conn.execute(
-                "SELECT balance FROM users WHERE user_id = %s", (user_id,)
+                "SELECT balance FROM users WHERE guild_id = %s AND user_id = %s",
+                (guild_id, user_id),
             ).fetchone()[0]
             conn.commit()
             return balance
@@ -817,12 +848,12 @@ def reserve_wager(user_id: int, amount: int):
         raise DatabaseOperationError("wager reservation failed") from exc
 
 
-def settle_wager(user_id: int, credit: int = 0, win_inc: int = 0,
+def settle_wager(guild_id: int, user_id: int, credit: int = 0, win_inc: int = 0,
                   loss_inc: int = 0):
     """Credits a previously reserved wager exactly once at the caller level."""
     if credit < 0:
         raise ValueError("wager credit cannot be negative")
-    return apply_user_delta(user_id, credit, 0, win_inc, loss_inc)
+    return apply_user_delta(guild_id, user_id, credit, 0, win_inc, loss_inc)
 
 
 def begin_interactive_wager(wager_id: str, guild_id: int, user_id: int,
@@ -842,11 +873,11 @@ def begin_interactive_wager(wager_id: str, guild_id: int, user_id: int,
     created_at = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            _ensure_user(conn, user_id)
+            _ensure_user(conn, guild_id, user_id)
             changed = conn.execute(
                 "UPDATE users SET balance = balance - %s "
-                "WHERE user_id = %s AND balance >= %s",
-                (stake, user_id, stake),
+                "WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (stake, guild_id, user_id, stake),
             ).rowcount
             if changed != 1:
                 conn.rollback()
@@ -861,7 +892,8 @@ def begin_interactive_wager(wager_id: str, guild_id: int, user_id: int,
             consumed = bool(consume_item and _consume_inventory_item(
                 conn, guild_id, user_id, consume_item, created_at))
             balance = conn.execute(
-                "SELECT balance FROM users WHERE user_id = %s", (user_id,)
+                "SELECT balance FROM users WHERE guild_id = %s AND user_id = %s",
+                (guild_id, user_id),
             ).fetchone()[0]
             conn.commit()
             return {"balance": balance, "consumed": consumed}
@@ -874,23 +906,27 @@ def begin_interactive_wager(wager_id: str, guild_id: int, user_id: int,
 
 
 def increase_interactive_wager(wager_id: str, user_id: int, amount: int):
-    """Atomically reserve an additional stake while the wager is pending."""
+    """Atomically reserve an additional stake while the wager is pending.
+
+    The wallet is the wager's own guild, read from its row: the wager is the
+    record of where the stake came from, so the caller cannot name another."""
     if amount <= 0:
         return None
     try:
         with get_connection() as conn:
             pending = conn.execute(
-                "SELECT 1 FROM casino_wagers "
+                "SELECT guild_id FROM casino_wagers "
                 "WHERE wager_id = %s AND user_id = %s AND status = 'pending'",
                 (wager_id, user_id),
             ).fetchone()
             if pending is None:
                 conn.rollback()
                 return None
+            guild_id = pending[0]
             changed = conn.execute(
                 "UPDATE users SET balance = balance - %s "
-                "WHERE user_id = %s AND balance >= %s",
-                (amount, user_id, amount),
+                "WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (amount, guild_id, user_id, amount),
             ).rowcount
             if changed != 1:
                 conn.rollback()
@@ -900,7 +936,8 @@ def increase_interactive_wager(wager_id: str, user_id: int, amount: int):
                 (amount, wager_id),
             )
             balance = conn.execute(
-                "SELECT balance FROM users WHERE user_id = %s", (user_id,)
+                "SELECT balance FROM users WHERE guild_id = %s AND user_id = %s",
+                (guild_id, user_id),
             ).fetchone()[0]
             conn.commit()
             return balance
@@ -913,28 +950,31 @@ def resolve_interactive_wager(wager_id: str, user_id: int, credit: int = 0,
                               win_inc: int = 0, loss_inc: int = 0,
                               outcome: str = "settled",
                               casino_rate_limit: tuple[int, int] | None = None):
-    """Settle a pending wager once and apply its payout in the same transaction."""
+    """Settle a pending wager once and apply its payout in the same transaction.
+
+    The payout goes to the wager's own guild, read from the row the settlement
+    claims, never from the caller."""
     if credit < 0:
         raise ValueError("wager credit cannot be negative")
     resolved_at = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            changed = conn.execute(
+            settled = conn.execute(
                 "UPDATE casino_wagers SET status = 'settled', resolved_at = %s, "
                 "resolution_json = %s WHERE wager_id = %s AND user_id = %s "
-                "AND status = 'pending'",
+                "AND status = 'pending' RETURNING guild_id",
                 (
                     resolved_at,
                     json.dumps({"outcome": outcome, "credit": credit}),
                     wager_id,
                     user_id,
                 ),
-            ).rowcount
-            if changed != 1:
+            ).fetchall()
+            if len(settled) != 1:
                 conn.rollback()
                 return None
             result = _apply_stats_locked(
-                conn, user_id, credit, 0, win_inc, loss_inc,
+                conn, settled[0][0], user_id, credit, 0, win_inc, loss_inc,
                 clamp_balance=False, casino_rate_limit=casino_rate_limit,
             )
             conn.commit()
@@ -950,15 +990,17 @@ def refund_interactive_wager(wager_id: str, reason: str = "delivery_failed"):
     try:
         with get_connection() as conn:
             row = conn.execute(
-                "SELECT user_id, stake FROM casino_wagers "
+                "SELECT guild_id, user_id, stake FROM casino_wagers "
                 "WHERE wager_id = %s AND status = 'pending'", (wager_id,)
             ).fetchone()
             if row is None:
                 conn.rollback()
                 return False
+            # The stake goes back to the wallet it came from: the wager's guild.
             conn.execute(
-                "UPDATE users SET balance = balance + %s WHERE user_id = %s",
-                (row[1], row[0]),
+                "UPDATE users SET balance = balance + %s "
+                "WHERE guild_id = %s AND user_id = %s",
+                (row[2], row[0], row[1]),
             )
             conn.execute(
                 "UPDATE casino_wagers SET status = 'refunded', resolved_at = %s, "
@@ -978,13 +1020,14 @@ def refund_pending_wagers(reason: str = "process_restart"):
     try:
         with get_connection() as conn:
             rows = conn.execute(
-                "SELECT wager_id, user_id, stake FROM casino_wagers "
+                "SELECT wager_id, guild_id, user_id, stake FROM casino_wagers "
                 "WHERE status = 'pending'"
             ).fetchall()
-            for wager_id, user_id, stake in rows:
+            for wager_id, guild_id, user_id, stake in rows:
                 conn.execute(
-                    "UPDATE users SET balance = balance + %s WHERE user_id = %s",
-                    (stake, user_id),
+                    "UPDATE users SET balance = balance + %s "
+                    "WHERE guild_id = %s AND user_id = %s",
+                    (stake, guild_id, user_id),
                 )
                 conn.execute(
                     "UPDATE casino_wagers SET status = 'refunded', resolved_at = %s, "
@@ -992,7 +1035,7 @@ def refund_pending_wagers(reason: str = "process_restart"):
                     (resolved_at, json.dumps({"reason": reason}), wager_id),
                 )
             conn.commit()
-            return {"count": len(rows), "amount": sum(row[2] for row in rows)}
+            return {"count": len(rows), "amount": sum(row[3] for row in rows)}
     except EngineError as exc:
         db_logger.exception("Pending wager recovery failed")
         raise DatabaseOperationError("pending wager recovery failed") from exc
@@ -1016,8 +1059,8 @@ def claim_periodic_reward(guild_id: int, user_id: int, reward_key: str,
                 if now - last_claim < timedelta(days=interval_days):
                     conn.rollback()
                     return None
-            _ensure_user(conn, user_id)
-            result = _apply_stats_locked(conn, user_id, amount, 0, 0, 0)
+            _ensure_user(conn, guild_id, user_id)
+            result = _apply_stats_locked(conn, guild_id, user_id, amount, 0, 0, 0)
             conn.execute(
                 "INSERT INTO reward_claims (guild_id, user_id, reward_key, claimed_at) "
                 "VALUES (%s, %s, %s, %s) ON CONFLICT(guild_id, user_id, reward_key) "
@@ -1034,7 +1077,7 @@ def claim_periodic_reward(guild_id: int, user_id: int, reward_key: str,
         raise DatabaseOperationError("periodic reward claim failed") from exc
 
 
-def resolve_instant_wager(user_id: int, stake: int, credit: int = 0,
+def resolve_instant_wager(guild_id: int, user_id: int, stake: int, credit: int = 0,
                           win_inc: int = 0, loss_inc: int = 0,
                           casino_rate_limit: tuple[int, int] | None = None):
     """Reserves and settles a non-interactive wager in one transaction."""
@@ -1042,16 +1085,17 @@ def resolve_instant_wager(user_id: int, stake: int, credit: int = 0,
         return None
     try:
         with get_connection() as conn:
-            _ensure_user(conn, user_id)
+            _ensure_user(conn, guild_id, user_id)
             changed = conn.execute(
-                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
-                (stake, user_id, stake),
+                "UPDATE users SET balance = balance - %s "
+                "WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (stake, guild_id, user_id, stake),
             ).rowcount
             if changed != 1:
                 conn.rollback()
                 return None
             result = _apply_stats_locked(
-                conn, user_id, credit, 0, win_inc, loss_inc,
+                conn, guild_id, user_id, credit, 0, win_inc, loss_inc,
                 clamp_balance=False, casino_rate_limit=casino_rate_limit,
             )
             conn.commit()
@@ -1070,10 +1114,11 @@ def resolve_dice_wager(guild_id: int, user_id: int, stake: int,
         return None
     try:
         with get_connection() as conn:
-            _ensure_user(conn, user_id)
+            _ensure_user(conn, guild_id, user_id)
             if conn.execute(
-                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
-                (stake, user_id, stake),
+                "UPDATE users SET balance = balance - %s "
+                "WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (stake, guild_id, user_id, stake),
             ).rowcount != 1:
                 conn.rollback()
                 return None
@@ -1096,7 +1141,7 @@ def resolve_dice_wager(guild_id: int, user_id: int, stake: int,
             else:
                 credit, win_inc, loss_inc, outcome = stake, 0, 0, "tie"
             result = _apply_stats_locked(
-                conn, user_id, credit, 0, win_inc, loss_inc, clamp_balance=False,
+                conn, guild_id, user_id, credit, 0, win_inc, loss_inc, clamp_balance=False,
                 casino_rate_limit=casino_rate_limit,
             )
             conn.commit()
@@ -1174,10 +1219,11 @@ def resolve_roulette_wager(guild_id: int, user_id: int, stake: int,
     rng = rng or secrets.SystemRandom()
     try:
         with get_connection() as conn:
-            _ensure_user(conn, user_id)
+            _ensure_user(conn, guild_id, user_id)
             if conn.execute(
-                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
-                (stake, user_id, stake),
+                "UPDATE users SET balance = balance - %s "
+                "WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (stake, guild_id, user_id, stake),
             ).rowcount != 1:
                 conn.rollback()
                 return None
@@ -1197,7 +1243,7 @@ def resolve_roulette_wager(guild_id: int, user_id: int, stake: int,
                     number, colour, payout = second_number, second_colour, second_payout
             won = payout > 0
             result = _apply_stats_locked(
-                conn, user_id, stake + payout if won else 0, 0,
+                conn, guild_id, user_id, stake + payout if won else 0, 0,
                 1 if won else 0, 0 if won else 1, clamp_balance=False,
                 casino_rate_limit=casino_rate_limit,
             )
@@ -1280,10 +1326,11 @@ def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None,
     total_weight = sum(weight for _, weight in segments)
     try:
         with get_connection() as conn:
-            _ensure_user(conn, user_id)
+            _ensure_user(conn, guild_id, user_id)
             if conn.execute(
-                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
-                (stake, user_id, stake),
+                "UPDATE users SET balance = balance - %s "
+                "WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (stake, guild_id, user_id, stake),
             ).rowcount != 1:
                 conn.rollback()
                 return None
@@ -1296,7 +1343,7 @@ def resolve_wheel_wager(guild_id: int, user_id: int, stake: int, rng=None,
             payout = stake * multiplier // 100
             won = payout > 0
             result = _apply_stats_locked(
-                conn, user_id, payout, 0, 1 if won else 0, 0 if won else 1,
+                conn, guild_id, user_id, payout, 0, 1 if won else 0, 0 if won else 1,
                 clamp_balance=False, casino_rate_limit=casino_rate_limit,
             )
             conn.commit()
@@ -1326,10 +1373,11 @@ def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None,
     rng = rng or secrets.SystemRandom()
     try:
         with get_connection() as conn:
-            _ensure_user(conn, user_id)
+            _ensure_user(conn, guild_id, user_id)
             if conn.execute(
-                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
-                (stake, user_id, stake),
+                "UPDATE users SET balance = balance - %s "
+                "WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (stake, guild_id, user_id, stake),
             ).rowcount != 1:
                 conn.rollback()
                 return None
@@ -1343,7 +1391,7 @@ def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None,
                     reels, payout = second_reels, _slots_payout(stake, second_reels)
             won = payout > 0
             result = _apply_stats_locked(
-                conn, user_id, stake + payout if won else 0, 0,
+                conn, guild_id, user_id, stake + payout if won else 0, 0,
                 1 if won else 0, 0 if won else 1, clamp_balance=False,
                 casino_rate_limit=casino_rate_limit,
             )
@@ -1362,17 +1410,18 @@ def resolve_slots_wager(guild_id: int, user_id: int, stake: int, rng=None,
         raise DatabaseOperationError("slots wager failed") from exc
 
 
-def transfer_balance(sender_id: int, recipient_id: int, amount: int,
+def transfer_balance(guild_id: int, sender_id: int, recipient_id: int, amount: int,
                      sender_xp: int = 0):
-    """Moves funds between two users in one transaction."""
+    """Moves funds between two members' wallets in one guild, in one transaction."""
     if amount <= 0 or amount > MAX_AMOUNT or sender_id == recipient_id:
         return None
     try:
         with get_connection() as conn:
-            _ensure_user(conn, sender_id)
-            _ensure_user(conn, recipient_id)
+            _ensure_user(conn, guild_id, sender_id)
+            _ensure_user(conn, guild_id, recipient_id)
             sender = conn.execute(
-                "SELECT balance, xp, level FROM users WHERE user_id = %s", (sender_id,)
+                "SELECT balance, xp, level FROM users "
+                "WHERE guild_id = %s AND user_id = %s", (guild_id, sender_id)
             ).fetchone()
             if sender[0] < amount:
                 conn.rollback()
@@ -1380,12 +1429,14 @@ def transfer_balance(sender_id: int, recipient_id: int, amount: int,
             new_xp = max(0, sender[1] + sender_xp)
             new_level = level_for_xp(new_xp)
             conn.execute(
-                "UPDATE users SET balance = balance - %s, xp = %s, level = %s WHERE user_id = %s",
-                (amount, new_xp, new_level, sender_id),
+                "UPDATE users SET balance = balance - %s, xp = %s, level = %s "
+                "WHERE guild_id = %s AND user_id = %s",
+                (amount, new_xp, new_level, guild_id, sender_id),
             )
             conn.execute(
-                "UPDATE users SET balance = balance + %s WHERE user_id = %s",
-                (amount, recipient_id),
+                "UPDATE users SET balance = balance + %s "
+                "WHERE guild_id = %s AND user_id = %s",
+                (amount, guild_id, recipient_id),
             )
             new_balance = sender[0] - amount
             conn.commit()
@@ -1399,7 +1450,7 @@ def transfer_balance(sender_id: int, recipient_id: int, amount: int,
         raise DatabaseOperationError("balance transfer failed") from exc
 
 
-def apply_batch_balance(user_ids, amount: int):
+def apply_batch_balance(guild_id: int, user_ids, amount: int):
     """Applies one balance adjustment to all supplied users atomically."""
     unique_ids = list(dict.fromkeys(int(user_id) for user_id in user_ids))
     if not unique_ids:
@@ -1407,7 +1458,7 @@ def apply_batch_balance(user_ids, amount: int):
     try:
         with get_connection() as conn:
             for user_id in unique_ids:
-                _apply_stats_locked(conn, user_id, balance_change=amount)
+                _apply_stats_locked(conn, guild_id, user_id, balance_change=amount)
             conn.commit()
             return len(unique_ids)
     except (EngineError, ValueError) as exc:
@@ -1415,7 +1466,7 @@ def apply_batch_balance(user_ids, amount: int):
         raise DatabaseOperationError("batch balance update failed") from exc
 
 
-def apply_batch_user_deltas(deltas):
+def apply_batch_user_deltas(guild_id: int, deltas):
     """Apply many independent balance/XP rewards in one write transaction.
 
     ``deltas`` contains ``(user_id, balance_change, xp_change)`` tuples. The
@@ -1429,6 +1480,7 @@ def apply_batch_user_deltas(deltas):
             for user_id, balance_change, xp_change in deltas:
                 results[int(user_id)] = _apply_stats_locked(
                     conn,
+                    guild_id,
                     int(user_id),
                     int(balance_change),
                     int(xp_change),
@@ -1440,7 +1492,7 @@ def apply_batch_user_deltas(deltas):
         raise DatabaseOperationError("batch user reward update failed") from exc
 
 
-def claim_timed_reward(user_id: int, cooldown_column: str, timestamp: str,
+def claim_timed_reward(guild_id: int, user_id: int, cooldown_column: str, timestamp: str,
                        coin_reward: int, xp_reward: int,
                        interval_seconds: int = None, once_per_day: bool = False):
     """Checks a cooldown and grants its reward in one write transaction."""
@@ -1449,9 +1501,10 @@ def claim_timed_reward(user_id: int, cooldown_column: str, timestamp: str,
     now = parse_stored(timestamp)
     try:
         with get_connection() as conn:
-            _ensure_user(conn, user_id, timestamp)
+            _ensure_user(conn, guild_id, user_id, timestamp)
             last_value = conn.execute(
-                f"SELECT {sql_identifier(cooldown_column)} FROM users WHERE user_id = %s", (user_id,)
+                f"SELECT {sql_identifier(cooldown_column)} FROM users "
+                "WHERE guild_id = %s AND user_id = %s", (guild_id, user_id)
             ).fetchone()[0]
             if last_value:
                 last = parse_stored(last_value)
@@ -1468,10 +1521,11 @@ def claim_timed_reward(user_id: int, cooldown_column: str, timestamp: str,
                     conn.rollback()
                     return {"claimed": False, "last_claim": last_value}
 
-            result = _apply_stats_locked(conn, user_id, coin_reward, xp_reward)
+            result = _apply_stats_locked(conn, guild_id, user_id, coin_reward, xp_reward)
             conn.execute(
-                f"UPDATE users SET {sql_identifier(cooldown_column)} = %s WHERE user_id = %s",
-                (timestamp, user_id),
+                f"UPDATE users SET {sql_identifier(cooldown_column)} = %s "
+                "WHERE guild_id = %s AND user_id = %s",
+                (timestamp, guild_id, user_id),
             )
             conn.commit()
             result.update({"claimed": True, "last_claim": last_value})
@@ -1516,9 +1570,8 @@ def _consume_streak_freeze(conn, guild_id: int, user_id: int,
     ).rowcount == 1
 
 
-def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
-                          base_coin: int, xp_reward: int,
-                          guild_id: int = None):
+def claim_everydle_reward(guild_id: int, user_id: int, cooldown_column: str,
+                          timestamp: str, base_coin: int, xp_reward: int):
     """Atomically grants one daily Everydle reward and updates its streak.
 
     A `streak_freeze` in the member's guild inventory buys one extra forgiven
@@ -1528,20 +1581,20 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
     and in the same transaction as the claim, because a crash between the two
     would either hand out a free freeze or charge for one that did nothing.
 
-    `guild_id` is optional because inventory is guild-local and the streak is
-    not. Without it there is no inventory to look in, so the streak resets the
-    way it always did.
+    The reward, the cooldown and the streak all live on this guild's row since
+    3.0.0. The puzzle itself is installation-wide, so one solve can be claimed
+    once in each guild (accepted, todo.md section 3).
     """
     if cooldown_column not in VALID_COOLDOWN_COLUMNS:
         raise ValueError(f"invalid cooldown column: {cooldown_column}")
     now = parse_stored(timestamp)
     try:
         with get_connection() as conn:
-            _ensure_user(conn, user_id, timestamp)
+            _ensure_user(conn, guild_id, user_id, timestamp)
             row = conn.execute(
                 f"SELECT {sql_identifier(cooldown_column)}, streak_count, last_streak_update "
-                "FROM users WHERE user_id = %s",
-                (user_id,),
+                "FROM users WHERE guild_id = %s AND user_id = %s",
+                (guild_id, user_id),
             ).fetchone()
             last_claim, streak_count, last_streak_update = row
             if last_claim and local_date(parse_stored(last_claim)) == local_date(now):
@@ -1560,8 +1613,7 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
                 elif day_gap in (1, 2):
                     # A single missed day is already forgiven, and always was.
                     new_streak = streak_count + 1
-                elif (guild_id is not None
-                      and day_gap <= 2 + int(
+                elif (day_gap <= 2 + int(
                           item_catalog.mechanic_value(
                               "streak_freeze",
                               guild_item_values(guild_id)) or 0)
@@ -1586,15 +1638,15 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
             # member read and the number they were paid for disagreed.
             effective_streak = min(new_streak, 100)
             reward = int(base_coin * (1.0 + effective_streak / 100.0))
-            result = _apply_stats_locked(conn, user_id, reward, xp_reward)
+            result = _apply_stats_locked(conn, guild_id, user_id, reward, xp_reward)
             conn.execute(
                 f"""
                 UPDATE users
                 SET {sql_identifier(cooldown_column)} = %s, streak_count = %s,
                     last_streak_update = %s
-                WHERE user_id = %s
+                WHERE guild_id = %s AND user_id = %s
                 """,
-                (timestamp, new_streak, timestamp, user_id),
+                (timestamp, new_streak, timestamp, guild_id, user_id),
             )
             conn.commit()
             result.update({"claimed": True, "reward": reward,
@@ -1605,7 +1657,7 @@ def claim_everydle_reward(user_id: int, cooldown_column: str, timestamp: str,
         raise DatabaseOperationError("Everydle reward failed") from exc
 
 
-def purchase_upgrade(user_id: int, price: int, upgrade: str, value=None):
+def purchase_upgrade(guild_id: int, user_id: int, price: int, upgrade: str, value=None):
     """Conditionally debits a user and applies a database-backed shop effect.
 
     Stackable consumables are not handled here: they are guild-local inventory
@@ -1616,18 +1668,20 @@ def purchase_upgrade(user_id: int, price: int, upgrade: str, value=None):
         raise ValueError("invalid purchase")
     try:
         with get_connection() as conn:
-            _ensure_user(conn, user_id)
+            _ensure_user(conn, guild_id, user_id)
             if upgrade == "vault":
                 current = conn.execute(
-                    "SELECT protected_reserve FROM users WHERE user_id = %s", (user_id,)
+                    "SELECT protected_reserve FROM users "
+                    "WHERE guild_id = %s AND user_id = %s", (guild_id, user_id)
                 ).fetchone()[0]
                 if current >= int(value):
                     conn.rollback()
                     return {"purchased": False, "reason": "already_owned"}
 
             changed = conn.execute(
-                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
-                (price, user_id, price),
+                "UPDATE users SET balance = balance - %s "
+                "WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (price, guild_id, user_id, price),
             ).rowcount
             if changed != 1:
                 conn.rollback()
@@ -1635,15 +1689,18 @@ def purchase_upgrade(user_id: int, price: int, upgrade: str, value=None):
 
             if upgrade == "vault":
                 conn.execute(
-                    "UPDATE users SET protected_reserve = %s WHERE user_id = %s", (int(value), user_id)
+                    "UPDATE users SET protected_reserve = %s "
+                    "WHERE guild_id = %s AND user_id = %s", (int(value), guild_id, user_id)
                 )
             elif upgrade == "bodyguard":
                 conn.execute(
-                    "UPDATE users SET rob_defense = 0.7, bodyguard_until = %s WHERE user_id = %s",
-                    (value, user_id),
+                    "UPDATE users SET rob_defense = 0.7, bodyguard_until = %s "
+                    "WHERE guild_id = %s AND user_id = %s",
+                    (value, guild_id, user_id),
                 )
             balance = conn.execute(
-                "SELECT balance FROM users WHERE user_id = %s", (user_id,)
+                "SELECT balance FROM users WHERE guild_id = %s AND user_id = %s",
+                (guild_id, user_id),
             ).fetchone()[0]
             conn.commit()
             return {"purchased": True, "balance": balance}
@@ -1667,10 +1724,11 @@ def purchase_inventory_item(guild_id: int, user_id: int, price: int,
     timestamp = datetime.now(timezone.utc).isoformat()
     try:
         with get_connection() as conn:
-            _ensure_user(conn, int(user_id), timestamp)
+            _ensure_user(conn, guild_id, int(user_id), timestamp)
             if conn.execute(
-                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
-                (price, int(user_id), price),
+                "UPDATE users SET balance = balance - %s "
+                "WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (price, guild_id, int(user_id), price),
             ).rowcount != 1:
                 conn.rollback()
                 return {"purchased": False, "reason": "insufficient_funds"}
@@ -1682,7 +1740,8 @@ def purchase_inventory_item(guild_id: int, user_id: int, price: int,
                 (int(guild_id), int(user_id), item_key, int(quantity), timestamp),
             )
             balance = conn.execute(
-                "SELECT balance FROM users WHERE user_id = %s", (int(user_id),)
+                "SELECT balance FROM users WHERE guild_id = %s AND user_id = %s",
+                (guild_id, int(user_id)),
             ).fetchone()[0]
             conn.commit()
             return {"purchased": True, "balance": balance, "price": price,
@@ -1693,10 +1752,10 @@ def purchase_inventory_item(guild_id: int, user_id: int, price: int,
         raise DatabaseOperationError("inventory purchase failed") from exc
 
 
-def refund_balance(user_id: int, amount: int):
+def refund_balance(guild_id: int, user_id: int, amount: int):
     if amount <= 0:
         return
-    apply_user_delta(user_id, balance_change=amount)
+    apply_user_delta(guild_id, user_id, balance_change=amount)
 
 # One installation-wide advisory lock key ("Potato"), taken by every write
 # transaction. PostgreSQL scopes advisory locks to the database.
@@ -2383,13 +2442,14 @@ def adopt_legacy_database(guild_id: int) -> dict:
 # User account reads and writes
 # ==========================================
 
-def get_user_balance(user_id: int) -> int:
-    """Return the stored balance, or zero when the user does not exist."""
+def get_user_balance(guild_id: int, user_id: int) -> int:
+    """Return the member's balance in this guild, or zero when there is no wallet."""
     try:
         # The connection context guarantees rollback and closure on every path.
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT balance FROM users WHERE user_id = %s", (user_id,))
+            cursor.execute("SELECT balance FROM users WHERE guild_id = %s AND user_id = %s",
+                           (guild_id, user_id))
             result = cursor.fetchone()
             return result[0] if result else 0
     except Exception as e:
@@ -2630,26 +2690,29 @@ def remove_ticket(channel_id: int):
 # Administration and moderation persistence
 # ==========================================
 
-def set_rules_read_time(user_id: int, seconds: int):
-    """Store how many seconds the member took to accept the rules."""
+def set_rules_read_time(guild_id: int, user_id: int, seconds: int):
+    """Store how many seconds the member took to accept this guild's rules."""
     try:
         with get_connection() as conn:
-            conn.execute("UPDATE users SET rules_read_time = %s WHERE user_id = %s", (seconds, user_id))
+            conn.execute("UPDATE users SET rules_read_time = %s "
+                         "WHERE guild_id = %s AND user_id = %s",
+                         (seconds, guild_id, user_id))
     except Exception as e: 
         db_logger.error(f"Failed to save rules acceptance time: {e}")
         raise DatabaseOperationError("rules read time update failed") from e
 
-def user_exists(user_id: int) -> bool:
-    """Return whether an account row exists for the user."""
+def user_exists(guild_id: int, user_id: int) -> bool:
+    """Return whether the member has a wallet in this guild."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("SELECT 1 FROM users WHERE user_id = %s", (user_id,))
+            cursor = conn.execute("SELECT 1 FROM users WHERE guild_id = %s AND user_id = %s",
+                                  (guild_id, user_id))
             return cursor.fetchone() is not None
     except Exception as e:
         db_logger.error(f"Failed to check whether user exists: {e}")
         return False
 
-def reset_user_cooldowns(user_id: int):
+def reset_user_cooldowns(guild_id: int, user_id: int):
     """Reset every business cooldown and daily streak for test administration."""
     try:
         with get_connection() as conn:
@@ -2669,8 +2732,8 @@ def reset_user_cooldowns(user_id: int):
                     bodyguard_until = NULL,
                     last_streak_update = NULL,
                     streak_count = 0
-                WHERE user_id = %s
-            """, (user_id,))
+                WHERE guild_id = %s AND user_id = %s
+            """, (guild_id, user_id))
     except Exception as e: 
         db_logger.error(f"Failed to reset user cooldowns: {e}")
         raise DatabaseOperationError("cooldown reset failed") from e
@@ -2871,11 +2934,12 @@ def remove_warning(warning_id: int, user_id: int, guild_id: int,
         )
         raise DatabaseOperationError("warning removal failed") from exc
 
-def get_user_intel(user_id: int):
-    """Return moderation-facing profile metadata and activity state."""
+def get_user_intel(guild_id: int, user_id: int):
+    """Return moderation-facing profile metadata and activity state in this guild."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("SELECT rules_read_time, last_active FROM users WHERE user_id = %s", (user_id,))
+            cursor = conn.execute("SELECT rules_read_time, last_active FROM users "
+                                  "WHERE guild_id = %s AND user_id = %s", (guild_id, user_id))
             return cursor.fetchone()
     except Exception as e:
         db_logger.error(f"Failed to read moderation profile data: {e}")
@@ -2885,10 +2949,10 @@ def get_user_intel(user_id: int):
 # Profiles and leaderboards
 # ==========================================
 
-# A leaderboard cannot be partitioned per guild while there is one wallet per user,
-# so it is filtered by guild membership instead: each guild ranks only its own
-# members. Member lists can be large, so the id set is chunked well under SQLite's
-# variable limit and the per-chunk winners are merged here. Erased members keep an
+# A leaderboard reads this guild's wallets (schema 27) *and* filters by current
+# membership, both: a member who left keeps a wallet here but drops off the
+# board. Member lists can be large, so the id set is chunked to keep each
+# statement's parameter list small and the per-chunk winners are merged here. Erased members keep an
 # anonymous economy row under a negative tombstone id and must never be ranked.
 # Each ranking query also leaves out a NULL value: the merge below sorts in
 # Python, where None does not compare with an int, and one such row emptied the
@@ -2896,7 +2960,8 @@ def get_user_intel(user_id: int):
 _MEMBER_ID_CHUNK = 900
 
 
-def _ranked_members(conn, sql: str, member_ids, limit: int, order_index: int):
+def _ranked_members(conn, guild_id: int, sql: str, member_ids, limit: int,
+                    order_index: int):
     """Run one ranking query per chunk of member ids and merge the results."""
     ids = sorted({int(member_id) for member_id in member_ids if int(member_id) > 0})
     if not ids:
@@ -2907,20 +2972,20 @@ def _ranked_members(conn, sql: str, member_ids, limit: int, order_index: int):
         placeholders = ",".join(["%s"] * len(chunk))
         merged.extend(
             conn.execute(
-                sql.format(placeholders=placeholders), (*chunk, limit)
+                sql.format(placeholders=placeholders), (guild_id, *chunk, limit)
             ).fetchall()
         )
     merged.sort(key=lambda row: row[order_index], reverse=True)
     return merged[:limit]
 
 
-def get_top_levels(member_ids, limit: int = 10):
+def get_top_levels(guild_id: int, member_ids, limit: int = 10):
     try:
         with get_connection() as conn:
             return _ranked_members(
-                conn,
-                "SELECT user_id, level, xp FROM users "
-                "WHERE user_id IN ({placeholders}) AND xp IS NOT NULL "
+                conn, guild_id,
+                "SELECT user_id, level, xp FROM users WHERE guild_id = %s "
+                "AND user_id IN ({placeholders}) AND xp IS NOT NULL "
                 "ORDER BY xp DESC, user_id LIMIT %s",
                 member_ids, limit, 2,
             )
@@ -2928,13 +2993,13 @@ def get_top_levels(member_ids, limit: int = 10):
         db_logger.error(f"Failed to read level leaderboard: {e}")
         return []
 
-def get_top_balances(member_ids, limit: int = 10):
+def get_top_balances(guild_id: int, member_ids, limit: int = 10):
     try:
         with get_connection() as conn:
             return _ranked_members(
-                conn,
-                "SELECT user_id, balance, level FROM users "
-                "WHERE user_id IN ({placeholders}) AND balance IS NOT NULL "
+                conn, guild_id,
+                "SELECT user_id, balance, level FROM users WHERE guild_id = %s "
+                "AND user_id IN ({placeholders}) AND balance IS NOT NULL "
                 "ORDER BY balance DESC, user_id LIMIT %s",
                 member_ids, limit, 1,
             )
@@ -2942,14 +3007,14 @@ def get_top_balances(member_ids, limit: int = 10):
         db_logger.error(f"Failed to read balance leaderboard: {e}")
         return []
 
-def get_top_streaks(member_ids, limit: int = 10):
+def get_top_streaks(guild_id: int, member_ids, limit: int = 10):
     try:
         with get_connection() as conn:
             # Only positive streaks belong on the public leaderboard.
             return _ranked_members(
-                conn,
-                "SELECT user_id, streak_count FROM users "
-                "WHERE user_id IN ({placeholders}) AND streak_count > 0 "
+                conn, guild_id,
+                "SELECT user_id, streak_count FROM users WHERE guild_id = %s "
+                "AND user_id IN ({placeholders}) AND streak_count > 0 "
                 "ORDER BY streak_count DESC, user_id LIMIT %s",
                 member_ids, limit, 1,
             )
@@ -2961,8 +3026,8 @@ def get_top_gacha_luck(guild_id: int, member_ids, banner_key: str = None,
                         limit: int = 10, minimum_five_stars: int = 3):
     """Ranked by best average luck -- lowest average pulls-per-5-star on one
     banner, not the live pity counter -- so this is a different query shape
-    from `_ranked_members`: `gacha_pulls` already carries a real `guild_id`,
-    where `users` does not, so there is no member-id IN-list to chunk. A
+    from `_ranked_members`: it groups `gacha_pulls` by member, so there is no
+    member-id IN-list to chunk. A
     member still needs `minimum_five_stars` 5-star pulls to qualify, or one
     early lucky pull would top the board on no evidence, and the result is
     still filtered to current guild members so a departed member drops off,
@@ -2989,20 +3054,20 @@ def get_top_gacha_luck(guild_id: int, member_ids, banner_key: str = None,
             for user_id, average, count in rows if user_id in ids][:limit]
 
 
-def get_user_profile(user_id: int):
+def get_user_profile(guild_id: int, user_id: int):
     try:
         with get_connection() as conn:
             cursor = conn.execute("""
                 SELECT level, xp, balance, bj_wins, bj_losses, streak_count,
                        last_streak_update
-                FROM users WHERE user_id = %s
-            """, (user_id,))
+                FROM users WHERE guild_id = %s AND user_id = %s
+            """, (guild_id, user_id))
             return cursor.fetchone()
     except Exception as e:
         db_logger.error(f"Failed to read user profile: {e}")
         return None
 
-def get_user_rank(xp: int, member_ids) -> int:
+def get_user_rank(guild_id: int, xp: int, member_ids) -> int:
     """Calculate the user's rank by XP among the members of one guild."""
     try:
         ids = sorted({int(member_id) for member_id in member_ids if int(member_id) > 0})
@@ -3012,9 +3077,9 @@ def get_user_rank(xp: int, member_ids) -> int:
                 chunk = ids[start:start + _MEMBER_ID_CHUNK]
                 placeholders = ",".join(["%s"] * len(chunk))
                 ahead += conn.execute(
-                    f"SELECT COUNT(*) FROM users WHERE xp > %s "
+                    f"SELECT COUNT(*) FROM users WHERE guild_id = %s AND xp > %s "
                     f"AND user_id IN ({placeholders})",
-                    (xp, *chunk),
+                    (guild_id, xp, *chunk),
                 ).fetchone()[0]
         return ahead + 1
     except Exception as e:
@@ -3025,43 +3090,44 @@ def get_user_rank(xp: int, member_ids) -> int:
 # Server activity persistence
 # ==========================================
 
-def update_last_active(user_id: int, timestamp: str):
-    """Record recent activity and clear the inactivity-warning flag."""
+def update_last_active(guild_id: int, user_id: int, timestamp: str):
+    """Record recent activity in this guild and clear its inactivity-warning flag."""
     try:
         with get_connection() as conn:
-            conn.execute("UPDATE users SET last_active = %s, inactive_warned = 0 WHERE user_id = %s", (timestamp, user_id))
+            conn.execute("UPDATE users SET last_active = %s, inactive_warned = 0 "
+                         "WHERE guild_id = %s AND user_id = %s",
+                         (timestamp, guild_id, user_id))
     except Exception as e:
         db_logger.error(f"Failed to update last-active timestamp: {e}")
         raise DatabaseOperationError("last-active update failed") from e
 
-def get_inactivity_data(user_id: int):
-    """Return the user's last-active timestamp and warning state."""
+def get_inactivity_data(guild_id: int, user_id: int):
+    """Return the member's last-active timestamp and warning state in this guild."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("SELECT last_active, inactive_warned FROM users WHERE user_id = %s", (user_id,))
+            cursor = conn.execute("SELECT last_active, inactive_warned FROM users "
+                                  "WHERE guild_id = %s AND user_id = %s", (guild_id, user_id))
             return cursor.fetchone()
     except Exception as e:
         db_logger.error(f"Failed to read inactivity data: {e}")
         return None
 
-def set_inactive_warned(user_id: int):
-    """Mark the user as having received an inactivity warning."""
+def set_inactive_warned(guild_id: int, user_id: int):
+    """Mark the member as having received this guild's inactivity warning."""
     try:
         with get_connection() as conn:
-            conn.execute("UPDATE users SET inactive_warned = 1 WHERE user_id = %s", (user_id,))
+            conn.execute("UPDATE users SET inactive_warned = 1 "
+                         "WHERE guild_id = %s AND user_id = %s", (guild_id, user_id))
     except Exception as e:
         db_logger.error(f"Failed to set inactivity warning state: {e}")
         raise DatabaseOperationError("inactive warning update failed") from e
 
-def create_new_user(user_id: int, timestamp: str):
-    """Create a user row with the normal account defaults."""
+def create_new_user(guild_id: int, user_id: int, timestamp: str):
+    """Create the member's wallet in this guild with the normal defaults: the
+    new-account balance in a first guild, 0 in any later one (`_ensure_user`)."""
     try:
         with get_connection() as conn:
-            conn.execute("""
-                INSERT INTO users (user_id, balance, xp, level, bj_wins, bj_losses, 
-                                rob_bonus, rob_defense, vault_protection, last_active, inactive_warned) 
-                VALUES (%s, 100, 0, 1, 0, 0, 0.0, 1.0, 0.0, %s, 0)
-            """, (user_id, timestamp))
+            _ensure_user(conn, guild_id, user_id, timestamp)
     except Exception as e:
         db_logger.error(f"Failed to create user: {e}")
         raise DatabaseOperationError("user creation failed") from e
@@ -3118,14 +3184,15 @@ def delete_rental(rental_id: int):
 # Casino and business cooldown persistence
 # ==========================================
 
-def get_cooldown(user_id: int, col_name: str):
+def get_cooldown(guild_id: int, user_id: int, col_name: str):
     """Read an allowlisted cooldown timestamp."""
     if col_name not in VALID_COOLDOWN_COLUMNS:
         raise ValueError(f"invalid cooldown column: {col_name}")
     try:
         with get_connection() as conn:
             # The allowlist makes the interpolated identifier safe; values remain parameterized.
-            cursor = conn.execute(f"SELECT {sql_identifier(col_name)} FROM users WHERE user_id = %s", (user_id,))
+            cursor = conn.execute(f"SELECT {sql_identifier(col_name)} FROM users "
+                                  "WHERE guild_id = %s AND user_id = %s", (guild_id, user_id))
             result = cursor.fetchone()
             return result[0] if result else None
     except EngineError as exc:
@@ -3135,25 +3202,31 @@ def get_cooldown(user_id: int, col_name: str):
         db_logger.exception("Cooldown read failed (column=%s)", col_name)
         raise DatabaseOperationError("cooldown read failed") from exc
 
-def set_cooldown(user_id: int, col_name: str, timestamp: str):
+def set_cooldown(guild_id: int, user_id: int, col_name: str, timestamp: str):
     """Write an allowlisted cooldown timestamp."""
     if col_name not in VALID_COOLDOWN_COLUMNS:
         raise ValueError(f"invalid cooldown column: {col_name}")
     try:
         with get_connection() as conn:
-            conn.execute(f"UPDATE users SET {sql_identifier(col_name)} = %s WHERE user_id = %s", (timestamp, user_id))
+            conn.execute(f"UPDATE users SET {sql_identifier(col_name)} = %s "
+                         "WHERE guild_id = %s AND user_id = %s", (timestamp, guild_id, user_id))
     except EngineError as exc:
         db_logger.exception("Cooldown update failed (column=%s)", col_name)
         raise DatabaseOperationError("cooldown update failed") from exc
 
 
-def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
+def resolve_robbery(guild_id: int, attacker_id: int, victim_id: int, timestamp: str,
                     base_chance: float, victim_passive_defense: float,
-                    chance_roll: float, steal_percent: float, guild_id: int = 0):
-    """Checks eligibility and resolves all robbery effects in one transaction."""
+                    chance_roll: float, steal_percent: float):
+    """Checks eligibility and resolves all robbery effects in one transaction.
+
+    Both wallets are this guild's. A victim with no wallet here yet gets one
+    first (todo.md section 3): they then fail the balance check as poor, so the
+    reply never tells the attacker that the victim is new to this server."""
     now = parse_stored(timestamp)
     try:
         with get_connection() as conn:
+            _ensure_user(conn, guild_id, victim_id, timestamp)
             attacker = conn.execute(
                 """
                 SELECT balance, xp, level, bj_wins, bj_losses, rob_bonus, last_rob,
@@ -3163,16 +3236,16 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
                     COALESCE((SELECT quantity FROM user_inventory
                         WHERE guild_id = %s AND user_id = users.user_id
                         AND item_key = 'vault_glove'), 0)
-                FROM users WHERE user_id = %s
+                FROM users WHERE guild_id = %s AND user_id = %s
                 """,
-                (int(guild_id), int(guild_id), attacker_id),
+                (int(guild_id), int(guild_id), int(guild_id), attacker_id),
             ).fetchone()
             victim = conn.execute(
                 """
                 SELECT balance, rob_defense, protected_reserve, bodyguard_until
-                FROM users WHERE user_id = %s
+                FROM users WHERE guild_id = %s AND user_id = %s
                 """,
-                (victim_id,),
+                (guild_id, victim_id),
             ).fetchone()
             if not attacker or not victim:
                 conn.rollback()
@@ -3193,16 +3266,17 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
             if victim[3] and now > parse_stored(victim[3]):
                 victim_defense = 1.0
                 conn.execute(
-                    "UPDATE users SET rob_defense = 1.0, bodyguard_until = NULL WHERE user_id = %s",
-                    (victim_id,),
+                    "UPDATE users SET rob_defense = 1.0, bodyguard_until = NULL "
+                    "WHERE guild_id = %s AND user_id = %s",
+                    (guild_id, victim_id),
                 )
             # attacker[5] is the legacy column-backed lockpick. Nothing writes it
             # any more: both systems now grant the inventory item, and this read
             # only honours members who bought one before that change. It is
             # cleared below on every resolved attempt, so the column drains and
             # this is a finite compatibility path, not a second live mechanic.
-            # It was never migrated because rob_bonus has no guild dimension and
-            # CLAUDE.md forbids guessing which guild a legacy row belonged to.
+            # Schema 27 put it on the guild's row with the rest of the wallet,
+            # so it now drains in the guild the member earned it in.
             inventory_lockpick = attacker[7] > 0
             inventory_glove = attacker[8] > 0
             # Read rather than written: this was the literal `0.15`, which
@@ -3226,7 +3300,8 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
                     stealable += int(protected * exposure)
                 amount = max(1, int(stealable * steal_percent)) if stealable else 0
                 attacker_result = _apply_stats_locked(
-                    conn, attacker_id, amount, 30, win_inc=1, clamp_balance=False
+                    conn, guild_id, attacker_id, amount, 30, win_inc=1,
+                    clamp_balance=False
                 )
                 # `clamp_balance=False` means `_apply_stats_locked` writes nothing
                 # and returns None rather than going negative. Discarding that
@@ -3235,7 +3310,8 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
                 # makes it unreachable, but the arithmetic that guarantees it sits
                 # sixty lines away, so the refusal is honoured rather than assumed.
                 if _apply_stats_locked(
-                        conn, victim_id, -amount, clamp_balance=False) is None:
+                        conn, guild_id, victim_id, -amount,
+                        clamp_balance=False) is None:
                     conn.rollback()
                     db_logger.error(
                         "Robbery debit refused; settlement rolled back "
@@ -3246,14 +3322,17 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
             else:
                 amount = int(attacker[0] * 0.10)
                 attacker_result = _apply_stats_locked(
-                    conn, attacker_id, -amount, 5, loss_inc=1, clamp_balance=False
+                    conn, guild_id, attacker_id, -amount, 5, loss_inc=1,
+                    clamp_balance=False
                 )
-                _apply_stats_locked(conn, victim_id, amount, clamp_balance=False)
+                _apply_stats_locked(conn, guild_id, victim_id, amount,
+                                    clamp_balance=False)
 
             consumed_lockpick = attacker[5] > 0
             conn.execute(
-                "UPDATE users SET last_rob = %s, rob_bonus = 0.0 WHERE user_id = %s",
-                (timestamp, attacker_id),
+                "UPDATE users SET last_rob = %s, rob_bonus = 0.0 "
+                "WHERE guild_id = %s AND user_id = %s",
+                (timestamp, guild_id, attacker_id),
             )
             for item_key, present in (("lockpick", inventory_lockpick),
                                       ("vault_glove", inventory_glove)):
@@ -3278,21 +3357,24 @@ def resolve_robbery(attacker_id: int, victim_id: int, timestamp: str,
         db_logger.exception("Robbery transaction failed (attacker=%s)", attacker_id)
         raise DatabaseOperationError("robbery transaction failed") from exc
 
-def get_rob_stats(user_id: int):
-    """Return all account values required to resolve a robbery."""
+def get_rob_stats(guild_id: int, user_id: int):
+    """Return all account values required to resolve a robbery in this guild."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("SELECT balance, rob_bonus, rob_defense, protected_reserve, bodyguard_until FROM users WHERE user_id = %s", (user_id,))
+            cursor = conn.execute("SELECT balance, rob_bonus, rob_defense, protected_reserve, "
+                                  "bodyguard_until FROM users WHERE guild_id = %s AND user_id = %s",
+                                  (guild_id, user_id))
             return cursor.fetchone()
     except Exception as e:
         db_logger.error(f"Failed to read robbery state: {e}")
         return None
 
-def expire_bodyguard(user_id: int):
-    """Clear expired bodyguard protection."""
+def expire_bodyguard(guild_id: int, user_id: int):
+    """Clear expired bodyguard protection on this guild's wallet."""
     try:
         with get_connection() as conn:
-            conn.execute("UPDATE users SET rob_defense = 1.0, bodyguard_until = NULL WHERE user_id = %s", (user_id,))
+            conn.execute("UPDATE users SET rob_defense = 1.0, bodyguard_until = NULL "
+                         "WHERE guild_id = %s AND user_id = %s", (guild_id, user_id))
     except Exception as e:
         db_logger.error(f"Failed to expire bodyguard: {e}")
         raise DatabaseOperationError("bodyguard expiry failed") from e
@@ -3301,7 +3383,7 @@ def expire_bodyguard(user_id: int):
 # Core account helpers
 # ==========================================
 
-def get_top_xp_user(member_ids):
+def get_top_xp_user(guild_id: int, member_ids):
     """Return the highest-XP member of one guild.
 
     This used to take no argument, so every guild computed the same winner and the
@@ -3310,8 +3392,9 @@ def get_top_xp_user(member_ids):
     try:
         with get_connection() as conn:
             leaders = _ranked_members(
-                conn,
-                "SELECT user_id, xp FROM users WHERE user_id IN ({placeholders}) "
+                conn, guild_id,
+                "SELECT user_id, xp FROM users WHERE guild_id = %s "
+                "AND user_id IN ({placeholders}) "
                 "AND xp IS NOT NULL ORDER BY xp DESC, user_id LIMIT %s",
                 member_ids, 1, 1,
             )
@@ -3320,35 +3403,38 @@ def get_top_xp_user(member_ids):
         db_logger.error(f"Failed to read top XP user: {e}")
         return None
 
-def get_full_user_data(user_id: int):
+def get_full_user_data(guild_id: int, user_id: int):
     """Return the account fields used by legacy update paths."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("""SELECT balance, xp, level, bj_wins, bj_losses, 
+            cursor = conn.execute("""SELECT balance, xp, level, bj_wins, bj_losses,
                                   rob_bonus, rob_defense, protected_reserve, bodyguard_until
-                                  FROM users WHERE user_id = %s""", (user_id,))
+                                  FROM users WHERE guild_id = %s AND user_id = %s""",
+                                  (guild_id, user_id))
             return cursor.fetchone()
     except Exception as e:
         db_logger.error(f"Failed to read full user data: {e}")
         return None
         
 
-def get_streak_data(user_id: int):
-    """Return the user's daily streak state."""
+def get_streak_data(guild_id: int, user_id: int):
+    """Return the member's daily streak state in this guild."""
     try:
         with get_connection() as conn:
-            cursor = conn.execute("SELECT streak_count, last_streak_update FROM users WHERE user_id = %s", (user_id,))
+            cursor = conn.execute("SELECT streak_count, last_streak_update FROM users "
+                                  "WHERE guild_id = %s AND user_id = %s", (guild_id, user_id))
             return cursor.fetchone()
     except Exception as e:
         db_logger.error(f"Failed to read streak state: {e}")
         return None
 
-def save_streak_data(user_id: int, streak_count: int, timestamp: str):
+def save_streak_data(guild_id: int, user_id: int, streak_count: int, timestamp: str):
     """Persist an already-calculated daily streak state."""
     try:
         with get_connection() as conn:
-            conn.execute("UPDATE users SET streak_count = %s, last_streak_update = %s WHERE user_id = %s", 
-                         (streak_count, timestamp, user_id))
+            conn.execute("UPDATE users SET streak_count = %s, last_streak_update = %s "
+                         "WHERE guild_id = %s AND user_id = %s",
+                         (streak_count, timestamp, guild_id, user_id))
     except Exception as e:
         db_logger.error(f"Failed to save streak state: {e}")
         raise DatabaseOperationError("streak update failed") from e
@@ -5066,7 +5152,7 @@ def _grant_gacha_reward_locked(conn, guild_id: int, user_id: int,
     kind, amount = reward["kind"], reward["amount"]
     granted = {"key": reward["key"], "kind": kind, "amount": amount}
     if kind == "coins":
-        conn.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s", (amount, user_id))
+        conn.execute("UPDATE users SET balance = balance + %s WHERE guild_id = %s AND user_id = %s", (amount, int(guild_id), user_id))
     elif kind == "item":
         conn.execute(
             "INSERT INTO user_inventory (guild_id, user_id, item_key, quantity, updated_at) "
@@ -5075,13 +5161,13 @@ def _grant_gacha_reward_locked(conn, guild_id: int, user_id: int,
             (guild_id, user_id, reward["key"], amount, timestamp),
         )
     elif kind == "vault":
-        current = conn.execute("SELECT protected_reserve FROM users WHERE user_id = %s", (user_id,)).fetchone()[0]
+        current = conn.execute("SELECT protected_reserve FROM users WHERE guild_id = %s AND user_id = %s", (int(guild_id), user_id)).fetchone()[0]
         if current >= amount:
             compensation = amount * config_value["duplicate_percent"] // 100
-            conn.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s", (compensation, user_id))
+            conn.execute("UPDATE users SET balance = balance + %s WHERE guild_id = %s AND user_id = %s", (compensation, int(guild_id), user_id))
             granted["duplicate_compensation"] = compensation
         else:
-            conn.execute("UPDATE users SET protected_reserve = %s WHERE user_id = %s", (amount, user_id))
+            conn.execute("UPDATE users SET protected_reserve = %s WHERE guild_id = %s AND user_id = %s", (amount, int(guild_id), user_id))
             granted["protected_reserve"] = amount
     else:
         voucher_id = secrets.token_urlsafe(12)
@@ -5207,11 +5293,11 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
                     "VALUES (%s, %s, 1, %s, 1, %s)",
                     (int(guild_id), banner_key, json.dumps(config_value, sort_keys=True), timestamp),
                 )
-            _ensure_user(conn, int(user_id), timestamp)
+            _ensure_user(conn, int(guild_id), int(user_id), timestamp)
             total_cost = config_value["cost"] * count
             if conn.execute(
-                "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
-                (total_cost, int(user_id), total_cost),
+                "UPDATE users SET balance = balance - %s WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (total_cost, int(guild_id), int(user_id), total_cost),
             ).rowcount != 1:
                 conn.rollback()
                 return {"purchased": False, "reason": "insufficient_funds"}
@@ -5327,7 +5413,7 @@ def perform_gacha_pulls(guild_id: int, user_id: int, count: int,
                 (int(guild_id), int(user_id), banner_key, pity, four_counter,
                  int(guaranteed["5"]), int(guaranteed["4"]), timestamp),
             )
-            balance = conn.execute("SELECT balance FROM users WHERE user_id = %s", (int(user_id),)).fetchone()[0]
+            balance = conn.execute("SELECT balance FROM users WHERE guild_id = %s AND user_id = %s", (int(guild_id), int(user_id))).fetchone()[0]
             conn.commit()
             return {"purchased": True, "cost": total_cost, "balance": balance,
                     "pity": pity, "four_star_counter": four_counter,
@@ -6201,18 +6287,18 @@ def purchase_custom_shop_item(guild_id: int, user_id: int, item_key: str) -> dic
             conn.rollback()
             return {"purchased": False, "reason": "unavailable"}
         template, _, price, config_value = row[0], row[1], row[2], json.loads(row[3])
-        _ensure_user(conn, int(user_id), timestamp)
+        _ensure_user(conn, int(guild_id), int(user_id), timestamp)
         if template == "vault":
             reserve = int(config_value["amount"])
             current = conn.execute(
-                "SELECT protected_reserve FROM users WHERE user_id = %s", (int(user_id),)
+                "SELECT protected_reserve FROM users WHERE guild_id = %s AND user_id = %s", (int(guild_id), int(user_id))
             ).fetchone()[0]
             if current >= reserve:
                 conn.rollback()
                 return {"purchased": False, "reason": "already_owned"}
         if conn.execute(
-            "UPDATE users SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
-            (price, int(user_id), price),
+            "UPDATE users SET balance = balance - %s WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+            (price, int(guild_id), int(user_id), price),
         ).rowcount != 1:
             conn.rollback()
             return {"purchased": False, "reason": "insufficient_funds"}
@@ -6228,11 +6314,11 @@ def purchase_custom_shop_item(guild_id: int, user_id: int, item_key: str) -> dic
                 (int(guild_id), int(user_id), config_value["item_key"], timestamp),
             )
         elif template == "vault":
-            conn.execute("UPDATE users SET protected_reserve = %s WHERE user_id = %s",
-                         (int(config_value["amount"]), int(user_id)))
+            conn.execute("UPDATE users SET protected_reserve = %s WHERE guild_id = %s AND user_id = %s",
+                         (int(config_value["amount"]), int(guild_id), int(user_id)))
         elif template == "coin_bundle":
-            conn.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s",
-                         (int(config_value["amount"]), int(user_id)))
+            conn.execute("UPDATE users SET balance = balance + %s WHERE guild_id = %s AND user_id = %s",
+                         (int(config_value["amount"]), int(guild_id), int(user_id)))
         elif template == "fulfillment_voucher":
             voucher_id = secrets.token_urlsafe(12)
             reward_key = f"{config_value['asset_type']}_{int(config_value['duration_days'])}d"
@@ -6271,7 +6357,7 @@ def purchase_custom_shop_item(guild_id: int, user_id: int, item_key: str) -> dic
                     (int(guild_id), int(user_id), entitlement_key, timestamp, expires.isoformat()),
                 )
             result["expires_at"] = expires.isoformat()
-        balance = conn.execute("SELECT balance FROM users WHERE user_id = %s", (int(user_id),)).fetchone()[0]
+        balance = conn.execute("SELECT balance FROM users WHERE guild_id = %s AND user_id = %s", (int(guild_id), int(user_id))).fetchone()[0]
         conn.commit()
         result["balance"] = balance
         return result
@@ -6287,8 +6373,8 @@ def rollback_custom_role_purchase(guild_id: int, user_id: int, charged_price: in
     the debit and the rollback cannot change what is returned.
     """
     with get_connection() as conn:
-        conn.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s",
-                     (int(charged_price), int(user_id)))
+        conn.execute("UPDATE users SET balance = balance + %s WHERE guild_id = %s AND user_id = %s",
+                     (int(charged_price), int(guild_id), int(user_id)))
         if template_type == "timed_role" and duration_days is not None:
             active = conn.execute(
                 "SELECT entitlement_id, expires_at FROM timed_entitlements WHERE guild_id = %s "
@@ -6960,16 +7046,19 @@ def _refund_pending_wagers_for_user_locked(conn, user_id: int, resolved_at: str)
     A pending row is a live refund obligation whose stake has already left
     ``users.balance``; deleting it would destroy the obligation and quietly shrink
     the installation's coin supply. The money lands on the row that is about to
-    become the tombstone, so nothing enters or leaves the economy.
+    become the tombstone, so nothing enters or leaves the economy. Each stake
+    returns to the wallet it left, the wager's own guild: with one wallet per
+    guild, crediting by member alone would pay it into every guild at once.
     """
     rows = conn.execute(
-        "SELECT wager_id, stake FROM casino_wagers "
+        "SELECT wager_id, stake, guild_id FROM casino_wagers "
         "WHERE user_id = %s AND status = 'pending'", (user_id,)
     ).fetchall()
-    for wager_id, stake in rows:
+    for wager_id, stake, guild_id in rows:
         conn.execute(
-            "UPDATE users SET balance = balance + %s WHERE user_id = %s",
-            (stake, user_id),
+            "UPDATE users SET balance = balance + %s "
+            "WHERE guild_id = %s AND user_id = %s",
+            (stake, guild_id, user_id),
         )
         conn.execute(
             "UPDATE casino_wagers SET status = 'refunded', resolved_at = %s, "
@@ -7189,17 +7278,21 @@ def anonymize_user(user_id: int, actor_id: int, guild_id: int = 0,
 
 
 def get_retention_candidates(cutoff_iso: str, limit: int = 25) -> list[int]:
-    """Members whose last recorded activity predates the retention window.
+    """Members inactive in every guild since before the retention window.
 
-    Membership is not knowable from SQLite, so the caller must additionally confirm
-    the member is absent from every guild before erasing them. A row that has never
-    recorded activity is never a candidate, because absence of a timestamp is not
-    evidence of absence of a member.
+    One member has one wallet row per guild (schema 27), so the question is
+    asked per person, once: the newest activity across all of their rows must
+    predate the cutoff (decided 2026-11-06), and each member is returned once.
+    Membership is not knowable from the database, so the caller must
+    additionally confirm the member is absent from every guild before erasing
+    them. A member with any row that has never recorded activity is never a
+    candidate, because absence of a timestamp is not evidence of absence.
     """
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT user_id FROM users WHERE user_id > 0 AND last_active IS NOT NULL "
-            "AND last_active < %s ORDER BY last_active ASC, user_id LIMIT %s",
+            "SELECT user_id FROM users WHERE user_id > 0 GROUP BY user_id "
+            "HAVING COUNT(last_active) = COUNT(*) AND MAX(last_active) < %s "
+            "ORDER BY MAX(last_active) ASC, user_id LIMIT %s",
             (cutoff_iso, max(1, int(limit))),
         ).fetchall()
     return [row[0] for row in rows]
