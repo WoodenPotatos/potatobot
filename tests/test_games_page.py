@@ -38,8 +38,8 @@ class GamesPageHarnessTests(unittest.TestCase):
         from core.supported_games import SUPPORTED_GAME_KEYS
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            original_path, original_admin = database.DB_PATH, dashboard_api.ADMIN_ID
-            database.DB_PATH = os.path.join(temp_dir, "fixture.db")
+            original_path, original_admin = database.DATA_DIR, dashboard_api.ADMIN_ID
+            database.DATA_DIR = temp_dir
             pg_harness.fresh_database()
             dashboard_api.ADMIN_ID = "42"
             settings_cache.invalidate()
@@ -87,7 +87,7 @@ class GamesPageHarnessTests(unittest.TestCase):
                     },
                 }
             finally:
-                database.DB_PATH = original_path
+                database.DATA_DIR = original_path
                 dashboard_api.ADMIN_ID = original_admin
                 settings_cache.invalidate()
             fixture_path = os.path.join(temp_dir, "fixture.json")

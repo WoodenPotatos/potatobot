@@ -6,6 +6,18 @@ stable. A build keeps its number across channels, so `2.18.3a` publishes as
 2026-10-22 by adding the old beta serial to z (`2.18.0-beta.1` is `2.18.1b`);
 the public repository's git tags keep their original names.
 
+## 2.21.37b
+
+- **SQLite support is removed.** Installations still on SQLite (2.19.x and
+  earlier) stay on the last SQLite stable, 2.19.29, which the public
+  repository keeps on the `stable-2.19` branch; there is no upgrade path from
+  it.
+  The one-time copy tool, `POTATOBOT_DB_PATH` and the offsite backup's
+  `--legacy-sqlite` are gone. Unset `POTATOBOT_DATA_DIR` now means beside the
+  code, where the session secret and card backgrounds already sat by default;
+  an installation that set only `POTATOBOT_DB_PATH` sets `POTATOBOT_DATA_DIR`
+  to that file's directory instead.
+
 ## 2.21.34b
 
 - **Privacy Policy 1.1: your data is encrypted at rest.** The database, its

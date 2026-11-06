@@ -153,8 +153,8 @@ class DashboardItemTestCase(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "items.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Guild")
@@ -169,7 +169,7 @@ class DashboardItemTestCase(unittest.TestCase):
         dashboard_api._permission_cache._entries.clear()
         # And so is the settings cache. A test here writes `shop_hidden_items`,
         # and left behind it answers for the next test — the same discipline
-        # `database.DB_PATH` needs, and the failure only shows in a full run.
+        # `database.DATA_DIR` needs, and the failure only shows in a full run.
         settings_cache.invalidate()
         with self.client.session_transaction() as session:
             session["logged_in"] = True
@@ -184,7 +184,7 @@ class DashboardItemTestCase(unittest.TestCase):
 
     def tearDown(self):
         dashboard_api.ADMIN_ID = self.original_admin_id
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         settings_cache.invalidate()
         self.temp_dir.cleanup()
 
@@ -648,8 +648,8 @@ class CustomRewardLabelTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "labels.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
@@ -660,7 +660,7 @@ class CustomRewardLabelTests(unittest.TestCase):
             "text": {"name": "Extra vault", "description": "d"}})
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _custom_items(self):

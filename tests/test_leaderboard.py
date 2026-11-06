@@ -47,8 +47,8 @@ class _FakeGuild:
 class LeaderboardViewTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "leaderboard.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Leaderboard Guild")
@@ -57,7 +57,7 @@ class LeaderboardViewTests(unittest.IsolatedAsyncioTestCase):
         self.guild = _FakeGuild(GUILD, [self.alice, self.bob])
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def seed(self, user_id, balance=0, xp=0, streak_count=0):

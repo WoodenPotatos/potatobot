@@ -107,8 +107,8 @@ class DashboardSideInvalidationTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "dashboard.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Guild")
@@ -141,7 +141,7 @@ class DashboardSideInvalidationTests(unittest.TestCase):
         dashboard_api._permission_cache._entries.clear()
         dashboard_api._session_users.clear()
         dashboard_api._last_access_invalidation_id = None
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def read(self):

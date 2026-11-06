@@ -49,17 +49,6 @@ POSTGRES_TYPES = {
     INSTANT: "timestamptz",
 }
 
-#: The SQLite declared type each kind is found under today.
-SQLITE_TYPES = {
-    IDENTITY: "INTEGER",
-    BIGINT: "INTEGER",
-    FLAG: "INTEGER",
-    DOUBLE: "REAL",
-    TEXT: "TEXT",
-    JSON: "TEXT",
-    INSTANT: "TEXT",
-}
-
 #: Columns PostgreSQL has that SQLite never did, by kind. `insertion_order`
 #: carries the order SQLite kept in a hidden rowid, which `get_user_vouchers`
 #: breaks an `acquired_at` tie by (decided 2026-10-31); an identity, but not

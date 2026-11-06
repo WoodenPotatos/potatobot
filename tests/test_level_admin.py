@@ -81,13 +81,13 @@ class SetUserExperienceTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.original = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp.name, "levels.db")
+        self.original = database.DATA_DIR
+        database.DATA_DIR = self.temp.name
         pg_harness.fresh_database()
         database.initialize_database()
 
     def tearDown(self):
-        database.DB_PATH = self.original
+        database.DATA_DIR = self.original
         self.temp.cleanup()
 
     def test_it_sets_the_xp_and_the_level_that_follows(self):
@@ -142,13 +142,13 @@ class DeltaReportsOldExperienceTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.original = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp.name, "levels.db")
+        self.original = database.DATA_DIR
+        database.DATA_DIR = self.temp.name
         pg_harness.fresh_database()
         database.initialize_database()
 
     def tearDown(self):
-        database.DB_PATH = self.original
+        database.DATA_DIR = self.original
         self.temp.cleanup()
 
     def test_a_clamped_negative_delta_still_reports_the_real_old_value(self):

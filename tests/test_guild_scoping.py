@@ -19,16 +19,16 @@ import pg_harness  # noqa: E402
 
 class GuildScopingTests(unittest.TestCase):
     def setUp(self):
-        self.original_path = database.DB_PATH
+        self.original_path = database.DATA_DIR
         self.temp_dir = tempfile.TemporaryDirectory()
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "First")
         database.register_guild(222, "Second")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     # -- prices and rewards ------------------------------------------------
@@ -211,15 +211,15 @@ class LegacyProvenanceTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         for guild_id, name in ((111, "first"), (222, "second")):
             database.register_guild(guild_id, name)
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def add_legacy_warning(self, user_id):

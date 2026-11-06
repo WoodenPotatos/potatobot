@@ -73,8 +73,8 @@ class RussianRouletteMathTests(unittest.TestCase):
 class RussianRouletteWagerTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "russian.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Roulette Guild")
@@ -83,7 +83,7 @@ class RussianRouletteWagerTests(unittest.TestCase):
             self.set_balance(member, START_BALANCE)
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def set_balance(self, member, amount):

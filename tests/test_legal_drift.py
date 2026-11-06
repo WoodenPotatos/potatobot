@@ -93,9 +93,9 @@ class LegalDriftTests(unittest.TestCase):
                 self.assertEqual(1, legal_drift.main(["check"]))
 
     def test_the_schema_fact_never_touches_the_configured_database(self):
-        before = database.DB_PATH
+        before = database.DATA_DIR
         legal_drift.compute_facts()
-        self.assertEqual(before, database.DB_PATH)
+        self.assertEqual(before, database.DATA_DIR)
         self.assertFalse(os.path.exists(os.path.join(ROOT, "drift.db")))
 
     def test_a_document_in_force_carries_no_placeholder(self):

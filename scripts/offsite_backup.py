@@ -29,9 +29,9 @@ no published port. A command writes the dump to its standard output.
 
 `--prune-local-backups-days` is the other half of retention: the dumps
 `initialize_database` takes before each migration (`potatobot-v<n>-<stamp>.dump`
-in `--backups-dir`), and the SQLite pre-migration copies of 2.20 and earlier
-(`economy.db.backup-v<n>-<stamp>` beside `--legacy-sqlite`), stay on the host as
-the rollback artefact, and nothing else removes them. The Privacy Policy
+in `--backups-dir`) stay on the host as the rollback artefact, and nothing else
+removes them. (2.20's SQLite copies and `--legacy-sqlite` went with SQLite,
+2026-11-02; F4 deleted the deployment's.) The Privacy Policy
 (`docs/legal/PRIVACY.md` §7) promises they go 90 days after the migration they
 protect; passing the flag is what keeps that promise. It runs only after this
 night's offsite copy has been verified, decides by the date in the file's
@@ -55,13 +55,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # What `database._pre_migration_backup` names a dump:
-# `potatobot-v<schema version>-<YYYYMMDD-HHMMSS>.dump`, and what 2.20's
-# SQLite migrations named a copy: `<database file>.backup-v<n>-<stamp>`. Both
-# stamps are host-local time (the one `datetime.now()` the project allows,
-# being a name).
+# `potatobot-v<schema version>-<YYYYMMDD-HHMMSS>.dump`. The stamp is host-local
+# time (the one `datetime.now()` the project allows, being a name).
 DUMP_NAME = re.compile(r"^potatobot-v(?P<version>\d+)-(?P<stamp>\d{8}-\d{6})\.dump$")
-LEGACY_NAME = re.compile(
-    r"^(?P<stem>.+)\.backup-v(?P<version>\d+)-(?P<stamp>\d{8}-\d{6})$")
 
 
 def take_dump(command: list[str], destination: Path) -> None:
@@ -122,12 +118,12 @@ def prune(remote: str, retention_days: int) -> None:
     )
 
 
-def _dated(candidate: Path, pattern: re.Pattern, stem: str | None = None):
-    """The stamp a pre-migration copy's name carries, or None."""
+def _dated(candidate: Path):
+    """The stamp a pre-migration dump's name carries, or None."""
     if candidate.is_symlink() or not candidate.is_file():
         return None
-    match = pattern.match(candidate.name)
-    if match is None or (stem is not None and match.group("stem") != stem):
+    match = DUMP_NAME.match(candidate.name)
+    if match is None:
         return None
     try:
         return datetime.strptime(match.group("stamp"), "%Y%m%d-%H%M%S")
@@ -135,35 +131,28 @@ def _dated(candidate: Path, pattern: re.Pattern, stem: str | None = None):
         return None
 
 
-def local_backups_due(backups_dir: Path | None, legacy_sqlite: Path | None,
-                      max_age_days: int, now: datetime | None = None) -> list[Path]:
-    """The pre-migration copies older than the window.
+def local_backups_due(backups_dir: Path | None, max_age_days: int,
+                      now: datetime | None = None) -> list[Path]:
+    """The pre-migration dumps older than the window.
 
-    Only a regular file named exactly as the bot names its dumps in
-    `backups_dir`, or as 2.20 named copies of `legacy_sqlite` beside it, with a
-    parseable stamp, qualifies; the stamp decides, never the modification
-    time. A symlink, another database's copies, the WAL sidecars and a name
-    that will not parse are all left alone: a file you cannot date is a file
-    you do not delete. `max_age_days <= 0` means the feature is off.
+    Only a regular file in `backups_dir` named exactly as the bot names its
+    dumps, with a parseable stamp, qualifies; the stamp decides, never the
+    modification time. A symlink, another program's dump and a name that will
+    not parse are all left alone: a file you cannot date is a file you do not
+    delete. `max_age_days <= 0` means the feature is off.
     """
-    if max_age_days <= 0:
+    if max_age_days <= 0 or backups_dir is None or not backups_dir.is_dir():
         return []
     cutoff = (now or datetime.now()) - timedelta(days=max_age_days)
-    candidates = []
-    if backups_dir is not None and backups_dir.is_dir():
-        candidates += [(path, _dated(path, DUMP_NAME))
-                       for path in sorted(backups_dir.glob("potatobot-v*.dump"))]
-    if legacy_sqlite is not None:
-        candidates += [(path, _dated(path, LEGACY_NAME, legacy_sqlite.name))
-                       for path in sorted(legacy_sqlite.parent.glob(
-                           f"{legacy_sqlite.name}.backup-v*"))]
+    candidates = [(path, _dated(path))
+                  for path in sorted(backups_dir.glob("potatobot-v*.dump"))]
     return [path for path, taken in candidates if taken is not None and taken < cutoff]
 
 
-def prune_local_backups(backups_dir: Path | None, legacy_sqlite: Path | None,
-                        max_age_days: int, now: datetime | None = None) -> list[Path]:
+def prune_local_backups(backups_dir: Path | None, max_age_days: int,
+                        now: datetime | None = None) -> list[Path]:
     """Delete what `local_backups_due` names, and return it."""
-    due = local_backups_due(backups_dir, legacy_sqlite, max_age_days, now)
+    due = local_backups_due(backups_dir, max_age_days, now)
     for path in due:
         path.unlink()
     return due
@@ -183,9 +172,6 @@ def main(argv=None) -> int:
     parser.add_argument("--backups-dir", type=Path, default=None,
                         help="where the bot writes its pre-migration dumps "
                              "(the data directory's backups/)")
-    parser.add_argument("--legacy-sqlite", type=Path, default=None,
-                        help="the SQLite database 2.20 ran on, whose pre-migration "
-                             "copies beside it are pruned too")
     parser.add_argument("--prune-local-backups-days", type=int, default=0,
                          help="also delete the pre-migration copies whose name-stamp "
                               "is older than this many days, after the offsite copy "
@@ -225,7 +211,7 @@ def main(argv=None) -> int:
     # Only now: a night whose upload did not land has already raised above, so
     # a local copy is never removed on the strength of an offsite copy that is
     # not there.
-    for removed in prune_local_backups(arguments.backups_dir, arguments.legacy_sqlite,
+    for removed in prune_local_backups(arguments.backups_dir,
                                        arguments.prune_local_backups_days):
         print(f"Removed pre-migration backup {removed.name} (older than "
               f"{arguments.prune_local_backups_days} days)")

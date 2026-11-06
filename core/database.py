@@ -172,26 +172,22 @@ def shutdown_executors(wait: bool = True):
 # root. This module lives in `core/`, so the root is two levels up -- one too
 # few would point a whole installation at `core/economy.db`.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# The SQLite file 2.20 and earlier ran on. Nothing here opens it any more; it
-# is what `data_dir()` falls back to beside, so an upgraded installation's
-# session secret and cards stay where they were, and what the copy script
-# reads (`scripts/migrate_sqlite_to_postgres.py`).
-DB_PATH = os.getenv("POTATOBOT_DB_PATH", os.path.join(BASE_DIR, "economy.db"))
-
 # Which PostgreSQL to use: a libpq connection string, or empty for libpq's own
 # environment (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD or PGPASSFILE),
 # which is how a deployment configures it, so no code here parses or logs a
-# secret. A module global read at call time, like DB_PATH: a test or a tool
+# secret. A module global read at call time, like DATA_DIR: a test or a tool
 # points it at another database by construction.
 DSN = ""
 
 # Where the installation's own files live -- the dashboard session secret, the
-# welcome-card backgrounds -- named apart from the database, because on
-# PostgreSQL the database has no directory to live beside (todo.md, "2.20.0:
-# PostgreSQL"). Unset, empty or blank means beside the database, where they have
-# always been, so nothing moves until a deployment sets it. A module global read
-# at call time, like DB_PATH: a test or a copy points it elsewhere by
-# construction.
+# welcome-card backgrounds, the pre-migration dumps -- named apart from the
+# database, because on PostgreSQL the database has no directory to live beside.
+# Unset, empty or blank means beside the code (the repository root, or `/app`
+# in the image, which sets it to `/data` instead): where SQLite's `economy.db`
+# and these files sat by default, so a checkout that never configured a path
+# keeps finding them (the maintainer, 2026-11-02, when SQLite and its
+# `POTATOBOT_DB_PATH` were removed). A module global read at call time: a test
+# or a tool points it at a temporary directory by construction.
 DATA_DIR = os.getenv("POTATOBOT_DATA_DIR", "").strip() or None
 
 
@@ -199,7 +195,7 @@ def data_dir() -> str:
     """The directory the installation's own files live in."""
     if DATA_DIR:
         return os.path.abspath(DATA_DIR)
-    return os.path.dirname(os.path.abspath(DB_PATH))
+    return BASE_DIR
 
 VALID_COOLDOWN_COLUMNS = {
     "last_daily", "last_job", "last_rob",

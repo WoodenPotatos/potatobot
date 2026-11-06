@@ -60,7 +60,7 @@ DBDLE_LOWER = {"killer": DBDLE_KILLER_ALIASES}
 
 # Persist shuffled decks so all users receive the same target without immediate repeats.
 # Overridable so this one mutable file can move off a container's read-only
-# root, the way POTATOBOT_DB_PATH already lets the database move -- narrower
+# root, the way POTATOBOT_DATA_DIR moves the installation's files -- narrower
 # than overriding DATA_DIR itself, which is the read-only dataset directory
 # and must stay shipped in the image.
 STATE_FILE = os.getenv("POTATOBOT_EVERYDLE_STATE_PATH",

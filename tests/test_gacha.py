@@ -31,8 +31,8 @@ class QueueRng:
 class GachaTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "gacha.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
@@ -41,7 +41,7 @@ class GachaTests(unittest.TestCase):
             conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 100000)")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_default_banner_matches_approved_rates(self):
@@ -425,8 +425,8 @@ class GachaBannerTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "banners.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
@@ -434,7 +434,7 @@ class GachaBannerTests(unittest.TestCase):
             conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 1000000)")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_a_guild_with_no_stored_banner_still_lists_the_default(self):
@@ -578,8 +578,8 @@ class GachaBannerScheduleTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "banners.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
@@ -587,7 +587,7 @@ class GachaBannerScheduleTests(unittest.TestCase):
             conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 1000000)")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _create(self, starts_at=None, ends_at=None, enabled=True):
@@ -699,14 +699,14 @@ class BannerRewardReconciliationTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "gacha.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(42, "Guild")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _saved_without(self, key):
@@ -801,8 +801,8 @@ class FeaturedSplitTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "gacha.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
@@ -810,7 +810,7 @@ class FeaturedSplitTests(unittest.TestCase):
             conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 100000000)")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     # -- fixtures ------------------------------------------------------------
@@ -1111,8 +1111,8 @@ class FeaturedSplitRateTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "gacha.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
@@ -1120,7 +1120,7 @@ class FeaturedSplitRateTests(unittest.TestCase):
             conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 100000000000)")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_the_featured_share_matches_the_closed_form(self):
@@ -1243,8 +1243,8 @@ class PityHistoryTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "gacha.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Gacha Guild")
@@ -1252,7 +1252,7 @@ class PityHistoryTests(unittest.TestCase):
             conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 100000000000)")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _all_five_star_banner(self):
@@ -1354,14 +1354,14 @@ class GachaAssetsSurviveShopBeingOffTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "gacha_assets.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(self.GUILD, "Guild")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def grant_asset_voucher(self, voucher_id="v1", reward_key="emoji_30d", days=30):
@@ -1456,14 +1456,14 @@ class ManualEntitlementGrantTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "manual_grants.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(self.GUILD, "Guild")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_it_writes_a_row_with_no_voucher(self):
@@ -1551,14 +1551,14 @@ class AssetPresenceVerificationTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "asset_presence.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(self.GUILD, "Guild")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _grant(self, kind="sticker", item_id="555", days=365):
@@ -1736,8 +1736,8 @@ class RewardLabelResolutionTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "labels.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
@@ -1748,7 +1748,7 @@ class RewardLabelResolutionTests(unittest.TestCase):
             "text": {"name": "Extra vault", "description": "d"}})
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_gacha_reward_label_makes_no_database_call(self):

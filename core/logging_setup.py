@@ -27,7 +27,7 @@ from core.deployment import _environment_bool
 
 # Two levels up: this module lives in `core/` and the log directory belongs
 # beside the entry points at the repository root -- unless a deployment
-# overrides it, the way `POTATOBOT_DB_PATH` already lets the database move.
+# overrides it, the way `POTATOBOT_DATA_DIR` moves the installation's files.
 # A container's root filesystem should hold nothing mutable, so the override
 # points this at the same `/data` volume the database already lives on.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

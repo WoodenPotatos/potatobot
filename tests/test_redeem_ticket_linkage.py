@@ -35,14 +35,14 @@ STAFF = 99
 class _FulfillmentTestCase(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Guild")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _grant_voucher(self, voucher_id="v1", reward_key="emoji_30d"):
@@ -170,7 +170,7 @@ class RevokeTimedEntitlementTests(_FulfillmentTestCase):
 
 class ControlActionWhitelistTests(unittest.TestCase):
     """Its own temp database, like every other class here -- without one this
-    silently read and wrote whatever `database.DB_PATH` happened to default
+    silently read and wrote whatever `database.DATA_DIR` happened to default
     to, which passed locally only because a stray `economy.db` sat in the
     repo root from earlier ad-hoc runs and masked the missing schema. CI's
     clean checkout had no such file and caught it: `queue_control_action`
@@ -180,14 +180,14 @@ class ControlActionWhitelistTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Guild")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_the_two_new_action_types_are_accepted(self):
@@ -318,14 +318,14 @@ class ControlActionDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "dispatch.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(GUILD, "Guild")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     async def test_the_notice_names_the_fulfilling_staff_member_and_item(self):

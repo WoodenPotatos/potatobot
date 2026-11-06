@@ -502,8 +502,8 @@ class OperatorAndMemberLanguageTests(unittest.TestCase):
         import dashboard_api
         self.database, self.api, self.cache = database, dashboard_api, settings_cache
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "language.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
@@ -529,7 +529,7 @@ class OperatorAndMemberLanguageTests(unittest.TestCase):
 
     def tearDown(self):
         self.api.ADMIN_ID = self.original_admin_id
-        self.database.DB_PATH = self.original_path
+        self.database.DATA_DIR = self.original_path
         self.cache.invalidate()
         self.temp_dir.cleanup()
 

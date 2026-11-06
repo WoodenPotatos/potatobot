@@ -54,8 +54,8 @@ class MarkdownPreviewTests(unittest.TestCase):
 class ManagedMessageRouteTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "dashboard.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
@@ -77,7 +77,7 @@ class ManagedMessageRouteTests(unittest.TestCase):
 
     def tearDown(self):
         dashboard_api.ADMIN_ID = self.original_admin_id
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def save(self, kind, **changes):
@@ -268,8 +268,8 @@ class RenderTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "render.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
@@ -288,7 +288,7 @@ class RenderTests(unittest.TestCase):
         self.guild = Guild()
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def stored(self, kind, **changes):
@@ -366,8 +366,8 @@ class ButtonLabelTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "labels.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(123, "Test Guild")
@@ -381,7 +381,7 @@ class ButtonLabelTests(unittest.TestCase):
         self.guild = Guild()
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def stored(self, kind, options):
@@ -973,8 +973,8 @@ class PublishEditsThePostedMessageWhereItIsTests(unittest.IsolatedAsyncioTestCas
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "publish.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "Guild")
@@ -985,7 +985,7 @@ class PublishEditsThePostedMessageWhereItIsTests(unittest.IsolatedAsyncioTestCas
         database.record_managed_post(111, "ticket", "help", 1, 5001)
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _channel(self, channel_id):

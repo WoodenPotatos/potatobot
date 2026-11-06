@@ -532,7 +532,7 @@
     "core/logging_setup.py:maxBytes": "5 * 1024 * 1024",
     "dashboard_api.py:MAX_TRACKED_SESSIONS": "2048",
     "deploy/potatobot-offsite-backup-podman.service:ExecStart": "/usr/bin/python3 /usr/local/libexec/potatobot/offsite_backup.py gdrivecrypt: --dump-command \"podman exec potatobot-db pg_dump --format=custom -U potatobot potatobot\" --restore-command \"podman exec -i potatobot-db pg_restore\" --backups-dir /var/lib/potatobot/bot/backups --prune-local-backups-days 90 --workdir /var/lib/potatobot/bot/offsite-tmp",
-    "deploy/potatobot-offsite-backup.service:ExecStart": "/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py gdrivecrypt: --backups-dir /opt/potatobot/backups --legacy-sqlite /opt/potatobot/economy.db --prune-local-backups-days 90",
+    "deploy/potatobot-offsite-backup.service:ExecStart": "/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py gdrivecrypt: --backups-dir /opt/potatobot/backups --prune-local-backups-days 90",
     "scripts/offsite_backup.py:--prune-local-backups-days": "0",
     "scripts/offsite_backup.py:--retention-days": "30"
   },

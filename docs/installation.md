@@ -416,26 +416,11 @@ before stopping the bot: it restores a dump of the live database into the
 scratch one, migrates that, fingerprints it before and after, and exits
 non-zero if any table lost or rewrote rows.
 
-**Upgrading from SQLite (2.19.29 or 2.20) to 2.21 (PostgreSQL)** is a one-time
-copy of the SQLite file into a new PostgreSQL database:
-
-1. Run 2.19.29 (the last public SQLite release) or any 2.20 build and let it
-   start once, so the file is at SQLite schema 26; then stop the bot.
-2. Create the empty database and the bot's role as in step 5 (or let the `db`
-   container initialise), and **do not** run `update_db.py` against it.
-3. Rehearse: `./venv/bin/python scripts/migrate_sqlite_to_postgres.py --source
-   /opt/potatobot/economy.db --legacy-timezone Europe/Budapest --dry-run`, with
-   the zone your host wrote its timestamps in. It refuses, before writing
-   anything, a file at another schema, one that fails SQLite's integrity or
-   foreign-key checks, a value that will not convert (naming where), and a
-   target that is not empty or not created with the `C.UTF-8` locale.
-4. Copy: the same command without `--dry-run`. It loads everything in one
-   transaction and proves it before committing — every table's rows, every
-   balance — so a failure commits nothing. The SQLite file is only read; keep
-   it, it is the rollback.
-5. Start 2.21.
-
-Rolling back afterwards means starting the old release on the old file, and loses every write made since the copy.
+**There is no upgrade from SQLite.** Installations on SQLite (2.19.x and
+earlier) are deprecated: keep running the last SQLite stable, 2.19.29 (the
+public repository's `stable-2.19` branch, tag `v2.19.29`), or start a new
+installation on PostgreSQL. A one-time copy tool shipped with the 2.21 betas up
+to 2.21.34b; it is not maintained and later releases do not include it.
 
 Restart even when no Python file changed: the command prefix is read once when
 the bot object is constructed, so changing it in the dashboard does nothing until

@@ -147,16 +147,15 @@ class LocalDevelopmentDashboardTests(unittest.TestCase):
         with no feature state — no sub-toggles, no generated sub-pages — which
         read as a broken feature rather than a broken harness.
         """
-        import os
         import tempfile
         import dashboard_api
         from core import database, permission_audit
 
         script = self.load_script()
         guild_id = 1420070400000000001
-        original_path, original_bot = database.DB_PATH, dashboard_api._dashboard_bot
+        original_path, original_bot = database.DATA_DIR, dashboard_api._dashboard_bot
         with tempfile.TemporaryDirectory() as directory:
-            database.DB_PATH = os.path.join(directory, "standin.db")
+            database.DATA_DIR = directory
             pg_harness.fresh_database()
             try:
                 database.initialize_database()
@@ -176,7 +175,7 @@ class LocalDevelopmentDashboardTests(unittest.TestCase):
                         self.assertIsNone(
                             dashboard_api._item_name_from_bot(guild_id, kind, 7))
             finally:
-                database.DB_PATH = original_path
+                database.DATA_DIR = original_path
                 dashboard_api._dashboard_bot = original_bot
 
     def test_the_injected_session_is_loopback_only_with_a_per_run_token(self):
@@ -526,7 +525,9 @@ class ConfigurationSecurityTests(unittest.TestCase):
         # Pinned by digest: a tag is a moving name.
         self.assertRegex(containerfile, r"FROM python:3\.13-slim@sha256:[0-9a-f]{64}")
         self.assertIn('VOLUME ["/data"]', containerfile)
-        self.assertIn("POTATOBOT_DB_PATH=/data/economy.db", containerfile)
+        # SQLite's path went with SQLite (2026-11-02); /data is set as the
+        # data directory, which is all the bot's own files need.
+        self.assertNotIn("POTATOBOT_DB_PATH", containerfile)
         # Music playback needs ffmpeg present in the image.
         self.assertIn("ffmpeg", containerfile)
 
@@ -578,7 +579,7 @@ class ConfigurationSecurityTests(unittest.TestCase):
             with self.subTest(setting=setting):
                 self.assertIn(setting, containerfile)
 
-    def test_the_generated_session_secret_follows_the_database(self):
+    def test_the_generated_session_secret_follows_the_data_directory(self):
         import stat
         import tempfile
         import dashboard_api
@@ -587,7 +588,7 @@ class ConfigurationSecurityTests(unittest.TestCase):
                 tempfile.TemporaryDirectory() as code_dir:
             legacy = Path(code_dir) / ".dashboard_session_secret"
             with patch.dict(os.environ, {"POTATOBOT_DASHBOARD_SESSION_SECRET": ""}), \
-                    patch.object(database, "DB_PATH", str(Path(directory) / "economy.db")), \
+                    patch.object(database, "DATA_DIR", directory), \
                     patch.object(dashboard_api, "LEGACY_SESSION_SECRET_PATH", str(legacy)):
                 generated = dashboard_api._load_session_secret()
                 beside = Path(directory) / ".dashboard_session_secret"
@@ -607,26 +608,28 @@ class ConfigurationSecurityTests(unittest.TestCase):
         import dashboard_api
         from core import database, welcome_card
         with tempfile.TemporaryDirectory() as data, \
-                tempfile.TemporaryDirectory() as db_dir, \
                 tempfile.TemporaryDirectory() as code_dir:
             with patch.dict(os.environ, {"POTATOBOT_DASHBOARD_SESSION_SECRET": ""}), \
-                    patch.object(database, "DB_PATH", str(Path(db_dir) / "economy.db")), \
                     patch.object(database, "DATA_DIR", data), \
                     patch.object(dashboard_api, "LEGACY_SESSION_SECRET_PATH",
                                  str(Path(code_dir) / ".dashboard_session_secret")):
                 generated = dashboard_api._load_session_secret()
                 self.assertEqual(generated, (Path(data) / ".dashboard_session_secret")
                                  .read_text(encoding="utf-8"))
-                self.assertFalse((Path(db_dir) / ".dashboard_session_secret").exists())
+                self.assertFalse((Path(code_dir) / ".dashboard_session_secret").exists())
                 self.assertEqual(Path(data) / "cards" / "7-join.png",
                                  welcome_card.background_path(7, "join"))
 
-    def test_an_unset_or_blank_data_directory_means_beside_the_database(self):
+    def test_an_unset_or_blank_data_directory_means_beside_the_code(self):
+        """Where SQLite's `economy.db`, the secret and the cards sat by default,
+        so a checkout that never configured a path keeps finding them (the
+        maintainer, 2026-11-02, when `POTATOBOT_DB_PATH` went with SQLite)."""
         from core import database
         for unset in (None, ""):
-            with patch.object(database, "DATA_DIR", unset), \
-                    patch.object(database, "DB_PATH", "/srv/potato/economy.db"):
-                self.assertEqual("/srv/potato", database.data_dir())
+            with patch.object(database, "DATA_DIR", unset):
+                self.assertEqual(str(ROOT), database.data_dir())
+        self.assertFalse(hasattr(database, "DB_PATH"),
+                         "SQLite's path was removed; nothing may read it again")
 
     def test_the_environment_value_is_read_once_and_blank_is_unset(self):
         import subprocess
@@ -640,9 +643,10 @@ class ConfigurationSecurityTests(unittest.TestCase):
             self.assertEqual(expected, out.splitlines()[-1], value)
 
     def test_the_suite_runs_with_no_data_directory_configured(self):
-        """A test redirects `DB_PATH` to a temporary file and expects the cards
-        and the session secret to follow it. With `POTATOBOT_DATA_DIR` set in
-        the shell they would land in that real directory instead."""
+        """A test points `DATA_DIR` at a temporary directory and restores it
+        afterwards; a test that does not redirect it writes beside the code.
+        With `POTATOBOT_DATA_DIR` set in the shell, such a test would write into
+        that real directory instead."""
         from core import database
         self.assertIsNone(database.DATA_DIR,
                           "unset POTATOBOT_DATA_DIR before running the suite")
@@ -851,9 +855,8 @@ class QuadletUnitTests(unittest.TestCase):
         # `bot/` on the LUKS mount; PostgreSQL's `pgdata/` sits beside it.
         self.assertEqual(["/var/lib/potatobot/bot:/data:Z"], self.values("Volume"))
         environment = self.values("Environment")
-        # No POTATOBOT_DB_PATH since F4: it existed only so the copy script
-        # found 2.20's SQLite file (the image still sets it for operators who
-        # have yet to copy). POTATOBOT_DATA_DIR is what places the bot's files.
+        # No POTATOBOT_DB_PATH: SQLite and its path are gone (2026-11-02).
+        # POTATOBOT_DATA_DIR is what places the bot's files.
         self.assertNotIn("POTATOBOT_DB_PATH=/data/economy.db", environment)
         for path in ("POTATOBOT_DATA_DIR=/data",
                      "POTATOBOT_LOG_DIR=/data/logs",

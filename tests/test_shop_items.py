@@ -317,8 +317,8 @@ class SharedItemPurchaseTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "shop.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Shop Guild")
@@ -327,7 +327,7 @@ class SharedItemPurchaseTests(unittest.TestCase):
             conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 100000)")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_consumables_stack_instead_of_being_refused(self):
@@ -417,8 +417,8 @@ class LegacyLockpickTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "legacy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(10, "Legacy Guild")
@@ -429,7 +429,7 @@ class LegacyLockpickTests(unittest.TestCase):
             conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 100000)")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_a_legacy_bonus_still_applies_and_is_then_cleared(self):
@@ -655,8 +655,8 @@ class ShopHideCommandTests(unittest.IsolatedAsyncioTestCase):
         from core import settings_cache
 
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
@@ -669,7 +669,7 @@ class ShopHideCommandTests(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self):
         self.settings_cache.invalidate()
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     async def _hide(self, item, hidden):

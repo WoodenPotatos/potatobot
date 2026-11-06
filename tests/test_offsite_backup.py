@@ -114,7 +114,7 @@ class DumpTests(unittest.TestCase):
 
 
 class LocalBackupPruneTests(unittest.TestCase):
-    """The pre-migration copies are the other half of retention: the Privacy
+    """The pre-migration dumps are the other half of retention: the Privacy
     Policy promises they go 90 days after the migration they protect, and this
     flag is what keeps that promise. Everything here pins what it must *not*
     delete."""
@@ -129,48 +129,40 @@ class LocalBackupPruneTests(unittest.TestCase):
         self.recent_dump = self.backups / f"potatobot-v28-{_stamp(10)}.dump"
         self.undatable_dump = self.backups / "potatobot-v29-garbage.dump"
         self.foreign = self.backups / f"other-v27-{_stamp(200)}.dump"
-        self.legacy = root / "economy.db"
-        self.legacy.write_bytes(b"x")
-        self.old_copy = root / f"economy.db.backup-v9-{_stamp(200)}"
-        self.recent_copy = root / f"economy.db.backup-v25-{_stamp(10)}"
-        self.other_db = root / f"other.db.backup-v2-{_stamp(200)}"
-        self.wal = root / "economy.db-wal"
-        for path in (self.old_dump, self.recent_dump, self.undatable_dump, self.foreign,
-                     self.old_copy, self.recent_copy, self.other_db, self.wal):
+        # Beside the directory, where 2.20 kept its SQLite copies: never in scope.
+        self.outside = root / f"economy.db.backup-v9-{_stamp(200)}"
+        for path in (self.old_dump, self.recent_dump, self.undatable_dump,
+                     self.foreign, self.outside):
             path.write_bytes(b"x")
-        # Symlinks wearing old names, pointing at the live files.
+        # A symlink wearing an old name, pointing at a live file.
         self.dump_link = self.backups / f"potatobot-v1-{_stamp(400)}.dump"
         self.dump_link.symlink_to(self.recent_dump)
-        self.copy_link = root / f"economy.db.backup-v1-{_stamp(400)}"
-        self.copy_link.symlink_to(self.legacy)
 
-    def test_only_dated_copies_older_than_the_window_are_due(self):
-        due = offsite_backup.local_backups_due(self.backups, self.legacy, 90)
-        self.assertEqual([self.old_dump, self.old_copy], due)
-
-    def test_either_kind_can_be_pruned_alone(self):
+    def test_only_dated_dumps_older_than_the_window_are_due(self):
         self.assertEqual([self.old_dump],
-                         offsite_backup.local_backups_due(self.backups, None, 90))
-        self.assertEqual([self.old_copy],
-                         offsite_backup.local_backups_due(None, self.legacy, 90))
+                         offsite_backup.local_backups_due(self.backups, 90))
 
-    def test_the_default_of_zero_keeps_every_copy(self):
-        self.assertEqual([], offsite_backup.local_backups_due(self.backups, self.legacy, 0))
+    def test_the_default_of_zero_keeps_every_dump(self):
+        self.assertEqual([], offsite_backup.local_backups_due(self.backups, 0))
+
+    def test_no_directory_means_nothing_is_due(self):
+        self.assertEqual([], offsite_backup.local_backups_due(None, 90))
+        self.assertEqual([], offsite_backup.local_backups_due(
+            self.backups / "missing", 90))
 
     def test_the_name_decides_not_the_modification_time(self):
         long_ago = (datetime.now() - timedelta(days=400)).timestamp()
         os.utime(self.recent_dump, (long_ago, long_ago))
         now = datetime.now().timestamp()
         os.utime(self.old_dump, (now, now))
-        self.assertEqual([self.old_dump, self.old_copy],
-                         offsite_backup.local_backups_due(self.backups, self.legacy, 90))
+        self.assertEqual([self.old_dump],
+                         offsite_backup.local_backups_due(self.backups, 90))
 
-    def test_prune_deletes_the_due_copies_and_nothing_else(self):
-        removed = offsite_backup.prune_local_backups(self.backups, self.legacy, 90)
-        self.assertEqual([self.old_dump, self.old_copy], removed)
-        for kept in (self.recent_dump, self.undatable_dump, self.foreign, self.legacy,
-                     self.recent_copy, self.other_db, self.wal, self.dump_link,
-                     self.copy_link):
+    def test_prune_deletes_the_due_dumps_and_nothing_else(self):
+        removed = offsite_backup.prune_local_backups(self.backups, 90)
+        self.assertEqual([self.old_dump], removed)
+        for kept in (self.recent_dump, self.undatable_dump, self.foreign,
+                     self.outside, self.dump_link):
             self.assertTrue(kept.exists() or kept.is_symlink(), kept.name)
 
     def test_the_cutoff_is_exact_to_the_day(self):
@@ -179,7 +171,7 @@ class LocalBackupPruneTests(unittest.TestCase):
         just_inside = self.backups / "potatobot-v31-20260803-120001.dump"
         for path in (exactly, just_inside):
             path.write_bytes(b"x")
-        due = offsite_backup.local_backups_due(self.backups, None, 90, now=now)
+        due = offsite_backup.local_backups_due(self.backups, 90, now=now)
         self.assertNotIn(exactly, due)
         self.assertNotIn(just_inside, due)
         self.assertIn(self.old_dump, due)

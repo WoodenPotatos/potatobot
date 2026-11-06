@@ -27,8 +27,7 @@
 # in this directory (see `potatobot-everydle-drift.service`'s own note).
 #
 # `ReadWritePaths=/opt/potatobot`: the prune deletes the pre-migration dumps
-# in `backups/` and 2.20's SQLite copies beside `economy.db`, and nothing
-# else. The dump itself goes to a private temporary directory.
+# in `backups/`, and nothing else. The dump itself goes to a private temporary directory.
 #
 # `ReadWritePaths=/home/woody/.config/rclone`: rclone periodically tries to
 # rewrite its own config file (observed 2026-09-27, most likely persisting a
@@ -71,8 +70,8 @@ Environment=PGHOST=localhost
 Environment=PGDATABASE=potatobot
 Environment=PGUSER=potatobot
 # `--prune-local-backups-days 90`: the retention docs/legal/PRIVACY.md §7
-# promises for the pre-migration copies, the bot's dumps and 2.20's SQLite ones.
-ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py gdrivecrypt: --backups-dir /opt/potatobot/backups --legacy-sqlite /opt/potatobot/economy.db --prune-local-backups-days 90
+# promises for the pre-migration copies, the bot's dumps.
+ExecStart=/opt/potatobot/venv/bin/python /opt/potatobot/scripts/offsite_backup.py gdrivecrypt: --backups-dir /opt/potatobot/backups --prune-local-backups-days 90
 SyslogIdentifier=potatobot-offsite-backup
 
 NoNewPrivileges=true

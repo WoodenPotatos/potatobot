@@ -22,16 +22,16 @@ import pg_harness  # noqa: E402
 
 class PrivacyWorkflowTests(unittest.TestCase):
     def setUp(self):
-        self.original_path = database.DB_PATH
+        self.original_path = database.DATA_DIR
         self.temp_dir = tempfile.TemporaryDirectory()
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "Guild")
         self.seed()
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def seed(self):
@@ -567,14 +567,14 @@ class ErasureColumnCoverageTests(unittest.TestCase):
     }
 
     def setUp(self):
-        self.original_path = database.DB_PATH
+        self.original_path = database.DATA_DIR
         self.temp_dir = tempfile.TemporaryDirectory()
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _columns(self):
@@ -633,9 +633,9 @@ class ErasureReachesLateTablesTests(unittest.TestCase):
     """The three columns that escaped, exercised rather than listed."""
 
     def setUp(self):
-        self.original_path = database.DB_PATH
+        self.original_path = database.DATA_DIR
         self.temp_dir = tempfile.TemporaryDirectory()
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "Guild")
@@ -653,7 +653,7 @@ class ErasureReachesLateTablesTests(unittest.TestCase):
             111, 42, "erase_member", {"user_id": 7})
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_the_hosted_post_goes_and_the_joined_post_forgets_them(self):
@@ -750,14 +750,14 @@ class SubjectTableCoverageTests(unittest.TestCase):
                        "updated_by", "approved_by"}
 
     def setUp(self):
-        self.original_path = database.DB_PATH
+        self.original_path = database.DATA_DIR
         self.temp_dir = tempfile.TemporaryDirectory()
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_every_table_holding_a_person_is_declared_somewhere(self):
@@ -918,9 +918,9 @@ class AuditRetentionTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.original_path = database.DB_PATH
+        self.original_path = database.DATA_DIR
         self.temp_dir = tempfile.TemporaryDirectory()
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(111, "Guild")
@@ -938,7 +938,7 @@ class AuditRetentionTests(unittest.TestCase):
                 )
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _actions(self):

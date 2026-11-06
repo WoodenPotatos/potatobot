@@ -84,15 +84,13 @@ services:
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.21.34a
+    image: potatobot:2.21.37a
     restart: unless-stopped
     env_file: ../.env
     environment:
       PGHOST: db
       PGDATABASE: potatobot
       PGUSER: potatobot
-      # Where a 2.20 SQLite file would sit, for the copy script.
-      POTATOBOT_DB_PATH: /data/economy.db
       POTATOBOT_DATA_DIR: /data
       POTATOBOT_LOG_DIR: /data/logs
       POTATOBOT_EVERYDLE_STATE_PATH: /data/everydle_state.json
@@ -110,7 +108,7 @@ services:
     build:
       context: ..
       dockerfile: container/Containerfile
-    image: potatobot:2.21.34a
+    image: potatobot:2.21.37a
     command: ["python", "dashboard_api.py"]
     restart: unless-stopped
     env_file: ../.env

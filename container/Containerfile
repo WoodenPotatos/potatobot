@@ -5,10 +5,10 @@
 # separate supervised services against one PostgreSQL database (2.21), which
 # runs in its own container (deploy/potatobot-db.container, compose's `db`).
 #
-# Build (from the repository root):  podman build -t potatobot:2.21.34a -f container/Containerfile .
-# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.21.34a
+# Build (from the repository root):  podman build -t potatobot:2.21.37a -f container/Containerfile .
+# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:2.21.37a
 # Panel:  podman run --env-file .env -v potatobot-data:/data -p 127.0.0.1:5000:5000 \
-#             potatobot:2.21.34a python dashboard_api.py
+#             potatobot:2.21.37a python dashboard_api.py
 
 # Pinned by digest, not tag: `3.13-slim` is a moving name, and an image that
 # changes under the same tag is a supply-chain change nobody reviewed.
@@ -20,11 +20,9 @@ FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb
 # bot's pre-migration backup runs (`pg_dump` must be at least the server's
 # version, and Debian trixie ships 17), so it comes from PostgreSQL's own apt
 # repository, set up by Debian's `postgresql-common`, whose bundled signing key
-# is the trust anchor -- no key is fetched over the network here. sqlite3 stays
-# for the move from 2.20: the copy script and the cutover read the old file
-# (todo.md, "2.20.0: PostgreSQL"); it goes once the SQLite file is archived.
+# is the trust anchor -- no key is fetched over the network here.
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ffmpeg ca-certificates sqlite3 \
+    && apt-get install --yes --no-install-recommends ffmpeg ca-certificates \
         postgresql-common \
     && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
     && apt-get install --yes --no-install-recommends postgresql-client-18 \
@@ -50,9 +48,7 @@ COPY . .
 # Mutable state lives on a volume, never in the image, so an upgrade cannot
 # replace it and a rollback cannot lose it; these paths would otherwise
 # default into `/app`, which this image does not let the runtime user write.
-# POTATOBOT_DB_PATH names where 2.20's SQLite file sits, for the copy script.
-ENV POTATOBOT_DB_PATH=/data/economy.db \
-    POTATOBOT_DATA_DIR=/data \
+ENV POTATOBOT_DATA_DIR=/data \
     POTATOBOT_LOG_DIR=/data/logs \
     POTATOBOT_EVERYDLE_STATE_PATH=/data/everydle_state.json \
     PYTHONUNBUFFERED=1 \

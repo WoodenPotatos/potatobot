@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, `deploy/` holds the systemd units and a rootless podman Quadlet unit, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 2.21.34b** &nbsp;·&nbsp; channel `beta`
+**Version 2.21.37b** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -186,6 +186,10 @@ matrices — is in [docs/development.md](docs/development.md).
 
 ## Recent releases
 
+### 2.21.37b
+
+- **SQLite support is removed.** Installations still on SQLite (2.19.x and earlier) stay on the last SQLite stable, 2.19.29, which the public repository keeps on the `stable-2.19` branch; there is no upgrade path from it. The one-time copy tool, `POTATOBOT_DB_PATH` and the offsite backup's `--legacy-sqlite` are gone. Unset `POTATOBOT_DATA_DIR` now means beside the code, where the session secret and card backgrounds already sat by default; an installation that set only `POTATOBOT_DB_PATH` sets `POTATOBOT_DATA_DIR` to that file's directory instead.
+
 ### 2.21.34b
 
 - **Privacy Policy 1.1: your data is encrypted at rest.** The database, its backups on the server and the bot's log file now sit on an encrypted disk volume, memory the server pages out stays in compressed RAM, and no log line naming you goes to the system journal any more; the older ones expire within about two months. Nothing the bot collects or shares changed. (English and Hungarian, sections 7, 9 and 14.)
@@ -204,11 +208,6 @@ matrices — is in [docs/development.md](docs/development.md).
 - **Sorted lists say how to break a tie.** Leaderboards, the No. 1 role, timed grants, party clean-up, role-menu buttons and the guild list now name a final sort key and where an empty value goes, reproducing the order SQLite already gave. On PostgreSQL a member with no recorded XP would otherwise have topped the leaderboard.
 - **A member with no recorded XP, balance or streak no longer empties a leaderboard.** One such row made the board's merge fail, and the board showed nobody. Such a member is now simply not ranked. No current data has one; it was found while auditing sort order.
 - …and 23 more, in [CHANGELOG.md](CHANGELOG.md).
-
-### 2.19.29
-
-- **A stable release channel exists.** The public repository now has a `stable` branch beside `beta`. A stable release is the last published beta copied with its letter stripped (`2.19.26b` becomes `2.19.26`, and `/version` reports the channel as stable), so the code is byte-identical to a beta that has already been out; betas keep landing on `beta`.
-- **The README below the introduction is generated from the code.** It said the schema was at version 24 (it is 26) and that LoLdle's hard mode was Hungarian-only (English has been complete since September), and the stable release shipped saying so. Only the maintainer's introduction is written by hand now; the version, the Python range, the intents, the schema version, the read-worker bounds, the gacha pity numbers, the game and feature counts, the documentation list and the recent releases are read from the code and the repository each time, and the build fails when the file disagrees.
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 

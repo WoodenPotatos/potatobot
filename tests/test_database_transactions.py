@@ -25,16 +25,16 @@ class TransactionTests(unittest.TestCase):
         # Always redirect the shared database module before destructive setup.
         # Test modules are imported together, so setting an environment variable
         # at import time is unsafe when another test imported ``database`` first.
-        self.original_path = database.DB_PATH
+        self.original_path = database.DATA_DIR
         self.temp_dir = tempfile.TemporaryDirectory()
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         with database.get_connection() as conn:
             conn.execute("INSERT INTO users (user_id, balance) VALUES (1, 100)")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     @staticmethod
@@ -225,15 +225,15 @@ class EverydleStreakPayoutTests(unittest.TestCase):
     BASE_XP = 100
 
     def setUp(self):
-        self.original_path = database.DB_PATH
+        self.original_path = database.DATA_DIR
         self.temp_dir = tempfile.TemporaryDirectory()
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         self.day = datetime(2026, 9, 1, 12, 0)
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def claim(self, offset_days=0, column="last_valdle"):
@@ -295,8 +295,8 @@ class AmountBoundTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "bounds.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
@@ -305,7 +305,7 @@ class AmountBoundTests(unittest.TestCase):
             conn.execute("INSERT INTO users (user_id, balance) VALUES (2, 500)")
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_an_instant_stake_past_the_bound_is_refused_not_raised(self):
@@ -345,15 +345,15 @@ class WriteTransactionTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "begin.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         self.outsider = psycopg.connect(database.DSN, autocommit=True)
         self.addCleanup(self.outsider.close)
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _another_session_can_write(self) -> bool:
@@ -637,13 +637,13 @@ class TicketReplacementTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "tickets.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
 
     def tearDown(self):
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def test_the_column_set_the_replacement_resets_is_complete(self):
@@ -683,13 +683,13 @@ class ReturnedIdTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "returning.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
         self.addCleanup(self.temp_dir.cleanup)
-        self.addCleanup(setattr, database, "DB_PATH", self.original_path)
+        self.addCleanup(setattr, database, "DATA_DIR", self.original_path)
 
     def _value(self, sql, key):
         with database.get_connection() as conn:
@@ -770,12 +770,12 @@ class SubjectJsonMatchTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "subject.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         self.addCleanup(self.temp_dir.cleanup)
-        self.addCleanup(setattr, database, "DB_PATH", self.original_path)
+        self.addCleanup(setattr, database, "DATA_DIR", self.original_path)
 
     def _lfg(self, message_id, joined_json, host_id=900):
         with database.get_connection() as conn:
@@ -846,12 +846,12 @@ class AggregateResultTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "aggregates.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         self.addCleanup(self.temp_dir.cleanup)
-        self.addCleanup(setattr, database, "DB_PATH", self.original_path)
+        self.addCleanup(setattr, database, "DATA_DIR", self.original_path)
 
     def test_the_luck_average_is_a_float(self):
         with database.get_connection() as conn:
@@ -881,12 +881,12 @@ class OrderingContractTests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "ordering.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         self.addCleanup(self.temp_dir.cleanup)
-        self.addCleanup(setattr, database, "DB_PATH", self.original_path)
+        self.addCleanup(setattr, database, "DATA_DIR", self.original_path)
 
     def _users(self, rows):
         with database.get_connection() as conn:
@@ -990,7 +990,7 @@ class SchemaTypeMapTests(unittest.TestCase):
     """`core/schema_types.py` beyond what `BaselineSchemaTests` checks against
     the PostgreSQL schema: the naming rule, and that what the code writes into
     an INSTANT column is an instant. (Its SQLite-side checks went with SQLite's
-    schema; `SQLITE_TYPES` stays for the copy script, which reads SQLite.)"""
+    schema, and the SQLite type table with the archived file.)"""
 
     def test_every_json_column_says_so_in_its_name(self):
         from core import schema_types
@@ -1004,8 +1004,8 @@ class SchemaTypeMapTests(unittest.TestCase):
         behind reads back through `parse_stored`, the copy's own reader."""
         from core import schema_types
         with tempfile.TemporaryDirectory() as directory:
-            original = database.DB_PATH
-            database.DB_PATH = os.path.join(directory, "written.db")
+            original = database.DATA_DIR
+            database.DATA_DIR = directory
             pg_harness.fresh_database()
             try:
                 database.initialize_database()
@@ -1030,5 +1030,5 @@ class SchemaTypeMapTests(unittest.TestCase):
                                 parse_stored(value)
                                 checked += 1
             finally:
-                database.DB_PATH = original
+                database.DATA_DIR = original
         self.assertGreater(checked, 10)

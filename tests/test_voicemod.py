@@ -72,8 +72,8 @@ class UserActionViewVisibilityTests(unittest.IsolatedAsyncioTestCase):
         self.voicemod = cogs.voicemod
 
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
@@ -95,7 +95,7 @@ class UserActionViewVisibilityTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.require_feature_patch.stop()
         self.owns_channel_patch.stop()
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     def _interaction(self):
@@ -159,8 +159,8 @@ class RejoinPermissionReplayTests(unittest.IsolatedAsyncioTestCase):
         self.voicemod = cogs.voicemod
 
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_path = database.DB_PATH
-        database.DB_PATH = os.path.join(self.temp_dir.name, "economy.db")
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
         pg_harness.fresh_database()
         database.initialize_database()
         database.register_guild(1, "Guild")
@@ -175,7 +175,7 @@ class RejoinPermissionReplayTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.is_enabled_patch.stop()
         self.guild_setting_patch.stop()
-        database.DB_PATH = self.original_path
+        database.DATA_DIR = self.original_path
         self.temp_dir.cleanup()
 
     async def test_an_allowed_target_is_visible_in_the_recreated_room(self):
