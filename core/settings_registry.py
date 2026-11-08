@@ -252,6 +252,18 @@ JSON_SHAPE_ITEM_VALUES = "item_values"
 #: own the way `MECHANIC_PARAMETERS` gives each item one.
 JSON_SHAPE_WHEEL_SEGMENTS = "wheel_segments"
 
+#: `{name: {type, when_ids, then_ids}}` — conditional role rules (decided
+#: 2026-11-06). `grants`: having any `when` role gives every `then` role, and
+#: losing the last `when` takes them back. `requires`: a `then` role is removed
+#: while the member holds none of `when`. `exclusive`: the `then` roles are a
+#: group a member holds one of; `when` stays empty.
+JSON_SHAPE_ROLE_RULES = "role_rules"
+ROLE_RULE_TYPES = ("grants", "requires", "exclusive")
+# A rule set is applied to every role change in the guild, so it is bounded:
+# enough for real servers, small enough that one member update stays cheap.
+ROLE_RULE_LIMIT = 25
+ROLE_RULE_ROLE_LIMIT = 25
+
 # Where a snowflake sits inside each shape, so the browser gets it as a string.
 # One declaration, read by the wire transform and by the tests: an id nested one
 # level down rounds exactly as readily as one at the top, and the bug does not
@@ -261,6 +273,7 @@ JSON_SHAPE_SNOWFLAKE_FIELDS = {
     JSON_SHAPE_LEVEL_ROLES: None,          # the value is the id itself
     JSON_SHAPE_GAMES: ("role", "channel", "patch_channel"),
     JSON_SHAPE_FACTIONS: ("leader_role_id", "manageable_ids"),
+    JSON_SHAPE_ROLE_RULES: ("when_ids", "then_ids"),
     # Declared as holding no snowflake rather than omitted: `wire_json_shape`
     # treats an absent shape as "nothing to transform", which is the same
     # behaviour by accident, and this is the one place the question is answered.
@@ -275,6 +288,7 @@ JSON_SHAPE_SNOWFLAKE_FIELDS = {
 JSON_SHAPE_ENTRY_FIELDS: dict[str, dict[str, object]] = {
     JSON_SHAPE_ROLE_MENU: {"id": None, "emoji": ""},
     JSON_SHAPE_FACTIONS: {"leader_role_id": None, "manageable_ids": []},
+    JSON_SHAPE_ROLE_RULES: {"type": "grants", "when_ids": [], "then_ids": []},
     JSON_SHAPE_GAMES: {"role": None, "channel": None, "lfg": False,
                        "patch_channel": None},
 }
@@ -329,6 +343,16 @@ WARN_DEFAULT_TAG = "general"
 # What crossing a threshold may do. "none" is the shipped answer for every tag,
 # so an installation that upgrades applies no consequence it was not asked for.
 WARN_ACTIONS = ("none", "timeout", "kick", "ban")
+
+# What the bot needs in any guild before a feature asks for more: seeing a
+# channel, and answering in it. No feature declares these, because every one
+# assumes them, so the invite link adds them to the union of
+# `required_discord_permissions` (`permission_audit.invite_permissions`).
+# Real `discord.Permissions` names, like the per-feature lists.
+BASE_DISCORD_PERMISSIONS = (
+    "view_channel", "send_messages", "embed_links", "read_message_history",
+    "add_reactions", "use_application_commands",
+)
 
 FEATURE_GROUP_ORDER = (
     "core", "community", "onboarding", "economy", "games", "rewards",
@@ -436,8 +460,6 @@ FEATURE_DEFINITIONS = {
         _feature("everydle_dbdle", "games", parent="everydle",
                  dependencies=("economy", "everydle"),
                  permissions=("embed_links", "attach_files")),
-        _feature("music", "media",
-                 permissions=("connect", "speak", "embed_links")),
         _feature("moderation", "moderation",
                  permissions=("kick_members", "ban_members",
                               "moderate_members", "manage_messages")),
@@ -446,9 +468,12 @@ FEATURE_DEFINITIONS = {
         _feature("tickets", "community",
                  permissions=("manage_channels", "manage_messages",
                               "embed_links")),
+        # Off by default: it moves roles on its own, so a guild asks for it.
+        _feature("role_rules", "community", default=False,
+                 permissions=("manage_roles",)),
         _feature("role_menus", "community",
                  permissions=("manage_roles", "embed_links",
-                              "external_emojis")),
+                              "external_emojis", "add_reactions")),
         _feature("onboarding", "onboarding",
                  permissions=("manage_roles", "embed_links")),
         _feature("temporary_voice", "community",
@@ -506,6 +531,10 @@ FEATURE_DEFINITIONS = {
         # Off by default because it asks for Manage Server: Discord lists a
         # guild's invites, and so their use counts, only to a member holding it,
         # and the use counts are the only way to tell who invited a joiner.
+        # Off by default: it copies message content into a channel, which a
+        # guild has to ask for (Privacy Policy section 5).
+        _feature("event_logging", "moderation", default=False,
+                 permissions=("send_messages", "embed_links")),
         _feature("invite_logging", "community", default=False,
                  permissions=("manage_guild", "send_messages", "embed_links")),
         _feature("social_twitch", "socials",
@@ -858,6 +887,22 @@ SETTING_DEFINITIONS = {
                  [], feature="inactivity", max_length=24, max_items=1000),
         # Where a crossed threshold is reported. Separate from bot_log_channel,
         # which is operational logging an operator reads, not moderation record.
+        # One optional channel per family (decided 2026-11-06); an unset one
+        # is a family that is not logged.
+        *(_setting(f"event_log_{family}_channel", "event_logging", "event_logging",
+                   SettingValueType.CHANNEL, None, feature="event_logging",
+                   channel_types=TEXT_CHANNEL_TYPES)
+          for family in ("messages", "members", "voice", "server")),
+        # A category covers the channels under it, and a voice channel its
+        # voice events, so all three kinds may be named.
+        _setting("event_log_ignored_channels", "event_logging", "event_logging",
+                 SettingValueType.CHANNEL_LIST, [], feature="event_logging",
+                 channel_types=("text", "news", "voice", "stage_voice",
+                                "category"),
+                 max_items=100),
+        _setting("event_log_ignored_roles", "event_logging", "event_logging",
+                 SettingValueType.ROLE_LIST, [], feature="event_logging",
+                 max_items=100),
         _setting("moderation_log_channel", "moderation", "warnings",
                  SettingValueType.CHANNEL, None,
                  feature="moderation_warn_alerts",
@@ -919,6 +964,9 @@ SETTING_DEFINITIONS = {
         # its validator stay: the builder route validates a menu's entries with
         # the same rule the settings save used, so the two cannot disagree about
         # what a malformed menu is.
+        _setting("role_rules", "role_rules", "role_rules", SettingValueType.JSON,
+                 {}, feature="role_rules", json_shape=JSON_SHAPE_ROLE_RULES,
+                 assignable_role=True),
         _setting("factions", "factions", "factions", SettingValueType.JSON,
                  {}, feature="factions", json_shape=JSON_SHAPE_FACTIONS,
                  requires_full_admin=True),
@@ -1420,6 +1468,47 @@ def _validated_factions(value):
     return normalised
 
 
+def _validated_role_rules(value):
+    """{name: {type, when_ids, then_ids}}, normalised with sorted id sets.
+
+    Every refusal here is one the bot would otherwise meet on a live member:
+    a rule with nothing to act on, a role that is its own condition, or an
+    exclusive group of one.
+    """
+    rules = _shaped_map(value, "the role rules")
+    if len(rules) > ROLE_RULE_LIMIT:
+        raise ValueError(f"at most {ROLE_RULE_LIMIT} role rules")
+    normalised = {}
+    for name, entry in rules.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("every role rule needs a name")
+        if len(name) > 60:
+            raise ValueError("a role rule name is at most 60 characters")
+        if not isinstance(entry, dict) or set(entry) - {"type", "when_ids", "then_ids"}:
+            raise ValueError("a role rule holds only 'type', 'when_ids' and 'then_ids'")
+        rule_type = entry.get("type")
+        if rule_type not in ROLE_RULE_TYPES:
+            raise ValueError("unknown role rule type")
+        sets = {}
+        for field in ("when_ids", "then_ids"):
+            roles = entry.get(field) or []
+            if not isinstance(roles, list):
+                raise ValueError("a role rule's roles must be a list")
+            sets[field] = sorted({_snowflake(role) for role in roles})
+            if len(sets[field]) > ROLE_RULE_ROLE_LIMIT:
+                raise ValueError(f"at most {ROLE_RULE_ROLE_LIMIT} roles per list")
+        when, then = sets["when_ids"], sets["then_ids"]
+        if rule_type == "exclusive":
+            if when or len(then) < 2:
+                raise ValueError("an exclusive group is two or more roles and no condition")
+        elif not when or not then:
+            raise ValueError("a role rule needs a condition role and a target role")
+        if set(when) & set(then):
+            raise ValueError("a role cannot be its own condition")
+        normalised[name.strip()] = {"type": rule_type, "when_ids": when, "then_ids": then}
+    return normalised
+
+
 def _validated_role_menu(value):
     """Normalise and reject a role menu, rather than storing whatever arrives.
 
@@ -1493,6 +1582,7 @@ _JSON_SHAPE_VALIDATORS = {
     JSON_SHAPE_FACTIONS: _validated_factions,
     JSON_SHAPE_ITEM_VALUES: _validated_item_values,
     JSON_SHAPE_WHEEL_SEGMENTS: _validated_wheel_segments,
+    JSON_SHAPE_ROLE_RULES: _validated_role_rules,
 }
 
 

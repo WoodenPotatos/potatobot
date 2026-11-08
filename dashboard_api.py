@@ -776,6 +776,21 @@ def session_touch():
     })
 
 
+def bot_invite_url() -> str | None:
+    """Discord's add-the-bot link, for the host session only (decided
+    2026-11-06): it invites *this* installation's bot, and the public
+    application of todo section 4 stays the plan for everyone else. The
+    permissions are derived from the registry, never written down."""
+    if not CLIENT_ID or not is_host_session():
+        return None
+    parameters = urlencode({
+        "client_id": CLIENT_ID,
+        "scope": "bot applications.commands",
+        "permissions": str(permission_audit.invite_permissions()),
+    })
+    return f"https://discord.com/oauth2/authorize?{parameters}"
+
+
 @app.route("/api/auth/status")
 def auth_status():
     """Report the current session state to the static client."""
@@ -789,6 +804,14 @@ def auth_status():
                 },
                 "csrf_token": session.get("csrf_token"),
                 "is_host": is_host_session(),
+                # Absent (None) for anyone but the host.
+                "invite_url": bot_invite_url(),
+                # The account menu links both documents, from the same
+                # addresses as the sign-in card and `/version`.
+                "legal": {
+                    "privacy": version.PRIVACY_POLICY_URL,
+                    "terms": version.TERMS_OF_SERVICE_URL,
+                },
                 # Drives the topbar countdown. Any authenticated request slides
                 # the cookie forward, so the client restarts it on every call.
                 "idle_timeout_seconds": int(SESSION_IDLE_TIMEOUT.total_seconds()),
@@ -3017,11 +3040,42 @@ def _validate_managed_options(kind, options):
         if set(options) - {"button_label"}:
             raise RequestValidationError("dashboard.errors.managed_options_invalid")
         _validate_button_label(options)
+    elif kind == "role_menu":
+        # Its entries carry the roles; options carry only how they are offered.
+        # Anything else would be stored and never read, which is worse than a
+        # refusal.
+        if set(options) - {"mode", "single_choice"}:
+            raise RequestValidationError("dashboard.errors.managed_options_invalid")
+        if "mode" in options and options["mode"] not in managed_messages.ROLE_MENU_MODES:
+            raise RequestValidationError("dashboard.errors.managed_options_invalid")
+        if "single_choice" in options and not isinstance(options["single_choice"], bool):
+            raise RequestValidationError("dashboard.errors.managed_options_invalid")
     elif options:
-        # A role menu carries its buttons in `entries`, so anything here would be
-        # stored and never read, which is worse than a refusal.
         raise RequestValidationError("dashboard.errors.managed_options_invalid")
     return options
+
+
+def _validate_reaction_menu(options, entries, body):
+    """The rules a reaction menu adds to a role menu's own.
+
+    A reaction is its emoji, so every entry needs one and no two may be the
+    same emoji however they are spelled (`managed_messages.emoji_key`): two
+    would be one reaction granting two roles. The legend joins the body, and
+    the two together must still fit one embed description.
+    """
+    if managed_messages.role_menu_mode(options) != "reactions":
+        return
+    seen = set()
+    for entry in entries:
+        key = managed_messages.emoji_key(entry.get("emoji"))
+        if key is None:
+            raise RequestValidationError("dashboard.errors.managed_reaction_emoji_required")
+        if key in seen:
+            raise RequestValidationError("dashboard.errors.managed_reaction_emoji_duplicate")
+        seen.add(key)
+    legend = managed_messages.reaction_legend(entries)
+    if len(body or "") + 2 + len(legend) > EMBED_BODY_LIMIT:
+        raise RequestValidationError("dashboard.errors.managed_body_long")
 
 
 def _validate_image_url(options):
@@ -3114,16 +3168,21 @@ def guild_managed_messages(guild_id, kind):
                                    or not isinstance(colour, int)
                                    or not 0 <= colour <= 0xFFFFFF):
             raise RequestValidationError("dashboard.errors.managed_colour_invalid")
+        options = _validate_managed_options(kind, payload["options"])
+        entries = _validate_managed_entries(kind, payload["entries"])
+        body = _managed_text(payload["body"], EMBED_BODY_LIMIT,
+                             "dashboard.errors.managed_body_long")
+        if kind == "role_menu":
+            _validate_reaction_menu(options, entries, body)
         result = database.save_managed_message(
             guild_id, actor_id(), kind, payload["menu_key"],
             payload["display_name"], payload["revision"],
             title=_managed_text(payload["title"], EMBED_TITLE_LIMIT,
                                 "dashboard.errors.managed_title_long"),
-            body=_managed_text(payload["body"], EMBED_BODY_LIMIT,
-                               "dashboard.errors.managed_body_long"),
+            body=body,
             colour=colour,
-            options=_validate_managed_options(kind, payload["options"]),
-            entries=_validate_managed_entries(kind, payload["entries"]),
+            options=options,
+            entries=entries,
         )
         return jsonify({"status": "success", "message": t("dashboard.managed_saved"),
                         "data": result}), 201
@@ -3380,6 +3439,17 @@ def adopt_guild_managed_message(guild_id, kind):
         entries = [dict(entry, role_id=int(entry["role_id"]))
                    for entry in (stored or {}).get("entries", [])
                    if entry.get("role_id")]
+        if kind == "role_menu":
+            # How the menu is offered is the row's, like its entries: nothing on
+            # the message says it, and reading it back would reset a reaction
+            # menu to buttons. Its legend is rendered from the entries, so one
+            # read back from the message is stripped, or it would print twice.
+            content["options"] = dict((stored or {}).get("options") or {})
+            legend = managed_messages.reaction_legend(entries)
+            body = content["body"] or ""
+            if (legend and managed_messages.role_menu_mode(content["options"]) == "reactions"
+                    and body.endswith(legend)):
+                content["body"] = body[:-len(legend)].rstrip() or None
         result = database.save_managed_message(
             guild_id, actor_id(), kind, payload["menu_key"],
             payload["display_name"], (stored or {}).get("revision", 0),

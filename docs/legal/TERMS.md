@@ -1,8 +1,8 @@
 # PotatoBot Terms of Service
 
-**Effective date:** 2026-10-31
-**Last updated:** 2026-10-31
-**Version:** 1.0
+**Effective date:** 2026-11-08
+**Last updated:** 2026-11-08
+**Version:** 1.1
 
 This document is written in English and Hungarian. The English text is the
 binding one; the Hungarian text (`TERMS.hu.md`) is a translation provided for
@@ -62,7 +62,8 @@ have your parent's or guardian's permission to use the bot's features.
 The bot offers, among other things, a virtual economy with coins and
 experience, casino-style games, a gacha, a shop, daily puzzles, counting and
 word-chain channels, group search, temporary voice rooms, tickets, moderation
-tools, announcements, music playback, stream and patch-note notifications, and
+tools, announcements, role rules, an event log, stream and patch-note
+notifications, and
 a dashboard where administrators configure all of this. Every feature can be
 switched on or off per server by that server's administrators, so what you see
 depends on where you are.
@@ -144,27 +145,13 @@ When using the bot you must not:
   dashboard beyond what you are authorised for;
 - probe, overload, scan or attack the bot, the dashboard, or the server they
   run on, or interfere with their operation;
-- use the music feature to play content you do not have the right to play
-  (section 6.1);
 - circumvent cooldowns, rate limits or feature restrictions;
 - impersonate the operator, the bot or Discord.
 
-### 6.1 Music
-
-The music feature plays audio from a YouTube link or search you provide, in a
-voice channel, for the members present. **You are responsible for what you
-request.** Request only content you have the right to listen to with the
-people in that channel, and do not use the feature to redistribute, record or
-publicly perform content beyond what the rights holder and YouTube's Terms of
-Service allow. The feature depends on a third-party platform we do not control
-and **may stop working or be withdrawn at any time** without notice. Rights
-holders who believe the feature is being used to infringe their rights may
-write to us at the contact address, and we will act on a valid notice.
-
-### 6.2 Content you provide
+### 6.1 Content you provide
 
 Text you type into the bot (a game name for a group post, a voice room name,
-a ticket message, a music search) must comply with the law, Discord's rules
+a ticket message) must comply with the law, Discord's rules
 and the server's rules. Where it is posted back into Discord, the server's
 administrators may remove it. You keep whatever rights you have in it and
 grant us only what is needed to run the feature.
@@ -271,7 +258,7 @@ the licence's own disclaimer governs the code.
   time to fix before disclosing. Do not test against the live installation
   with other people's data.
 - **Content that infringes your rights** (section 6.1): write to the contact
-  address with the server, the time, what was played and your claim.
+  address with the server, the time, the content and your claim.
 - **Violations of Discord's rules** can also be reported to Discord through its
   own tools.
 

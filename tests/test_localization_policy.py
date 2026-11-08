@@ -178,9 +178,9 @@ class NavigationReachabilityTests(unittest.TestCase):
         self.assertIn("overview", {item["page"] for item in self.items})
 
     def test_every_category_entry_owns_settings_or_child_toggles(self):
-        """`categoryHasVisibleSettings` counts both, which is why the Casino and
-        Music pages are legitimate with no settings of their own: they exist to
-        hold the sub-toggles whose `parent` names them."""
+        """`categoryHasVisibleSettings` counts both, which is why the Casino page
+        is legitimate with no settings of its own: it exists to hold the
+        sub-toggles whose `parent` names it."""
         owning = {definition.category
                   for definition in SETTING_DEFINITIONS.values()}
         parents = {definition.parent

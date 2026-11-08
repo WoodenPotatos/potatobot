@@ -1,0 +1,4454 @@
+{
+ "retcode": 0,
+ "message": "OK",
+ "data": {
+  "list": [
+   {
+    "post": {
+     "game_id": 6,
+     "post_id": "47271769",
+     "f_forum_id": 0,
+     "uid": "172534910",
+     "subject": "A brand-new season of \"Currency Wars: Voyage Into the Canvas\" is here!",
+     "content": "After the Version 4.7 update on 2026/11/11, the IPC officially partners up with the copyright holders of The Fluffy comics to launch a brand-new season, \"Currency Wars: Voyage Into the Canvas\"! Play to obtain Stellar Jade ×4,000, Variable Dice ×2, Self-Modeling Resin ×2, Tracks of Destiny ×3, and other rewards! The new season brings a massive update, featuring the brand-new seasonal gameplay, \"Escapade\" and \"Plot Armor.\" Meanwhile, Bonds have been completely revamped. Employee Bonds, costs, on/off-field positioning, and Character Empowerments have all been fully reworked. Brand-new equipment, Investment Environments, and strategies also await your selection. Come and experience a different gameplay strategy! ▌New Season Availability",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1793505605,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 15,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-11-05 17:36:06",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "22",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "tr-tr",
+       "it-it"
+      ],
+      "future_post_id": "24946",
+      "lang_subject": {
+       "it-it": "A brand-new season of \"Currency Wars: Voyage Into the Canvas\" is here!",
+       "ru-ru": "Начинается новый сезон Валютных войн: Путешествие в картину!",
+       "de-de": "Die brandneue Saison „Währungskrieg: Reise in die Leinwand“ ist da!",
+       "en-us": "A brand-new season of \"Currency Wars: Voyage Into the Canvas\" is here!",
+       "es-es": "¡Llega la nueva temporada de Guerra de Divisas: Viaje al cuadro!",
+       "ja-jp": "「マネーウォーズ・キャンバスアドベンチャー」新シーズン開幕！",
+       "zh-tw": "「貨幣戰爭•入畫奇航」全新賽季來襲！",
+       "vi-vn": "Mùa giải mới \"Chiến Tranh Tiền Tệ - Du Hành Nhập Họa\" đã ra mắt!",
+       "ko-kr": "「화폐 전쟁•그림 속 기묘한 항해」 신규 시즌 시작!",
+       "tr-tr": "A brand-new season of \"Currency Wars: Voyage Into the Canvas\" is here!",
+       "zh-cn": "「货币战争•入画奇航」全新赛季来袭！",
+       "id-id": "Musim Baru \"Perang Mata Uang: Petualangan ke Dalam Lukisan\" Hadir!",
+       "fr-fr": "La toute nouvelle saison Guerres des monnaies : Voyage vers la toile débarque !",
+       "pt-pt": "A nova temporada de \"Guerra Monetária: Viagem pela Tela\" chegou!",
+       "th-th": "\"สงครามเงินตรา: เดินทางสู่ภาพวาด\" ฤดูกาลใหม่ล่าสุดมาถึงแล้ว!"
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "After the Version 4.7 update on 2026/11/11, the IPC officially partners up with the copyright holders of The Fluffy comics to launch a brand-new season, \"Currency Wars: Voyage Into the Canvas\"! Play to obtain Stellar Jade ×4,000, Variable Dice ×2, Self-Modeling Resin ×2, Tracks of Destiny ×3, and other rewards! The new season brings a massive update, featuring the brand-new seasonal gameplay, \"Escapade\" and \"Plot Armor.\" Meanwhile, Bonds have been completely revamped. Employee Bonds, costs, on/off-field positioning, and Character Empowerments have all been fully reworked. Brand-new equipment, Investment Environments, and strategies also await your selection. Come and experience a different gameplay strategy! ▌New Season Availability",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "172534910",
+     "nickname": "Honkai: Star Rail",
+     "introduce": "May This Journey Lead Us Starward",
+     "avatar": "-1",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "HonkaiSR Official"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://upload-os-bbs.hoyolab.com/upload/2026/06/01/172534910/2580ad8512a84f03b984b9067dff255a_988975766878626867.jpeg",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 12184,
+     "reply_num": 19,
+     "like_num": 992,
+     "bookmark_num": 18,
+     "share_num": 5,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 950
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 18
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 9
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 5
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 4
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "9",
+       "upvote_num": 3
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/30/f7d1bb8a55c2eb319155eb5b3c405153_2429655916980457886.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "2316808",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 237,
+         "y": 15
+        },
+        "rb_point": {
+         "x": 1035,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 65
+        },
+        "rb_point": {
+         "x": 1337,
+         "y": 1067
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 104,
+         "y": 15
+        },
+        "rb_point": {
+         "x": 1168,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 65
+        },
+        "rb_point": {
+         "x": 1337,
+         "y": 817
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145889705"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/30/8e5faa937290bc9659e62226eb67439a_6840807264261923120.png",
+      "height": 185,
+      "width": 1080,
+      "format": "PNG",
+      "size": "161966",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 470,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 609,
+         "y": 185
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 416,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 663,
+         "y": 185
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 447,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 632,
+         "y": 185
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 375,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 704,
+         "y": 185
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145892452"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/30/f7d1bb8a55c2eb319155eb5b3c405153_2429655916980457886.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "2316808",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 237,
+         "y": 15
+        },
+        "rb_point": {
+         "x": 1035,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 65
+        },
+        "rb_point": {
+         "x": 1337,
+         "y": 1067
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 104,
+         "y": 15
+        },
+        "rb_point": {
+         "x": 1168,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 65
+        },
+        "rb_point": {
+         "x": 1337,
+         "y": 817
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145889705"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/30/8e5faa937290bc9659e62226eb67439a_6840807264261923120.png",
+      "height": 185,
+      "width": 1080,
+      "format": "PNG",
+      "size": "161966",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 470,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 609,
+         "y": 185
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 416,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 663,
+         "y": 185
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 447,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 632,
+         "y": 185
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 375,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 704,
+         "y": 185
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145892452"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 6,
+     "post_id": "47252649",
+     "f_forum_id": 0,
+     "uid": "172534910",
+     "subject": "Version 4.7 Store Update",
+     "content": "Hello, Trailblazers! After the Version 4.7 update on 2026/11/11, value packs will be available for a limited time! Consume Star Rail Special Passes or consume Stellar Jades in \"Phantasia Showstage\" to participate in the outfit draw event to obtain Resonance for claiming Affinitive Eidolons. In addition, Trailblaze Fashion and more will be added to the \"Gift of Stardust\" Exchange Shop! ▌Limited-Time Pack \"Special Ticket\"",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1793364904,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 9,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-10-31 04:16:25",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "22",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "tr-tr",
+       "it-it"
+      ],
+      "future_post_id": "24924",
+      "lang_subject": {
+       "tr-tr": "Version 4.7 Store Update",
+       "id-id": "Baru di Toko Versi 4.7",
+       "de-de": "Version 4.7: Neu im Shop",
+       "th-th": "อัปเดตร้านค้าเวอร์ชัน 4.7",
+       "it-it": "Version 4.7 Store Update",
+       "vi-vn": "Cập nhật Cửa Hàng phiên bản 4.7",
+       "ru-ru": "Новинки в магазине версии 4.7",
+       "zh-tw": "4.7版本商店新品上架",
+       "en-us": "Version 4.7 Store Update",
+       "fr-fr": "Mise à jour de la boutique dans la version 4.7",
+       "ja-jp": "Ver.4.7ショップ更新",
+       "es-es": "Actualización de la tienda de la versión 4.7",
+       "ko-kr": "4.7 버전 상점 신상 출시",
+       "zh-cn": "4.7版本商店上新",
+       "pt-pt": "Atualização da Loja da Versão 4.7"
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "Hello, Trailblazers! After the Version 4.7 update on 2026/11/11, value packs will be available for a limited time! Consume Star Rail Special Passes or consume Stellar Jades in \"Phantasia Showstage\" to participate in the outfit draw event to obtain Resonance for claiming Affinitive Eidolons. In addition, Trailblaze Fashion and more will be added to the \"Gift of Stardust\" Exchange Shop! ▌Limited-Time Pack \"Special Ticket\"",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "172534910",
+     "nickname": "Honkai: Star Rail",
+     "introduce": "May This Journey Lead Us Starward",
+     "avatar": "-1",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "HonkaiSR Official"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://upload-os-bbs.hoyolab.com/upload/2026/06/01/172534910/2580ad8512a84f03b984b9067dff255a_988975766878626867.jpeg",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 23324,
+     "reply_num": 8,
+     "like_num": 1019,
+     "bookmark_num": 19,
+     "share_num": 1,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 982
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 15
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 8
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 6
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 4
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "7",
+       "upvote_num": 1
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/30/0b3e7a986a821b4e34e9875ba053239a_2747945596507353206.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "3987713",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 195,
+         "y": 82
+        },
+        "rb_point": {
+         "x": 875,
+         "y": 990
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 82
+        },
+        "rb_point": {
+         "x": 1121,
+         "y": 923
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 81,
+         "y": 82
+        },
+        "rb_point": {
+         "x": 989,
+         "y": 990
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 82
+        },
+        "rb_point": {
+         "x": 1121,
+         "y": 712
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145877570"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/30/d0017e0f2c9384163dbe9dcb9cb4cbda_5382179991723897147.png",
+      "height": 92,
+      "width": 1080,
+      "format": "PNG",
+      "size": "22153",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 494,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 586,
+         "y": 92
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 458,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 621,
+         "y": 92
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 505,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 574,
+         "y": 92
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 478,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 601,
+         "y": 92
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145878085"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/30/0b3e7a986a821b4e34e9875ba053239a_2747945596507353206.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "3987713",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 195,
+         "y": 82
+        },
+        "rb_point": {
+         "x": 875,
+         "y": 990
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 82
+        },
+        "rb_point": {
+         "x": 1121,
+         "y": 923
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 81,
+         "y": 82
+        },
+        "rb_point": {
+         "x": 989,
+         "y": 990
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 82
+        },
+        "rb_point": {
+         "x": 1121,
+         "y": 712
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145877570"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/30/d0017e0f2c9384163dbe9dcb9cb4cbda_5382179991723897147.png",
+      "height": 92,
+      "width": 1080,
+      "format": "PNG",
+      "size": "22153",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 494,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 586,
+         "y": 92
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 458,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 621,
+         "y": 92
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 505,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 574,
+         "y": 92
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 478,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 601,
+         "y": 92
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145878085"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 6,
+     "post_id": "47252509",
+     "f_forum_id": 0,
+     "uid": "172534910",
+     "subject": "\"Cosmic Aesthetics: Phantasia Showstage\" Outfit Draw Event Details",
+     "content": "Hello, Trailblazers! Starlight and moonlight adorn the Lotto Goddess's bespoke outfit. Aeon ★ Aha's new outfit \"Star Lotto\" will be available in Version 4.7! ▌\"Phantasia Showstage\" Outfit Draw Event Details",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1793364307,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 72,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-11-06 02:09:19",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "22",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "it-it",
+       "tr-tr"
+      ],
+      "future_post_id": "24916",
+      "lang_subject": {
+       "en-us": "\"Cosmic Aesthetics: Phantasia Showstage\" Outfit Draw Event Details",
+       "de-de": "Details zur Outfit-Ziehungsaktion „Kosmische Ästhetik: Showbühne von Fantasia“",
+       "zh-tw": "「寰宇美學•幻樂秀場」服裝抽取活動說明",
+       "es-es": "Detalles del evento de sorteo de vestuarios «Estética universal: Espectáculo de música ilusoria»",
+       "tr-tr": "\"Cosmic Aesthetics: Phantasia Showstage\" Outfit Draw Event Details",
+       "it-it": "\"Cosmic Aesthetics: Phantasia Showstage\" Outfit Draw Event Details",
+       "zh-cn": "「寰宇美学•幻乐秀场」时装抽取活动说明",
+       "ja-jp": "コスチューム獲得イベント「スペース美学・幻楽のファッションショー」について",
+       "fr-fr": "Détails de l'événement de tirage de tenues « Esthétiques cosmiques : Scène de spectacle illusoire »",
+       "ko-kr": "「우주적 미학•환상의 쇼타임」 코스튬 뽑기 이벤트 안내",
+       "vi-vn": "Chi Tiết Sự Kiện Rút Thời Trang \"Mỹ Học Vũ Trụ - Sân Khấu Huyễn Lạc\"",
+       "pt-pt": "Detalhes do Evento de Sorteio de Trajes \"Estética Cósmica: Palco Fantástico\"",
+       "th-th": "คำอธิบายกิจกรรมสุ่มชุด \"สุนทรียศาสตร์แห่งจักรวาล: ลานแสดงปีติมายา\"",
+       "id-id": "Penjelasan Event Pengundian Kostum \"Estetika Semesta: Panggung Musik Fantasi\"",
+       "ru-ru": "Описание события розыгрыша костюма «Космическая эстетика: Иллюзорная сцена»"
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "Hello, Trailblazers! Starlight and moonlight adorn the Lotto Goddess's bespoke outfit. Aeon ★ Aha's new outfit \"Star Lotto\" will be available in Version 4.7! ▌\"Phantasia Showstage\" Outfit Draw Event Details",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "172534910",
+     "nickname": "Honkai: Star Rail",
+     "introduce": "May This Journey Lead Us Starward",
+     "avatar": "-1",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "HonkaiSR Official"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://upload-os-bbs.hoyolab.com/upload/2026/06/01/172534910/2580ad8512a84f03b984b9067dff255a_988975766878626867.jpeg",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 35327,
+     "reply_num": 100,
+     "like_num": 1247,
+     "bookmark_num": 84,
+     "share_num": 33,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 1169
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 39
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 12
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 8
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 7
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 7
+      },
+      {
+       "upvote_id": "6",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "9",
+       "upvote_num": 2
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/29/89bb5e1b0033f7915090bfe1c8e9cea5_8205611972943861976.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "3315453",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 120,
+         "y": 28
+        },
+        "rb_point": {
+         "x": 908,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 76
+        },
+        "rb_point": {
+         "x": 1081,
+         "y": 886
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 0,
+         "y": 28
+        },
+        "rb_point": {
+         "x": 1051,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 76
+        },
+        "rb_point": {
+         "x": 1081,
+         "y": 684
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145849051"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/29/1ef7690958c3ad985c4703d09e9d8ff9_1723433986501401676.png",
+      "height": 1062,
+      "width": 2360,
+      "format": "PNG",
+      "size": "57299",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 781,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1578,
+         "y": 1062
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 471,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1888,
+         "y": 1062
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 649,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1711,
+         "y": 1062
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 235,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 2124,
+         "y": 1062
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145851061"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/29/5b548909a9740e238e3cdd7467c9cc54_5889043614521796091.png",
+      "height": 1074,
+      "width": 2360,
+      "format": "PNG",
+      "size": "58620",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 225,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 2134,
+         "y": 1074
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 777,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1582,
+         "y": 1074
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 463,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1896,
+         "y": 1074
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 643,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1717,
+         "y": 1074
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145851063"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/29/89bb5e1b0033f7915090bfe1c8e9cea5_8205611972943861976.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "3315453",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 120,
+         "y": 28
+        },
+        "rb_point": {
+         "x": 908,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 76
+        },
+        "rb_point": {
+         "x": 1081,
+         "y": 886
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 0,
+         "y": 28
+        },
+        "rb_point": {
+         "x": 1051,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 76
+        },
+        "rb_point": {
+         "x": 1081,
+         "y": 684
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145849051"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/29/1ef7690958c3ad985c4703d09e9d8ff9_1723433986501401676.png",
+      "height": 1062,
+      "width": 2360,
+      "format": "PNG",
+      "size": "57299",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 781,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1578,
+         "y": 1062
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 471,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1888,
+         "y": 1062
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 649,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1711,
+         "y": 1062
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 235,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 2124,
+         "y": 1062
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145851061"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/29/5b548909a9740e238e3cdd7467c9cc54_5889043614521796091.png",
+      "height": 1074,
+      "width": 2360,
+      "format": "PNG",
+      "size": "58620",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 225,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 2134,
+         "y": 1074
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 777,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1582,
+         "y": 1074
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 463,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1896,
+         "y": 1074
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 643,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1717,
+         "y": 1074
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145851063"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 6,
+     "post_id": "47252072",
+     "f_forum_id": 0,
+     "uid": "172534910",
+     "subject": "\"Grab Your Opening Gifts\" Event Details",
+     "content": "Let the show begin! Aha brought a ton of great gifts! THEY sure have clout! ■Collection Time After the Version 4.7 update on 2026/11/11 – 2026/12/23 05:59 (UTC+8) ■Requirement Trailblaze Level ≥ 4 ▌Affinitive Starveil",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1793362807,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 65,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-11-06 12:47:44",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "22",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "tr-tr",
+       "it-it"
+      ],
+      "future_post_id": "24927",
+      "lang_subject": {
+       "pt-pt": "Detalhes do Evento \"Pega Tudo e Corre!\"",
+       "fr-fr": "Détails de l'événement « Récupérez vos cadeaux de bienvenue »",
+       "tr-tr": "\"Grab Your Opening Gifts\" Event Details",
+       "ja-jp": "イベント「つかめ、開幕の贈り物！」について",
+       "id-id": "Penjelasan Event \"Hadiah Pembuka, Auto Borong\"",
+       "zh-cn": "「开场好礼先抱走」活动说明",
+       "en-us": "\"Grab Your Opening Gifts\" Event Details",
+       "vi-vn": "Chi Tiết Sự Kiện \"Nhận Ngay Quà Mở Màn\"",
+       "it-it": "\"Grab Your Opening Gifts\" Event Details",
+       "ko-kr": "「오프닝 기프트」 이벤트 안내",
+       "ru-ru": "Описание события «Забирайте стартовые подарки»",
+       "es-es": "Detalles del evento «Llévate los regalos de apertura»",
+       "zh-tw": "「開場好禮先抱走」活動說明",
+       "de-de": "Details zur Aktion „Schnapp dir die Startgeschenke“",
+       "th-th": "คำอธิบายกิจกรรม \"รับของขวัญเปิดม่าน\""
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "Let the show begin! Aha brought a ton of great gifts! THEY sure have clout! ■Collection Time After the Version 4.7 update on 2026/11/11 – 2026/12/23 05:59 (UTC+8) ■Requirement Trailblaze Level ≥ 4 ▌Affinitive Starveil",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "172534910",
+     "nickname": "Honkai: Star Rail",
+     "introduce": "May This Journey Lead Us Starward",
+     "avatar": "-1",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "HonkaiSR Official"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://upload-os-bbs.hoyolab.com/upload/2026/06/01/172534910/2580ad8512a84f03b984b9067dff255a_988975766878626867.jpeg",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 29726,
+     "reply_num": 64,
+     "like_num": 1412,
+     "bookmark_num": 69,
+     "share_num": 2,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 1336
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 47
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 11
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 9
+      },
+      {
+       "upvote_id": "9",
+       "upvote_num": 4
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 2
+      },
+      {
+       "upvote_id": "10",
+       "upvote_num": 2
+      },
+      {
+       "upvote_id": "6",
+       "upvote_num": 1
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/30/09d22b6552bf3f58ab9c4aaba917fc94_172118495244651005.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "3801451",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 143,
+         "y": 40
+        },
+        "rb_point": {
+         "x": 921,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 75
+        },
+        "rb_point": {
+         "x": 1117,
+         "y": 913
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 13,
+         "y": 40
+        },
+        "rb_point": {
+         "x": 1051,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 75
+        },
+        "rb_point": {
+         "x": 1117,
+         "y": 703
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145877840"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/30/09d22b6552bf3f58ab9c4aaba917fc94_172118495244651005.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "3801451",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 143,
+         "y": 40
+        },
+        "rb_point": {
+         "x": 921,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 75
+        },
+        "rb_point": {
+         "x": 1117,
+         "y": 913
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 13,
+         "y": 40
+        },
+        "rb_point": {
+         "x": 1051,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 75
+        },
+        "rb_point": {
+         "x": 1117,
+         "y": 703
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145877840"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 6,
+     "post_id": "47238004",
+     "f_forum_id": 0,
+     "uid": "172534910",
+     "subject": "Garden of Plenty Event: Calyx Drop Rate Doubled for a Limited Time",
+     "content": "▌Event Period 2026/10/30 04:00 (server time) - 2026/11/11 03:59 (UTC+8) ▌Participation Requirement Complete the Adventure Mission \"Calyx (Golden): Bud of Memories\" ▌Event Details During the Garden of Plenty event, beat Calyx (Golden) and Calyx (Crimson) challenges to receive double rewards. You will get an additional set of rewards on top of default drops after consuming an event double reward opportunity and Trailblaze Power. During the event, the number of double reward opportunities is limited. The limit and remaining attempts can be viewed in the Garden of Plenty event stage page. The double reward count will not reset during the event. Be sure to schedule your time for this challenge accordingly, Trailblazers.",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1793242806,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 12,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-10-29 22:55:27",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "22",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "it-it",
+       "tr-tr"
+      ],
+      "future_post_id": "24889",
+      "lang_subject": {
+       "ko-kr": "「꽃 피는 정원」 이벤트: 모조 꽃받침 기간 한정 2배 드랍",
+       "ru-ru": "Событие «Сад множества»: вдвое больше наград за Чашелисты",
+       "es-es": "Evento «Jardín de la opulencia»: obtén el doble de recompensas de Cáliz por tiempo limitado",
+       "id-id": "Event \"Taman Kelimpahan\": Hadiah Ganda Calyx untuk Waktu Terbatas",
+       "vi-vn": "Sự Kiện \"Thịnh Vượng Trong Hoa\": Đài Hoa Nhân Tạo Rơi x2 Hạn Giờ",
+       "zh-cn": "「花藏繁生」活动：拟造花萼限时双倍掉落",
+       "tr-tr": "Garden of Plenty Event: Calyx Drop Rate Doubled for a Limited Time",
+       "de-de": "Aktion „Garten des Überflusses“: Zeitlich begrenzt doppelte Belohnungen bei Blütenkelchen",
+       "fr-fr": "Événement Jardin de l'opulence : obtenez le double des récompenses des Calices pendant un temps limité",
+       "it-it": "Garden of Plenty Event: Calyx Drop Rate Doubled for a Limited Time",
+       "pt-pt": "Jardim da Fartura: obtenha o dobro de recompensas no Cálice por tempo limitado",
+       "en-us": "Garden of Plenty Event: Calyx Drop Rate Doubled for a Limited Time",
+       "ja-jp": "イベント「花が育む繁生」：期間限定で疑似花萼のドロップが2倍に！",
+       "zh-tw": "「花藏繁生」活動：擬造花萼限時雙倍掉落",
+       "th-th": "กิจกรรม \"บุปผาบานสะพรั่ง\": Calyx ดรอปสองเท่าในเวลาจำกัด"
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "▌Event Period 2026/10/30 04:00 (server time) - 2026/11/11 03:59 (UTC+8) ▌Participation Requirement Complete the Adventure Mission \"Calyx (Golden): Bud of Memories\" ▌Event Details During the Garden of Plenty event, beat Calyx (Golden) and Calyx (Crimson) challenges to receive double rewards. You will get an additional set of rewards on top of default drops after consuming an event double reward opportunity and Trailblaze Power. During the event, the number of double reward opportunities is limited. The limit and remaining attempts can be viewed in the Garden of Plenty event stage page. The double reward count will not reset during the event. Be sure to schedule your time for this challenge accordingly, Trailblazers.",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "172534910",
+     "nickname": "Honkai: Star Rail",
+     "introduce": "May This Journey Lead Us Starward",
+     "avatar": "-1",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "HonkaiSR Official"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://upload-os-bbs.hoyolab.com/upload/2026/06/01/172534910/2580ad8512a84f03b984b9067dff255a_988975766878626867.jpeg",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 8117,
+     "reply_num": 23,
+     "like_num": 816,
+     "bookmark_num": 11,
+     "share_num": 0,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 793
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 9
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 5
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 4
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "6",
+       "upvote_num": 1
+      },
+      {
+       "upvote_id": "7",
+       "upvote_num": 1
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/27/997c5b2d0a629cabbdfc5b31a9f3b489_2045029242702547151.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "4000440",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 1092,
+         "y": 89
+        },
+        "rb_point": {
+         "x": 1697,
+         "y": 895
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 1092,
+         "y": 340
+        },
+        "rb_point": {
+         "x": 1899,
+         "y": 945
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 1092,
+         "y": 89
+        },
+        "rb_point": {
+         "x": 1899,
+         "y": 895
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 1092,
+         "y": 340
+        },
+        "rb_point": {
+         "x": 1899,
+         "y": 794
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145764975"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/27/997c5b2d0a629cabbdfc5b31a9f3b489_2045029242702547151.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "4000440",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 1092,
+         "y": 89
+        },
+        "rb_point": {
+         "x": 1697,
+         "y": 895
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 1092,
+         "y": 340
+        },
+        "rb_point": {
+         "x": 1899,
+         "y": 945
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 1092,
+         "y": 89
+        },
+        "rb_point": {
+         "x": 1899,
+         "y": 895
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 1092,
+         "y": 340
+        },
+        "rb_point": {
+         "x": 1899,
+         "y": 794
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145764975"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 6,
+     "post_id": "47142215",
+     "f_forum_id": 0,
+     "uid": "172534910",
+     "subject": "Version 4.6 Event Warp: Phase II",
+     "content": "Hello, Trailblazers! The drop rates for the limited 5-star character Pearl (Elation: Ice) and the limited 5-star Light Cone \"Colors for Tomorrow (Elation)\" will be boosted for a limited time. The drop rates for the 4-star characters Qingque (Erudition: Quantum), Xueyi (Destruction: Quantum), and Misha (Destruction: Ice), as well as the 4-star Light Cones \"Post-Op Conversation (Abundance),\" \"Planetary Rendezvous (Harmony),\" and \"Boundless Choreo (Nihility)\" will be boosted for a limited time. The Warp period is from after the Version 4.6 update on 2026/09/28 – 2026/11/10 15:00 (server time). The limited 5-star character Mortenax Blade (Nihility: Fire) and the limited 5-star Light Cone \"Reforged in Hellfire (Nihility)\" will return. The Warp period is from 2026/10/21 12:00 – 2026/11/10 15:00 (server time). ▌\"An Ocean in a Pearl\" and \"Brilliant Fixation: Colors for Tomorrow\" Event Warps",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1792476008,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 35,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-10-31 07:54:35",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "22",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "it-it",
+       "tr-tr"
+      ],
+      "future_post_id": "24762",
+      "lang_subject": {
+       "fr-fr": "Sauts événements de la version 4.6 (partie 2)",
+       "de-de": "Aktionswarps von Version 4.6 (Phase 2)",
+       "zh-cn": "4.6版本活动跃迁（其二）",
+       "ru-ru": "Прыжок события версии 4.6: вторая фаза",
+       "tr-tr": "Version 4.6 Event Warp: Phase II",
+       "en-us": "Version 4.6 Event Warp: Phase II",
+       "vi-vn": "Bước Nhảy Sự Kiện Phiên Bản 4.6 (Kỳ 2)",
+       "ja-jp": "Ver.4.6イベント跳躍・その2",
+       "it-it": "Version 4.6 Event Warp: Phase II",
+       "id-id": "Event Warp Versi 4.6 (Tahap II)",
+       "th-th": "กิจกรรมวาร์ปเวอร์ชัน 4.6 (ช่วงที่ 2)",
+       "zh-tw": "4.6版本活動躍遷（其二）",
+       "es-es": "Saltos de evento (II) de la versión 4.6",
+       "pt-pt": "Salto Hiperespacial de Evento da Versão 4.6: Parte II",
+       "ko-kr": "4.6 버전 이벤트 워프 (2)"
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "Hello, Trailblazers! The drop rates for the limited 5-star character Pearl (Elation: Ice) and the limited 5-star Light Cone \"Colors for Tomorrow (Elation)\" will be boosted for a limited time. The drop rates for the 4-star characters Qingque (Erudition: Quantum), Xueyi (Destruction: Quantum), and Misha (Destruction: Ice), as well as the 4-star Light Cones \"Post-Op Conversation (Abundance),\" \"Planetary Rendezvous (Harmony),\" and \"Boundless Choreo (Nihility)\" will be boosted for a limited time. The Warp period is from after the Version 4.6 update on 2026/09/28 – 2026/11/10 15:00 (server time). The limited 5-star character Mortenax Blade (Nihility: Fire) and the limited 5-star Light Cone \"Reforged in Hellfire (Nihility)\" will return. The Warp period is from 2026/10/21 12:00 – 2026/11/10 15:00 (server time). ▌\"An Ocean in a Pearl\" and \"Brilliant Fixation: Colors for Tomorrow\" Event Warps",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "172534910",
+     "nickname": "Honkai: Star Rail",
+     "introduce": "May This Journey Lead Us Starward",
+     "avatar": "-1",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "HonkaiSR Official"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://upload-os-bbs.hoyolab.com/upload/2026/06/01/172534910/2580ad8512a84f03b984b9067dff255a_988975766878626867.jpeg",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 45019,
+     "reply_num": 33,
+     "like_num": 1136,
+     "bookmark_num": 44,
+     "share_num": 15,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 1092
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 19
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 8
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 7
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 5
+      },
+      {
+       "upvote_id": "9",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "6",
+       "upvote_num": 1
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 1
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/16/c4ad4cf76730b8e15324610efd9c22c3_8253529473331117229.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "5373179",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 95
+        },
+        "rb_point": {
+         "x": 1092,
+         "y": 914
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 4,
+         "y": 47
+        },
+        "rb_point": {
+         "x": 1036,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 95
+        },
+        "rb_point": {
+         "x": 1092,
+         "y": 709
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 133,
+         "y": 47
+        },
+        "rb_point": {
+         "x": 907,
+         "y": 1079
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145279614"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/16/a29f9b75885d9c089bb6cb1444b0cc94_8962223996850976238.jpg",
+      "height": 1350,
+      "width": 1080,
+      "format": "JPEG",
+      "size": "311057",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 270
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 0,
+         "y": 135
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 1214
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 372
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 977
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 33,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1046,
+         "y": 1350
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145281542"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/16/c4ad4cf76730b8e15324610efd9c22c3_8253529473331117229.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "5373179",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 95
+        },
+        "rb_point": {
+         "x": 1092,
+         "y": 914
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 4,
+         "y": 47
+        },
+        "rb_point": {
+         "x": 1036,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 95
+        },
+        "rb_point": {
+         "x": 1092,
+         "y": 709
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 133,
+         "y": 47
+        },
+        "rb_point": {
+         "x": 907,
+         "y": 1079
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145279614"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/16/a29f9b75885d9c089bb6cb1444b0cc94_8962223996850976238.jpg",
+      "height": 1350,
+      "width": 1080,
+      "format": "JPEG",
+      "size": "311057",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 270
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 0,
+         "y": 135
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 1214
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 372
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 977
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 33,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1046,
+         "y": 1350
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145281542"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 6,
+     "post_id": "47043223",
+     "f_forum_id": 0,
+     "uid": "172534910",
+     "subject": "Planar Fissure Event: Planar Ornaments Drop Rate Doubled for a Limited Time",
+     "content": "▌Event Period 2026/10/12 04:00 - 2026/10/25 03:59 (server time) ▌Participation Requirement Unlock Planar Ornament ▌Event Details During the Planar Fissure event, receive double rewards when obtaining Immersion Rewards or performing Ornament Extraction in the Simulated Universe. You will get additional rewards on top of default drops after consuming an event double reward opportunity and Immersifiers (or Trailblaze Power). During the event, the number of double reward opportunities is limited and can be viewed in the Planar Fissure event page. The double reward count will not reset during the event. Be sure to schedule your time for this challenge accordingly, Trailblazers.",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1791687603,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 21,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-10-15 02:08:58",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "22",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "it-it",
+       "tr-tr"
+      ],
+      "future_post_id": "24673",
+      "lang_subject": {
+       "zh-cn": "「位面分裂」活动：位面饰品限时双倍掉落",
+       "it-it": "Planar Fissure Event: Planar Ornaments Drop Rate Doubled for a Limited Time",
+       "en-us": "Planar Fissure Event: Planar Ornaments Drop Rate Doubled for a Limited Time",
+       "zh-tw": "「次元分裂」活動：次元飾品限時雙倍掉落",
+       "fr-fr": "Événement Fracture dimensionnelle : ornements planaires doublés pendant un temps limité",
+       "ja-jp": "イベント「次元界分裂」：期間限定で次元界オーナメントのドロップが2倍に！",
+       "de-de": "Aktion „Planarer Riss“: Zeitlich begrenzt doppelte Belohnungen für Planarornamente",
+       "pt-pt": "Fissura Plana: obtenha o dobro de Ornamentos Planos por tempo limitado",
+       "ko-kr": "「차원 분열」 이벤트: 차원 장신구 기간 한정 2배 드랍",
+       "id-id": "Event \"Retakan Planar\": Hadiah Ganda Planar Ornament untuk Waktu Terbatas",
+       "es-es": "Evento «Fisura del plano»: obtén el doble de recompensas de ornamentos por tiempo limitado",
+       "th-th": "กิจกรรม \"รอยแยกมิติระนาบ\": จักรวาลประดับดรอปสองเท่าในเวลาจำกัด",
+       "vi-vn": "Sự Kiện \"Vị Diện Nứt Vỡ\": Phụ Kiện Vị Diện Rơi x2 Hạn Giờ",
+       "ru-ru": "Событие «Планарный раскол»: вдвое больше Планарных украшений",
+       "tr-tr": "Planar Fissure Event: Planar Ornaments Drop Rate Doubled for a Limited Time"
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "▌Event Period 2026/10/12 04:00 - 2026/10/25 03:59 (server time) ▌Participation Requirement Unlock Planar Ornament ▌Event Details During the Planar Fissure event, receive double rewards when obtaining Immersion Rewards or performing Ornament Extraction in the Simulated Universe. You will get additional rewards on top of default drops after consuming an event double reward opportunity and Immersifiers (or Trailblaze Power). During the event, the number of double reward opportunities is limited and can be viewed in the Planar Fissure event page. The double reward count will not reset during the event. Be sure to schedule your time for this challenge accordingly, Trailblazers.",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "172534910",
+     "nickname": "Honkai: Star Rail",
+     "introduce": "May This Journey Lead Us Starward",
+     "avatar": "-1",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "HonkaiSR Official"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://upload-os-bbs.hoyolab.com/upload/2026/06/01/172534910/2580ad8512a84f03b984b9067dff255a_988975766878626867.jpeg",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 15562,
+     "reply_num": 17,
+     "like_num": 830,
+     "bookmark_num": 9,
+     "share_num": 2,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 808
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 6
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 5
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 4
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "6",
+       "upvote_num": 2
+      },
+      {
+       "upvote_id": "7",
+       "upvote_num": 1
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 1
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/08/445eff9915166d9bcdbd60b279933ff8_739955734522521317.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "4543697",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 1101,
+         "y": 112
+        },
+        "rb_point": {
+         "x": 1914,
+         "y": 924
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 1101,
+         "y": 356
+        },
+        "rb_point": {
+         "x": 1914,
+         "y": 813
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 1101,
+         "y": 112
+        },
+        "rb_point": {
+         "x": 1711,
+         "y": 924
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 1101,
+         "y": 356
+        },
+        "rb_point": {
+         "x": 1914,
+         "y": 966
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "144916052"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/10/08/445eff9915166d9bcdbd60b279933ff8_739955734522521317.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "4543697",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 1101,
+         "y": 112
+        },
+        "rb_point": {
+         "x": 1914,
+         "y": 924
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 1101,
+         "y": 356
+        },
+        "rb_point": {
+         "x": 1914,
+         "y": 813
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 1101,
+         "y": 112
+        },
+        "rb_point": {
+         "x": 1711,
+         "y": 924
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 1101,
+         "y": 356
+        },
+        "rb_point": {
+         "x": 1914,
+         "y": 966
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "144916052"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 6,
+     "post_id": "46861607",
+     "f_forum_id": 0,
+     "uid": "172534910",
+     "subject": "Version 4.6 \"Dance With the Beast Before Moonrise\" Update Details",
+     "content": "The beast stirring in the darkness opens THEIR maw once more, demanding a god as a sacrifice. Before the moon rises again, only the blood of the wise can sate THEIR hunger... Hello, Trailblazers! Welcome to Version 4.6 \"Dance With the Beast Before Moonrise\"! ▌Update and Compensation Details",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1790550006,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 30,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-10-11 22:50:56",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "22",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "it-it",
+       "tr-tr"
+      ],
+      "future_post_id": "24608",
+      "lang_subject": {
+       "id-id": "Penjelasan Update Versi 4.6 \"Sebelum Bulan Terbit, Menari Bersama Sang Buas\"",
+       "fr-fr": "Détails de la mise à jour de la version 4.6 « Danse avec la bête avant l'orée de la lune »",
+       "zh-tw": "4.6版本「月升之前，與獸共舞」版本更新說明",
+       "ja-jp": "Ver.4.6「月立つ前に獣と踊れ」アップデートについて",
+       "th-th": "คำอธิบายการอัปเดตเวอร์ชัน 4.6 \"ก่อนจันทร์ฉาย ร่ายรำกับอสูร\"",
+       "ru-ru": "Обновление версии 4.6 «Танцуй со зверем до восхода луны»",
+       "es-es": "Detalles de la actualización de la versión 4.6 «Danza con la bestia antes de que se alce la luna»",
+       "de-de": "Erläuterungen zur Aktualisierung auf Version 4.6 „Tanz mit der Bestie vor Mondaufgang“",
+       "tr-tr": "Version 4.6 \"Dance With the Beast Before Moonrise\" Update Details",
+       "vi-vn": "Chi Tiết Cập Nhật Phiên Bản 4.6 \"Trước Khi Trăng Lên, Khiêu Vũ Cùng Ác Thú\"",
+       "zh-cn": "4.6版本「月升之前，与兽共舞」版本更新说明",
+       "en-us": "Version 4.6 \"Dance With the Beast Before Moonrise\" Update Details",
+       "it-it": "Version 4.6 \"Dance With the Beast Before Moonrise\" Update Details",
+       "ko-kr": "4.6 버전 「달 뜨기 전, 괴수와 춤을」 버전 업데이트 안내",
+       "pt-pt": "Detalhes da Atualização da Versão 4.6 \"Uma Dança com a Fera às Vésperas do Luar\""
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "The beast stirring in the darkness opens THEIR maw once more, demanding a god as a sacrifice. Before the moon rises again, only the blood of the wise can sate THEIR hunger... Hello, Trailblazers! Welcome to Version 4.6 \"Dance With the Beast Before Moonrise\"! ▌Update and Compensation Details",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "172534910",
+     "nickname": "Honkai: Star Rail",
+     "introduce": "May This Journey Lead Us Starward",
+     "avatar": "-1",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "HonkaiSR Official"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://upload-os-bbs.hoyolab.com/upload/2026/06/01/172534910/2580ad8512a84f03b984b9067dff255a_988975766878626867.jpeg",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 58765,
+     "reply_num": 30,
+     "like_num": 833,
+     "bookmark_num": 17,
+     "share_num": 7,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 816
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 8
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 2
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 2
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 1
+      },
+      {
+       "upvote_id": "9",
+       "upvote_num": 1
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/09/24/694e777822e0964cdaa7458804c82fef_8989305327318684464.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "4465752",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 215,
+         "y": 480
+        },
+        "rb_point": {
+         "x": 1088,
+         "y": 971
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 215,
+         "y": 158
+        },
+        "rb_point": {
+         "x": 869,
+         "y": 1030
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 215,
+         "y": 267
+        },
+        "rb_point": {
+         "x": 1088,
+         "y": 921
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 215,
+         "y": 158
+        },
+        "rb_point": {
+         "x": 1088,
+         "y": 1030
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "143904395"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/09/24/694e777822e0964cdaa7458804c82fef_8989305327318684464.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "4465752",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 215,
+         "y": 480
+        },
+        "rb_point": {
+         "x": 1088,
+         "y": 971
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 215,
+         "y": 158
+        },
+        "rb_point": {
+         "x": 869,
+         "y": 1030
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 215,
+         "y": 267
+        },
+        "rb_point": {
+         "x": 1088,
+         "y": 921
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 215,
+         "y": 158
+        },
+        "rb_point": {
+         "x": 1088,
+         "y": 1030
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "143904395"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 6,
+     "post_id": "46851682",
+     "f_forum_id": 0,
+     "uid": "172534910",
+     "subject": "Version 4.6 Event Warp: Phase I",
+     "content": "Hello, Trailblazers! The drop rates for the limited 5-star character Pearl (Elation: Ice) and the limited 5-star Light Cone \"Colors for Tomorrow (Elation)\" will be boosted for a limited time. The drop rates for the 4-star characters Qingque (Erudition: Quantum), Xueyi (Destruction: Quantum), and Misha (Destruction: Ice), as well as the 4-star Light Cones \"Post-Op Conversation (Abundance),\" \"Planetary Rendezvous (Harmony),\" and \"Boundless Choreo (Nihility)\" will be boosted for a limited time. The Warp period is from after the Version 4.6 update on 2026/09/28 – 2026/11/10 15:00 (server time). The limited 5-star character Evanescia (Elation: Physical) and the limited 5-star Light Cone \"Until the Flowers Bloom Again (Elation)\" will return. The Warp period is from after the Version 4.6 update on 2026/09/28 – 2026/10/21 11:59 (server time). ▌\"An Ocean in a Pearl\" and \"Brilliant Fixation: Colors for Tomorrow\" Event Warps",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1790488804,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 38,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-10-31 07:59:10",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "22",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "it-it",
+       "tr-tr"
+      ],
+      "future_post_id": "24599",
+      "lang_subject": {
+       "vi-vn": "Bước Nhảy Sự Kiện Phiên Bản 4.6 (Kỳ 1)",
+       "zh-cn": "4.6版本活动跃迁（其一）",
+       "zh-tw": "4.6版本活動躍遷（其一）",
+       "th-th": "กิจกรรมวาร์ปเวอร์ชัน 4.6 (ช่วงที่ 1)",
+       "ja-jp": "Ver.4.6イベント跳躍・その1",
+       "fr-fr": "Sauts événements de la version 4.6 (partie 1)",
+       "ko-kr": "4.6 버전 이벤트 워프 (1)",
+       "id-id": "Event Warp Versi 4.6 (Tahap I)",
+       "de-de": "Aktionswarps von Version 4.6 (Phase 1)",
+       "en-us": "Version 4.6 Event Warp: Phase I",
+       "ru-ru": "Прыжок события версии 4.6: первая фаза",
+       "es-es": "Saltos de evento (I) de la versión 4.6",
+       "it-it": "Version 4.6 Event Warp: Phase I",
+       "tr-tr": "Version 4.6 Event Warp: Phase I",
+       "pt-pt": "Salto Hiperespacial de Evento da Versão 4.6: Parte I"
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "Hello, Trailblazers! The drop rates for the limited 5-star character Pearl (Elation: Ice) and the limited 5-star Light Cone \"Colors for Tomorrow (Elation)\" will be boosted for a limited time. The drop rates for the 4-star characters Qingque (Erudition: Quantum), Xueyi (Destruction: Quantum), and Misha (Destruction: Ice), as well as the 4-star Light Cones \"Post-Op Conversation (Abundance),\" \"Planetary Rendezvous (Harmony),\" and \"Boundless Choreo (Nihility)\" will be boosted for a limited time. The Warp period is from after the Version 4.6 update on 2026/09/28 – 2026/11/10 15:00 (server time). The limited 5-star character Evanescia (Elation: Physical) and the limited 5-star Light Cone \"Until the Flowers Bloom Again (Elation)\" will return. The Warp period is from after the Version 4.6 update on 2026/09/28 – 2026/10/21 11:59 (server time). ▌\"An Ocean in a Pearl\" and \"Brilliant Fixation: Colors for Tomorrow\" Event Warps",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "172534910",
+     "nickname": "Honkai: Star Rail",
+     "introduce": "May This Journey Lead Us Starward",
+     "avatar": "-1",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "HonkaiSR Official"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://upload-os-bbs.hoyolab.com/upload/2026/06/01/172534910/2580ad8512a84f03b984b9067dff255a_988975766878626867.jpeg",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 71039,
+     "reply_num": 40,
+     "like_num": 1135,
+     "bookmark_num": 39,
+     "share_num": 4,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 1091
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 28
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 7
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 5
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 1
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/09/24/8dce87dcbdb877a404e9d1ac5a48f1ef_2326426280653150930.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "4259067",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 1020,
+         "y": 6
+        },
+        "rb_point": {
+         "x": 1824,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 917,
+         "y": 56
+        },
+        "rb_point": {
+         "x": 1919,
+         "y": 807
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 917,
+         "y": 56
+        },
+        "rb_point": {
+         "x": 1919,
+         "y": 1058
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 917,
+         "y": 56
+        },
+        "rb_point": {
+         "x": 1919,
+         "y": 619
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "143894719"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/09/24/02b9b9f6faabc003edb54030cffe8a99_255901260523225456.jpg",
+      "height": 1350,
+      "width": 1080,
+      "format": "JPEG",
+      "size": "307703",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 59,
+         "y": 7
+        },
+        "rb_point": {
+         "x": 931,
+         "y": 879
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 59,
+         "y": 7
+        },
+        "rb_point": {
+         "x": 931,
+         "y": 497
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 59,
+         "y": 7
+        },
+        "rb_point": {
+         "x": 713,
+         "y": 879
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 59,
+         "y": 7
+        },
+        "rb_point": {
+         "x": 931,
+         "y": 661
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "143895178"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/09/24/8dce87dcbdb877a404e9d1ac5a48f1ef_2326426280653150930.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "4259067",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 1020,
+         "y": 6
+        },
+        "rb_point": {
+         "x": 1824,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 917,
+         "y": 56
+        },
+        "rb_point": {
+         "x": 1919,
+         "y": 807
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 917,
+         "y": 56
+        },
+        "rb_point": {
+         "x": 1919,
+         "y": 1058
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 917,
+         "y": 56
+        },
+        "rb_point": {
+         "x": 1919,
+         "y": 619
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "143894719"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/09/24/02b9b9f6faabc003edb54030cffe8a99_255901260523225456.jpg",
+      "height": 1350,
+      "width": 1080,
+      "format": "JPEG",
+      "size": "307703",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 59,
+         "y": 7
+        },
+        "rb_point": {
+         "x": 931,
+         "y": 879
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 59,
+         "y": 7
+        },
+        "rb_point": {
+         "x": 931,
+         "y": 497
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 59,
+         "y": 7
+        },
+        "rb_point": {
+         "x": 713,
+         "y": 879
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 59,
+         "y": 7
+        },
+        "rb_point": {
+         "x": 931,
+         "y": 661
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "143895178"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 6,
+     "post_id": "46826146",
+     "f_forum_id": 0,
+     "uid": "172534910",
+     "subject": "Version 4.6 \"Nameless Honor\" Update",
+     "content": "Hello, Trailblazers! During the event, Trailblazers can increase their Nameless Honor level to obtain rewards such as Star Rail Passes, Self-Modeling Resins, and Tracks of Destiny. After unlocking Nameless Glory, you will immediately obtain Stellar Jade ×680. In addition, increasing Nameless Honor levels will allow Trailblazers to obtain Light Cone Memory Shard ×1, Star Rail Special Pass ×4, a 4-star Light Cone of your choice, Variable Dice ×1, Self-Modeling Resin ×2, Relic Remains, the universal Path material Tears of Dreams, and more! If the Trailblazer unlocks the Nameless Medal, in addition to the previous rewards, they will immediately increase their Honor level by 10, and obtain the avatar \"Pearl: Court,\" the avatar \"Argenti: Court,\" Light Cone Memory Shard ×1, Stellar Jade ×200, and Fuel rewards! ▌Start Date",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1790307006,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 41,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-09-27 18:17:13",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "22",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "it-it",
+       "tr-tr"
+      ],
+      "future_post_id": "24598",
+      "lang_subject": {
+       "zh-tw": "4.6版本「無名勳禮」更新",
+       "en-us": "Version 4.6 \"Nameless Honor\" Update",
+       "th-th": "อัปเดต \"เกียรติยศนิรนาม\" เวอร์ชัน 4.6",
+       "pt-pt": "Atualização da Honra dos Inominados da Versão 4.6",
+       "fr-fr": "Mise à jour de l'Honneur des Sans Noms de la version 4.6",
+       "tr-tr": "Version 4.6 \"Nameless Honor\" Update",
+       "de-de": "Aktualisierung von „Namenlose Ehre“ in Version 4.6",
+       "es-es": "Actualización de Honor anónimo de la versión 4.6",
+       "ru-ru": "Обновление Чести Безымянных версии 4.6",
+       "it-it": "Version 4.6 \"Nameless Honor\" Update",
+       "zh-cn": "4.6版本「无名勋礼」更新",
+       "ko-kr": "4.6 버전 「무명의 공훈」 업데이트",
+       "id-id": "Update \"Kehormatan Tanpa Nama\" Versi 4.6",
+       "ja-jp": "Ver.4.6「ナナシの勲功」更新",
+       "vi-vn": "Cập Nhật \"Vinh Dự Vô Danh\" Phiên Bản 4.6"
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "Hello, Trailblazers! During the event, Trailblazers can increase their Nameless Honor level to obtain rewards such as Star Rail Passes, Self-Modeling Resins, and Tracks of Destiny. After unlocking Nameless Glory, you will immediately obtain Stellar Jade ×680. In addition, increasing Nameless Honor levels will allow Trailblazers to obtain Light Cone Memory Shard ×1, Star Rail Special Pass ×4, a 4-star Light Cone of your choice, Variable Dice ×1, Self-Modeling Resin ×2, Relic Remains, the universal Path material Tears of Dreams, and more! If the Trailblazer unlocks the Nameless Medal, in addition to the previous rewards, they will immediately increase their Honor level by 10, and obtain the avatar \"Pearl: Court,\" the avatar \"Argenti: Court,\" Light Cone Memory Shard ×1, Stellar Jade ×200, and Fuel rewards! ▌Start Date",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "172534910",
+     "nickname": "Honkai: Star Rail",
+     "introduce": "May This Journey Lead Us Starward",
+     "avatar": "-1",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "HonkaiSR Official"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://upload-os-bbs.hoyolab.com/upload/2026/06/01/172534910/2580ad8512a84f03b984b9067dff255a_988975766878626867.jpeg",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 25228,
+     "reply_num": 41,
+     "like_num": 1038,
+     "bookmark_num": 33,
+     "share_num": 7,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 990
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 28
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 7
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 4
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 4
+      },
+      {
+       "upvote_id": "7",
+       "upvote_num": 2
+      },
+      {
+       "upvote_id": "9",
+       "upvote_num": 2
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 1
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/09/24/60a490d58f21b09b1a07ac18e739906f_725050959850279736.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "4749445",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 239,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1680,
+         "y": 1080
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 420,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1500,
+         "y": 1080
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1920,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 555,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1365,
+         "y": 1080
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "143890508"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/community/2026/09/24/60a490d58f21b09b1a07ac18e739906f_725050959850279736.png",
+      "height": 1080,
+      "width": 1920,
+      "format": "PNG",
+      "size": "4749445",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 239,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1680,
+         "y": 1080
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 420,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1500,
+         "y": 1080
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1920,
+         "y": 1079
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 555,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 1365,
+         "y": 1080
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "143890508"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   }
+  ],
+  "last_id": 10,
+  "is_last": false
+ }
+}

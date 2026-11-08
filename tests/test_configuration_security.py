@@ -528,8 +528,12 @@ class ConfigurationSecurityTests(unittest.TestCase):
         # SQLite's path went with SQLite (2026-11-02); /data is set as the
         # data directory, which is all the bot's own files need.
         self.assertNotIn("POTATOBOT_DB_PATH", containerfile)
-        # Music playback needs ffmpeg present in the image.
-        self.assertIn("ffmpeg", containerfile)
+        # Restated 2026-11-08: music left this bot, and ffmpeg with it. An
+        # image carries no media toolchain it does not run.
+        # Comments stripped first: the one saying why ffmpeg is gone names it.
+        instructions = "\n".join(line for line in containerfile.splitlines()
+                                 if not line.lstrip().startswith("#"))
+        self.assertNotIn("ffmpeg", instructions)
 
     def test_one_ignore_file_serves_both_tools(self):
         """Docker reads only `.dockerignore`; podman prefers `.containerignore`
@@ -716,7 +720,7 @@ class RepositoryLayoutTests(unittest.TestCase):
         "control_actions.py",
         "database.py", "deployment.py",
         "feature_access.py", "item_catalog.py", "logging_setup.py",
-        "managed_messages.py", "minigame_data.py", "music_extract.py",
+        "managed_messages.py", "minigame_data.py",
         "permission_audit.py", "schema_types.py",
         "settings_cache.py", "settings_registry.py", "support_tickets.py",
         "supported_games.py", "version.py", "welcome_card.py",

@@ -17,7 +17,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 #: Every locale key that interpolates an upstream title, and where.
 SITES = {
-    "music.now_playing_desc": "cogs/music.py",
     "socials.twitch_live_desc": "cogs/socials.py",
     "socials.youtube_new_video_desc": "cogs/socials.py",
     "patchbot.new_patch_desc": "cogs/patchbot.py",

@@ -92,7 +92,7 @@ the host can queue the same erasure from the dashboard's Privacy page.
 | What | Where | Content | Retention |
 | --- | --- | --- | --- |
 | Bot log | `LOG_DIR/bot.log` (`/data/logs` in the container) | see §3 | `RotatingFileHandler` 5 MB × 10 |
-| stdout → journald | host journal | same lines, unless `POTATOBOT_LOG_CONSOLE=false` (the reference host since F4): then only stderr (crash tracebacks, `faulthandler` dumps, the watchdog's reason, ffmpeg's own stderr) and PostgreSQL's errors without DETAIL or STATEMENT | host `SystemMaxUse=500M`; about two months on the reference host |
+| stdout → journald | host journal | same lines, unless `POTATOBOT_LOG_CONSOLE=false` (the reference host since F4): then only stderr (crash tracebacks, `faulthandler` dumps, the watchdog's reason) and PostgreSQL's errors without DETAIL or STATEMENT | host `SystemMaxUse=500M`; about two months on the reference host |
 | Pre-migration backups | `backups/potatobot-v{n}-{timestamp}.dump` in the data directory (a `pg_dump`, mode 0600, since 2.21), and, until F4 deleted them with the SQLite file, 2.20's `{DB_PATH}.backup-v{n}-{timestamp}` SQLite copies | full database copy | deleted by `scripts/offsite_backup.py --prune-local-backups-days N` after the night's offsite copy verifies, by the date in the file name; the deployed units pass 90; the flag defaults to 0 (keep) |
 | Offsite backup | `rclone crypt` remote on Google Drive | full database dump (`pg_dump`), encrypted before upload | `--retention-days` 30 |
 | Everydle state | `data/everydle_state.json` or `POTATOBOT_EVERYDLE_STATE_PATH` | daily target ids | no member data |
@@ -105,17 +105,13 @@ Format `time | level | logger | message`; INFO and above; loggers `discord`,
 `PotatoBot.*`, `waitress`.
 
 - **UIDs appear** on: member join registration and autorole lines
-  (`cogs/serverevents.py`), music search/extraction failures
-  (`cogs/music.py`), an undeliverable export (`cogs/privacy.py`), a support
+  (`cogs/serverevents.py`), an undeliverable export (`cogs/privacy.py`), a support
   ticket open (`core/support_tickets.py`), a failed level-role move
   (`cogs/utils.py`), failed economy writes in `core/database.py` (`user=%s`
   lines), a failed robbery (attacker, victim, amount).
-- **Never**: usernames, display names, message content, music search text or
-  URLs (the extractor reduces errors to the exception class), IP addresses,
+- **Never**: usernames, display names, message content, IP addresses,
   OAuth data, dashboard bodies, query strings or sessions.
-- **Edge cases**: `cogs/music.py` logs the raw playback error, and ffmpeg's
-  own stderr (`-loglevel warning`) is not scrubbed, so a stream URL (no member
-  data) can reach the journal even with the console off; `main.py`'s unhandled-command-error line includes the exception
+- **Edge cases**: `main.py`'s unhandled-command-error line includes the exception
   text, which can contain argument values; discord.py's default error handler
   logs tracebacks for slash and component errors.
 - **Dashboard**: no access log; slow requests (method, path, status, ms),
@@ -139,6 +135,7 @@ Format `time | level | logger | message`; INFO and above; loggers `discord`,
 | Announcements | per-event channels | mention, username, display name, user id, account age, joined-ago, moderator and reason from Discord's audit log (`on_audit_log_entry_create`, `guild.audit_logs`), re-uploaded avatar, optional image card; nothing stored |
 | Ticket transcript | `ticket_logs` (requires full admin) | `[time] display_name: content`, attachment links, header with claimer and close reason; ≤ 50,000 messages, ≤ 5 files; nothing stored |
 | Inactivity report | `bot_log_channel` | display name, mention, avatar, 14 days, last-active time |
+| Server event log | `event_log_{messages,members,voice,server}_channel` (feature `event_logging`, off by default; ignore lists `event_log_ignored_channels`/`_roles`) | edited/deleted message text while cached (else none), author mention, channel, jump link, attachment count; nickname/role/timeout changes; voice join/leave/move; channel/role/invite/emoji changes (a new invite with its creator's mention, use limit and expiry); bots' messages never; nothing stored |
 | Casino rate limit | `casino_rate_limit_alert_channel` | mention, window, cap |
 | Kick/ban/timeout | invoking channel + DM | mention, moderator, reason |
 | Level-up | `levels_channels` | mention, level |
@@ -154,10 +151,9 @@ erasure receipt. Nothing else.
 | --- | --- | --- | --- |
 | Discord gateway/REST/CDN | always | everything the bot posts; avatar bytes fetched into memory for announcements; `guild.invites()` on join | – |
 | Discord OAuth2 + REST (dashboard) | operator action | `identify guilds` scopes; `/users/@me`, `/users/@me/guilds`, token refresh; bot-token lookups of `/users/{id}` (audit actor names, cached 600 s in memory), channels/roles, emoji/sticker/sound names | tokens in memory only |
-| YouTube / googlevideo (`core/music_extract.py`, ffmpeg) | member `/play` or search modal | **member's search text verbatim** (`ytsearch1:`) or pasted URL; server IP | in-memory queue |
 | Twitch `id.twitch.tv`, `api.twitch.tv/helix/streams` | 5-min loop | app credentials, configured streamer logins | in memory |
 | YouTube RSS `www.youtube.com/feeds` | 5-min loop | configured channel ids | in memory |
-| Steam, Riot (LoL, Valorant), HoYoLAB, Mojang/minecraft.net | 45-min loop, regardless of flags | nothing personal | `game_patch_state` |
+| Steam, Riot (LoL, Valorant), HoYoLAB, Mojang/minecraft.net | 45-min loop, regardless of flags | nothing personal; an announcement may carry the post's image address, which Discord loads itself | `game_patch_state` |
 | `raw.githubusercontent.com` | dashboard changelog page | nothing personal | cached 300 s |
 | SMTP (optional) | ERROR log record | log line incl. UIDs/guild ids | – |
 | Google Drive via rclone (timer) | nightly | encrypted full database | 30 days |
@@ -184,8 +180,9 @@ open sidebar sections. No login table, no email scope.
 
 Word filter delete + warning; warning thresholds → timeout/kick/ban (all
 shipped at 0); casino rate-limit alert (no action); inactivity report (no
-action); retention sweep. Discord's own audit log receives the reason for
-threshold actions.
+action); role rules (give or remove roles on a role change, `role_rules`,
+shipped off; nothing stored); retention sweep. Discord's own audit log
+receives the reason for threshold actions and role rule changes.
 
 ## 8. Known gaps (2026-10-31)
 

@@ -1,8 +1,8 @@
 # PotatoBot Privacy Policy
 
-**Effective date:** 2026-11-06
-**Last updated:** 2026-11-06
-**Version:** 1.2
+**Effective date:** 2026-11-08
+**Last updated:** 2026-11-08
+**Version:** 1.4
 
 This document is written in English and Hungarian. The English text is the
 binding one; the Hungarian text (`PRIVACY.hu.md`) is a translation provided
@@ -74,8 +74,7 @@ described here.
   counting value).
 - Your data is stored on a server we operate ourselves, and backed up nightly
   in **encrypted** form to Google Drive, where copies are kept for 30 days.
-- The only text you type that leaves our installation is a **music search**
-  (sent to YouTube). Nothing else you type is sent to a third party.
+- Nothing you type is sent to a third party.
 - We never sell data, never show advertising, never use your data to train AI
   models, and never share it with data brokers.
 - You can download everything we hold about you with **`/mydata`** and erase
@@ -91,7 +90,7 @@ described here.
 | Source | What | How |
 | --- | --- | --- |
 | **Discord's API** (the main source) | Your user ID, the servers and channels you share with the bot, your roles, your voice state, your join and leave events, your server boosts, and the content of messages in channels the bot can read. Your username, display name, avatar and account creation date are shown to the bot but, except where section 4 says so, not stored. | Discord sends these to the bot as events over its gateway and REST API, because the bot has been added to a server you are in. This is data we did not get from you directly (GDPR Article 14). |
-| **You** | Commands you run, buttons you press, text you type into the bot's modals (a game name for a group search, a voice room name, a music search), your confirmation of a data erasure. | Directly, when you use a feature. |
+| **You** | Commands you run, buttons you press, reactions you add to a role menu, text you type into the bot's modals (a game name for a group search, a voice room name), your confirmation of a data erasure. | Directly, when you use a feature. |
 | **Server staff** | The reason attached to a warning, kick, ban or level change about you; whether you are excluded from the inactivity report. | Typed by a moderator of the server. |
 | **Discord's audit log** | Who kicked or banned a member and why. | Read only to tell a kick or ban apart from a voluntary leave, when that announcement feature is on. |
 
@@ -113,20 +112,21 @@ each row, and **(c)** a legal obligation.
 | **Account and economy** (per server: one wallet in each server, and a new account receives its starting coins only in the first one) | Coin balance, experience, level, blackjack win/loss counts, purchased modifiers (rob bonus, rob defence, vault protection, protected reserve), bodyguard expiry; timestamps of your last daily claim, last work, last robbery, last streak update and last activity; streak count; whether the inactivity report has mentioned you. | Running the economy and the games; preventing double payouts. | (b); anti-abuse (f) | Erasure or the retention sweep (section 7). The balance and level survive erasure under an anonymous ID (section 8.3). |
 | **Activity tracking** | One "last active" timestamp, updated at most once a day when you send a message or join a voice channel. No content. | Chat and voice rewards; the inactivity report; the retention sweep. | (b); (f) running a community | As above; blanked on erasure. |
 | **Levels and roles** | Derived from experience. Role changes are made in Discord, not stored. | Level rewards. | (b) | As above. |
+| **Role rules** | Nothing is stored. When your roles change, the server's rules may give or remove other roles in Discord. | Keeping roles consistent with the server's rules. | (b) | Not applicable. |
 | **Casino games** | Every wager: game, stake, outcome, credit, when placed and settled; a rolling winnings counter used to detect abnormal earning rates. | Settling bets safely across restarts; detecting exploits. | (b); (f) game integrity | Wager rows are kept under an anonymous ID after erasure (section 8.3); the counter is deleted. |
 | **Shop, inventory, gacha, vouchers** | Items you own and their quantity; every gacha pull (banner, rarity, reward, pity counters); vouchers you hold and when you redeemed them; timed grants such as a premium role or a rented emoji, sticker or soundboard sound, including which staff member granted or completed it; fulfilment requests for assets you redeemed. | Delivering what you bought or won; expiring rentals; preventing duplicate payouts. | (b) | Erasure. Grants are withdrawn in Discord first. |
 | **Daily puzzles (Everydle: LoLdle, Valdle, DbDle, Genshindle)** | One timestamp per puzzle variant recording when you last played. Your guesses are **not** stored. | Enforcing the once-a-day rule and paying rewards. | (b) | Erasure. |
 | **Counting and word-chain channels** | The current chain value and the ID of the last member who played; every accepted word, stored without any user ID. See section 5. | Running the game and refusing repeated words. | (b) | Last-player ID is removed on erasure; words until the chain is reset. |
 | **Looking for group** | Posts you host: the game name you typed, how many players you need, the IDs of members who joined, when it was created. | Showing and updating the party post. | (b) | Eight days after creation, or erasure. |
-| **Temporary voice rooms** | The name you gave your room, its user limit, lock state and bitrate; the member IDs you allowed or blocked; the ID of your current room. | Recreating your room the way you left it. | (b) | Erasure (also when another member erases themselves, their entry on your list is removed). |
+| **Temporary voice rooms** | The name you gave your room, its user limit, lock state and bitrate; the member IDs you allowed or blocked; the ID of your current room. | Recreating your room the way you left it; the room's control panel shows its state, including whom you let in, in the room's own chat (blocked members are not shown). | (b) | Erasure (also when another member erases themselves, their entry on your list is removed). |
 | **Tickets** | That you opened a ticket (channel ID, type, when), and which staff member claimed it. **No ticket text is stored in the database**; see "Ticket transcripts" in section 6. | Limiting one open ticket per member; staff workflow. | (b); (f) support | Erasure. |
 | **Moderation: warnings** | Each warning: your ID, the moderator's ID, the warning's tag, the reason the moderator typed, the date. Per-tag counts are compared against thresholds the server configured. | Moderating the server. | (f) keeping the community safe; the server's rules | Until staff remove it or you are erased. A removed warning's content stays in the staff audit log until erasure (section 6). |
 | **Moderation: word filter** | Nothing about you is stored beyond a warning (above) whose reason names the channel, never the word or your message. | Enforcing server rules. | (f) | As warnings. |
 | **Onboarding and rules** | How many seconds passed between your joining and your accepting the rules. | Moderation analytics for staff. | (f) | Blanked on erasure. |
 | **Inactivity report** | Uses the last-active timestamp. Staff may exclude member IDs from the report through a setting. | Letting staff see who has been inactive for 14 days. | (f) community management | As above. |
 | **Announcements** (join, leave, kick, ban, boost) | Nothing is stored. The post includes your mention, username, display name, user ID, account age and, for kicks and bans, the moderator and reason from Discord's audit log. Your avatar is downloaded into memory and attached to the post, or drawn onto an optional image card, so it stays visible after you change it. | Welcoming and informing the community. | (f) running a community | Only as a Discord message, which the server controls. |
+| **Server event log** (off unless a server enables it) | Nothing is stored. Posts to the log channels a server chose: your edited or deleted messages (with their text while the bot still holds them), your nickname, role and timeout changes, your voice channel joins, leaves and moves; server changes such as channels, roles, invites (naming who created one) and emoji. | Letting a server's staff moderate and see what changed. | (f) moderation and safety of the community | Stays in that Discord channel under the server's control. |
 | **Invite log** | Nothing is stored. A staff-channel post names the new member, their account age, the inviter and the invite code. | Letting staff see how members arrive. | (f) anti-raid, community safety | Only as a Discord message. |
-| **Music** | Nothing is stored. The queue (what was requested and by whom) exists in memory while the bot plays. | Playing audio you requested. | (b) | Lost on restart. |
 | **Twitch and YouTube notifications** | No member data. Streamer and channel names are server configuration. | Announcing streams and videos. | (b) for the server | Not applicable. |
 | **Game patch notes** | No member data. | Announcing updates. | Not applicable | Not applicable. |
 | **Data-sharing preferences** | Any opt-out you record for a data category, with a timestamp. (Foundation for a future multi-server economy; today nothing reads it.) | Honouring your choice. | (b) | Erasure. |
@@ -157,9 +157,15 @@ for exactly these things, all in memory, as each message arrives:
 4. **Activity rewards** note that you sent a message; the content is not
    read.
 5. **Boost detection** looks at the message type only.
+6. **The server event log**, where a server enables it (off by default): when
+   you edit or delete a message, its text is posted to a log channel that
+   server's staff chose, but only while the bot still holds the message in
+   its short-term memory; an older message is logged without its text. Bots'
+   messages and the channels and roles a server excludes are never logged.
+   Nothing is stored in the database.
 
-Message content is never logged, never sent to a third party, and never used
-to train any model.
+Message content is never written to our own logs or database (beyond item 3),
+never sent to a third party, and never used to train any model.
 
 ---
 
@@ -195,9 +201,8 @@ governed by Discord's terms and the server's own settings. Of note:
 | --- | --- | --- | --- | --- |
 | **Google LLC** (Google Drive) | A nightly **encrypted** copy of the whole database. Google cannot read it: the file is encrypted on our server with rclone's crypt layer before upload, and the keys never leave our server. | Off-site backup. | United States | Encryption before transfer; Google's certification under the EU-US Data Privacy Framework, with the Standard Contractual Clauses as fallback. |
 | **Cloudflare, Inc.** | Every request to the dashboard passes through Cloudflare's edge and a Cloudflare Tunnel to our server. Cloudflare sees the **IP address, request metadata and TLS handshake** of each dashboard visitor, provides DNS for `potatobot.win`, and forwards email sent to our contact address to the mailbox we read (Cloudflare Email Routing), so it handles the content of anything you write to us. It does not see bot traffic to Discord. | Publishing the dashboard over HTTPS without exposing our home connection. | EU edge locations and United States | Cloudflare's Data Processing Addendum, its EU-US Data Privacy Framework certification, and the Standard Contractual Clauses. |
-| **Google LLC** (YouTube) | When you use the music feature: the **search text you typed, or the YouTube URL you pasted**, and our server's IP address. No Discord data is sent. The audio stream is fetched by our server. | Finding and playing the song you asked for. | United States | YouTube acts as an independent controller under its own privacy policy; we send nothing beyond the query. |
 | **Twitch Interactive, Inc.** | Only the streamer names a server administrator configured, with our application credentials. No member data. | Stream notifications. | United States | None needed for member data; none is sent. |
-| **Game publishers' public endpoints** (Valve/Steam, Riot Games, HoYoverse, Mojang) | Nothing about anyone; our server polls public patch-notes feeds. | Patch-notes notifications. | Various | Not applicable. |
+| **Game publishers' public endpoints** (Valve/Steam, Riot Games, HoYoverse, Mojang) | Nothing about anyone; our server polls public patch-notes feeds. An announcement may show the publisher's picture by its address, which Discord loads through its own media proxy, so neither our server nor your client contacts the publisher for it. | Patch-notes notifications. | Various | Not applicable. |
 | **GitHub, Inc.** | A plain request for the project's changelog when a dashboard user opens the changelog page. No user data. | Showing release notes. | United States | Not applicable. |
 | **An email provider (optional)** | If the operator enables error alerting, lines of the bot's error log are emailed to the operator's own address through an SMTP server. Such lines can contain **Discord user IDs and server IDs**, never message text or usernames. **This installation: not enabled.** | Being told when the bot breaks. | Depends on provider | Disabled unless configured; TLS in transit. |
 
@@ -234,6 +239,9 @@ transfer Discord makes under its own terms, not one we make.
   naming members, and the record of past erasures (anonymous IDs only). They
   do not see other servers' data, and they cannot read balances or warnings
   in bulk; those are reached through the bot's own staff commands in Discord.
+- **Staff who can read a server's event log channels**, where that server
+  enabled the event log: the events it logs about you there (section 5,
+  item 6, and section 4).
 - **The operator** can read everything in the database and the logs.
 - **Nobody else.** We disclose data to third parties only in the cases in
   section 6.2, when the law requires it, or when you expressly ask us to.
@@ -253,7 +261,7 @@ transfer Discord makes under its own terms, not one we make.
 | Operational logs (section 9) | The bot's log file rotates at 10 × 5 MB (about 55 MB). The system journal is capped by size at 500 MB on this host, about two months; the log lines naming members it held until November 2026 expire under that cap. |
 | Off-site encrypted backups | 30 days, then deleted automatically. |
 | Pre-migration backups on the server | A full copy taken before each database upgrade, kept on the server as the rollback artefact. An erasure does not reach them. The nightly backup job deletes each one once it is older than the window, after that night's off-site copy has been verified. **This installation: 90 days after the migration they protect.** |
-| In-memory data (music queue, invite snapshot, cooldown maps, dashboard tokens and rate-limit counters) | Lost on restart; dashboard tokens at most 12 hours. |
+| In-memory data (invite snapshot, cooldown maps, dashboard tokens and rate-limit counters) | Lost on restart; dashboard tokens at most 12 hours. |
 
 Erasing your data does not reach into backups. A backup restored after your
 erasure would bring your rows back; our procedure is to re-run every erasure
@@ -355,12 +363,9 @@ none of these names you. The log file contains:
   timings and error types;
 - **your Discord user ID** on a small number of lines: when you join a server
   and the bot registers your account or assigns automatic roles, and when a
-  feature fails while handling your request (for example a music search that
-  could not be completed or an export that could not be delivered);
-- never your username, message content, music search text, IP address or
-  dashboard session data. The music extractor's own errors are reduced to a
-  bare error type before logging. A failure inside the audio player can, in
-  rare cases, quote the stream URL that was being played.
+  feature fails while handling your request (for example an export that could
+  not be delivered);
+- never your username, message content, IP address or dashboard session data.
 
 The dashboard keeps **no access log**: it records only slow requests (method,
 path, status, duration) and unhandled errors. Visitor IP addresses are held in
@@ -386,6 +391,9 @@ software applies them without a human looking at the individual case:
   is taken from you automatically.
 - **Inactivity report**: 14 days without a recorded message or voice join
   produces a staff post naming you; no action is taken against you.
+- **Role rules**: when your roles change, rules the server set can give or
+  remove other roles (for example, a role that needs a verified role is
+  removed without it). Off unless a server enables it.
 - **Retention sweep** (section 7).
 
 Where such a decision affects you, you have the right to obtain human

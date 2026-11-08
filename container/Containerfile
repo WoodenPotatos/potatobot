@@ -5,10 +5,10 @@
 # separate supervised services against one PostgreSQL database (2.21), which
 # runs in its own container (deploy/potatobot-db.container, compose's `db`).
 #
-# Build (from the repository root):  podman build -t potatobot:3.0.5a -f container/Containerfile .
-# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:3.0.5a
+# Build (from the repository root):  podman build -t potatobot:3.0.17a -f container/Containerfile .
+# Bot:    podman run --env-file .env -v potatobot-data:/data potatobot:3.0.17a
 # Panel:  podman run --env-file .env -v potatobot-data:/data -p 127.0.0.1:5000:5000 \
-#             potatobot:3.0.5a python dashboard_api.py
+#             potatobot:3.0.17a python dashboard_api.py
 
 # Pinned by digest, not tag: `3.13-slim` is a moving name, and an image that
 # changes under the same tag is a supply-chain change nobody reviewed.
@@ -16,13 +16,13 @@
 # 2026-09-01. Bump the digest deliberately, with the date.
 FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS base
 
-# ffmpeg is required for music playback. The PostgreSQL 18 client is what the
-# bot's pre-migration backup runs (`pg_dump` must be at least the server's
+# No ffmpeg: music left this bot for its own (3.0.17a). The PostgreSQL 18
+# client is what the bot's pre-migration backup runs (`pg_dump` must be at least the server's
 # version, and Debian trixie ships 17), so it comes from PostgreSQL's own apt
 # repository, set up by Debian's `postgresql-common`, whose bundled signing key
 # is the trust anchor -- no key is fetched over the network here.
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ffmpeg ca-certificates \
+    && apt-get install --yes --no-install-recommends ca-certificates \
         postgresql-common \
     && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
     && apt-get install --yes --no-install-recommends postgresql-client-18 \

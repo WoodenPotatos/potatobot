@@ -6,6 +6,66 @@ stable. A build keeps its number across channels, so `2.18.3a` publishes as
 2026-10-22 by adding the old beta serial to z (`2.18.0-beta.1` is `2.18.1b`);
 the public repository's git tags keep their original names.
 
+## 3.0.17b
+
+- **Music has left PotatoBot.** `/play`, `/queue`, `/skip` and the rest of the
+  music commands are gone; music lives on in a separate bot. The image no
+  longer carries FFmpeg, and `yt-dlp`, `PyNaCl` and `davey` left the
+  dependencies. A server's stored music switch is simply no longer read.
+- **Privacy Policy 1.4 and Terms of Service 1.1** (both languages, effective
+  2026-11-08): no music search is sent to YouTube any more, so YouTube is no
+  longer a recipient, and the Terms drop the music section. Version 1.4 also
+  carries 1.3's event log change. Material, announced in the next guild
+  message.
+- **Server event log** (off until a server enables it). Four optional log
+  channels: edited and deleted messages (with their text while the bot still
+  holds the message), member changes (nickname, roles, timeouts), voice joins,
+  leaves and moves, and server changes (channels, roles, emoji, and each new
+  invite with who created it, its use limit and when it expires).
+  Channels and roles can be excluded; bots' messages are never logged, and
+  nothing is stored.
+- **Privacy Policy 1.3** (sections 4, 5 and 6.5, both languages): a server
+  that enables the event log has the text of an edited or deleted message
+  posted to its staff log channel. A material change, announced in the next
+  guild message.
+- **Conditional role rules** (off until a server enables *Role rules*).
+  Three kinds of rule, set on their own dashboard page: a role that *grants*
+  others (and takes them back when it goes), a role that *requires* another
+  (and is removed without it), and an *exclusive group* where a member holds
+  one role and the newest wins. They apply to every role change, including the
+  bot's own level rewards and role menus, and never touch a privileged role or
+  one above the bot. Privacy Policy sections 4 and 10 list them (both
+  languages).
+- **Reaction roles.** A role menu can now be offered as reactions instead of
+  buttons: the bot reacts with each entry's emoji, lists under the message
+  which emoji gives which role, and grants or removes the role as members add
+  or remove their reaction. A "one role at a time" switch makes a menu
+  pick-one. Set it on the role menu's page in the dashboard; `/setup_*` and
+  `/update_*` follow the same setting.
+- **Genshin Impact and Honkai: Star Rail announce the patch notes, not the
+  notices around them.** A store update, an event or a maintenance preview
+  whose title mentions the version no longer counts as the new patch, so a
+  version is announced once, with its notes.
+- **Patch announcements show a short preview and the release's picture.**
+  Steam games, League of Legends, Valorant, Genshin Impact and Honkai: Star
+  Rail announcements now carry the first lines of the post (about 300
+  characters) and its header image when the source has one. Minecraft stays a
+  title and a link: its site does not let Discord load the picture.
+- **Dashboard: the sidebar tidies itself.** A section with sub-pages that
+  opened because you visited it now closes again when you move to another
+  page; one you opened with its arrow stays open, as before.
+- **The temporary voice room panel shows the room's state, live.** Owner,
+  open, locked or locked to a faction (the factions are named while the
+  faction lock is enabled), visible or hidden, user limit, bitrate and who has
+  been let in; it redraws after every change made with its buttons. Blocked
+  members are not listed.
+- **Dashboard: the Privacy Policy and the Terms are linked from the account
+  menu**, beside the theme and language choices.
+- **Dashboard: the host can add the bot to another server** from the server
+  menu, which now opens even with one server. The invite asks for exactly the
+  permissions the bot's features declare, plus seeing and answering in a
+  channel, and never for Administrator. Other dashboard users do not see it.
+
 ## 3.0.5b
 
 - **3.0.0: every server has its own economy.** Your coin balance, experience,

@@ -1,8 +1,8 @@
 # PotatoBot Adatkezelési tájékoztató
 
-**Hatálybalépés:** 2026-11-06
-**Utolsó frissítés:** 2026-11-06
-**Verzió:** 1.2
+**Hatálybalépés:** 2026-11-08
+**Utolsó frissítés:** 2026-11-08
+**Verzió:** 1.4
 
 Ez a dokumentum angol és magyar nyelven készült. Az angol szöveg
 (`PRIVACY.md`) az irányadó; a magyar fordítás a könnyebb megértést szolgálja.
@@ -78,9 +78,7 @@ adatkezelésért az üzemeltető marad az adatkezelő.
 - Az adataidat saját magunk által üzemeltetett szerveren tároljuk, és éjjelente
   **titkosított** formában mentjük a Google Drive-ra, ahol a másolatok 30
   napig maradnak meg.
-- Az egyetlen általad beírt szöveg, amely elhagyja a telepítésünket, a
-  **zenekeresés** (ezt a YouTube-nak küldjük). Semmi más, amit beírsz, nem jut
-  harmadik félhez.
+- Semmi, amit beírsz, nem jut harmadik félhez.
 - Soha nem adunk el adatot, nem jelenítünk meg hirdetést, nem használjuk az
   adataidat MI-modellek tanítására, és nem adjuk át adatkereskedőknek.
 - A rólad tárolt összes adatot letöltheted a **`/mydata`** paranccsal, és
@@ -97,7 +95,7 @@ adatkezelésért az üzemeltető marad az adatkezelő.
 | Forrás | Mi | Hogyan |
 | --- | --- | --- |
 | **A Discord API-ja** (a fő forrás) | A felhasználói azonosítód, a bottal közös szervereid és csatornáid, a szerepköreid, a hangállapotod, a belépési és kilépési eseményeid, a szerver-boostjaid, valamint az üzenetek tartalma azokban a csatornákban, amelyeket a bot olvashat. A felhasználóneved, megjelenített neved, profilképed és a fiókod létrehozásának dátuma látható a bot számára, de – a 4. pontban jelzett kivételekkel – nem tároljuk. | A Discord eseményként küldi ezeket a botnak a gateway-en és a REST API-n keresztül, mert a botot hozzáadták egy olyan szerverhez, amelynek tagja vagy. Ezeket az adatokat nem közvetlenül tőled kaptuk (GDPR 14. cikk). |
-| **Te** | A futtatott parancsok, a megnyomott gombok, a bot űrlapjaiba beírt szövegek (játék neve csapatkereséshez, hangszoba neve, zenekeresés), az adattörlés megerősítése. | Közvetlenül, amikor egy funkciót használsz. |
+| **Te** | A futtatott parancsok, a megnyomott gombok, a rangmenükre tett reakcióid, a bot űrlapjaiba beírt szövegek (játék neve csapatkereséshez, hangszoba neve), az adattörlés megerősítése. | Közvetlenül, amikor egy funkciót használsz. |
 | **A szerver stábja** | A rólad szóló figyelmeztetéshez, kirúgáshoz, kitiltáshoz vagy szintmódosításhoz fűzött indoklás; hogy ki vagy-e véve az inaktivitási jelentésből. | A szerver egy moderátora írja be. |
 | **A Discord naplója (audit log)** | Ki rúgott ki vagy tiltott ki egy tagot, és miért. | Kizárólag annak megállapítására olvassuk, hogy kirúgás, kitiltás vagy önkéntes kilépés történt-e, ha ez a bejelentő funkció be van kapcsolva. |
 
@@ -120,20 +118,21 @@ jogos érdekünk, és **(c)** jogi kötelezettség.
 | **Fiók és gazdaság** (szerverenként: minden szerveren külön pénztárca, és egy új fiók csak az első szerverén kapja meg a kezdő érméit) | Érmeegyenleg, tapasztalati pont, szint, blackjack győzelmek/vereségek száma, megvásárolt módosítók (rablási bónusz, rablás elleni védelem, széfvédelem, védett tartalék), testőr lejárata; az utolsó napi jutalom, utolsó munka, utolsó rablás, utolsó sorozatfrissítés és utolsó aktivitás időbélyege; sorozatszámláló; hogy az inaktivitási jelentés említett-e már. | A gazdaság és a játékok működtetése; dupla kifizetések megelőzése. | (b); visszaélés elleni védelem (f) | Törlésig vagy a megőrzési söprésig (7. pont). Az egyenleg és a szint a törlés után anonim azonosító alatt marad meg (8.3 pont). |
 | **Aktivitáskövetés** | Egyetlen „utoljára aktív” időbélyeg, naponta legfeljebb egyszer frissül, amikor üzenetet küldesz vagy hangcsatornába lépsz. Tartalom nélkül. | Chat- és hangjutalmak; inaktivitási jelentés; megőrzési söprés. | (b); (f) közösség működtetése | Mint fent; törléskor kiürítjük. |
 | **Szintek és szerepkörök** | A tapasztalati pontból származtatott. A szerepkör-változtatások a Discordon történnek, nem tárolódnak. | Szintjutalmak. | (b) | Mint fent. |
+| **Rangszabályok** | Semmi nem tárolódik. Ha a szerepköreid változnak, a szerver szabályai más szerepköröket adhatnak vagy vehetnek el a Discordon. | A szerepkörök összhangban tartása a szerver szabályaival. | (b) | Nem értelmezhető. |
 | **Kaszinójátékok** | Minden tét: játék, tét összege, kimenetel, jóváírás, mikor tették meg és mikor zárult le; gördülő nyereményszámláló a rendellenes nyereményráta észlelésére. | A tétek biztonságos lezárása újraindításokon át; kihasználások észlelése. | (b); (f) a játék integritása | A tétsorok a törlés után anonim azonosító alatt maradnak (8.3 pont); a számláló törlődik. |
 | **Bolt, leltár, gacha, utalványok** | A birtokolt tárgyak és mennyiségük; minden gacha-húzás (banner, ritkaság, jutalom, pity-számlálók); a birtokolt utalványok és beváltásuk ideje; időkorlátos juttatások, például prémium szerepkör vagy bérelt emoji, matrica, hangtábla-hang, beleértve, melyik stábtag adta vagy teljesítette; a beváltott eszközökre vonatkozó teljesítési kérelmek. | A megvásárolt vagy megnyert dolgok átadása; bérletek lejáratása; dupla kifizetések megelőzése. | (b) | Törlésig. A juttatásokat előbb a Discordon vonjuk vissza. |
 | **Napi fejtörők (Everydle: LoLdle, Valdle, DbDle, Genshindle)** | Fejtörő-változatonként egy időbélyeg arról, mikor játszottál utoljára. A tippjeidet **nem** tároljuk. | A napi egyszeri szabály érvényesítése és a jutalmak kifizetése. | (b) | Törlésig. |
 | **Számláló és szólánc csatornák** | A lánc aktuális értéke és az utoljára játszó tag azonosítója; minden elfogadott szó, felhasználói azonosító nélkül tárolva. Lásd 5. pont. | A játék működtetése és az ismételt szavak elutasítása. | (b) | Az utolsó játékos azonosítója törléskor eltávolításra kerül; a szavak a lánc visszaállításáig. |
 | **Csapatkeresés (LFG)** | Az általad létrehozott hirdetések: a beírt játéknév, hány játékos kell, a csatlakozott tagok azonosítói, a létrehozás ideje. | A hirdetés megjelenítése és frissítése. | (b) | A létrehozástól számított nyolc napig, vagy törlésig. |
-| **Ideiglenes hangszobák** | A szobádnak adott név, létszámkorlát, zárolt állapot és bitráta; az általad engedélyezett vagy tiltott tagok azonosítói; az aktuális szobád azonosítója. | A szobád visszaállítása úgy, ahogy hagytad. | (b) | Törlésig (ha egy másik tag törli magát, a te listádról is lekerül). |
+| **Ideiglenes hangszobák** | A szobádnak adott név, létszámkorlát, zárolt állapot és bitráta; az általad engedélyezett vagy tiltott tagok azonosítói; az aktuális szobád azonosítója. | A szobád visszaállítása úgy, ahogy hagytad; a szoba vezérlőpanelje a szoba saját csevegésében mutatja az állapotát, köztük azt is, kit engedtél be (a tiltott tagokat nem). | (b) | Törlésig (ha egy másik tag törli magát, a te listádról is lekerül). |
 | **Jegyek (ticketek)** | Hogy nyitottál jegyet (csatorna-azonosító, típus, mikor), és melyik stábtag vette át. **Jegyszöveget az adatbázisban nem tárolunk**; lásd „Jegyátiratok” a 6. pontban. | Tagonként egy nyitott jegy korlátozása; stábmunkafolyamat. | (b); (f) támogatás | Törlésig. |
 | **Moderáció: figyelmeztetések** | Minden figyelmeztetés: az azonosítód, a moderátor azonosítója, a figyelmeztetés címkéje, a moderátor által beírt indoklás, a dátum. A címkénkénti számokat a szerver által beállított küszöbökkel vetjük össze. | A szerver moderálása. | (f) a közösség biztonsága; a szerver szabályai | Amíg a stáb el nem távolítja, vagy amíg nem törlöd magad. Az eltávolított figyelmeztetés tartalma a stáb naplójában a törlésig megmarad (6. pont). |
 | **Moderáció: szószűrő** | Rólad semmit nem tárolunk a fenti figyelmeztetésen túl, amelynek indoklása a csatornát nevezi meg, soha nem a szót vagy az üzenetedet. | A szerver szabályainak érvényesítése. | (f) | Mint a figyelmeztetéseknél. |
 | **Belépés és szabályzat** | Hány másodperc telt el a belépésed és a szabályzat elfogadása között. | Moderációs elemzés a stábnak. | (f) | Törléskor kiürítjük. |
 | **Inaktivitási jelentés** | Az utolsó aktivitás időbélyegét használja. A stáb egy beállítással kivehet tagazonosítókat a jelentésből. | A stáb lássa, ki inaktív 14 napja. | (f) közösségkezelés | Mint fent. |
 | **Bejelentések** (belépés, kilépés, kirúgás, kitiltás, boost) | Semmi nem tárolódik. A bejegyzés tartalmazza az említésedet, felhasználóneved, megjelenített neved, felhasználói azonosítód, a fiókod korát, kirúgásnál és kitiltásnál pedig a Discord naplójából a moderátort és az indokot. A profilképedet memóriába töltjük le, és csatolmányként a bejegyzéshez fűzzük, vagy opcionális képkártyára rajzoljuk, hogy a megváltoztatása után is látható maradjon. | A közösség üdvözlése és tájékoztatása. | (f) közösség működtetése | Csak Discord-üzenetként, amely felett a szerver rendelkezik. |
+| **Szerver-eseménynapló** (ki van kapcsolva, amíg egy szerver be nem kapcsolja) | Semmi nem tárolódik. A szerver által választott naplócsatornákba kerül: a szerkesztett vagy törölt üzeneteid (a szövegükkel, amíg a bot még tartja őket), a beceneved, szerepköreid és némításod változásai, a hangcsatornákba való belépésed, kilépésed és átlépésed; valamint szerver-változások, például csatornák, szerepkörök, meghívók (megnevezve, ki hozta létre) és emojik. | Hogy a szerver stábja moderálhasson és lássa, mi változott. | (f) a közösség moderálása és biztonsága | Abban a Discord-csatornában marad, a szerver kezelésében. |
 | **Meghívónapló** | Semmi nem tárolódik. Egy stábcsatornába kerülő bejegyzés megnevezi az új tagot, a fiókja korát, a meghívót és a meghívókódot. | A stáb lássa, hogyan érkeznek a tagok. | (f) raid elleni védelem, közösségi biztonság | Csak Discord-üzenetként. |
-| **Zene** | Semmi nem tárolódik. A lejátszási sor (mit kértek és ki) a memóriában él, amíg a bot játszik. | Az általad kért hang lejátszása. | (b) | Újraindításkor elvész. |
 | **Twitch- és YouTube-értesítések** | Tagadat nincs. A streamer- és csatornanevek szerverbeállítások. | Streamek és videók bejelentése. | (b) a szerver részére | Nem értelmezhető. |
 | **Játékfrissítési jegyzetek** | Tagadat nincs. | Frissítések bejelentése. | Nem értelmezhető | Nem értelmezhető. |
 | **Adatmegosztási preferenciák** | Egy adatkategóriára rögzített leiratkozásod, időbélyeggel. (Egy jövőbeli többszerveres gazdaság alapja; ma semmi nem olvassa.) | A választásod tiszteletben tartása. | (b) | Törlésig. |
@@ -166,9 +165,17 @@ beérkezésekor:
 4. **Aktivitási jutalmak** csak azt rögzítik, hogy üzenetet küldtél; a
    tartalmat nem olvassák.
 5. **Boost-észlelés** csak az üzenet típusát nézi.
+6. **A szerver eseménynaplója**, ahol egy szerver bekapcsolja (alapból ki van
+   kapcsolva): ha szerkesztesz vagy törölsz egy üzenetet, a szövege a szerver
+   stábja által választott naplócsatornába kerül, de csak amíg a bot még a
+   rövid távú memóriájában tartja az üzenetet; egy régebbi üzenet a szövege
+   nélkül kerül a naplóba. Botok üzenetei, valamint a szerver által kizárt
+   csatornák és szerepkörök soha nem kerülnek a naplóba. Az adatbázisban
+   semmi nem tárolódik.
 
-Az üzenettartalmat soha nem naplózzuk, soha nem küldjük harmadik félnek, és
-soha nem használjuk modell tanítására.
+Az üzenettartalmat soha nem írjuk a saját naplóinkba vagy az adatbázisba (a 3.
+ponton túl), soha nem küldjük harmadik félnek, és soha nem használjuk modell
+tanítására.
 
 ---
 
@@ -206,9 +213,8 @@ rá. Figyelemre méltó:
 | --- | --- | --- | --- | --- |
 | **Google LLC** (Google Drive) | A teljes adatbázis éjszakai, **titkosított** másolata. A Google nem tudja olvasni: a fájlt feltöltés előtt a szerverünkön az rclone titkosítási rétege titkosítja, és a kulcsok soha nem hagyják el a szerverünket. | Külső helyszíni biztonsági mentés. | Egyesült Államok | Titkosítás a továbbítás előtt; a Google EU–USA adatvédelmi keretrendszer (Data Privacy Framework) szerinti tanúsítása, tartalékként az általános szerződési feltételek (SCC). |
 | **Cloudflare, Inc.** | Az irányítópult felé irányuló minden kérés a Cloudflare peremhálózatán és egy Cloudflare Tunnelen keresztül jut a szerverünkre. A Cloudflare látja az irányítópult minden látogatójának **IP-címét, kérésmetaadatait és TLS-kézfogását**, a `potatobot.win` DNS-szolgáltatója, és a kapcsolati címünkre küldött e-maileket az általunk olvasott postafiókba továbbítja (Cloudflare Email Routing), így kezeli mindannak a tartalmát, amit nekünk írsz. A bot Discord felé irányuló forgalmát nem látja. | Az irányítópult HTTPS-en való közzététele az otthoni kapcsolatunk kitétele nélkül. | EU-s peremhelyszínek és Egyesült Államok | A Cloudflare adatfeldolgozási kiegészítése, EU–USA adatvédelmi keretrendszer szerinti tanúsítása és az általános szerződési feltételek. |
-| **Google LLC** (YouTube) | Amikor a zenefunkciót használod: **az általad beírt keresőszöveg vagy a beillesztett YouTube-URL**, valamint a szerverünk IP-címe. Discord-adatot nem küldünk. A hangfolyamot a szerverünk tölti le. | A kért zene megtalálása és lejátszása. | Egyesült Államok | A YouTube önálló adatkezelőként jár el saját adatvédelmi szabályzata szerint; a keresésen túl semmit nem küldünk. |
 | **Twitch Interactive, Inc.** | Csak a szerveradminisztrátor által beállított streamerneveket, az alkalmazásunk hitelesítő adataival. Tagadat nincs. | Stream-értesítések. | Egyesült Államok | Tagadathoz nem szükséges; nem küldünk ilyet. |
-| **Játékkiadók nyilvános végpontjai** (Valve/Steam, Riot Games, HoYoverse, Mojang) | Senkiről semmit; a szerverünk nyilvános frissítési jegyzet-feedeket kérdez le. | Frissítési jegyzet-értesítések. | Változó | Nem értelmezhető. |
+| **Játékkiadók nyilvános végpontjai** (Valve/Steam, Riot Games, HoYoverse, Mojang) | Senkiről semmit; a szerverünk nyilvános frissítési jegyzet-feedeket kérdez le. Egy értesítés megjelenítheti a kiadó képét a címe alapján, amelyet a Discord a saját médiaproxyján keresztül tölt be, így ehhez sem a szerverünk, sem a te kliensed nem lép kapcsolatba a kiadóval. | Frissítési jegyzet-értesítések. | Változó | Nem értelmezhető. |
 | **GitHub, Inc.** | Egy egyszerű kérés a projekt változásnaplójáért, amikor egy irányítópult-felhasználó megnyitja a változásnapló oldalt. Felhasználói adat nincs. | Kiadási jegyzetek megjelenítése. | Egyesült Államok | Nem értelmezhető. |
 | **E-mail-szolgáltató (opcionális)** | Ha az üzemeltető bekapcsolja a hibariasztást, a bot hibanaplójának sorait SMTP-szerveren keresztül e-mailben küldi az üzemeltető saját címére. Ezek a sorok tartalmazhatnak **Discord felhasználói és szerverazonosítókat**, üzenetszöveget vagy felhasználónevet soha. **Ez a telepítés: nincs bekapcsolva.** | Értesülés arról, ha a bot elromlik. | Szolgáltatótól függ | Beállítás nélkül kikapcsolva; TLS a továbbítás során. |
 
@@ -249,6 +255,9 @@ Discord végez a saját feltételei alapján, nem mi.
   szerverek adatait nem látják, és nem olvashatnak tömegesen egyenlegeket vagy
   figyelmeztetéseket; azokhoz a bot saját stábparancsain keresztül jutnak a
   Discordon.
+- **A szerver eseménynapló-csatornáit olvasó stáb**, ahol a szerver
+  bekapcsolta az eseménynaplót: az ott rólad naplózott események (5. pont 6.
+  alpont és 4. pont).
 - **Az üzemeltető** mindent olvashat az adatbázisban és a naplókban.
 - **Senki más.** Harmadik félnek csak a 6.2 pontban felsorolt esetekben, ha a
   jog előírja, vagy ha kifejezetten kéred, adunk át adatot.
@@ -268,7 +277,7 @@ Discord végez a saját feltételei alapján, nem mi.
 | Működési naplók (9. pont) | A bot naplófájlja 10 × 5 MB-onként rotálódik (kb. 55 MB). A rendszernaplót ezen a gépen 500 MB-os méretkorlát határolja, kb. két hónap; a tagokat megnevező sorok, amelyeket 2026 novemberéig tartalmazott, e korlát szerint járnak le. |
 | Külső helyszíni titkosított mentések | 30 nap, utána automatikusan törlődnek. |
 | Migráció előtti mentések a szerveren | Minden adatbázis-frissítés előtt készült teljes másolat, a szerveren tárolva visszaállítási céllal. A törlés nem éri el őket. Az éjszakai mentési feladat törli mindegyiket, amint az időablaknál régebbi, miután az aznapi külső másolat ellenőrzése sikerült. **Ez a telepítés: az általuk védett migráció után 90 nappal.** |
-| Memóriában tartott adatok (lejátszási sor, meghívó-pillanatkép, időkorlát-térképek, irányítópult-tokenek és sebességkorlát-számlálók) | Újraindításkor elvesznek; az irányítópult-tokenek legfeljebb 12 óra. |
+| Memóriában tartott adatok (meghívó-pillanatkép, időkorlát-térképek, irányítópult-tokenek és sebességkorlát-számlálók) | Újraindításkor elvesznek; az irányítópult-tokenek legfeljebb 12 óra. |
 
 Az adataid törlése nem terjed ki a biztonsági mentésekre. A törlésed után
 visszaállított mentés visszahozná a soraidat; eljárásunk szerint bármely
@@ -374,11 +383,9 @@ ezek egyike sem nevez meg téged. A naplófájl tartalmazza:
 - **a Discord felhasználói azonosítódat** kisszámú sorban: amikor belépsz egy
   szerverre, és a bot regisztrálja a fiókodat vagy automatikus szerepköröket ad,
   valamint amikor egy funkció a kérésed kezelése közben hibázik (például egy
-  befejezhetetlen zenekeresés vagy egy kézbesíthetetlen export);
-- soha nem tartalmazzák a felhasználóneved, az üzenettartalmat, a
-  zenekeresési szöveget, az IP-címed vagy az irányítópult-munkamenet adatait. A
-  zenekinyerő saját hibáit naplózás előtt puszta hibatípusra csupaszítjuk. A
-  hanglejátszón belüli hiba ritka esetben idézheti a lejátszott folyam URL-jét.
+  kézbesíthetetlen export);
+- soha nem tartalmazzák a felhasználóneved, az üzenettartalmat, az IP-címed
+  vagy az irányítópult-munkamenet adatait.
 
 Az irányítópult **nem vezet hozzáférési naplót**: csak a lassú kéréseket
 (módszer, útvonal, állapot, időtartam) és a kezeletlen hibákat rögzíti. A
@@ -406,6 +413,10 @@ A szoftver anélkül alkalmazza őket, hogy ember vizsgálná az egyedi esetet:
 - **Inaktivitási jelentés**: 14 nap rögzített üzenet vagy hangcsatlakozás
   nélkül egy téged megnevező stábbejegyzést eredményez; ellened nem történik
   intézkedés.
+- **Rangszabályok**: ha a szerepköreid változnak, a szerver által beállított
+  szabályok más szerepköröket adhatnak vagy vehetnek el (például egy
+  igazolt szerepkört igénylő szerepkör nélküle lekerül). Ki van kapcsolva,
+  amíg egy szerver be nem kapcsolja.
 - **Megőrzési söprés** (7. pont).
 
 Ha egy ilyen döntés érint, jogod van emberi beavatkozást kérni, az

@@ -4,7 +4,7 @@
 
 The protected assets are Discord/OAuth/Twitch credentials, the dashboard session
 secret, member balances and moderation records, guild configuration, and the
-ability to act through the bot's Discord role. Discord, YouTube/yt-dlp, Twitch,
+ability to act through the bot's Discord role. Discord, Twitch,
 the reverse proxy or tunnel in front of the dashboard, the private network used
 for host administration, package registries, and administrators' browsers are
 external trust boundaries.
@@ -43,11 +43,8 @@ authentication.
   claims, persistent interactive-wager identities, compare-and-set settlement,
   and startup refunds.
 - Cross-guild data disclosure: guild-scoped configuration and guild-filtered
-  leaderboards. Wallets are still one per Discord account across the whole
-  installation (see Residual risks).
-- Remote media abuse: HTTPS YouTube-only input, no credentials or ports, bounded
-  extraction workers/timeouts/playlists/queues, live and duration limits, isolated
-  yt-dlp instances, and constrained FFmpeg protocols.
+  leaderboards, and since 3.0.0 one wallet per member per guild (schema 27),
+  so coins, XP and cooldowns earned in one guild cannot be spent in another.
 - Resource exhaustion: body limits, request rate limits, command cooldowns,
   bounded in-memory maps/views/transcripts, database worker limits, and rotating
   logs.
@@ -59,8 +56,7 @@ authentication.
 
 The database is single-host state (PostgreSQL in a container under the
 service account, reachable only on its private network) and is not protected
-from an attacker who controls the service account. Economy state (balances, XP, cooldowns) has no
-guild dimension yet, so one wallet per Discord account serves every guild the bot
-is in; do not run one installation for unrelated communities until per-guild
-wallets ship. The `DataContext`/`scoped_accounts` foundation for that is tested
-but has no runtime caller.
+from an attacker who controls the service account. Wallets are per guild since
+3.0.0, but moderation is not shared across guilds and one installation's
+operator can read every guild's data; the `DataContext`/`scoped_accounts`
+foundation for shared economies is tested but has no runtime caller.

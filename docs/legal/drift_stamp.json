@@ -5,6 +5,9 @@
     "SESSION_COOKIE_SECURE": "( deployment_settings.dashboard_external_url or \"\" ).lower().startswith(\"https://\")",
     "SESSION_IDLE_TIMEOUT": "timedelta(minutes=10)",
     "SESSION_LIFETIME": "timedelta(hours=12)",
+    "bot_invite_scopes": [
+      "bot applications.commands"
+    ],
     "oauth_scopes": [
       "identify guilds"
     ]
@@ -214,6 +217,7 @@
     "casino_wheel",
     "chat_rewards",
     "economy",
+    "event_logging",
     "everydle",
     "everydle_dbdle",
     "everydle_genshindle",
@@ -233,7 +237,6 @@
     "moderation_warn_actions",
     "moderation_warn_alerts",
     "moderation_word_filter",
-    "music",
     "onboarding",
     "patchbot",
     "patchbot_cs2",
@@ -249,6 +252,7 @@
     "patchbot_zzz",
     "profiles",
     "role_menus",
+    "role_rules",
     "shop",
     "shop_gacha",
     "social_twitch",
@@ -265,8 +269,6 @@
     "moderation": "True"
   },
   "log_formats_naming_a_user": [
-    "cogs/music.py: Music extraction failed (guild_id=%s, user_id=%s, error=%s)",
-    "cogs/music.py: Music search failed (user_id=%s, error=%s)",
     "cogs/privacy.py: Could not deliver a data export (user_id=%s).",
     "cogs/privacy.py: Retention sweep erased %s member(s) inactive since %s.",
     "cogs/serverevents.py: Assigned configured autoroles to user ID %s.",
@@ -324,6 +326,7 @@
     "api.twitch.tv",
     "bbs-api-os.hoyolab.com",
     "cdn.discordapp.com",
+    "clan.akamai.steamstatic.com",
     "dbd.tricky.lol",
     "ddragon.leagueoflegends.com",
     "discord.com",
@@ -365,6 +368,18 @@
       "feature": null,
       "scope": "instance",
       "type": "integer"
+    },
+    "event_log_ignored_channels": {
+      "default": [],
+      "feature": "event_logging",
+      "scope": "guild",
+      "type": "channel_list"
+    },
+    "event_log_ignored_roles": {
+      "default": [],
+      "feature": "event_logging",
+      "scope": "guild",
+      "type": "role_list"
     },
     "ignored_users": {
       "default": [],

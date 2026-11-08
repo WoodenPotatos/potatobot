@@ -183,10 +183,14 @@ class RejoinPermissionReplayTests(unittest.IsolatedAsyncioTestCase):
         database.set_voice_permission(1, owner_id, allowed_id, 1)
         database.set_voice_permission(1, owner_id, blocked_id, 0)
 
-        new_channel = types.SimpleNamespace(
-            id=1000, send=AsyncMock(), delete=AsyncMock()
-        )
+        # The shape `create_voice_channel` really returns: the new panel is
+        # rendered from the created channel's own name, limits and overwrites.
+        new_channel = _PanelChannel(None)
+        new_channel.id = 1000
+        new_channel.send = AsyncMock()
+        new_channel.delete = AsyncMock()
         guild = _FakeGuild(1, new_channel)
+        new_channel.guild = guild
         allowed_member = _Entity(id=allowed_id, display_name="Allowed")
         blocked_member = _Entity(id=blocked_id, display_name="Blocked")
         guild._members = {allowed_id: allowed_member, blocked_id: blocked_member}
@@ -206,6 +210,176 @@ class RejoinPermissionReplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(overwrites[blocked_member].view_channel)
         self.assertTrue(overwrites[allowed_member].connect)
         self.assertFalse(overwrites[blocked_member].connect)
+        # The panel arrives with its state, so a new room never shows a bare line.
+        self.assertIsInstance(new_channel.send.await_args.kwargs.get("embed"), discord.Embed)
+
+
+
+class _PanelGuild:
+    def __init__(self, guild_id=1):
+        self.id = guild_id
+        self.default_role = _Role(guild_id)
+        self.me = _Entity(id=999)
+
+
+class _Role(discord.Role):
+    """A real `discord.Role` subclass, so the renderer's isinstance check is the
+    production one, without a gateway payload behind it."""
+
+    def __init__(self, role_id):  # noqa: D401 - deliberately skips Role.__init__
+        self.id = role_id
+
+    def __hash__(self):
+        return hash(("role", self.id))
+
+    def __eq__(self, other):
+        return isinstance(other, _Role) and other.id == self.id
+
+
+class _PanelChannel:
+    def __init__(self, guild, *, name="Room", user_limit=0, bitrate=64000):
+        self.id = 555
+        self.guild = guild
+        self.name = name
+        self.user_limit = user_limit
+        self.bitrate = bitrate
+        self.overwrites = {}
+
+    def overwrites_for(self, target):
+        return self.overwrites.get(target, discord.PermissionOverwrite())
+
+
+def _fields(embed):
+    return {field.name: field.value for field in embed.fields}
+
+
+class RoomPanelTests(unittest.IsolatedAsyncioTestCase):
+    """The panel shows the room's state, read from the channel's overwrites."""
+
+    def setUp(self):
+        import cogs.voicemod
+        self.voicemod = cogs.voicemod
+        self.t = cogs.voicemod.t
+        self.guild = _PanelGuild()
+        self.channel = _PanelChannel(self.guild)
+
+    def render(self, *, faction_lock=False, factions=()):
+        with patch.object(self.voicemod, "all_faction_role_ids",
+                          return_value=set(factions)):
+            return self.voicemod.render_room_panel(
+                self.channel, 7, faction_lock_enabled=faction_lock)
+
+    def test_an_open_visible_room_with_no_limit(self):
+        fields = _fields(self.render())
+        self.assertEqual(self.t("voicemod.panel_access_open"),
+                         fields[self.t("voicemod.panel_field_access")])
+        self.assertEqual(self.t("voicemod.panel_visibility_visible"),
+                         fields[self.t("voicemod.panel_field_visibility")])
+        self.assertEqual(self.t("voicemod.panel_limit_none"),
+                         fields[self.t("voicemod.panel_field_limit")])
+        self.assertEqual(self.t("voicemod.panel_bitrate", bitrate=64),
+                         fields[self.t("voicemod.panel_field_bitrate")])
+
+    def test_a_locked_hidden_room_says_so(self):
+        self.channel.overwrites[self.guild.default_role] = discord.PermissionOverwrite(
+            connect=False, view_channel=False)
+        self.channel.user_limit = 4
+        fields = _fields(self.render())
+        self.assertEqual(self.t("voicemod.panel_access_locked"),
+                         fields[self.t("voicemod.panel_field_access")])
+        self.assertEqual(self.t("voicemod.panel_visibility_hidden"),
+                         fields[self.t("voicemod.panel_field_visibility")])
+        self.assertEqual("4", fields[self.t("voicemod.panel_field_limit")])
+
+    def test_let_in_members_are_listed_but_never_the_owner_a_bot_or_the_blocked(self):
+        owner, friend, bot, blocked = (_Entity(id=7), _Entity(id=42),
+                                       _Entity(id=50, bot=True), _Entity(id=60))
+        self.channel.overwrites.update({
+            owner: discord.PermissionOverwrite(connect=True, manage_channels=True),
+            friend: discord.PermissionOverwrite(connect=True, view_channel=True),
+            bot: discord.PermissionOverwrite(connect=True),
+            blocked: discord.PermissionOverwrite(connect=False),
+        })
+        self.assertEqual("<@42>", _fields(self.render())[self.t("voicemod.panel_field_permitted")])
+
+    def test_a_long_list_is_capped_with_a_count(self):
+        for member_id in range(100, 100 + self.voicemod.PANEL_MEMBER_CAP + 3):
+            self.channel.overwrites[_Entity(id=member_id)] = discord.PermissionOverwrite(connect=True)
+        value = _fields(self.render())[self.t("voicemod.panel_field_permitted")]
+        self.assertTrue(value.endswith(self.t("voicemod.panel_more", count=3)))
+
+    def test_the_faction_lock_shows_its_factions_only_while_the_feature_is_on(self):
+        faction = _Role(77)
+        self.channel.overwrites[self.guild.default_role] = discord.PermissionOverwrite(connect=False)
+        self.channel.overwrites[faction] = discord.PermissionOverwrite(connect=True)
+        on = _fields(self.render(faction_lock=True, factions={77}))
+        self.assertEqual(self.t("voicemod.panel_access_faction", factions="<@&77>"),
+                         on[self.t("voicemod.panel_field_access")])
+        off = _fields(self.render(faction_lock=False, factions={77}))
+        self.assertEqual(self.t("voicemod.panel_access_locked"),
+                         off[self.t("voicemod.panel_field_access")])
+
+    async def _refresh(self, messages, owner_id=7):
+        fresh = _PanelChannel(self.guild)
+        fresh.overwrites[self.guild.default_role] = discord.PermissionOverwrite(connect=False)
+
+        async def history(**_):
+            for message in messages:
+                yield message
+        fresh.history = history
+        self.guild.fetch_channel = AsyncMock(return_value=fresh)
+        with patch.object(self.voicemod.database, "run", AsyncMock(return_value=owner_id)), \
+                patch.object(self.voicemod, "is_enabled", return_value=False):
+            await self.voicemod.refresh_room_panel(self.channel)
+
+    def _message(self, author_id, custom_id):
+        button = types.SimpleNamespace(custom_id=custom_id)
+        return types.SimpleNamespace(
+            author=types.SimpleNamespace(id=author_id),
+            components=[types.SimpleNamespace(children=[button])],
+            edit=AsyncMock(),
+        )
+
+    async def test_refresh_redraws_the_panel_from_the_fetched_channel_and_keeps_its_buttons(self):
+        other = self._message(123, "vc_lock")          # not the bot's
+        claim = self._message(999, "something_else")   # the bot's, not the panel
+        panel = self._message(999, "vc_lock")
+        await self._refresh([other, claim, panel])
+        other.edit.assert_not_awaited()
+        claim.edit.assert_not_awaited()
+        panel.edit.assert_awaited_once()
+        kwargs = panel.edit.await_args.kwargs
+        # The fetched channel is locked; the cached one is not. The panel must
+        # show what Discord now enforces, not the state before the click.
+        self.assertEqual(self.t("voicemod.panel_access_locked"),
+                         _fields(kwargs["embed"])[self.t("voicemod.panel_field_access")])
+        self.assertNotIn("view", kwargs, "never re-send the persistent view")
+
+    async def test_refresh_leaves_an_untracked_room_alone(self):
+        panel = self._message(999, "vc_lock")
+        await self._refresh([panel], owner_id=None)
+        panel.edit.assert_not_awaited()
+
+    async def test_a_failed_refresh_never_breaks_the_control_action(self):
+        panel = self._message(999, "vc_lock")
+        response = types.SimpleNamespace(status=500, reason="boom")
+        panel.edit = AsyncMock(side_effect=discord.HTTPException(response, "boom"))
+        with self.assertLogs("PotatoBot.VoiceMod", level="WARNING"):
+            await self._refresh([panel])
+
+    async def test_a_permit_redraws_the_panel(self):
+        target = _Entity(id=42, display_name="Target")
+        channel = types.SimpleNamespace(set_permissions=AsyncMock(), id=555)
+        view = self.voicemod.UserActionView(channel, target, 7)
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(id=7), guild_id=1,
+            response=types.SimpleNamespace(edit_message=AsyncMock()))
+        with patch.object(self.voicemod, "require_interaction_feature", AsyncMock(return_value=True)), \
+                patch.object(self.voicemod, "owns_current_channel", AsyncMock(return_value=True)), \
+                patch.object(self.voicemod.database, "run", AsyncMock()), \
+                patch.object(self.voicemod, "refresh_room_panel", AsyncMock()) as refresh:
+            await view.permit(interaction)
+        refresh.assert_awaited_once_with(channel)
 
 
 if __name__ == "__main__":

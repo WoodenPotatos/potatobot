@@ -32,6 +32,116 @@ async def owns_current_channel(channel, member):
         and voice.channel.id == channel.id
     )
 
+# How many let-in members the panel names before it says "+N more": an embed
+# field holds 1024 characters and a mention is about 22.
+PANEL_MEMBER_CAP = 15
+# The panel is the bot's first message in the room; it is found by its lock
+# button's custom_id, so no message id has to be stored.
+PANEL_MARKER_ID = "vc_lock"
+
+
+def render_room_panel(channel, owner_id, *, faction_lock_enabled: bool) -> discord.Embed:
+    """The room's state as the panel shows it, read from the channel itself.
+
+    Everything comes from the channel's own overwrites, never from stored
+    state, so the panel cannot disagree with what Discord enforces. The faction
+    line exists only while the faction-lock feature is on. Blocked members are
+    deliberately not listed: the panel sits in the room's own chat, and naming
+    who was shut out would be a public call-out.
+    """
+    guild = channel.guild
+    everyone = channel.overwrites_for(guild.default_role)
+    locked = everyone.connect is False
+    hidden = everyone.view_channel is False
+
+    faction_ids = all_faction_role_ids(guild.id) if faction_lock_enabled else set()
+    factions, permitted = [], []
+    for target, overwrite in channel.overwrites.items():
+        if isinstance(target, discord.Role):
+            if target.id in faction_ids and overwrite.connect is True:
+                factions.append(target)
+        elif (overwrite.connect is True and target.id != owner_id
+                and not getattr(target, "bot", False)):
+            permitted.append(target)
+
+    if locked and factions:
+        access = t("voicemod.panel_access_faction",
+                   factions=", ".join(f"<@&{role.id}>" for role in
+                                      sorted(factions, key=lambda role: role.id)))
+    elif locked:
+        access = t("voicemod.panel_access_locked")
+    else:
+        access = t("voicemod.panel_access_open")
+
+    names = [f"<@{member.id}>" for member in
+             sorted(permitted, key=lambda member: member.id)[:PANEL_MEMBER_CAP]]
+    if len(permitted) > PANEL_MEMBER_CAP:
+        names.append(t("voicemod.panel_more", count=len(permitted) - PANEL_MEMBER_CAP))
+
+    embed = discord.Embed(
+        title=t("voicemod.panel_title",
+                name=discord.utils.escape_markdown(channel.name)),
+        description=t("voicemod.panel_owner", owner=f"<@{owner_id}>"),
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(name=t("voicemod.panel_field_access"), value=access, inline=True)
+    embed.add_field(
+        name=t("voicemod.panel_field_visibility"),
+        value=t("voicemod.panel_visibility_hidden" if hidden
+                else "voicemod.panel_visibility_visible"),
+        inline=True)
+    embed.add_field(
+        name=t("voicemod.panel_field_limit"),
+        value=str(channel.user_limit) if channel.user_limit else t("voicemod.panel_limit_none"),
+        inline=True)
+    embed.add_field(name=t("voicemod.panel_field_bitrate"),
+                    value=t("voicemod.panel_bitrate", bitrate=channel.bitrate // 1000),
+                    inline=True)
+    embed.add_field(name=t("voicemod.panel_field_permitted"),
+                    value=", ".join(names) if names else t("voicemod.panel_permitted_none"),
+                    inline=False)
+    return embed
+
+
+async def _find_panel_message(channel):
+    """The bot's panel in this room, or None."""
+    me = channel.guild.me
+    async for message in channel.history(limit=25, oldest_first=True):
+        if me is None or message.author.id != me.id:
+            continue
+        for row in message.components:
+            for child in getattr(row, "children", ()):
+                if getattr(child, "custom_id", None) == PANEL_MARKER_ID:
+                    return message
+    return None
+
+
+async def refresh_room_panel(channel):
+    """Redraw the panel after a change; never raises into the control action.
+
+    The channel is fetched again first: discord.py updates its cached
+    overwrites only when Discord's update event arrives, which is after
+    `set_permissions` returns, so rendering the cached channel would show the
+    state from before the click. Only the embed is edited, so the registered
+    persistent buttons are left exactly as posted.
+    """
+    try:
+        owner_id = await database.run(database.get_active_channel_owner, channel.id)
+        if owner_id is None:
+            return
+        fresh = await channel.guild.fetch_channel(channel.id)
+        message = await _find_panel_message(fresh)
+        if message is None:
+            return
+        await message.edit(embed=render_room_panel(
+            fresh, owner_id,
+            faction_lock_enabled=is_enabled(channel.guild.id, "temporary_voice_faction_lock")))
+    except (discord.HTTPException, database.DatabaseOperationError) as error:
+        voice_logger.warning(
+            "Failed to refresh the voice room panel (channel_id=%s, error=%s)",
+            channel.id, type(error).__name__)
+
+
 class LimitModal(discord.ui.Modal):
     def __init__(self, channel, user):
         super().__init__(title=t("voicemod.limit_modal_title"))
@@ -68,6 +178,7 @@ class LimitModal(discord.ui.Modal):
                     database.set_voice_limit, interaction.guild_id, self.user.id, new_limit
                 )
                 await interaction.response.send_message(t("voicemod.limit_success", limit=new_limit), ephemeral=True)
+                await refresh_room_panel(self.channel)
             else:
                 await interaction.response.send_message(t("voicemod.limit_range_error"), ephemeral=True)
         except ValueError:
@@ -107,6 +218,7 @@ class RenameModal(discord.ui.Modal):
             database.set_voice_name, interaction.guild_id, self.user.id, name
         )
         await interaction.response.send_message(t("voicemod.rename_success", name=name), ephemeral=True)
+        await refresh_room_panel(self.channel)
 
 class BitrateSelect(discord.ui.Select):
     def __init__(self, channel, user, guild_limit):
@@ -138,6 +250,7 @@ class BitrateSelect(discord.ui.Select):
             database.set_voice_bitrate, interaction.guild_id, self.user.id, bitrate
         )
         await interaction.response.send_message(t("voicemod.bitrate_success", bitrate=bitrate//1000), ephemeral=True)
+        await refresh_room_panel(self.channel)
 
 class BitrateView(discord.ui.View):
     def __init__(self, channel, user, guild_limit):
@@ -178,6 +291,7 @@ class UserActionView(discord.ui.View):
             self.owner_id, self.target.id, 1,
         )
         await interaction.response.edit_message(content=t("voicemod.permit_success", user=self.target.display_name), view=None)
+        await refresh_room_panel(self.channel)
 
     async def block(self, interaction: discord.Interaction):
         if not await require_interaction_feature(interaction, "temporary_voice"):
@@ -201,6 +315,7 @@ class UserActionView(discord.ui.View):
             self.owner_id, self.target.id, 0,
         )
         await interaction.response.edit_message(content=t("voicemod.block_success", user=self.target.display_name), view=None)
+        await refresh_room_panel(self.channel)
 
 class UserSelect(discord.ui.UserSelect):
     def __init__(self, channel, user):
@@ -317,6 +432,7 @@ class VoiceControlView(discord.ui.View):
             database.set_voice_lock, interaction.guild_id, owner_id, 1
         )
         await interaction.response.send_message(t("voicemod.room_locked"), ephemeral=True)
+        await refresh_room_panel(interaction.channel)
 
     async def unlock(self, interaction: discord.Interaction):
         owner_id = await database.run(database.get_active_channel_owner, interaction.channel.id)
@@ -353,6 +469,7 @@ class VoiceControlView(discord.ui.View):
             database.set_voice_lock, interaction.guild_id, owner_id, 0
         )
         await interaction.response.send_message(t("voicemod.room_unlocked"), ephemeral=True)
+        await refresh_room_panel(interaction.channel)
 
     async def lock_to_faction(self, interaction: discord.Interaction):
         # interaction_check has already cleared maintenance and temporary_voice.
@@ -401,6 +518,7 @@ class VoiceControlView(discord.ui.View):
         await interaction.response.send_message(
             t("voicemod.room_faction_locked", count=len(roles)), ephemeral=True
         )
+        await refresh_room_panel(interaction.channel)
 
     async def claim_ownership(self, interaction: discord.Interaction):
         channel = interaction.channel
@@ -437,6 +555,7 @@ class VoiceControlView(discord.ui.View):
         new_name = pref[0] if pref and pref[0] else t("voicemod.default_room_name", user=interaction.user.display_name)
         await channel.edit(name=new_name)
         await interaction.response.send_message(t("voicemod.ownership_claimed", user=interaction.user.display_name), ephemeral=False)
+        await refresh_room_panel(channel)
 
     async def set_limit(self, interaction: discord.Interaction):
         if not await owns_current_channel(interaction.channel, interaction.user):
@@ -483,6 +602,7 @@ class VoiceControlView(discord.ui.View):
                 await interaction.channel.set_permissions(member_role, overwrite=mem_ow)
 
         await interaction.response.send_message(t("voicemod.room_hidden"), ephemeral=True)
+        await refresh_room_panel(interaction.channel)
 
     async def unhide(self, interaction: discord.Interaction):
         # Unhiding a room is restricted to current staff configuration.
@@ -508,6 +628,7 @@ class VoiceControlView(discord.ui.View):
                 await interaction.channel.set_permissions(member_role, overwrite=mem_ow)
 
         await interaction.response.send_message(t("voicemod.room_unhidden"), ephemeral=True)
+        await refresh_room_panel(interaction.channel)
 
 class VoiceMods(commands.Cog):
     def __init__(self, bot):
@@ -614,7 +735,10 @@ class VoiceMods(commands.Cog):
                 faction_lock=is_enabled(guild.id, "temporary_voice_faction_lock")
             )
             msg = t("voicemod.control_panel_msg", user=member.mention)
-            await new_channel.send(msg, view=view)
+            panel = render_room_panel(
+                new_channel, member.id,
+                faction_lock_enabled=is_enabled(guild.id, "temporary_voice_faction_lock"))
+            await new_channel.send(msg, embed=panel, view=view)
 
         if before.channel:
             is_temp = await database.run(database.get_active_channel_owner, before.channel.id) is not None

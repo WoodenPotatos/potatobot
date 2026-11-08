@@ -73,7 +73,7 @@ READ_ONLY_OPERATIONS = {
     "get_user_inventory",
     "get_user_vouchers",
     "get_guild_settings", "get_instance_settings", "get_schema_version",
-    "list_managed_messages", "get_managed_message",
+    "list_managed_messages", "get_managed_message", "get_role_menu_by_message",
     "get_settings_revision",
     "get_settings_audit", "get_privacy_audit", "get_shop_item_definitions",
     "list_dashboard_documents", "get_control_action",
@@ -6444,6 +6444,18 @@ def list_managed_messages(guild_id: int, kind: str = None) -> list[dict]:
 def get_managed_message(guild_id: int, kind: str, menu_key: str) -> dict | None:
     for message in list_managed_messages(guild_id, kind):
         if message["menu_key"] == menu_key:
+            return message
+    return None
+
+
+def get_role_menu_by_message(guild_id: int, message_id: int) -> dict | None:
+    """The role menu posted as this message, or None.
+
+    How a reaction finds its menu: a reaction carries the message and the
+    emoji, never a `custom_id`, so the posted message is the menu's address.
+    """
+    for message in list_managed_messages(guild_id, "role_menu"):
+        if message.get("message_id") and int(message["message_id"]) == int(message_id):
             return message
     return None
 

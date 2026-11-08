@@ -30,6 +30,43 @@ MANAGED_KIND_FEATURES = {
 }
 
 
+# How a role menu offers its roles (decided 2026-11-06: a mode of the role
+# menu, not a kind of its own). `buttons` is what every menu was before, so a
+# row with no mode is a button menu.
+ROLE_MENU_MODES = ("buttons", "reactions")
+
+
+def role_menu_mode(options) -> str:
+    mode = (options or {}).get("mode")
+    return mode if mode in ROLE_MENU_MODES else "buttons"
+
+
+def emoji_key(text) -> str | None:
+    """One comparable identity for an emoji, however it was written.
+
+    A custom emoji is its id (`<:potato:123>` and `<a:potato:123>` are the
+    same one, and its name can be renamed under it); a Unicode emoji is its
+    text with any variation selector removed, which is how Discord reports a
+    reaction. Two entries with one key would be one reaction routing to two
+    roles, so this is what "unique per menu" compares.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return None
+    partial = discord.PartialEmoji.from_str(text.strip())
+    if partial.id:
+        return f"custom:{partial.id}"
+    return "unicode:" + (partial.name or "").replace("\ufe0f", "")
+
+
+def reaction_legend(entries) -> str:
+    """The lines a reaction menu shows under its body: which emoji gives what.
+
+    A button carries its own label; a reaction does not, so without this a
+    member would see emoji and have to guess what each one grants.
+    """
+    return "\n".join(f"{entry['emoji']} {entry['label']}" for entry in entries)
+
+
 # Discord's button-label limit. discord.py does not check it — it coerces to
 # `str` and lets Discord answer 400 — so an over-long label would surface as an
 # opaque outbox error after the operator had already pressed Post.
@@ -111,6 +148,14 @@ def render_managed_message(guild, stored):
         from cogs.roleselect import RoleMenuView
         if not stored["entries"]:
             return None, "managed_menu_empty"
+        if role_menu_mode(options) == "reactions":
+            # No view: the bot's own reactions are the controls, added after
+            # the post by the publisher, and a click routes by message and
+            # emoji rather than by a `custom_id`.
+            legend = reaction_legend(stored["entries"])
+            embed.description = "\n\n".join(
+                part for part in (embed.description, legend) if part)
+            return [embed], None
         # The guild id is what makes this *this* guild's menu. Without it the
         # constructor builds the routing instance, which carries every guild's
         # labels.

@@ -26,7 +26,8 @@ import discord
 
 from cogs.utils import t
 from core import database
-from core.managed_messages import render_managed_message
+from core.managed_messages import (emoji_key, render_managed_message,
+                                   role_menu_mode)
 
 # The name the worker logged under while it lived in `dashboard_api`, kept so a
 # journal search for an outbox failure still finds the old lines and the new.
@@ -78,6 +79,40 @@ async def execute_member_erasure(bot, action) -> str | None:
     return None
 
 
+async def sync_menu_reactions(message, stored):
+    """Make the bot's own reactions on a role menu match what it offers.
+
+    A reaction menu gets one reaction per entry, added by the bot so a member
+    only has to click; an entry removed since loses the bot's reaction. A button
+    menu has none, which also tidies a menu switched back from reactions.
+    Members' own reactions are never removed here: that is their choice, and an
+    emoji no longer on the menu simply routes to nothing. Returns an outbox
+    error code, or None.
+    """
+    if stored["kind"] != "role_menu":
+        return None
+    wanted = {}
+    if role_menu_mode(stored.get("options")) == "reactions":
+        for entry in stored["entries"]:
+            wanted.setdefault(emoji_key(entry["emoji"]), entry["emoji"])
+    present = {emoji_key(str(reaction.emoji)): reaction
+               for reaction in getattr(message, "reactions", []) if reaction.me}
+    try:
+        for key, reaction in present.items():
+            if key not in wanted:
+                await message.remove_reaction(reaction.emoji, message.guild.me)
+        for key, emoji in wanted.items():
+            if key not in present:
+                await message.add_reaction(emoji)
+    except discord.Forbidden:
+        return "bot_permission_denied"
+    except discord.HTTPException:
+        # Discord's answer to an emoji it does not know, or one from a server
+        # the bot is not in: the message is posted, its reactions are not.
+        return "managed_reaction_failed"
+    return None
+
+
 async def execute_managed_publish(guild, channel, action):
     """Post the managed message, or edit the one already posted.
 
@@ -108,7 +143,7 @@ async def execute_managed_publish(guild, channel, action):
             posted = await source.fetch_message(int(stored["message_id"]))
             await posted.edit(embeds=embeds, view=view,
                               allowed_mentions=discord.AllowedMentions.none())
-            return None
+            return await sync_menu_reactions(posted, stored)
         except discord.NotFound:
             logger.info(
                 "Managed message %s/%s was gone; posting a new one "
@@ -119,7 +154,7 @@ async def execute_managed_publish(guild, channel, action):
     await database.run_write(database.record_managed_post, guild.id,
                              stored["kind"], stored["menu_key"],
                              channel.id, message.id)
-    return None
+    return await sync_menu_reactions(message, stored)
 
 
 async def execute_managed_delete(channel, action):

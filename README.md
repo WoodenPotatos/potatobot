@@ -15,7 +15,7 @@ The bot's main language is Hungarian but it has a full English localization, and
 Currently the bot is built for single guild use however it already has the foundation for multi guild usage with some fancy special features in mind. It runs bare metal or as a container: `container/` holds a Containerfile and a compose.yaml for the two-process split, `deploy/` holds the systemd units and a rootless podman Quadlet unit, and CI builds the image on every push.
 
 <!-- BEGIN GENERATED: version -->
-**Version 3.0.5b** &nbsp;·&nbsp; channel `beta`
+**Version 3.0.17b** &nbsp;·&nbsp; channel `beta`
 
 Early access. Expect breaking changes between releases.
 <!-- END GENERATED: version -->
@@ -43,14 +43,13 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14 and P
   Everydle minigame data, with Hungarian as the source language
 - PostgreSQL storage with numbered, transactional migrations, a dump before each one,
   and asynchronous read/write execution
-- 62 guild feature switches in eleven groups, with dependency checks,
+- 63 guild feature switches in ten groups, with dependency checks,
   audit revisions, and runtime cache refresh
 - Moderation, warnings, faction management, tickets, onboarding, role menus, and temporary voice channels
 - LoLdle, Valdle, DbDle and Genshindle daily puzzles; counting and word-chain
   channels
 - Casino games: blackjack, dice, roulette, slots, wheel, mines, hilo, crash and
   Russian roulette
-- HTTPS YouTube-only music playback through bounded `yt-dlp` and FFmpeg workers
 - OAuth-authenticated dashboard designed to run behind private HTTPS
 - Typed, categorized guild dashboard with feature-aware navigation, safe Discord
   selectors, audit history, gacha/banner controls, content builders, and safe shop templates
@@ -86,7 +85,6 @@ Runs on a headless Linux server under systemd. Requires Python 3.12–3.14 and P
 - Python 3.12, 3.13, or 3.14
 - A Discord application and bot token
 - Discord privileged Message Content and Server Members intents
-- FFmpeg for music playback
 - PostgreSQL 18, on the host or as the container beside the bot
 - Optional Twitch API credentials for stream notifications
 - For the dashboard, an HTTPS reverse proxy in front of loopback: Tailscale
@@ -186,6 +184,18 @@ matrices — is in [docs/development.md](docs/development.md).
 
 ## Recent releases
 
+### 3.0.17b
+
+- **Music has left PotatoBot.** `/play`, `/queue`, `/skip` and the rest of the music commands are gone; music lives on in a separate bot. The image no longer carries FFmpeg, and `yt-dlp`, `PyNaCl` and `davey` left the dependencies. A server's stored music switch is simply no longer read.
+- **Privacy Policy 1.4 and Terms of Service 1.1** (both languages, effective 2026-11-08): no music search is sent to YouTube any more, so YouTube is no longer a recipient, and the Terms drop the music section. Version 1.4 also carries 1.3's event log change. Material, announced in the next guild message.
+- **Server event log** (off until a server enables it). Four optional log channels: edited and deleted messages (with their text while the bot still holds the message), member changes (nickname, roles, timeouts), voice joins, leaves and moves, and server changes (channels, roles, emoji, and each new invite with who created it, its use limit and when it expires). Channels and roles can be excluded; bots' messages are never logged, and nothing is stored.
+- **Privacy Policy 1.3** (sections 4, 5 and 6.5, both languages): a server that enables the event log has the text of an edited or deleted message posted to its staff log channel. A material change, announced in the next guild message.
+- **Conditional role rules** (off until a server enables *Role rules*). Three kinds of rule, set on their own dashboard page: a role that *grants* others (and takes them back when it goes), a role that *requires* another (and is removed without it), and an *exclusive group* where a member holds one role and the newest wins. They apply to every role change, including the bot's own level rewards and role menus, and never touch a privileged role or one above the bot. Privacy Policy sections 4 and 10 list them (both languages).
+- **Reaction roles.** A role menu can now be offered as reactions instead of buttons: the bot reacts with each entry's emoji, lists under the message which emoji gives which role, and grants or removes the role as members add or remove their reaction. A "one role at a time" switch makes a menu pick-one. Set it on the role menu's page in the dashboard; `/setup_*` and `/update_*` follow the same setting.
+- **Genshin Impact and Honkai: Star Rail announce the patch notes, not the notices around them.** A store update, an event or a maintenance preview whose title mentions the version no longer counts as the new patch, so a version is announced once, with its notes.
+- **Patch announcements show a short preview and the release's picture.** Steam games, League of Legends, Valorant, Genshin Impact and Honkai: Star Rail announcements now carry the first lines of the post (about 300 characters) and its header image when the source has one. Minecraft stays a title and a link: its site does not let Discord load the picture.
+- …and 4 more, in [CHANGELOG.md](CHANGELOG.md).
+
 ### 3.0.5b
 
 - **3.0.0: every server has its own economy.** Your coin balance, experience, level, cooldowns, `/daily`, Everydle streaks and casino limits are now kept separately in each server the bot is in, so coins earned in one server cannot be spent in another and a member of two servers no longer earns twice into one wallet. Everything you had is kept, in the server where you earned it; in any server you join later you start at 0 (a brand-new account still gets its starting coins in its first server). Leaderboards, `/profile` and robbery read the current server's wallets.
@@ -196,13 +206,6 @@ matrices — is in [docs/development.md](docs/development.md).
 ### 2.21.37
 
 - **SQLite support is removed.** Installations still on SQLite (2.19.x and earlier) stay on the last SQLite stable, 2.19.29, which the public repository keeps on the `stable-2.19` branch; there is no upgrade path from it. The one-time copy tool, `POTATOBOT_DB_PATH` and the offsite backup's `--legacy-sqlite` are gone. Unset `POTATOBOT_DATA_DIR` now means beside the code, where the session secret and card backgrounds already sat by default; an installation that set only `POTATOBOT_DB_PATH` sets `POTATOBOT_DATA_DIR` to that file's directory instead.
-
-### 2.21.34b
-
-- **Privacy Policy 1.1: your data is encrypted at rest.** The database, its backups on the server and the bot's log file now sit on an encrypted disk volume, memory the server pages out stays in compressed RAM, and no log line naming you goes to the system journal any more; the older ones expire within about two months. Nothing the bot collects or shares changed. (English and Hungarian, sections 7, 9 and 14.)
-- **Keep member-naming log lines out of the system journal (operators).** A new `POTATOBOT_LOG_CONSOLE` setting (default `true`, see `.env.example`): set it to `false` and the bot writes its log lines only to `bot.log` in its data directory, so a journal on an unencrypted disk no longer holds them. Crash traces and stack dumps still reach the journal. The reference Quadlet unit sets it, `deploy/potatobot-db.container` makes PostgreSQL log errors without their values, and `deploy/potatobot-log` is a small reader for the log file that a sudoers rule can grant without wider access.
-- **The nightly offsite backup can stage its dump on the encrypted volume.** `scripts/offsite_backup.py --workdir DIR` writes the plaintext dump and its verification copy there instead of the system temporary directory, and refuses to run if the directory is missing. The reference unit passes it and no longer passes `--legacy-sqlite` or sets `POTATOBOT_DB_PATH`.
-- **Faster test suite for contributors.** Each test resets its database with ordered deletes instead of `TRUNCATE`, and `scripts/run_tests_parallel.py` runs the suite across several PostgreSQL databases for quick iteration (the serial run stays the gate).
 
 The full history is in [CHANGELOG.md](CHANGELOG.md).
 

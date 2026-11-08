@@ -13,6 +13,10 @@ const API = '/api';
 let locale = {};
 let csrf = '';
 let isHost = false;
+// Discord's add-the-bot link; `/auth/status` sends it to the host session only.
+let inviteUrl = null;
+// The Privacy Policy and Terms addresses, for the account menu.
+let legalLinks = null;
 // Per guild, unlike `isHost`: refreshed on every `loadGuild()`, never carried
 // over from the previously active guild.
 let isFullAdminForGuild = false;
@@ -693,15 +697,19 @@ function renderHeaderControls() {
 
     const guildTrigger = document.getElementById('guild-trigger');
     const guild = selectedGuild();
-    guildTrigger.classList.toggle('hidden', guilds.length === 0);
-    guildTrigger.disabled = guilds.length < 2;
+    // The menu opens for one guild too when it can offer the invite.
+    const hasMenu = guilds.length > 1 || Boolean(inviteUrl);
+    guildTrigger.classList.toggle('hidden', guilds.length === 0 && !inviteUrl);
+    guildTrigger.disabled = !hasMenu;
     if (guild) {
         guildTrigger.replaceChildren(
             avatarNode(guild.icon_url, guild.name, 'avatar avatar-sm'),
             element('span', 'guild-name', guild.name),
         );
-        if (guilds.length > 1) guildTrigger.appendChild(icon('ic-chevron-down', 'ic ic-sm'));
+    } else {
+        guildTrigger.replaceChildren(element('span', 'guild-name', tr('dashboard.guild_invite')));
     }
+    if (hasMenu) guildTrigger.appendChild(icon('ic-chevron-down', 'ic ic-sm'));
 }
 
 function buildAccountMenu(menu, close) {
@@ -736,6 +744,21 @@ function buildAccountMenu(menu, close) {
         });
     }
 
+    if (legalLinks) {
+        menu.appendChild(element('div', 'menu-divider'));
+        [['privacy', 'dashboard.login_privacy'], ['terms', 'dashboard.login_terms']]
+            .forEach(([key, label]) => {
+                if (typeof legalLinks[key] !== 'string') return;
+                menu.appendChild(menuItem(tr(label), {
+                    symbol: 'ic-link',
+                    onSelect: () => {
+                        close();
+                        window.open(legalLinks[key], '_blank', 'noopener,noreferrer');
+                    },
+                }));
+            });
+    }
+
     menu.appendChild(element('div', 'menu-divider'));
     menu.appendChild(menuItem(tr('dashboard.logout'), {
         symbol: 'ic-logout',
@@ -760,6 +783,16 @@ function buildGuildMenu(menu, close) {
         item.prepend(avatarNode(guild.icon_url, guild.name, 'avatar avatar-xs'));
         menu.appendChild(item);
     });
+    if (inviteUrl) {
+        if (guilds.length) menu.appendChild(element('div', 'menu-divider'));
+        menu.appendChild(menuItem(tr('dashboard.guild_invite'), {
+            symbol: 'ic-plus',
+            onSelect: () => {
+                close();
+                window.open(inviteUrl, '_blank', 'noopener,noreferrer');
+            },
+        }));
+    }
 }
 
 /** Re-fetch the catalogue and repaint everything that carries translated text. */
@@ -787,6 +820,8 @@ async function authenticate() {
 
     csrf = result.csrf_token;
     isHost = result.is_host === true;
+    inviteUrl = typeof result.invite_url === 'string' ? result.invite_url : null;
+    legalLinks = result.legal || null;
     startSessionTimer(result.idle_timeout_seconds);
     account = result.user;
     guilds = result.guilds || [];
@@ -1079,11 +1114,18 @@ async function showPage(page) {
         node.classList.toggle('active', active);
         if (active) node.setAttribute('aria-current', 'page');
         else node.removeAttribute('aria-current');
-        // Open the branch holding the page, so the active item is never
-        // inside a closed one, and the branch a parent page heads, so its
-        // sub-pages show the moment it is visited. Not remembered: the
-        // operator did not ask.
-        if (active && node.closest('.nav-branch')) setBranchOpen(node.closest('.nav-branch'), true);
+    });
+    // Open the branch holding the page, so the active item is never inside a
+    // closed one, and the branch a parent page heads, so its sub-pages show the
+    // moment it is visited. Every other branch closes unless the operator
+    // opened it with its expander: one opened only by visiting used to stay
+    // open after leaving, so each visit left more of the sidebar unfolded.
+    // Navigation is never remembered; only the expander is.
+    const remembered = openBranches();
+    document.querySelectorAll('.nav-branch').forEach((branch) => {
+        const holdsActive = [...branch.querySelectorAll('.nav-item')]
+            .some((node) => node.dataset.page === page);
+        setBranchOpen(branch, holdsActive || remembered.has(branch.dataset.branch));
     });
 
     // Reset the shared header slots before rendering, so a page is free to fill
@@ -2203,6 +2245,29 @@ const JSON_ROW_SHAPES = {
         incomplete: (columns) => (columns.lfg === true || columns.lfg === 'true')
             && (!columns.role || !columns.channel),
     },
+    role_rules: {
+        // One row per rule (decided 2026-11-06). `when` stays empty for an
+        // exclusive group, which the server enforces and the hint explains.
+        key: {kind: 'text', label: 'dashboard.role_rule_name'},
+        columns: [
+            {name: 'type', kind: 'choice', label: 'dashboard.role_rule_type',
+             options: ['grants', 'requires', 'exclusive'],
+             optionLabels: 'dashboard.role_rule_types'},
+            {name: 'when_ids', kind: 'role_list', label: 'dashboard.role_rule_when'},
+            {name: 'then_ids', kind: 'role_list', label: 'dashboard.role_rule_then',
+             required: true},
+        ],
+        unpack: (entry) => ({
+            type: entry?.type ?? 'grants',
+            when_ids: entry?.when_ids ?? [],
+            then_ids: entry?.then_ids ?? [],
+        }),
+        pack: (columns) => ({
+            type: columns.type || 'grants',
+            when_ids: columns.when_ids || [],
+            then_ids: columns.then_ids || [],
+        }),
+    },
     factions: {
         key: {kind: 'text', label: 'dashboard.faction_key'},
         columns: [
@@ -2342,6 +2407,21 @@ function jsonRowEditor(definition, value) {
             input.addEventListener('change', () => saveFeature(featureKey, input, state.revision));
             wrap.append(input, element('span', 'track'));
             return wrap;
+        }
+        if (spec.kind === 'choice') {
+            // Read back through `node.value` like a text cell.
+            const select = document.createElement('select');
+            select.className = 'row-field';
+            select.dataset.column = spec.name;
+            select.title = tr(spec.label);
+            spec.options.forEach((option) => {
+                const node = document.createElement('option');
+                node.value = option;
+                node.textContent = tr(`${spec.optionLabels}.${option}`);
+                select.appendChild(node);
+            });
+            select.value = spec.options.includes(current) ? current : spec.options[0];
+            return select;
         }
         if (spec.kind === 'toggle') {
             const wrap = element('label', 'switch row-switch');
@@ -5210,7 +5290,28 @@ const MANAGED_FIELDS = {
                    max: 80, hint: 'managed_button_label'},
     image_url: {kind: 'text', label: 'dashboard.managed_image', max: 1024,
                 wide: true, hint: 'managed_image'},
+    // A role menu's mode (2026-11-06): buttons, or the bot's reactions.
+    menu_mode: {kind: 'choice', label: 'dashboard.role_menu_mode',
+                options: ['buttons', 'reactions'], default: 'buttons',
+                optionLabels: 'dashboard.role_menu_modes', hint: 'role_menu_mode'},
+    single_choice: {kind: 'checkbox', label: 'dashboard.role_menu_single_choice',
+                    default: false, hint: 'role_menu_single_choice'},
 };
+
+/** What `core/managed_messages.emoji_key` compares: a custom emoji by its id,
+ *  a Unicode one by its text without the variation selector. */
+function emojiKey(text) {
+    const value = String(text || '').trim();
+    if (!value) return null;
+    const custom = value.match(/^<?a?:?[A-Za-z0-9_]+:(\d{13,20})>?$/);
+    return custom ? `custom:${custom[1]}` : `unicode:${value.replaceAll('\ufe0f', '')}`;
+}
+
+/** The lines a reaction menu shows under its body, as the renderer adds them. */
+function reactionLegend(entries) {
+    return (entries || []).filter((entry) => entry.label)
+        .map((entry) => `${entry.emoji} ${entry.label}`).join('\n');
+}
 
 const RULES_SECTION_LIMIT = 10;
 const MANAGED_ENTRY_LIMIT = 25;
@@ -5275,7 +5376,7 @@ const MANAGED_KINDS = {
         sections: [
             {legend: 'dashboard.managed_step_message',
              fields: ['display_name', 'menu_key', 'colour', 'channel',
-                      'title', 'body']},
+                      'title', 'body', 'menu_mode', 'single_choice']},
             {legend: 'dashboard.managed_step_roles', repeat: 'entries'},
         ],
         repeat: {
@@ -5298,15 +5399,26 @@ const MANAGED_KINDS = {
             channel: item?.channel_id ?? null,
             title: item?.title ?? '',
             body: item?.body ?? '',
+            menu_mode: item?.options?.mode ?? 'buttons',
+            single_choice: item?.options?.single_choice === true,
             entries: (item?.entries ?? []).map((entry) => ({
                 label: entry.label ?? '', role_id: entry.role_id ?? '',
                 emoji: entry.emoji ?? '',
             })),
         }),
-        pack: (values) => ({
-            title: values.title || null, body: values.body || null,
-            options: {}, entries: values.entries,
-        }),
+        // A shaped editor returns what the API sent: a menu stored with no
+        // options packs none, so opening and saving it changes nothing.
+        pack: (values, item) => {
+            const options = {};
+            if (values.menu_mode !== 'buttons' || item?.options?.mode !== undefined) {
+                options.mode = values.menu_mode;
+            }
+            if (values.single_choice || item?.options?.single_choice !== undefined) {
+                options.single_choice = values.single_choice;
+            }
+            return {title: values.title || null, body: values.body || null,
+                    options, entries: values.entries};
+        },
     },
     embed: {
         // The plain sender: a message the bot says, and nothing around it. No
@@ -5755,7 +5867,7 @@ function renderManagedEditor(page, item) {
                 display_name: values.display_name,
                 revision: item?.revision ?? 0,
                 colour: values.colour,
-                ...spec.pack(values),
+                ...spec.pack(values, item),
             };
             const saved = await api(`/guilds/${guildId}/managed/${spec.kind}`,
                                     {method: 'POST', headers: headers(),
@@ -5891,6 +6003,15 @@ function managedProblem(spec, values) {
         // apart — and the API refuses the whole save rather than one row.
         if (new Set(labels).size !== labels.length) {
             return 'dashboard.errors.managed_entry_duplicate';
+        }
+        if (values.menu_mode === 'reactions') {
+            const keys = (values.entries || []).map((entry) => emojiKey(entry.emoji));
+            if (keys.some((key) => key === null)) {
+                return 'dashboard.errors.managed_reaction_emoji_required';
+            }
+            if (new Set(keys).size !== keys.length) {
+                return 'dashboard.errors.managed_reaction_emoji_duplicate';
+            }
         }
     }
     return null;
@@ -6363,9 +6484,13 @@ function messagePreview(spec, values) {
     author.appendChild(element('span', 'preview-author-name', guild?.name || ''));
     message.appendChild(author);
 
+    // A reaction menu lists its emoji under the body, as the renderer does.
+    const legend = spec.kind === 'role_menu' && values.menu_mode === 'reactions'
+        ? reactionLegend(values.entries) : '';
     const embeds = (spec.kind === 'rules' || spec.kind === 'embed')
         ? (values.embeds || []).map((row) => ({title: row.title, body: row.body}))
-        : [{title: values.title, body: values.body}];
+        : [{title: values.title,
+            body: [values.body, legend].filter(Boolean).join('\n\n')}];
 
     embeds.forEach((embed, index) => {
         const card = element('div', 'preview-embed');
@@ -6432,6 +6557,8 @@ function previewButtons(spec, values) {
     // An embed carries no button at all: it is the message and nothing else.
     if (spec.kind === 'embed') return [];
     if (spec.kind === 'role_menu') {
+        // A reaction menu carries no buttons: its controls are the reactions.
+        if (values.menu_mode === 'reactions') return [];
         return (values.entries || [])
             .filter((entry) => entry.label)
             .map((entry) => ({label: entry.label, style: 'secondary',

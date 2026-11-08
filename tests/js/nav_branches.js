@@ -145,6 +145,19 @@ const settle = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
     assert.ok(patchBranch.classList.contains('open'), 'a parent page opens its branch');
     console.log('ok    visiting a parent page opens its branch');
 
+    // The maintainer's report (2026-11-06): a branch opened by visiting stayed
+    // open after moving to another page, cluttering the sidebar. Onboarding
+    // was opened with its expander above, so it stays: that one is a choice.
+    await window.eval('showPage("overview")');
+    await settle();
+    assert.ok(!patchBranch.classList.contains('open'),
+        'a branch opened only by visiting closes when the operator moves on');
+    assert.strictEqual(patchBranch.querySelector('.nav-expand').getAttribute('aria-expanded'), 'false');
+    assert.ok(branch.classList.contains('open'), 'a branch opened with its expander stays open');
+    console.log('ok    moving on closes a visited branch but keeps a chosen one');
+    await window.eval('showPage("member_announcements")');
+    await settle();
+
     // Generated sub-pages: a `child_pages` parent's children that own settings.
     const generated = () => [...doc.querySelectorAll(
         '.nav-branch[data-branch="member_announcements"] .nav-children > .nav-item')];

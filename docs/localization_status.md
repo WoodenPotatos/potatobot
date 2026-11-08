@@ -154,9 +154,8 @@ same opaque-id mechanism carries it without any loader change).
 
 A playback failure used to be logged and told the member nothing. The key that
 once reported it (`music.playback_error`) was deleted rather than revived,
-because it interpolated the raw error; the `after` callback in `cogs/music.py`
-now posts the generic `music.playback_failed` instead, which names the failure
-without quoting the exception, and the track still auto-advances.
+because it interpolated the raw error. Music, and every `music.*` key with it,
+left the bot in 3.0.17a (2026-11-08) for the separate `potatomusic`.
 
 ---
 

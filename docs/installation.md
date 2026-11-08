@@ -17,7 +17,6 @@ read `CHANGELOG.md` before upgrading, and keep the backups the migration writes.
 | | |
 | --- | --- |
 | Python | 3.12, 3.13 or 3.14 |
-| FFmpeg | only for music; everything else works without it |
 | A host | any Linux box that can stay online; the reference deployment is AlmaLinux 10 |
 | HTTPS | required *only* if you want the dashboard — see step 6 |
 | PostgreSQL | 18, on this host or in a container beside the bot (step 5, or 7a) |

@@ -1925,6 +1925,43 @@ class AuditHardeningTests(unittest.TestCase):
         self.assertEqual(403, statuses[0])
         self.assertIn(429, statuses)
 
+    def test_only_the_host_session_receives_the_bot_invite_link(self):
+        from urllib.parse import parse_qs, urlparse
+        from core import permission_audit
+
+        self.authenticate(user_id="7")
+        self.assertIsNone(self.client.get("/api/auth/status").get_json()["invite_url"])
+        self.authenticate(user_id="42")
+        invite = self.client.get("/api/auth/status").get_json()["invite_url"]
+        query = parse_qs(urlparse(invite).query)
+        self.assertTrue(invite.startswith("https://discord.com/oauth2/authorize?"))
+        self.assertEqual(["client-id"], query["client_id"])
+        self.assertEqual(["bot applications.commands"], query["scope"])
+        self.assertEqual([str(permission_audit.invite_permissions())],
+                         query["permissions"])
+
+    def test_the_invite_asks_for_every_permission_a_feature_declares(self):
+        import discord
+        from core import permission_audit, settings_registry
+
+        granted = discord.Permissions(permission_audit.invite_permissions())
+        for definition in settings_registry.FEATURE_DEFINITIONS.values():
+            for name in definition.required_discord_permissions:
+                with self.subTest(feature=definition.key, permission=name):
+                    self.assertTrue(getattr(granted, name))
+        for name in settings_registry.BASE_DISCORD_PERMISSIONS:
+            self.assertTrue(getattr(granted, name), name)
+        # The per-feature audit means nothing to a bot that holds everything.
+        self.assertFalse(granted.administrator)
+
+    def test_status_carries_the_policy_links_from_one_place(self):
+        from core import version
+
+        self.authenticate(user_id="7")
+        legal = self.client.get("/api/auth/status").get_json()["legal"]
+        self.assertEqual({"privacy": version.PRIVACY_POLICY_URL,
+                          "terms": version.TERMS_OF_SERVICE_URL}, legal)
+
     def test_a_bad_oauth_state_does_not_end_a_live_session(self):
         self.authenticate()
         refused = self.client.get("/api/callback?code=x&state=wrong")

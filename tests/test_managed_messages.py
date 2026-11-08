@@ -150,9 +150,45 @@ class ManagedMessageRouteTests(unittest.TestCase):
                    for index in range(26)]
         self.assertEqual(400, self.save("role_menu", entries=entries).status_code)
 
-    def test_a_role_menu_may_not_carry_options(self):
-        """A stored value nothing reads is worse than a refusal."""
+    def test_a_role_menu_carries_only_the_options_it_reads(self):
+        """A stored value nothing reads is worse than a refusal. Restated
+        2026-11-06: a role menu now reads `mode` and `single_choice` (reaction
+        menus), and still refuses anything else."""
         self.assertEqual(400, self.role_menu(options={"variant": "games"}).status_code)
+        self.assertEqual(400, self.role_menu(options={"mode": "dropdown"}).status_code)
+        self.assertEqual(400, self.role_menu(options={"single_choice": "yes"}).status_code)
+        self.assertEqual(201, self.role_menu(
+            options={"mode": "buttons", "single_choice": False}).status_code)
+
+    # ------------------------------------------------------- reaction menus
+
+    def test_a_reaction_menu_needs_an_emoji_on_every_row(self):
+        entries = [{"label": "Valorant", "role_id": "1420070400000000001", "emoji": "🔫"},
+                   {"label": "League", "role_id": "1420070400000000002", "emoji": ""}]
+        self.assertEqual(400, self.save("role_menu", entries=entries,
+                                        options={"mode": "reactions"}).status_code)
+        # The same rows are a valid button menu: a button may go without one.
+        self.assertEqual(201, self.save("role_menu", entries=entries).status_code)
+
+    def test_one_emoji_however_spelled_cannot_grant_two_roles(self):
+        for first, second in (("❤️", "❤"),
+                              ("<:potato:1420070400000000005>",
+                               "<a:renamed:1420070400000000005>")):
+            with self.subTest(first=first, second=second):
+                entries = [{"label": "A", "role_id": "1420070400000000001", "emoji": first},
+                           {"label": "B", "role_id": "1420070400000000002", "emoji": second}]
+                response = self.save("role_menu", entries=entries,
+                                     options={"mode": "reactions"})
+                self.assertEqual(400, response.status_code)
+                self.assertEqual(
+                    dashboard_api.t("dashboard.errors.managed_reaction_emoji_duplicate"),
+                    response.get_json()["message"])
+
+    def test_a_reaction_menu_round_trips_its_mode(self):
+        self.assertEqual(201, self.role_menu(
+            options={"mode": "reactions", "single_choice": True}).status_code)
+        menu = self.client.get("/api/guilds/123/managed/role_menu").get_json()["data"][0]
+        self.assertEqual({"mode": "reactions", "single_choice": True}, menu["options"])
 
     # --------------------------------------------------------- rules panel
 
@@ -1116,3 +1152,169 @@ class TicketLauncherNamingTests(unittest.IsolatedAsyncioTestCase):
         mocked_open.assert_awaited_once_with(
             interaction.guild, interaction.user, "ticket-woody", "support")
 
+
+
+class ReactionMenuTests(unittest.IsolatedAsyncioTestCase):
+    """A role menu offered as reactions (decided 2026-11-06): no view, a
+    legend under the body, the bot's own reactions kept in line with the
+    entries, and a reaction granting or removing the role behind its emoji."""
+
+    ROLE_A, ROLE_B = 1420070400000000001, 1420070400000000002
+    MESSAGE = 1420070400000000009
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = database.DATA_DIR
+        database.DATA_DIR = self.temp_dir.name
+        pg_harness.fresh_database()
+        database.initialize_database()
+        database.register_guild(123, "Test Guild")
+        settings_cache.invalidate()
+        refresh_feature_cache(123)
+
+    def tearDown(self):
+        settings_cache.invalidate()
+        database.DATA_DIR = self.original_path
+        self.temp_dir.cleanup()
+
+    def store(self, *, mode="reactions", single_choice=False):
+        database.save_managed_message(
+            123, 42, "role_menu", "games", "Games", 0, title="Pick", body="React below.",
+            options={"mode": mode, "single_choice": single_choice},
+            entries=[{"label": "Valorant", "role_id": self.ROLE_A, "emoji": "🔫"},
+                     {"label": "League", "role_id": self.ROLE_B, "emoji": "⚔️"}])
+        database.record_managed_post(123, "role_menu", "games", 1420070400000000010,
+                                     self.MESSAGE)
+        return database.get_managed_message(123, "role_menu", "games")
+
+    # ------------------------------------------------------------ render
+
+    def test_a_reaction_menu_renders_no_view_and_a_legend(self):
+        embeds, view = managed_messages.render_managed_message(
+            SimpleNamespace(id=123, icon=None), self.store())
+        self.assertIsNone(view)
+        self.assertEqual("React below.\n\n🔫 Valorant\n⚔️ League", embeds[0].description)
+
+    def test_a_menu_with_no_mode_is_still_a_button_menu(self):
+        stored = self.store(mode="buttons")
+        stored["options"] = {}
+        _embeds, view = managed_messages.render_managed_message(
+            SimpleNamespace(id=123, icon=None), stored)
+        self.assertIsNotNone(view)
+
+    # -------------------------------------------------------------- sync
+
+    def _message(self, mine=()):
+        reactions = [SimpleNamespace(emoji=emoji, me=True) for emoji in mine]
+        reactions.append(SimpleNamespace(emoji="👍", me=False))  # a member's own
+        return SimpleNamespace(reactions=reactions, guild=SimpleNamespace(me="bot"),
+                               add_reaction=AsyncMock(), remove_reaction=AsyncMock())
+
+    async def test_sync_adds_what_is_missing_and_drops_only_its_own_stale_reaction(self):
+        message = self._message(mine=("🔫", "🎲"))
+        self.assertIsNone(await control_actions.sync_menu_reactions(message, self.store()))
+        message.add_reaction.assert_awaited_once_with("⚔️")
+        message.remove_reaction.assert_awaited_once_with("🎲", "bot")
+
+    async def test_a_button_menu_takes_its_own_reactions_back(self):
+        message = self._message(mine=("🔫",))
+        await control_actions.sync_menu_reactions(message, self.store(mode="buttons"))
+        message.add_reaction.assert_not_awaited()
+        message.remove_reaction.assert_awaited_once_with("🔫", "bot")
+
+    async def test_a_refused_reaction_is_an_error_the_operator_sees(self):
+        message = self._message()
+        response = SimpleNamespace(status=400, reason="Unknown Emoji")
+        message.add_reaction = AsyncMock(side_effect=discord.HTTPException(response, "x"))
+        self.assertEqual("managed_reaction_failed",
+                         await control_actions.sync_menu_reactions(message, self.store()))
+
+    async def test_sync_never_touches_another_kind(self):
+        message = self._message(mine=("🔫",))
+        result = await control_actions.sync_menu_reactions(
+            message, {"kind": "rules", "options": {}, "entries": []})
+        self.assertIsNone(result)
+        message.remove_reaction.assert_not_awaited()
+
+    # ---------------------------------------------------------- listener
+
+    def _cog_and_guild(self, member_roles=()):
+        import cogs.roleselect  # inside: tests/test_cog_loading.py reloads cogs
+        self.roleselect = cogs.roleselect
+        roles = {role_id: SimpleNamespace(id=role_id) for role_id in (self.ROLE_A, self.ROLE_B)}
+        member = SimpleNamespace(id=7, bot=False, roles=[roles[r] for r in member_roles],
+                                 add_roles=AsyncMock(), remove_roles=AsyncMock())
+        partial = SimpleNamespace(remove_reaction=AsyncMock())
+        channel = SimpleNamespace(get_partial_message=lambda _id: partial)
+        guild = SimpleNamespace(id=123, get_role=roles.get,
+                                get_member=lambda _id: member,
+                                get_channel=lambda _id: channel)
+        bot = SimpleNamespace(user=SimpleNamespace(id=999), get_guild=lambda _id: guild)
+        cog = cogs.roleselect.RoleSelect.__new__(cogs.roleselect.RoleSelect)
+        cog.bot = bot
+        return cog, guild, member, roles, partial
+
+    def _payload(self, emoji, member, message_id=None):
+        return SimpleNamespace(guild_id=123, user_id=member.id, member=member,
+                               message_id=message_id or self.MESSAGE,
+                               channel_id=1420070400000000010,
+                               emoji=discord.PartialEmoji(name=emoji))
+
+    async def _react(self, cog, payload, *, added=True, allowed=True):
+        with patch.object(self.roleselect, "can_self_assign_role", return_value=allowed), \
+                patch.object(self.roleselect, "maintenance_blocks", return_value=False):
+            await cog.apply_reaction(payload, added=added)
+
+    async def test_a_reaction_grants_and_its_removal_takes_the_role(self):
+        self.store()
+        cog, _guild, member, roles, _partial = self._cog_and_guild()
+        await self._react(cog, self._payload("🔫", member))
+        member.add_roles.assert_awaited_once()
+        self.assertIs(roles[self.ROLE_A], member.add_roles.await_args.args[0])
+        member.roles.append(roles[self.ROLE_A])
+        await self._react(cog, self._payload("🔫", member), added=False)
+        self.assertIs(roles[self.ROLE_A], member.remove_roles.await_args.args[0])
+
+    async def test_an_emoji_spelled_with_its_variation_selector_still_routes(self):
+        self.store()
+        cog, _guild, member, roles, _partial = self._cog_and_guild()
+        await self._react(cog, self._payload("⚔", member))  # Discord drops U+FE0F
+        self.assertIs(roles[self.ROLE_B], member.add_roles.await_args.args[0])
+
+    async def test_single_choice_drops_the_other_role_and_reaction(self):
+        self.store(single_choice=True)
+        cog, _guild, member, roles, partial = self._cog_and_guild(member_roles=(self.ROLE_A,))
+        await self._react(cog, self._payload("⚔️", member))
+        self.assertIs(roles[self.ROLE_B], member.add_roles.await_args.args[0])
+        self.assertEqual((roles[self.ROLE_A],), member.remove_roles.await_args.args)
+        partial.remove_reaction.assert_awaited_once_with("🔫", member)
+
+    async def test_what_a_reaction_must_not_do(self):
+        cases = {
+            "a restricted role": dict(allowed=False),
+            "an emoji not on the menu": dict(emoji="🎲"),
+            "another message": dict(message_id=1420070400000000099),
+        }
+        self.store()
+        for why, case in cases.items():
+            with self.subTest(why=why):
+                cog, _guild, member, _roles, _partial = self._cog_and_guild()
+                payload = self._payload(case.get("emoji", "🔫"), member,
+                                        case.get("message_id"))
+                await self._react(cog, payload, allowed=case.get("allowed", True))
+                member.add_roles.assert_not_awaited()
+
+    async def test_a_button_menu_ignores_reactions(self):
+        self.store(mode="buttons")
+        cog, _guild, member, _roles, _partial = self._cog_and_guild()
+        await self._react(cog, self._payload("🔫", member))
+        member.add_roles.assert_not_awaited()
+
+    async def test_the_feature_switch_and_bots_are_honoured(self):
+        self.store()
+        cog, _guild, member, _roles, _partial = self._cog_and_guild()
+        with patch.object(self.roleselect, "is_enabled", return_value=False):
+            await self._react(cog, self._payload("🔫", member))
+        member.bot = True
+        await self._react(cog, self._payload("🔫", member))
+        member.add_roles.assert_not_awaited()

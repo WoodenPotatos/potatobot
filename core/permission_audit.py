@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 import discord
 
 from core.settings_registry import (
+    BASE_DISCORD_PERMISSIONS,
     FEATURE_DEFINITIONS,
     SETTING_DEFINITIONS,
     SettingValueType,
@@ -103,6 +104,21 @@ class PermissionReport:
             "blocking_count": len(self.blocking),
             "degraded_count": len(self.findings) - len(self.blocking),
         }
+
+
+def invite_permissions() -> int:
+    """The permissions integer for the bot's invite link.
+
+    Derived, never written down: the base set every guild needs plus the union
+    of every feature's `required_discord_permissions`, so a feature that starts
+    needing a permission is invited with it and the audit and the invite cannot
+    disagree. Never `administrator`: the audit reports per feature, and a bot
+    holding everything would make that report meaningless.
+    """
+    names = set(BASE_DISCORD_PERMISSIONS)
+    for definition in FEATURE_DEFINITIONS.values():
+        names.update(definition.required_discord_permissions)
+    return discord.Permissions(**{name: True for name in sorted(names)}).value
 
 
 def _missing(permissions: discord.Permissions, required) -> tuple[str, ...]:

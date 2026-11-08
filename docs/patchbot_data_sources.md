@@ -157,3 +157,23 @@ does: that tick links the hub, and the next tick (the version has not
 changed, so nothing re-posts) is moot since the adapter only fires once per
 new version id — a late article means that one announcement is
 lower-fidelity, not that it retries.
+
+## Excerpts and pictures (probed 2026-11-06)
+
+Fetched live with `urllib` for the 3.0.10a preview; the recordings are in
+`tests/fixtures/patchbot/` (trimmed by item count only).
+
+| Source | Excerpt | Picture | Notes |
+| --- | --- | --- | --- |
+| Steam News | `contents` with `maxlength=0` (the full post, BBCode; a literal bracket is escaped as `\[`) | the first `[img src="{STEAM_CLAN_IMAGE}/…"]`; the token expands to `https://clan.akamai.steamstatic.com/images/` (200 `image/png`; `clan.cloudflare.steamstatic.com` also answered, `shared.fastly…/clans/` 404) | CS2's newest official post had no picture; Dead by Daylight's did |
+| Riot (LoL, Valorant) | the card's `description.body` (`type: html`, one sentence) | the card's `media.url` when `media.type == "image"` (`cmsassets.rgpub.io`, 1920×1080) | the card also carries `imageMedia`, unused |
+| HoYoLAB | `post.content` (plain text, `〓` section markers) | the entry's `cover_list[0].url` (also in `image_list`; `post.cover` was empty) | `upload-os-bbs.hoyolab.com` serves without a Referer |
+| Minecraft | none: the article's `og:description` only repeats the title | none: `www.minecraft.net` answered a browser User-Agent in 0.3 s and timed out after 30 s for `Discordbot/2.0`, so Discord's proxy would not load it | no second fetch is made |
+
+Every picture host above answered a plain request with no Referer (Discord's
+proxy sends none). The same probe found two titles that pass the version
+heuristic but are not the notes: HSR's "Version 4.7 Store Update" and
+Genshin's "Version 7.2 Update Maintenance Preview", which precedes each notes
+post. Since 3.0.12a `HOYOLAB_EXCLUDED_WORDS` (store, shop, event, warp,
+maintenance, preview) skips them.
+

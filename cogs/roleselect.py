@@ -8,6 +8,7 @@ from the guild the click came from. The rows the menus are built from live in
 Rules that bind changes here: docs/subsystems/managed_messages.md
 """
 
+import asyncio
 import discord
 import logging
 import os
@@ -23,12 +24,27 @@ if ROOT_DIR not in sys.path:
 from discord.ext import commands
 from core import database
 from cogs.utils import BoundedCooldownMap, can_self_assign_role, t
-from core.feature_access import require_interaction_feature
+from core.bounded import BoundedValueMap
+from core.feature_access import (is_enabled, maintenance_blocks,
+                                 require_interaction_feature)
+from core.managed_messages import emoji_key, role_menu_mode
 
 role_logger = logging.getLogger("PotatoBot.RoleSelect")
 
 ROLE_ACTION_COOLDOWN = 3
 role_action_times = BoundedCooldownMap()
+# One lock per (guild, member) for reaction menus. A reaction cannot be refused
+# with a reply, so fast clicks are serialised rather than dropped: dropping one
+# would leave a reaction on the message with no role behind it.
+reaction_locks = BoundedValueMap()
+
+
+def _reaction_lock(guild_id, user_id) -> asyncio.Lock:
+    key = (guild_id, user_id)
+    lock = reaction_locks.get(key)
+    if lock is None:
+        lock = reaction_locks[key] = asyncio.Lock()
+    return lock
 
 def menu_entries(guild_id, menu_key) -> dict:
     """One guild's menu, as {label: {"id": role_id, "emoji": str}}.
@@ -195,6 +211,80 @@ class RoleSelect(commands.Cog):
         # per-menu for a registered view to hold.
         self.bot.add_view(RoleMenuView())
 
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload):
+        await self.apply_reaction(payload, added=True)
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload):
+        await self.apply_reaction(payload, added=False)
+
+    async def apply_reaction(self, payload, *, added: bool):
+        """A reaction on a reaction-mode role menu grants or removes its role.
+
+        Routed by (message, emoji) to the stored menu, never by anything the
+        message carries, so nothing per-message lives in memory. Every refusal a
+        button gives applies here too, but silently: a reaction has no reply.
+        Raw events, so a menu posted before the last restart still works
+        without its message being cached.
+        """
+        if payload.guild_id is None or payload.user_id == getattr(self.bot.user, "id", None):
+            return
+        guild = self.bot.get_guild(payload.guild_id)
+        if guild is None or not is_enabled(guild.id, "role_menus"):
+            return
+        member = payload.member if added else guild.get_member(payload.user_id)
+        if member is None or member.bot or maintenance_blocks(guild, member):
+            return
+        menu = await database.run_read(database.get_role_menu_by_message,
+                                       guild.id, payload.message_id)
+        if not menu or role_menu_mode(menu.get("options")) != "reactions":
+            return
+        key = emoji_key(str(payload.emoji))
+        entry = next((item for item in menu["entries"]
+                      if emoji_key(item["emoji"]) == key), None)
+        role = guild.get_role(int(entry["role_id"])) if entry else None
+        if role is None or not can_self_assign_role(guild, role):
+            return
+        reason = t("roleselect.audit_reason")
+        async with _reaction_lock(guild.id, member.id):
+            try:
+                if not added:
+                    if role in member.roles:
+                        await member.remove_roles(role, reason=reason)
+                    return
+                if role not in member.roles:
+                    await member.add_roles(role, reason=reason)
+                if (menu.get("options") or {}).get("single_choice"):
+                    await self._keep_single_choice(guild, member, menu, entry, payload,
+                                                   reason)
+            except discord.HTTPException as error:
+                role_logger.warning(
+                    "Reaction role change failed (guild_id=%s, menu=%s, error=%s)",
+                    guild.id, menu["menu_key"], type(error).__name__)
+
+    async def _keep_single_choice(self, guild, member, menu, chosen, payload, reason):
+        """Pick-one: the member's other roles from this menu go, and so do their
+        other reactions on it, so the message shows what they hold. Removing a
+        reaction needs Manage Messages; without it the roles are still right."""
+        others = [item for item in menu["entries"] if item is not chosen]
+        drop = [role for role in (guild.get_role(int(item["role_id"])) for item in others)
+                if role is not None and role in member.roles
+                and can_self_assign_role(guild, role)]
+        if drop:
+            await member.remove_roles(*drop, reason=reason)
+        channel = guild.get_channel(payload.channel_id)
+        if channel is None:
+            return
+        message = channel.get_partial_message(payload.message_id)
+        for item in others:
+            try:
+                await message.remove_reaction(item["emoji"], member)
+            except discord.Forbidden:
+                return
+            except discord.HTTPException:
+                continue
+
     async def menu_embed(self, guild_id, menu_key):
         """The embed for one menu, operator text first.
 
@@ -214,18 +304,39 @@ class RoleSelect(commands.Cog):
             color=discord.Color(colour) if colour is not None
             else discord.Color.green())
 
-    async def post_menu(self, ctx, menu_key):
-        if not menu_entries(ctx.guild.id, menu_key):
-            await ctx.send(t("roleselect.menu_empty"), ephemeral=True)
-            return
-        view = RoleMenuView(ctx.guild.id, menu_key)
+    async def menu_parts(self, guild_id, menu_key):
+        """The embed and view for one menu, honouring how it is offered.
+
+        A reaction menu has no view and lists its emoji under the body, as the
+        dashboard's renderer does; the commands must not post a button menu the
+        operator set to reactions.
+        """
+        from core.managed_messages import reaction_legend
+        stored = await database.run_read(database.get_managed_message,
+                                         guild_id, "role_menu", menu_key)
+        embed = await self.menu_embed(guild_id, menu_key)
+        if stored and role_menu_mode(stored.get("options")) == "reactions":
+            embed.description = "\n\n".join(
+                part for part in (embed.description,
+                                  reaction_legend(stored["entries"])) if part)
+            return stored, embed, None
+        view = RoleMenuView(guild_id, menu_key)
         # The routing instance registered at startup knows every label that
         # existed then. A label added since is not in it, so the freshly built
         # view has to be registered too or its button answers nothing after the
         # next restart-free edit.
         self.bot.add_view(view)
-        message = await ctx.channel.send(
-            embed=await self.menu_embed(ctx.guild.id, menu_key), view=view)
+        return stored, embed, view
+
+    async def post_menu(self, ctx, menu_key):
+        from core.control_actions import sync_menu_reactions
+        if not menu_entries(ctx.guild.id, menu_key):
+            await ctx.send(t("roleselect.menu_empty"), ephemeral=True)
+            return
+        stored, embed, view = await self.menu_parts(ctx.guild.id, menu_key)
+        message = await ctx.channel.send(embed=embed, view=view)
+        if stored:
+            await sync_menu_reactions(message, stored)
         # Remember it, so `/update_*` and the dashboard both know which message
         # is the live one without being told.
         await database.run_write(database.record_managed_post, ctx.guild.id,
@@ -252,10 +363,10 @@ class RoleSelect(commands.Cog):
                        if stored.get("channel_id") else ctx.channel)
             message = await (channel or ctx.channel).fetch_message(
                 int(stored["message_id"]))
-            view = RoleMenuView(ctx.guild.id, menu_key)
-            self.bot.add_view(view)
-            await message.edit(
-                embed=await self.menu_embed(ctx.guild.id, menu_key), view=view)
+            from core.control_actions import sync_menu_reactions
+            stored, embed, view = await self.menu_parts(ctx.guild.id, menu_key)
+            await message.edit(embed=embed, view=view)
+            await sync_menu_reactions(message, stored)
             await ctx.send(t(f"roleselect.{menu_key}_updated"), ephemeral=True)
         except Exception:
             role_logger.exception("Failed to update the %s role menu.", menu_key)

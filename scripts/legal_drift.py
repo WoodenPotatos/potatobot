@@ -248,8 +248,22 @@ def _dashboard_session():
     for name, value in re.findall(
             r"SESSION_COOKIE_(\w+)=((?:\([^)]*\)[^,\n]*)|[^,\n]+)", text):
         facts[f"SESSION_COOKIE_{name}"] = " ".join(value.split())
-    scopes = re.findall(r"\"scope\":\s*\"([^\"]+)\"", text)
-    facts["oauth_scopes"] = sorted(set(scopes))
+    # Two kinds of Discord authorize request, told apart by what comes back.
+    # The sign-in carries a `redirect_uri`: Discord returns a token to us and
+    # §11 describes its scopes. The host's add-the-bot link (3.0.7a) has none:
+    # nothing returns, so it is recorded apart rather than read as a sign-in
+    # scope, and a change to either still shows up as drift.
+    sign_in, invite = set(), set()
+    for node in ast.walk(_ast(ROOT / "dashboard_api.py")):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = {key.value for key in node.keys if isinstance(key, ast.Constant)}
+        for key, value in zip(node.keys, node.values):
+            if (isinstance(key, ast.Constant) and key.value == "scope"
+                    and isinstance(value, ast.Constant)):
+                (sign_in if "redirect_uri" in keys else invite).add(value.value)
+    facts["oauth_scopes"] = sorted(sign_in)
+    facts["bot_invite_scopes"] = sorted(invite)
     return facts
 
 

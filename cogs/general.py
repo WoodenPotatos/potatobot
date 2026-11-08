@@ -77,22 +77,6 @@ def get_help_data():
                 t("general.usage_freemines"): t("general.cmd_freemines")
             }
         },
-        "music": {
-            "label": t("general.help_music_label"),
-            "emoji": "🎵",
-            "description": t("general.help_music_desc"),
-            "commands": {
-                t("general.usage_join"): t("general.cmd_join"),
-                t("general.usage_play"): t("general.cmd_play"),
-                t("general.usage_queue"): t("general.cmd_queue"),
-                t("general.usage_skip"): t("general.cmd_skip"),
-                t("general.usage_remove"): t("general.cmd_remove"),
-                t("general.usage_shuffle"): t("general.cmd_shuffle"),
-                t("general.usage_loop"): t("general.cmd_loop"),
-                t("general.usage_np"): t("general.cmd_np"),
-                t("general.usage_stop"): t("general.cmd_stop")
-            }
-        },
         "everydle": {
             "label": t("general.help_everydle_label"),
             "emoji": "🧠",

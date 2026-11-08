@@ -1,0 +1,1636 @@
+{
+ "retcode": 0,
+ "message": "OK",
+ "data": {
+  "list": [
+   {
+    "post": {
+     "game_id": 2,
+     "post_id": "47312224",
+     "f_forum_id": 0,
+     "uid": "1015537",
+     "subject": "V7.2 Known Issues & Update",
+     "content": "Dear Travelers: To ensure that all Travelers have the best-possible Genshin Impact experience, our developers continually make optimizations and bug fixes to the game based on Travelers' feedback.",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1793776587,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 70,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-11-06 11:27:47",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "2",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "tr-tr",
+       "it-it"
+      ],
+      "future_post_id": "24994",
+      "lang_subject": {
+       "it-it": "Ver.7.2 Miglioramenti e modifiche apportate",
+       "id-id": "V7.2 Perbaikan dan Optimalisasi Versi ",
+       "fr-fr": "Version 7.2 : Problèmes connus & Mise à jour du",
+       "es-es": "V7.2 Actualización y optimizaciones",
+       "ja-jp": "Ver.7.2アップデートと調整",
+       "th-th": "V7.2 ปัญหาที่รับทราบแล้ว & เนื้อหาการอัปเดต ",
+       "zh-tw": "V7.2遊戲更新修復與優化說明 ",
+       "de-de": "V7.2 Bekannte Probleme und Aktualisierung ",
+       "en-us": "V7.2 Known Issues & Update",
+       "pt-pt": "V7.2 Atualização e Otimizações",
+       "zh-cn": "V7.2游戏更新修复与优化说明",
+       "ru-ru": "V7.2 Известные проблемы и обновления",
+       "tr-tr": "Ver.7.2 Oyunun güncelleme düzeltmeleri ve iyileştirme notları",
+       "vi-vn": "7.2 Vấn đề đã biết và cập nhật",
+       "ko-kr": "7.2 버전 발견한 오류 & 업데이트 공지 "
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "Dear Travelers: To ensure that all Travelers have the best-possible Genshin Impact experience, our developers continually make optimizations and bug fixes to the game based on Travelers' feedback.",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "1015537",
+     "nickname": "Genshin Impact Official",
+     "introduce": "Grand Master of Genshin Impact Forum",
+     "avatar": "100236",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "Official Big Boss"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://fastcdn.hoyoverse.com/static-resource-v2/2024/04/10/71a62b9a993534f3db7896fc6f725ff8_4436020059642725994.webp",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 26405,
+     "reply_num": 95,
+     "like_num": 1320,
+     "bookmark_num": 34,
+     "share_num": 0,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 1295
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 13
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 2
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 2
+      },
+      {
+       "upvote_id": "7",
+       "upvote_num": 1
+      },
+      {
+       "upvote_id": "9",
+       "upvote_num": 1
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/11/04/0/4f1a3f167c3d0da42fbef4ec84f17a54_6696428006059291001.webp",
+      "height": 390,
+      "width": 1080,
+      "format": "WEBP",
+      "size": "24062",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 27,
+         "y": 29
+        },
+        "rb_point": {
+         "x": 603,
+         "y": 353
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 27,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 319,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 27,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 547,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 27,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 417,
+         "y": 389
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "146137450"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/11/04/0/4f1a3f167c3d0da42fbef4ec84f17a54_6696428006059291001.webp",
+      "height": 390,
+      "width": 1080,
+      "format": "WEBP",
+      "size": "24062",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 27,
+         "y": 29
+        },
+        "rb_point": {
+         "x": 603,
+         "y": 353
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 27,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 319,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 27,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 547,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 27,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 417,
+         "y": 389
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "146137450"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 2,
+     "post_id": "47306125",
+     "f_forum_id": 0,
+     "uid": "1015537",
+     "subject": "\"Hour of Ruin\" Version 7.2 Update Details",
+     "content": "Dear Traveler, Below are the details of the Version 7.2 update \"Hour of Ruin\" and the update compensation. 〓Compensation Details〓 Maintenance Compensation: Primogems ×300 (60 Primogems per hour the servers are down) Issue Fix Compensation: Primogems ×300 (please refer to the relevant compensation mail for more details) 〓Scope of Compensation〓 Maintenance Compensation: Travelers who have reached Adventure Rank 5 or above by 2026/11/04 06:00 (UTC+8). Compensation must be claimed before the end of Version 7.2. Issue Fix Compensation: Travelers who have reached Adventure Rank 5 or above by 2026/11/04 06:00 (UTC+8). Please log in and claim your compensation before 2026/11/07 06:00 (UTC+8). Our developers will distribute compensation to Travelers via in-game mail within 5 hours after the update maintenance is finished. The mail will expire after 30 days, so don't forget to claim the attached compensation in time. 〓Update Schedule〓 Update maintenance begins 2026/11/04 06:00 (UTC+8) and is estimated to take 5 hours. 〓How to Update Game Client〓 PC: Close the game, open the Genshin Impact Launcher, and click Update. iOS: Open the App Store and tap Update. Android: Open the game and follow the directions on-screen. PlayStation®: Highlight \"Genshin Impact\" from the Home screen, press the OPTIONS button and select \"Check for Update.\" Xbox Series X|S: Open the system main menu, select \"My games & apps,\" select the \"Manage\" tab, and on the \"Updates\" page, find \"Genshin Impact\" and confirm to update. Please do not hesitate to contact Customer Service if you encounter any issues installing the new version. We will do our very best to resolve the issue. 〓Update Details〓 I. New Areas New Areas in Snezhnaya Now Available ◇ In Version 7.2, the following areas in Snezhnaya will become available: Novokitezhgrad and Wingspan Peak. After completing the \"An Ancient Song of Flowing Crystal and Stone Chests\" quest chain, the Shadow Realm area (Third-Person Shooter Combat Gameplay) east of Wingspan Peak will recede, allowing Travelers to freely add characters to their party and explore the area. ※ Completing the \"Gunfire in the Silent Lands\" quest in Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" will automatically unlock a Teleport Waypoint northeast of Fellfrost Peak in Snezhnaya. You can use this Teleport Waypoint to head over to the new areas. You'll also receive the Primogem reward for this Teleport Waypoint when it unlocks automatically. ※ Teleporting to this Waypoint will unlock a new railroad map. ◇ \"Meeting Point\" Update: With the opening of the new areas, two new Meeting Points will be added to Snezhnaya: \"Meeting Point: Teplo Oasis\" and \"Meeting Point: Royal Railway Transport Bureau.\" Complete the construction of each Meeting Point to unlock its corresponding Meeting Point Chronicle Quest. \"Meeting Point: Teplo Oasis\" Unlock Criteria: ◆ Progress through Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" and complete \"Silence Alone is Disfavored.\" ※ After meeting the above unlock criteria, complete the World Quest \"A Lovely Oasis Holiday\" to unlock the Meeting Point. \"Meeting Point: Royal Railway Transport Bureau\" Unlock Criteria: ◆ Progress through Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" and complete \"Silence Alone is Disfavored.\" ◆ Complete the World Quest \"To the Kristall City.\" ※ After meeting the above unlock criteria, complete the World Quest \"Beneath Dust and Snow\" to unlock the Meeting Point. In addition, there will be new Fishing Points and \"Radiant Spincrystals\" in the new areas. II. New Characters \"Rules Set at Naught\" Mitya (Electro) (5-Star) ◇ Stellar Linchpin: Electro ◇ Weapon: Catalyst ◇ An exceptionally ingenious energy specialist and a master of the fine art of \"schedule-dodging.\" Mitya is an Electro DPS character who enables the party to trigger Stellar-Conduct and deals Stellar-Conduct reaction DMG in different ways. When Mitya is in the party, the Polestar Field will follow the current active character in real time. \"Fort Fulguration\" Valeriy (Electro) (4-Star) ◇ Vision: Electro ◇ Weapon: Sword ◇ Commander of the Special Assignments Battalion. A soldier skilled at protecting key personnel and keeping operations on track. Valeriy is a support character who can provide Electro-related buffs and shields. III. New Equipment Event-Exclusive Weapons Starsealed Edict (5-Star Catalyst) Increases the equipping character's CRIT DMG. When the equipping character uses an Elemental Skill, they gain the \"Crystal Compounding\" effect, which increases their Elemental Mastery. While this effect is active, when nearby party members trigger Elemental Reactions, the equipping character also gains the \"Law of Combustion\" effect, further increasing their Elemental Mastery. When the equipping character enters the Radiance: Stellar-Conduct state, the \"Law of Combustion\" effect additionally increases the equipping character's Stellar-Conduct CRIT DMG. This effect can be triggered even when the equipping character is off-field. ◆ The event-exclusive weapons can be obtained from the Event Wish. Please refer to the relevant official Event Notices for specific acquisition details. IV. New Main Story 1. New Archon Quest Chapter VII: Act V - \"Hour of Ruin\" Permanently available after the Version 7.2 update ◆ Quest Unlock Criteria: • Adventure Rank 18 or above • Complete Archon Quest Chapter VII: Act IV \"A Rekviem for the Underworld\" • The \"Focused Experience Mode\" function is available for this quest. Chapter VII: Act VI - \"A Yesterday Sent From Beyond\" Permanently available after the Version 7.2 update ◆ Quest Unlock Criteria: • Adventure Rank 18 or above • Complete Archon Quest Chapter VII: Act V \"Hour of Ruin\" • The \"Focused Experience Mode\" function is available for this quest. ※ Travelers who have reached Adventure Rank 18 or above and completed Archon Quest Prologue: Act III \"Song of the Dragon and Freedom\" can use the automatically unlocked Teleport Waypoint to reach Snezhnaya and begin Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" even if they have not completed the preceding Archon Quests, such as \"Song of the Welkin Moon: Act X.\" 2. New World Quests New World Quests The \"An Ancient Song of Flowing Crystal and Stone Chests\" Quest Chain, \"Dark Clouds in a Wine Bottle,\" \"Borrowing a Gold Coin From a Portrait,\" and more. ※ Progress through Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" and complete \"Gunfire in the Silent Lands\" to unlock these quests. ※ This World Quest includes scenes involving natural disasters. All events and circumstances depicted in these scenes are entirely fictional. V. New Enemies Wavebinder ◇ A Volkodlak of peerless strength, brought into being to fulfill an ancient civilization's grand ambition of exploring the waters unhindered. At intervals, it drinks a hot beverage to build up its Courage. Once its Courage is full, it enters the Valiant state, causing its attacks to become more ferocious and greatly increasing all Elemental RES and Physical RES. While in this state, its Courage will be continuously consumed, and it will exit the state once its Courage is depleted. Taking Electro DMG or Electro DMG considered as DMG from the corresponding Stellar Glimmer reaction reduces its accumulated Courage, or causes it to exit the Valiant state more quickly. Additionally, Stellar Glimmer reactions also seem to interfere with its attempts to drink hot beverages... Located in Novokitezhgrad Mindless Iceborn Icebound Reflection ◇ A snow-and-ice monster formed through the condensation of special frost and snow. The Icebound Reflection loses its immunity to Cryo DMG and its innate Cryo status when affected by the Stellar Glimmer reaction. Aberrant Chimeric Monsters \"Chimeric Skorp,\" \"Chimeric Crocohoof\" ◇ These Aberrant Chimeric Monsters are products of the bio-alchemy that once flourished across the frozen wastes. Certain aspects of their behavior can be disrupted by the Stellar Glimmer Reaction. VI. System Update \"Secret Tsarist Assignment\" Update: \"Secret Tsarist Assignment: Part II\" Complete missions in \"Secret Tsarist Assignment: Part II\" to obtain rewards including a wind glider and a recipe. Third-Person Shooter Combat Gameplay Update ◆ Firearm Updates Adds two new shotguns: \"Sosruko's Flame\" and \"Apsat's Mountain Hunt.\" The new firearms can be obtained by completing World Quests. ◆ Edge of Survival Stage Updates After the Version 7.2 update, \"Edge of Survival\" adds three new stages: \"Hammer and Anvil,\" \"Harbor Under Heavy Guard,\" and \"The Calamity-Torn Old City,\" along with their corresponding rewards. Following the version update, the \"Edge of Survival\" > \"Frontrunners' Edge\" > \"All Records\" screen will enter a data compilation period, and will reopen once data compilation is complete. VII. Miliastra Wonderland Miliastra Wonderland Update ◆ Cosmetic Sets The \"Polyphonic Harmony\" Event Ode brings 4 new sets: \"Polyphonic Variations,\" \"Dreamkeeper Plush,\" \"Tea-Time Enchantment,\" and \"A Study in Bloom.\" Chronicles of the Realms/Epic of the Realms features 3 new sets: \"Harmonic Insight,\" \"Clouds Unfurled,\" and \"Run with the Wind.\" Available for a limited time only from the Miliastra Shop: 3 new sets. They are \"Pixel Motion,\" \"Fish on the Run,\" and \"Masquerade.\" \"Encounter Echoes\" Standard Ode: 1 new Set Catalog, \"Drifting with the Waves,\" is available. Take part in the \"Raiment Collection: Radiance Ablaze\" event to obtain the new \"Tinker's Treasures\" set. The previously released sets \"Afternoon Nectar\" and \"Prelude to Spring\" will return to the Miliastra Shop for a limited time after the version update. The new version also adds additional cosmetic components, expressions, and special effects. ◆ Lobby With the new version update, the Public Lobby will be changed to a new theme: \"Nocturne Theater: Tales Most Wondrous.\" Travelers can purchase the new Private Lobby \"Nocturne Theater: Melodious Echoes\" through the Miliastra Pass. VIII. Genius Invokation TCG Genius Invokation TCG Gameplay Update New Character Card: Varka and the corresponding Talent card. The corresponding invitation duel and guest challenges have been added to the Player List. New Action Cards: \"Streaming Song,\" \"Dawn's Return,\" \"Ode to Ascension,\" \"Song of Days Past,\" \"Zeitlind,\" and \"Elemental Transfiguration: Burning Blessing\" have been added. These can now be purchased from Prince at The Cat's Tail. The Forge Realm's Temper is once again available. The theme of this edition is \"The Forge Realm's Temper: Endless Swarm.\" (1) Defeat endless waves of enemies during the rounds in \"The Forge Realm's Temper: Endless Swarm\" to accrue score. (2) After you complete the stage battle, you will gain a score and the corresponding rewards based on the highest score you got in the stage. (3) Different stages will contain different special rules that grant buffs. Use these rules well to fight more effectively. IX. Imaginarium Theater Update Scheduled for December 1 After the Version 7.2 update, a new season of \"Imaginarium Theater\" will be available on December 1. Required Elemental Types: Pyro, Hydro, and Geo Opening Characters: Arlecchino, Bennett, Furina, Xingqiu, Navia, and Illuga When Imaginarium Theater is open, the corresponding Opening Characters will obtain Fantastical Blessings. Special Guest Stars: Chasca, Varesa, Kinich, and Iansan After the new season of Imaginarium Theater begins, the characters Arlecchino, Linnea, Ifa, and Nefer will each gain a new \"Thespian Trick\" that can be exchanged from the NPC Wolfy. Envisaged Echoes Update After the Version 7.2 update, new challenge stages and Echo cosmetics for Xilonen and Yae Miko will be added. X. Spiral Abyss Update Scheduled for November 16 ◇ After the Version 7.2 update, Phase 1 of the Spiral Abyss will be updated on November 16. ◆ Floor 11 Ley Line Disorder changed to: All party members gain a 60% Electro DMG Bonus. All party members gain a 60% Geo DMG Bonus. ◆ Floor 12 Ley Line Disorders changed to: First Half: Lunar-Crystallize DMG is increased by 75%. Second Half: All party members' Elemental Mastery is increased by 200. ◆ Updated the monster lineup on Floors 11 – 12 of the Spiral Abyss. ◆ Blessing of the Abyssal Moon: Resounding Moon When a character triggers Superconduct or Stellar-Conduct reaction on an opponent, they gain 1 stack count, and when the stack count reaches 3, a shockwave is unleashed at the opponent's position, dealing True DMG and consuming all stack counts at the same time. Up to 1 stack count can be gained every 0.1s. A shockwave can be unleashed this way every 4s. Update Scheduled for December 16 ◇ After the Version 7.2 update, Phase 2 of the Spiral Abyss will be updated on December 16. ◆ Floor 11 Ley Line Disorder changed to: All party members receive a 60% Cryo DMG Bonus. All characters in the party gain a 60% Anemo DMG Bonus. ◆ Floor 12 Ley Line Disorders changed to: First Half: Characters' Stellar Glimmer DMG increased by 75%. Second Half: Anemo DMG dealt by the active character is increased by 75%. ◆ Updated the monster lineup on Floors 11 – 12 of the Spiral Abyss. ◆ Blessing of the Abyssal Moon: Glistening Moon When a character deals Stellar-Conduct or Stellar Swirl DMG on an opponent, they gain 1 stack count, and when the stack count reaches 6, a shockwave is unleashed at the opponent's position, dealing True DMG and consuming all stack counts at the same time. Up to 1 stack count can be gained every 0.1s. A shockwave can be unleashed this way every 6s. XI. Other Update Details 1. New Recipes: ○ Exploration or Quest Rewards: \"Chicken Kitezhgrad,\" \"Caviar Blini,\" and \"Snowy Nocturne\" ○ From Snezhnaya NPC Sapieha: \"Solyanka\" 2. New Character Specialty Dishes: ○ Mitya's specialty: \"Energy-Replenishing Meal\" ○ Valeriy's specialty: \"Emergency Barricade\" 3. Adds the \"Snezhnaya: Sacred City of Ice and Pale Star (II)\" and \"Land of Surging Shadows (II)\" Achievement categories, as well as new Achievements to the \"Wonders of the World\" category. 4. Adds Set 53 of \"Paimon's Paintings\" chat emojis. 5. Adds some prompts for loading screens. 6. New Namecards: \"Mitya: Scarf\": Reward for reaching Friendship Lv. 10 with Mitya \"Valeriy: Rank\": Reward for reaching Friendship Lv. 10 with Valeriy \"Snezhnaya: Snow Wings\": Reward for completing all achievements under \"Snezhnaya: Sacred City of Ice and Pale Star (II)\" \"Achievement: Stillness\": Reward for completing all achievements under \"Land of Surging Shadows (II)\" \"Travel Notes: Sacred Spirit\": Reward obtained via the BP system 7. Adds new wildlife: Tiny Ironquill and Shaleshell. You can use the Omni-Ubiquity Net to capture certain creatures. 8. Adds 3 new Local Legends to \"Valiant Chronicles\": Rowdy Beast Host, Elder Blighttree, and Ancient Ironquill. Complete the required number of challenges to obtain the \"Crystalline Frost\" avatar frame. 9. Repertoire of Myriad Melodies Update: ○ Adds a new music album \"Encounter: Interlude of the Long Journey.\" ○ Adds a new score theme \"Floating Lotus, Listening Spring.\" 10. Drops and Materials added between Versions Luna IV to 7.2 can now be placed in the Parametric Transformer, with new development items amongst the converted products. 〓Adjustments & Optimizations〓 ● Exploration Lowers the requirements for unlocking the Pale Crown Palace station on the railroad map. The station now unlocks after completing the \"Gunfire in the Silent Lands\" quest of Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" and remains permanently visible on the map once unlocked. ● Third-Person Shooter Combat Gameplay 1. Adds support for the DualSense® wireless controller's adaptive triggers when using firearms (This feature can be configured in Settings > Controls on PC and PS5.) 2. Adds visual effects when equipping full-loadout firearms. 3. After rotating a character in the Eye of Graeae interface, switching to another interface and returning to the character interface now resets the character to face forward. 4. In the Assemble interface of the firearms, the description of the full-loadout effect is grayed out when the effect is inactive. 5. In the Assemble interface of the firearms, clicking \"Go\" for a locked accessory obtainable through Access Cards, Meeting Points, or Edge of Survival will take you to its source. ● Prime Ice Construct 1. Increases the batch deletion limit in Manage Prime Ice Constructs from 100 to 200. 2. Adds an \"Only Friends\" option for sending and receiving in Prime Ice Construct Permission Settings. 3. Prime Ice Constructs are no longer sent to areas near Statues of The Seven, the Adventurers' Guilds, Blacksmiths, or Meeting Points. 4. Newly unlocked Prime Ice Construct appearances now display a red dot or \"New\" indicator. Appearances unlocked before the version update do not display these indicators. ● Miliastra Wonderland 1. Adds a like button to the profile screen opened by interacting with other Travelers in the Lobby. 2. Adds a \"Like History\" feature and related notifications. Like History can be accessed from the Miliastra Wonderland main screen and the Miliastra Information screen. 3. You can now give likes to other Travelers' shared Cosmetic Plans when viewing them. ● Other Systems 1. Optimizes the display of Artifact rewards in Stygian Onslaught. 2. Optimizes some of the text descriptions and interaction experiences in the Stygian Onslaught interface. 3. Optimizes the order and layout of certain button icons in the Paimon Menu. 4. Optimizes some hints and interactions for the Artifact Lock Assistance feature. 5. Adds an \"Enemy Details\" section to the Ley Line Outcrop sidebar on the Map screen. ● Audio 1. Optimizes English, Japanese, and Korean voice-over lines in certain quests, and fixes related voice-over errors. 2. Optimizes the wording of some Japanese voice-over lines for the characters \"Vesna\" and \"Odette\" in the characters' Profile > Voice-Over interfaces. ● Other 1. Optimizes the marking logic for \"Specialty Tracking\": When tracking a particular Local Specialty, if there is a Character in the party who can display the corresponding regional specialties, the mini-map will prioritize marking the tracked specialty. 2. Optimizes the scene lighting for Xiao's Challenge within Envisaged Echoes to make the route guidance clearer. 3. Optimizes Vesna's movement when she gets caught on slopes or similar terrain while in the \"Coursing\" state. She can now tap the Jump button to gain height normally in this state, just as she can on flat terrain. 4. Adds a region-based filter to the Guiding Notes. 5. Optimizes the spelling of certain character names in the Guiding Notes. 6. Adjusts the \"Chat\" feature in accordance with policies on the protection of minors: After the version update, the \"Current Team\" and \"Serenitea Pot\" chat channels are unavailable to U13 and Minor Travelers. 〓Bug Fixes〓 ● Quests 1. Fixes an issue whereby, during the battle against Ronova in the Archon Quest \"A Rekviem for the Underworld,\" switching characters has a small chance of teleporting the active character to an abnormal location. 2. Fixes an issue whereby the chessboard was displayed incorrectly during dialogue in the Secret Tsarist Assignment \"The Tsaritsa's Chess Game (I).\" ● Enemies 1. Fixes an issue whereby, under certain circumstances, characters may unexpectedly exit combat when approaching the edge of the combat area while challenging \"Guardian Blade of Drifting Snow\" in the open world. 2. Fixes an issue whereby the enemy \"Guardian Blade of Drifting Snow\" may behave abnormally under certain circumstances during combat. 3. Fixes an issue whereby, under certain circumstances, certain Geo constructs can be created on the model of the enemy \"Wildwood Leshy\". ● Characters 1. Fixes an issue whereby, under certain circumstances, the tips of Vesna's ears may clip slightly through nearby parts of her model. 2. Fixes an issue whereby the effects of Yumemizuki Mizuki's Constellation Lv. 2 would cause abnormal visual effects to appear on certain objects. 3. Fixes some display issues with the Traveler character model on mobile devices, including issues with Aether's earring and Lumine's top. 4. Fixes an issue whereby the visual effects for Wriothesley's Charged Attack \"Luster: Vaulting Fist\" would play repeatedly when it deals Stellar-Conduct reaction DMG. 5. Fixes an issue whereby, while Vesna was in the \"Coursing\" state, if her Elemental Skill button was replaced by a button for the special gameplay mechanics, the Elemental Skill button could function abnormally after leaving the relevant gameplay mode. 6. Fixes an issue whereby after reconnecting to the game server, Vesna would fail to enter the \"Coursing\" state upon being switched onto the field, even if the current scene met the trigger conditions for her Talent \"The Grand Circuit.\" ● Exploration Fixes an issue whereby the Quest Item \"VIP Pass\" associated with a World Quest in Snezhnaya had an incorrect icon. ● Audio 1. Fixes an issue in the Anecdote \"Vesna: Another Ticket Trouble\" whereby a voice-over line had a chance of playing abnormally. 2. Fixes an issue whereby there were errors with Vodyanitsa's Chinese voice-over line \"Vodyanitsa's Troubles\" in Character > Profile > Voice-Over. 3. Fixes an issue whereby the sound effects for certain quests, scenes, objects, and enemies were incorrect or missing, and optimizes the related sound effects. 4. Fixes issues in the English voice-over for cutscenes in the Archon Quests \"White Night, Like a Dream Upon Waking\" and \"One Move Left to Make,\" whereby pronouns and other lines do not match the corresponding text. ● Miliastra Wonderland 1. Fixes an issue whereby the expressions of the Manekin wearing the Cosmetic Set: Whimsical Spectacle or the Cosmetic Set: Osmanthus in the Moonlight would display incorrectly when performing the \"Colorful Entrance\" action. 2. Fixes an issue whereby the top and bottom of Cosmetic Set: Feathers of Justice would clip through each other when worn by the Manekina. 3. Fixes an issue whereby, after adjusting an ornament to certain positions while a Manekina is wearing the Cosmetic Set \"Azure Mountainshade,\" the ornament may display abnormally while the Manekina is walking. 4. Fixes an issue whereby the icon for the cosmetic \"Leg Accessory: Afternoon Nectar Socks\" does not match its in-game appearance. 5. Fixes an issue whereby Vodyanitsa does not reveal her true Water Imp form when swimming in the waters of the lobby. ● Third-Person Shooter Combat Gameplay 1. Fixes an issue whereby the icons for certain Firearms and Frag Crystals do not match their in-game models. 2. Fixes an issue whereby, under certain circumstances, certain opponents' animations for vaulting over cover were unexpectedly interrupted in the Shadow Realm (Third-Person Shooter Combat gameplay). ● Genius Invokation TCG Fixes an issue whereby the Talent Card \"Elk With Fanged Antlers\" cannot be played while the Character Card \"Illuga\" is frozen. ● Other Systems 1. Fixes an issue whereby the icons for certain \"Cooking\" interaction buttons in Snezhnaya would display incorrectly. 2. Fixes an issue whereby Vesna's \"More About Vesna: I\" voice-over line in Character > Profile > Voice-Over had an unlock requirement. (After the fix, this voice-over line is unlocked by default and no longer requires Friendship Lv. 4). 3. Fixes an issue whereby, under certain circumstances, Trounce Domains would display incorrect tags in Adventurer Handbook > Domains > Training Guide. 4. Fixes an issue whereby, under certain circumstances, the \"Travel Account\" gadget continues to display the \"New anecdote recorded\" notification after its recorded anecdotes have been viewed. 5. Fixes an issue whereby, under certain circumstances, previewing a weapon appearance on the \"Secret Tsarist Assignment\" screen causes weapons to display incorrectly on the Weapons screen. 6. Fixes an issue whereby, in Controller Mode, the left stick cannot be used to scroll down through the invitation in \"Secret Tsarist Assignment.\" 7. Fixes an issue whereby Aether's hands would clip through his body in Character > Talents when wearing the outfit \"As Heaven and Earth Are Made Anew.\" 8. Fixes an issue whereby Vesna's wings may appear abnormally semi-transparent if her idle animation is interrupted on the Character screen. ● Other 1. Fixes an issue whereby the source descriptions for the Local Specialties \"Golden Fern,\" \"Flockingweed,\" and \"Frostfairy Flower\" do not include \"Grown in the Serenitea Pot.\" 2. Fixes an issue whereby Flins's hand model displays incorrectly when switching to the \"Lantern Up, Weapons Ready\" pose under Take Photo > Pose. 3. Fixes text errors in certain quests, interfaces, dialogues and descriptions. 4. Fixes text errors in some dialogue lines for the NPC \"Myatezhnaya\" in Zapolyarny Palace. 5. Fixes an issue whereby the Brilliant Blessing \"Hydro Crystal: Starting Stone Stream\" in Imaginarium Theater has a small chance of causing Stone Streams to fall at incorrect locations. 6. Fixes an issue whereby certain characters' mouth animations were incorrectly displayed when they first appear in quests or when switching to them in the party. 7. Fixes some text errors in certain languages and optimizes text. (Note: Related in-game functions have not changed. Travelers can view the changes in different languages by going to the Paimon Menu > Settings > Language and changing the Game Language.) ◆ Optimizes inconsistencies between certain voice-overs and the corresponding lines. ◆ Optimizes certain English translations. 〓Genius Invokation TCG Balance Adjustment〓 Genius Invokation TCG Balance Adjustment 1. Adds \"Hall of a Thousand Pillars\" to the \"Adventure\" effects. 2. Increases the starting Max HP of Character Card \"Black Serpent Knight: Windcutter\" from 10 to 12. 3. Adjusts the Passive Skill of Character Card \"Black Serpent Knight: Windcutter\": Reduces its activation limit from twice per Round to once per Round. 4. Adjusts the effect of the Support Card \"Overloaded: Thunderstrike\": Changes the limit for \"...the Piercing DMG dealt by this card is increased by 1 for this Round\" from \"(up to 3)\" to \"(up to 2).\" 5. Adjusts the effect of the Support Card \"Rimegrass Blessing: Thorn Frost\": Changes its End Phase effect to \"Deals 2 Piercing DMG to opposing characters affected by Cryo or Dendro, then removes their Cryo and Dendro applications.\" 6. Adjusts the effect of the Support Card \"Rimegrass Blessing: Cold Vine\": Changes \"After you use a Skill, if the opponent's active character is affected by Dendro...\" to \"After you use a Skill, if the opponent's active character is affected by both Cryo and Dendro: Removes the Cryo application from the opponent's active character, deals 2 Dendro DMG, draws 1 card, and heals your most injured character for 1 HP. (Twice per Round).\" *This is a work of fiction and is not related to any actual people, events, groups, or organizations. \"PlayStation\", \"PS5\", \"DualSense\", \"DUALSHOCK\" are registered trademarks or trademarks of Sony Interactive Entertainment Inc.",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1793746805,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 112,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-11-05 19:16:19",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "2",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "tr-tr",
+       "it-it"
+      ],
+      "future_post_id": "24983",
+      "lang_subject": {
+       "th-th": "คำอธิบายการอัปเดตเวอร์ชัน 7.2 \"โมงยามแห่งความพินาศ\"",
+       "pt-pt": "Descrição de Atualização da Versão 7.2 \"A Hora da Destruição\"",
+       "vi-vn": "Giới Thiệu Cập Nhật Phiên Bản 7.2 \"Thời Khắc Hủy Diệt\"",
+       "ru-ru": "Подробности обновления версии 7.2 «Час погибели»",
+       "tr-tr": "\"Yıkımın Eşiğinde\" 7.2 Sürümü Güncelleme Ayrıntıları",
+       "zh-tw": "「壞滅肇始之時」7.2版本更新說明",
+       "fr-fr": "Détails de la mise à jour de version 7.2 « Heure de la ruine »",
+       "ko-kr": "7.2 버전 「종말의 서막」 업데이트 안내",
+       "it-it": "Dettagli versione 7.2 \"L'alba della rovina\"",
+       "zh-cn": "「坏灭肇始之时」7.2版本更新说明",
+       "ja-jp": "Ver.7.2「終焉へ墜ちる時」正式リリース",
+       "de-de": "Erläuterungen zur Aktualisierung auf Version 7.2 „Die Stunde der Zerstörung“",
+       "en-us": "\"Hour of Ruin\" Version 7.2 Update Details",
+       "es-es": "Detalles de la versión 7.2 «La hora de la destrucción»",
+       "id-id": "Penjelasan Update Versi 7.2 \"Detik-Detik Awal Kehancuran\""
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "Dear Traveler, Below are the details of the Version 7.2 update \"Hour of Ruin\" and the update compensation. 〓Compensation Details〓 Maintenance Compensation: Primogems ×300 (60 Primogems per hour the servers are down) Issue Fix Compensation: Primogems ×300 (please refer to the relevant compensation mail for more details) 〓Scope of Compensation〓 Maintenance Compensation: Travelers who have reached Adventure Rank 5 or above by 2026/11/04 06:00 (UTC+8). Compensation must be claimed before the end of Version 7.2. Issue Fix Compensation: Travelers who have reached Adventure Rank 5 or above by 2026/11/04 06:00 (UTC+8). Please log in and claim your compensation before 2026/11/07 06:00 (UTC+8). Our developers will distribute compensation to Travelers via in-game mail within 5 hours after the update maintenance is finished. The mail will expire after 30 days, so don't forget to claim the attached compensation in time. 〓Update Schedule〓 Update maintenance begins 2026/11/04 06:00 (UTC+8) and is estimated to take 5 hours. 〓How to Update Game Client〓 PC: Close the game, open the Genshin Impact Launcher, and click Update. iOS: Open the App Store and tap Update. Android: Open the game and follow the directions on-screen. PlayStation®: Highlight \"Genshin Impact\" from the Home screen, press the OPTIONS button and select \"Check for Update.\" Xbox Series X|S: Open the system main menu, select \"My games & apps,\" select the \"Manage\" tab, and on the \"Updates\" page, find \"Genshin Impact\" and confirm to update. Please do not hesitate to contact Customer Service if you encounter any issues installing the new version. We will do our very best to resolve the issue. 〓Update Details〓 I. New Areas New Areas in Snezhnaya Now Available ◇ In Version 7.2, the following areas in Snezhnaya will become available: Novokitezhgrad and Wingspan Peak. After completing the \"An Ancient Song of Flowing Crystal and Stone Chests\" quest chain, the Shadow Realm area (Third-Person Shooter Combat Gameplay) east of Wingspan Peak will recede, allowing Travelers to freely add characters to their party and explore the area. ※ Completing the \"Gunfire in the Silent Lands\" quest in Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" will automatically unlock a Teleport Waypoint northeast of Fellfrost Peak in Snezhnaya. You can use this Teleport Waypoint to head over to the new areas. You'll also receive the Primogem reward for this Teleport Waypoint when it unlocks automatically. ※ Teleporting to this Waypoint will unlock a new railroad map. ◇ \"Meeting Point\" Update: With the opening of the new areas, two new Meeting Points will be added to Snezhnaya: \"Meeting Point: Teplo Oasis\" and \"Meeting Point: Royal Railway Transport Bureau.\" Complete the construction of each Meeting Point to unlock its corresponding Meeting Point Chronicle Quest. \"Meeting Point: Teplo Oasis\" Unlock Criteria: ◆ Progress through Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" and complete \"Silence Alone is Disfavored.\" ※ After meeting the above unlock criteria, complete the World Quest \"A Lovely Oasis Holiday\" to unlock the Meeting Point. \"Meeting Point: Royal Railway Transport Bureau\" Unlock Criteria: ◆ Progress through Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" and complete \"Silence Alone is Disfavored.\" ◆ Complete the World Quest \"To the Kristall City.\" ※ After meeting the above unlock criteria, complete the World Quest \"Beneath Dust and Snow\" to unlock the Meeting Point. In addition, there will be new Fishing Points and \"Radiant Spincrystals\" in the new areas. II. New Characters \"Rules Set at Naught\" Mitya (Electro) (5-Star) ◇ Stellar Linchpin: Electro ◇ Weapon: Catalyst ◇ An exceptionally ingenious energy specialist and a master of the fine art of \"schedule-dodging.\" Mitya is an Electro DPS character who enables the party to trigger Stellar-Conduct and deals Stellar-Conduct reaction DMG in different ways. When Mitya is in the party, the Polestar Field will follow the current active character in real time. \"Fort Fulguration\" Valeriy (Electro) (4-Star) ◇ Vision: Electro ◇ Weapon: Sword ◇ Commander of the Special Assignments Battalion. A soldier skilled at protecting key personnel and keeping operations on track. Valeriy is a support character who can provide Electro-related buffs and shields. III. New Equipment Event-Exclusive Weapons Starsealed Edict (5-Star Catalyst) Increases the equipping character's CRIT DMG. When the equipping character uses an Elemental Skill, they gain the \"Crystal Compounding\" effect, which increases their Elemental Mastery. While this effect is active, when nearby party members trigger Elemental Reactions, the equipping character also gains the \"Law of Combustion\" effect, further increasing their Elemental Mastery. When the equipping character enters the Radiance: Stellar-Conduct state, the \"Law of Combustion\" effect additionally increases the equipping character's Stellar-Conduct CRIT DMG. This effect can be triggered even when the equipping character is off-field. ◆ The event-exclusive weapons can be obtained from the Event Wish. Please refer to the relevant official Event Notices for specific acquisition details. IV. New Main Story 1. New Archon Quest Chapter VII: Act V - \"Hour of Ruin\" Permanently available after the Version 7.2 update ◆ Quest Unlock Criteria: • Adventure Rank 18 or above • Complete Archon Quest Chapter VII: Act IV \"A Rekviem for the Underworld\" • The \"Focused Experience Mode\" function is available for this quest. Chapter VII: Act VI - \"A Yesterday Sent From Beyond\" Permanently available after the Version 7.2 update ◆ Quest Unlock Criteria: • Adventure Rank 18 or above • Complete Archon Quest Chapter VII: Act V \"Hour of Ruin\" • The \"Focused Experience Mode\" function is available for this quest. ※ Travelers who have reached Adventure Rank 18 or above and completed Archon Quest Prologue: Act III \"Song of the Dragon and Freedom\" can use the automatically unlocked Teleport Waypoint to reach Snezhnaya and begin Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" even if they have not completed the preceding Archon Quests, such as \"Song of the Welkin Moon: Act X.\" 2. New World Quests New World Quests The \"An Ancient Song of Flowing Crystal and Stone Chests\" Quest Chain, \"Dark Clouds in a Wine Bottle,\" \"Borrowing a Gold Coin From a Portrait,\" and more. ※ Progress through Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" and complete \"Gunfire in the Silent Lands\" to unlock these quests. ※ This World Quest includes scenes involving natural disasters. All events and circumstances depicted in these scenes are entirely fictional. V. New Enemies Wavebinder ◇ A Volkodlak of peerless strength, brought into being to fulfill an ancient civilization's grand ambition of exploring the waters unhindered. At intervals, it drinks a hot beverage to build up its Courage. Once its Courage is full, it enters the Valiant state, causing its attacks to become more ferocious and greatly increasing all Elemental RES and Physical RES. While in this state, its Courage will be continuously consumed, and it will exit the state once its Courage is depleted. Taking Electro DMG or Electro DMG considered as DMG from the corresponding Stellar Glimmer reaction reduces its accumulated Courage, or causes it to exit the Valiant state more quickly. Additionally, Stellar Glimmer reactions also seem to interfere with its attempts to drink hot beverages... Located in Novokitezhgrad Mindless Iceborn Icebound Reflection ◇ A snow-and-ice monster formed through the condensation of special frost and snow. The Icebound Reflection loses its immunity to Cryo DMG and its innate Cryo status when affected by the Stellar Glimmer reaction. Aberrant Chimeric Monsters \"Chimeric Skorp,\" \"Chimeric Crocohoof\" ◇ These Aberrant Chimeric Monsters are products of the bio-alchemy that once flourished across the frozen wastes. Certain aspects of their behavior can be disrupted by the Stellar Glimmer Reaction. VI. System Update \"Secret Tsarist Assignment\" Update: \"Secret Tsarist Assignment: Part II\" Complete missions in \"Secret Tsarist Assignment: Part II\" to obtain rewards including a wind glider and a recipe. Third-Person Shooter Combat Gameplay Update ◆ Firearm Updates Adds two new shotguns: \"Sosruko's Flame\" and \"Apsat's Mountain Hunt.\" The new firearms can be obtained by completing World Quests. ◆ Edge of Survival Stage Updates After the Version 7.2 update, \"Edge of Survival\" adds three new stages: \"Hammer and Anvil,\" \"Harbor Under Heavy Guard,\" and \"The Calamity-Torn Old City,\" along with their corresponding rewards. Following the version update, the \"Edge of Survival\" > \"Frontrunners' Edge\" > \"All Records\" screen will enter a data compilation period, and will reopen once data compilation is complete. VII. Miliastra Wonderland Miliastra Wonderland Update ◆ Cosmetic Sets The \"Polyphonic Harmony\" Event Ode brings 4 new sets: \"Polyphonic Variations,\" \"Dreamkeeper Plush,\" \"Tea-Time Enchantment,\" and \"A Study in Bloom.\" Chronicles of the Realms/Epic of the Realms features 3 new sets: \"Harmonic Insight,\" \"Clouds Unfurled,\" and \"Run with the Wind.\" Available for a limited time only from the Miliastra Shop: 3 new sets. They are \"Pixel Motion,\" \"Fish on the Run,\" and \"Masquerade.\" \"Encounter Echoes\" Standard Ode: 1 new Set Catalog, \"Drifting with the Waves,\" is available. Take part in the \"Raiment Collection: Radiance Ablaze\" event to obtain the new \"Tinker's Treasures\" set. The previously released sets \"Afternoon Nectar\" and \"Prelude to Spring\" will return to the Miliastra Shop for a limited time after the version update. The new version also adds additional cosmetic components, expressions, and special effects. ◆ Lobby With the new version update, the Public Lobby will be changed to a new theme: \"Nocturne Theater: Tales Most Wondrous.\" Travelers can purchase the new Private Lobby \"Nocturne Theater: Melodious Echoes\" through the Miliastra Pass. VIII. Genius Invokation TCG Genius Invokation TCG Gameplay Update New Character Card: Varka and the corresponding Talent card. The corresponding invitation duel and guest challenges have been added to the Player List. New Action Cards: \"Streaming Song,\" \"Dawn's Return,\" \"Ode to Ascension,\" \"Song of Days Past,\" \"Zeitlind,\" and \"Elemental Transfiguration: Burning Blessing\" have been added. These can now be purchased from Prince at The Cat's Tail. The Forge Realm's Temper is once again available. The theme of this edition is \"The Forge Realm's Temper: Endless Swarm.\" (1) Defeat endless waves of enemies during the rounds in \"The Forge Realm's Temper: Endless Swarm\" to accrue score. (2) After you complete the stage battle, you will gain a score and the corresponding rewards based on the highest score you got in the stage. (3) Different stages will contain different special rules that grant buffs. Use these rules well to fight more effectively. IX. Imaginarium Theater Update Scheduled for December 1 After the Version 7.2 update, a new season of \"Imaginarium Theater\" will be available on December 1. Required Elemental Types: Pyro, Hydro, and Geo Opening Characters: Arlecchino, Bennett, Furina, Xingqiu, Navia, and Illuga When Imaginarium Theater is open, the corresponding Opening Characters will obtain Fantastical Blessings. Special Guest Stars: Chasca, Varesa, Kinich, and Iansan After the new season of Imaginarium Theater begins, the characters Arlecchino, Linnea, Ifa, and Nefer will each gain a new \"Thespian Trick\" that can be exchanged from the NPC Wolfy. Envisaged Echoes Update After the Version 7.2 update, new challenge stages and Echo cosmetics for Xilonen and Yae Miko will be added. X. Spiral Abyss Update Scheduled for November 16 ◇ After the Version 7.2 update, Phase 1 of the Spiral Abyss will be updated on November 16. ◆ Floor 11 Ley Line Disorder changed to: All party members gain a 60% Electro DMG Bonus. All party members gain a 60% Geo DMG Bonus. ◆ Floor 12 Ley Line Disorders changed to: First Half: Lunar-Crystallize DMG is increased by 75%. Second Half: All party members' Elemental Mastery is increased by 200. ◆ Updated the monster lineup on Floors 11 – 12 of the Spiral Abyss. ◆ Blessing of the Abyssal Moon: Resounding Moon When a character triggers Superconduct or Stellar-Conduct reaction on an opponent, they gain 1 stack count, and when the stack count reaches 3, a shockwave is unleashed at the opponent's position, dealing True DMG and consuming all stack counts at the same time. Up to 1 stack count can be gained every 0.1s. A shockwave can be unleashed this way every 4s. Update Scheduled for December 16 ◇ After the Version 7.2 update, Phase 2 of the Spiral Abyss will be updated on December 16. ◆ Floor 11 Ley Line Disorder changed to: All party members receive a 60% Cryo DMG Bonus. All characters in the party gain a 60% Anemo DMG Bonus. ◆ Floor 12 Ley Line Disorders changed to: First Half: Characters' Stellar Glimmer DMG increased by 75%. Second Half: Anemo DMG dealt by the active character is increased by 75%. ◆ Updated the monster lineup on Floors 11 – 12 of the Spiral Abyss. ◆ Blessing of the Abyssal Moon: Glistening Moon When a character deals Stellar-Conduct or Stellar Swirl DMG on an opponent, they gain 1 stack count, and when the stack count reaches 6, a shockwave is unleashed at the opponent's position, dealing True DMG and consuming all stack counts at the same time. Up to 1 stack count can be gained every 0.1s. A shockwave can be unleashed this way every 6s. XI. Other Update Details 1. New Recipes: ○ Exploration or Quest Rewards: \"Chicken Kitezhgrad,\" \"Caviar Blini,\" and \"Snowy Nocturne\" ○ From Snezhnaya NPC Sapieha: \"Solyanka\" 2. New Character Specialty Dishes: ○ Mitya's specialty: \"Energy-Replenishing Meal\" ○ Valeriy's specialty: \"Emergency Barricade\" 3. Adds the \"Snezhnaya: Sacred City of Ice and Pale Star (II)\" and \"Land of Surging Shadows (II)\" Achievement categories, as well as new Achievements to the \"Wonders of the World\" category. 4. Adds Set 53 of \"Paimon's Paintings\" chat emojis. 5. Adds some prompts for loading screens. 6. New Namecards: \"Mitya: Scarf\": Reward for reaching Friendship Lv. 10 with Mitya \"Valeriy: Rank\": Reward for reaching Friendship Lv. 10 with Valeriy \"Snezhnaya: Snow Wings\": Reward for completing all achievements under \"Snezhnaya: Sacred City of Ice and Pale Star (II)\" \"Achievement: Stillness\": Reward for completing all achievements under \"Land of Surging Shadows (II)\" \"Travel Notes: Sacred Spirit\": Reward obtained via the BP system 7. Adds new wildlife: Tiny Ironquill and Shaleshell. You can use the Omni-Ubiquity Net to capture certain creatures. 8. Adds 3 new Local Legends to \"Valiant Chronicles\": Rowdy Beast Host, Elder Blighttree, and Ancient Ironquill. Complete the required number of challenges to obtain the \"Crystalline Frost\" avatar frame. 9. Repertoire of Myriad Melodies Update: ○ Adds a new music album \"Encounter: Interlude of the Long Journey.\" ○ Adds a new score theme \"Floating Lotus, Listening Spring.\" 10. Drops and Materials added between Versions Luna IV to 7.2 can now be placed in the Parametric Transformer, with new development items amongst the converted products. 〓Adjustments & Optimizations〓 ● Exploration Lowers the requirements for unlocking the Pale Crown Palace station on the railroad map. The station now unlocks after completing the \"Gunfire in the Silent Lands\" quest of Archon Quest Chapter VII: Act I \"Everwinter Without Mercy\" and remains permanently visible on the map once unlocked. ● Third-Person Shooter Combat Gameplay 1. Adds support for the DualSense® wireless controller's adaptive triggers when using firearms (This feature can be configured in Settings > Controls on PC and PS5.) 2. Adds visual effects when equipping full-loadout firearms. 3. After rotating a character in the Eye of Graeae interface, switching to another interface and returning to the character interface now resets the character to face forward. 4. In the Assemble interface of the firearms, the description of the full-loadout effect is grayed out when the effect is inactive. 5. In the Assemble interface of the firearms, clicking \"Go\" for a locked accessory obtainable through Access Cards, Meeting Points, or Edge of Survival will take you to its source. ● Prime Ice Construct 1. Increases the batch deletion limit in Manage Prime Ice Constructs from 100 to 200. 2. Adds an \"Only Friends\" option for sending and receiving in Prime Ice Construct Permission Settings. 3. Prime Ice Constructs are no longer sent to areas near Statues of The Seven, the Adventurers' Guilds, Blacksmiths, or Meeting Points. 4. Newly unlocked Prime Ice Construct appearances now display a red dot or \"New\" indicator. Appearances unlocked before the version update do not display these indicators. ● Miliastra Wonderland 1. Adds a like button to the profile screen opened by interacting with other Travelers in the Lobby. 2. Adds a \"Like History\" feature and related notifications. Like History can be accessed from the Miliastra Wonderland main screen and the Miliastra Information screen. 3. You can now give likes to other Travelers' shared Cosmetic Plans when viewing them. ● Other Systems 1. Optimizes the display of Artifact rewards in Stygian Onslaught. 2. Optimizes some of the text descriptions and interaction experiences in the Stygian Onslaught interface. 3. Optimizes the order and layout of certain button icons in the Paimon Menu. 4. Optimizes some hints and interactions for the Artifact Lock Assistance feature. 5. Adds an \"Enemy Details\" section to the Ley Line Outcrop sidebar on the Map screen. ● Audio 1. Optimizes English, Japanese, and Korean voice-over lines in certain quests, and fixes related voice-over errors. 2. Optimizes the wording of some Japanese voice-over lines for the characters \"Vesna\" and \"Odette\" in the characters' Profile > Voice-Over interfaces. ● Other 1. Optimizes the marking logic for \"Specialty Tracking\": When tracking a particular Local Specialty, if there is a Character in the party who can display the corresponding regional specialties, the mini-map will prioritize marking the tracked specialty. 2. Optimizes the scene lighting for Xiao's Challenge within Envisaged Echoes to make the route guidance clearer. 3. Optimizes Vesna's movement when she gets caught on slopes or similar terrain while in the \"Coursing\" state. She can now tap the Jump button to gain height normally in this state, just as she can on flat terrain. 4. Adds a region-based filter to the Guiding Notes. 5. Optimizes the spelling of certain character names in the Guiding Notes. 6. Adjusts the \"Chat\" feature in accordance with policies on the protection of minors: After the version update, the \"Current Team\" and \"Serenitea Pot\" chat channels are unavailable to U13 and Minor Travelers. 〓Bug Fixes〓 ● Quests 1. Fixes an issue whereby, during the battle against Ronova in the Archon Quest \"A Rekviem for the Underworld,\" switching characters has a small chance of teleporting the active character to an abnormal location. 2. Fixes an issue whereby the chessboard was displayed incorrectly during dialogue in the Secret Tsarist Assignment \"The Tsaritsa's Chess Game (I).\" ● Enemies 1. Fixes an issue whereby, under certain circumstances, characters may unexpectedly exit combat when approaching the edge of the combat area while challenging \"Guardian Blade of Drifting Snow\" in the open world. 2. Fixes an issue whereby the enemy \"Guardian Blade of Drifting Snow\" may behave abnormally under certain circumstances during combat. 3. Fixes an issue whereby, under certain circumstances, certain Geo constructs can be created on the model of the enemy \"Wildwood Leshy\". ● Characters 1. Fixes an issue whereby, under certain circumstances, the tips of Vesna's ears may clip slightly through nearby parts of her model. 2. Fixes an issue whereby the effects of Yumemizuki Mizuki's Constellation Lv. 2 would cause abnormal visual effects to appear on certain objects. 3. Fixes some display issues with the Traveler character model on mobile devices, including issues with Aether's earring and Lumine's top. 4. Fixes an issue whereby the visual effects for Wriothesley's Charged Attack \"Luster: Vaulting Fist\" would play repeatedly when it deals Stellar-Conduct reaction DMG. 5. Fixes an issue whereby, while Vesna was in the \"Coursing\" state, if her Elemental Skill button was replaced by a button for the special gameplay mechanics, the Elemental Skill button could function abnormally after leaving the relevant gameplay mode. 6. Fixes an issue whereby after reconnecting to the game server, Vesna would fail to enter the \"Coursing\" state upon being switched onto the field, even if the current scene met the trigger conditions for her Talent \"The Grand Circuit.\" ● Exploration Fixes an issue whereby the Quest Item \"VIP Pass\" associated with a World Quest in Snezhnaya had an incorrect icon. ● Audio 1. Fixes an issue in the Anecdote \"Vesna: Another Ticket Trouble\" whereby a voice-over line had a chance of playing abnormally. 2. Fixes an issue whereby there were errors with Vodyanitsa's Chinese voice-over line \"Vodyanitsa's Troubles\" in Character > Profile > Voice-Over. 3. Fixes an issue whereby the sound effects for certain quests, scenes, objects, and enemies were incorrect or missing, and optimizes the related sound effects. 4. Fixes issues in the English voice-over for cutscenes in the Archon Quests \"White Night, Like a Dream Upon Waking\" and \"One Move Left to Make,\" whereby pronouns and other lines do not match the corresponding text. ● Miliastra Wonderland 1. Fixes an issue whereby the expressions of the Manekin wearing the Cosmetic Set: Whimsical Spectacle or the Cosmetic Set: Osmanthus in the Moonlight would display incorrectly when performing the \"Colorful Entrance\" action. 2. Fixes an issue whereby the top and bottom of Cosmetic Set: Feathers of Justice would clip through each other when worn by the Manekina. 3. Fixes an issue whereby, after adjusting an ornament to certain positions while a Manekina is wearing the Cosmetic Set \"Azure Mountainshade,\" the ornament may display abnormally while the Manekina is walking. 4. Fixes an issue whereby the icon for the cosmetic \"Leg Accessory: Afternoon Nectar Socks\" does not match its in-game appearance. 5. Fixes an issue whereby Vodyanitsa does not reveal her true Water Imp form when swimming in the waters of the lobby. ● Third-Person Shooter Combat Gameplay 1. Fixes an issue whereby the icons for certain Firearms and Frag Crystals do not match their in-game models. 2. Fixes an issue whereby, under certain circumstances, certain opponents' animations for vaulting over cover were unexpectedly interrupted in the Shadow Realm (Third-Person Shooter Combat gameplay). ● Genius Invokation TCG Fixes an issue whereby the Talent Card \"Elk With Fanged Antlers\" cannot be played while the Character Card \"Illuga\" is frozen. ● Other Systems 1. Fixes an issue whereby the icons for certain \"Cooking\" interaction buttons in Snezhnaya would display incorrectly. 2. Fixes an issue whereby Vesna's \"More About Vesna: I\" voice-over line in Character > Profile > Voice-Over had an unlock requirement. (After the fix, this voice-over line is unlocked by default and no longer requires Friendship Lv. 4). 3. Fixes an issue whereby, under certain circumstances, Trounce Domains would display incorrect tags in Adventurer Handbook > Domains > Training Guide. 4. Fixes an issue whereby, under certain circumstances, the \"Travel Account\" gadget continues to display the \"New anecdote recorded\" notification after its recorded anecdotes have been viewed. 5. Fixes an issue whereby, under certain circumstances, previewing a weapon appearance on the \"Secret Tsarist Assignment\" screen causes weapons to display incorrectly on the Weapons screen. 6. Fixes an issue whereby, in Controller Mode, the left stick cannot be used to scroll down through the invitation in \"Secret Tsarist Assignment.\" 7. Fixes an issue whereby Aether's hands would clip through his body in Character > Talents when wearing the outfit \"As Heaven and Earth Are Made Anew.\" 8. Fixes an issue whereby Vesna's wings may appear abnormally semi-transparent if her idle animation is interrupted on the Character screen. ● Other 1. Fixes an issue whereby the source descriptions for the Local Specialties \"Golden Fern,\" \"Flockingweed,\" and \"Frostfairy Flower\" do not include \"Grown in the Serenitea Pot.\" 2. Fixes an issue whereby Flins's hand model displays incorrectly when switching to the \"Lantern Up, Weapons Ready\" pose under Take Photo > Pose. 3. Fixes text errors in certain quests, interfaces, dialogues and descriptions. 4. Fixes text errors in some dialogue lines for the NPC \"Myatezhnaya\" in Zapolyarny Palace. 5. Fixes an issue whereby the Brilliant Blessing \"Hydro Crystal: Starting Stone Stream\" in Imaginarium Theater has a small chance of causing Stone Streams to fall at incorrect locations. 6. Fixes an issue whereby certain characters' mouth animations were incorrectly displayed when they first appear in quests or when switching to them in the party. 7. Fixes some text errors in certain languages and optimizes text. (Note: Related in-game functions have not changed. Travelers can view the changes in different languages by going to the Paimon Menu > Settings > Language and changing the Game Language.) ◆ Optimizes inconsistencies between certain voice-overs and the corresponding lines. ◆ Optimizes certain English translations. 〓Genius Invokation TCG Balance Adjustment〓 Genius Invokation TCG Balance Adjustment 1. Adds \"Hall of a Thousand Pillars\" to the \"Adventure\" effects. 2. Increases the starting Max HP of Character Card \"Black Serpent Knight: Windcutter\" from 10 to 12. 3. Adjusts the Passive Skill of Character Card \"Black Serpent Knight: Windcutter\": Reduces its activation limit from twice per Round to once per Round. 4. Adjusts the effect of the Support Card \"Overloaded: Thunderstrike\": Changes the limit for \"...the Piercing DMG dealt by this card is increased by 1 for this Round\" from \"(up to 3)\" to \"(up to 2).\" 5. Adjusts the effect of the Support Card \"Rimegrass Blessing: Thorn Frost\": Changes its End Phase effect to \"Deals 2 Piercing DMG to opposing characters affected by Cryo or Dendro, then removes their Cryo and Dendro applications.\" 6. Adjusts the effect of the Support Card \"Rimegrass Blessing: Cold Vine\": Changes \"After you use a Skill, if the opponent's active character is affected by Dendro...\" to \"After you use a Skill, if the opponent's active character is affected by both Cryo and Dendro: Removes the Cryo application from the opponent's active character, deals 2 Dendro DMG, draws 1 card, and heals your most injured character for 1 HP. (Twice per Round).\" *This is a work of fiction and is not related to any actual people, events, groups, or organizations. \"PlayStation\", \"PS5\", \"DualSense\", \"DUALSHOCK\" are registered trademarks or trademarks of Sony Interactive Entertainment Inc.",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "1015537",
+     "nickname": "Genshin Impact Official",
+     "introduce": "Grand Master of Genshin Impact Forum",
+     "avatar": "100236",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "Official Big Boss"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://fastcdn.hoyoverse.com/static-resource-v2/2024/04/10/71a62b9a993534f3db7896fc6f725ff8_4436020059642725994.webp",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 67318,
+     "reply_num": 129,
+     "like_num": 2024,
+     "bookmark_num": 139,
+     "share_num": 17,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 1907
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 56
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 31
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 21
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "10",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 2
+      },
+      {
+       "upvote_id": "9",
+       "upvote_num": 1
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/11/03/0/4fb6643771f39afd98e992be24db7c2a_1890517915922016676.jpeg",
+      "height": 390,
+      "width": 1080,
+      "format": "JPEG",
+      "size": "69741",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 594,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 984,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 594,
+         "y": 85
+        },
+        "rb_point": {
+         "x": 1060,
+         "y": 347
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 594,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 886,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 594,
+         "y": 6
+        },
+        "rb_point": {
+         "x": 1060,
+         "y": 356
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "146077451"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/11/03/0/4fb6643771f39afd98e992be24db7c2a_1890517915922016676.jpeg",
+      "height": 390,
+      "width": 1080,
+      "format": "JPEG",
+      "size": "69741",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 594,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 984,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 594,
+         "y": 85
+        },
+        "rb_point": {
+         "x": 1060,
+         "y": 347
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 594,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 886,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 594,
+         "y": 6
+        },
+        "rb_point": {
+         "x": 1060,
+         "y": 356
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "146077451"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 2,
+     "post_id": "47283828",
+     "f_forum_id": 0,
+     "uid": "1015537",
+     "subject": "Version 7.2 Update Maintenance Preview",
+     "content": "Dear Traveler, The development team will begin update maintenance on 2026/11/04 06:00 (UTC+8). Once maintenance is complete, the game will be updated to the all-new Version 7.2: \"Hour of Ruin.\" At the same time, pre-installation for Version 7.2 is now available. Travelers can download part of the update resources in advance to enjoy faster access once the version update goes live.",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1793589005,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 1031,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-11-06 08:54:56",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "2",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "tr-tr",
+       "it-it"
+      ],
+      "future_post_id": "24917",
+      "lang_subject": {
+       "en-us": "Version 7.2 Update Maintenance Preview",
+       "fr-fr": "Annonce de la mise à jour de version 7.2",
+       "tr-tr": "7.2 Sürümü Güncelleme Duyurusu Önizlemesi",
+       "th-th": "ประกาศอัปเดตปรับปรุงเซิร์ฟเวอร์เวอร์ชัน 7.2",
+       "ru-ru": "Технические работы в связи с выходом версии 7.2",
+       "ko-kr": "7.2 버전 업데이트 점검 예고",
+       "de-de": "Ankündigung der Wartung zur Aktualisierung auf Version 7.2",
+       "ja-jp": "Ver.7.2バージョンアップのお知らせ",
+       "vi-vn": "Thông Báo Bảo Trì Cập Nhật Phiên Bản 7.2",
+       "pt-pt": "Aviso de Manutenção da Versão 7.2",
+       "id-id": "Pemberitahuan Maintenance Update Versi 7.2",
+       "it-it": "Annuncio di manutenzione e aggiornamento alla versione 7.2",
+       "zh-tw": "7.2版本更新維護預告",
+       "es-es": "Aviso de mantenimiento y actualización de la versión 7.2",
+       "zh-cn": "7.2版本更新维护预告"
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "Dear Traveler, The development team will begin update maintenance on 2026/11/04 06:00 (UTC+8). Once maintenance is complete, the game will be updated to the all-new Version 7.2: \"Hour of Ruin.\" At the same time, pre-installation for Version 7.2 is now available. Travelers can download part of the update resources in advance to enjoy faster access once the version update goes live.",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "1015537",
+     "nickname": "Genshin Impact Official",
+     "introduce": "Grand Master of Genshin Impact Forum",
+     "avatar": "100236",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "Official Big Boss"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://fastcdn.hoyoverse.com/static-resource-v2/2024/04/10/71a62b9a993534f3db7896fc6f725ff8_4436020059642725994.webp",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 674159,
+     "reply_num": 1447,
+     "like_num": 3270,
+     "bookmark_num": 484,
+     "share_num": 60,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 2976
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 132
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 46
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 41
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 29
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 21
+      },
+      {
+       "upvote_id": "9",
+       "upvote_num": 14
+      },
+      {
+       "upvote_id": "6",
+       "upvote_num": 11
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/29/0/8320fa8820ace261f98ca8e2caa97cfc_8201903188242373386.jpeg",
+      "height": 390,
+      "width": 1080,
+      "format": "JPEG",
+      "size": "46831",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 53,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 443,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 53,
+         "y": 29
+        },
+        "rb_point": {
+         "x": 629,
+         "y": 353
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 53,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 345,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 53,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 573,
+         "y": 389
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145849566"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/29/0/9698c6cc20b9feb20d5cf3e5c5029f45_878895031697946069.jpeg",
+      "height": 9028,
+      "width": 1080,
+      "format": "JPEG",
+      "size": "990819",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 0,
+         "y": 3974
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 5054
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 4211
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 4816
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 0,
+         "y": 3794
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 5234
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 4109
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 4918
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": true
+      },
+      "template_info": null,
+      "image_id": "145849567"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/29/0/8320fa8820ace261f98ca8e2caa97cfc_8201903188242373386.jpeg",
+      "height": 390,
+      "width": 1080,
+      "format": "JPEG",
+      "size": "46831",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 53,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 443,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 53,
+         "y": 29
+        },
+        "rb_point": {
+         "x": 629,
+         "y": 353
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 53,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 345,
+         "y": 389
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 53,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 573,
+         "y": 389
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145849566"
+     },
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/29/0/9698c6cc20b9feb20d5cf3e5c5029f45_878895031697946069.jpeg",
+      "height": 9028,
+      "width": 1080,
+      "format": "JPEG",
+      "size": "990819",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 0,
+         "y": 3974
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 5054
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 0,
+         "y": 4211
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 4816
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 0,
+         "y": 3794
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 5234
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 0,
+         "y": 4109
+        },
+        "rb_point": {
+         "x": 1080,
+         "y": 4918
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": true
+      },
+      "template_info": null,
+      "image_id": "145849567"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   },
+   {
+    "post": {
+     "game_id": 2,
+     "post_id": "47247786",
+     "f_forum_id": 0,
+     "uid": "1015537",
+     "subject": "Beware of Phishing Websites: Keep Your Account Secure",
+     "content": "Dear Traveler, We have recently identified cases of Travelers' accounts being stolen through phishing websites in certain regions. To keep Travelers' accounts secure, we will continue to strengthen our security measures and take further legal action as appropriate. We would also like to remind all Travelers of the following: Always use official channels to log in and manage your account. • Please use only the official Genshin Impact client and website to log in, view, or update your account information. • Do not click links from unknown sources or enter your login details, password, or verification codes on unofficial pages. Phishing websites often lure visitors with promises of free rewards, prize draws and cashback offers, or warnings of unusual account activity. Please stay alert. • Regularly check that you still have control of the email address and phone number linked to your account. Reduce the risk of account theft by changing your password regularly, using a strong password, and strengthening your email account's security. • If you discover that the email address linked to your account has been changed to an unfamiliar one, or receive notifications of logins or changes to linked account information that you did not initiate, change your password through official channels or contact official Customer Service immediately for assistance. We are committed to keeping Travelers' accounts secure. We sincerely hope to work together with all Travelers to build and maintain a fair and welcoming gaming environment.",
+     "cover": "",
+     "view_type": 1,
+     "created_at": 1793331007,
+     "images": [],
+     "post_status": {
+      "is_top": false,
+      "is_good": false,
+      "is_official": false,
+      "is_vote": false,
+      "is_quiz_vote": false,
+      "is_demoted": false,
+      "is_hot": false
+     },
+     "topic_ids": [],
+     "view_status": 1,
+     "max_floor": 61,
+     "is_original": 1,
+     "republish_authorization": 2,
+     "reply_time": "2026-11-05 14:53:40",
+     "is_deleted": 0,
+     "is_interactive": false,
+     "structured_content": "",
+     "structured_content_rows": [],
+     "lang": "en-us",
+     "official_type": 0,
+     "reply_forbid": {
+      "date_type": 0,
+      "start_date": "0",
+      "cur_date": "0",
+      "level": 0
+     },
+     "video": "",
+     "contribution_id": "0",
+     "event_start_date": "0",
+     "event_end_date": "0",
+     "classification_id": "2",
+     "is_audit": false,
+     "is_multi_language": true,
+     "origin_lang": "",
+     "sub_type": 0,
+     "reprint_source": "",
+     "can_edit": true,
+     "last_modify_time": 0,
+     "multi_language_info": {
+      "langs": [
+       "zh-cn",
+       "zh-tw",
+       "en-us",
+       "id-id",
+       "th-th",
+       "de-de",
+       "fr-fr",
+       "es-es",
+       "pt-pt",
+       "ru-ru",
+       "ko-kr",
+       "vi-vn",
+       "ja-jp",
+       "tr-tr",
+       "it-it"
+      ],
+      "future_post_id": "24913",
+      "lang_subject": {
+       "it-it": "Fai attenzione ai siti web adibiti al phishing e proteggi la sicurezza del tuo account",
+       "ja-jp": "フィッシングサイトにご注意ください",
+       "fr-fr": "Méfiez-vous des sites d'hameçonnage et protégez la sécurité de votre compte",
+       "es-es": "Cuidado con los sitios de phishing y protege la seguridad de tu cuenta",
+       "ko-kr": "피싱 사이트를 주의해 주세요",
+       "th-th": "โปรดระวังเว็บไซต์ฟิชชิ่ง เพื่อความปลอดภัยของบัญชี",
+       "pt-pt": "Cuidado com Sites de Phishing: Mantenha Sua Conta Segura",
+       "zh-cn": "谨防钓鱼网站，保护账号安全",
+       "vi-vn": "Cẩn Thận Web Lừa Đảo, Bảo Vệ An Toàn Tài Khoản",
+       "ru-ru": "Остерегайтесь фишинговых сайтов и защищайте свою учётную запись",
+       "id-id": "Waspadai Situs Phishing: Lindungi Keamanan Akun Anda",
+       "zh-tw": "謹防釣魚網站，保護帳號安全",
+       "en-us": "Beware of Phishing Websites: Keep Your Account Secure",
+       "tr-tr": "Kimlik Avı Sitelerine Karşı Dikkatli Ol, Hesabını Koru",
+       "de-de": "Sei vorsichtig bei Phishing-Websites und schütze dein Konto"
+      },
+      "lang_content": {},
+      "lang_structured_content": {}
+     },
+     "visible_level": 1,
+     "has_cover": false,
+     "suid": "0",
+     "desc": "Dear Traveler, We have recently identified cases of Travelers' accounts being stolen through phishing websites in certain regions. To keep Travelers' accounts secure, we will continue to strengthen our security measures and take further legal action as appropriate. We would also like to remind all Travelers of the following: Always use official channels to log in and manage your account. • Please use only the official Genshin Impact client and website to log in, view, or update your account information. • Do not click links from unknown sources or enter your login details, password, or verification codes on unofficial pages. Phishing websites often lure visitors with promises of free rewards, prize draws and cashback offers, or warnings of unusual account activity. Please stay alert. • Regularly check that you still have control of the email address and phone number linked to your account. Reduce the risk of account theft by changing your password regularly, using a strong password, and strengthening your email account's security. • If you discover that the email address linked to your account has been changed to an unfamiliar one, or receive notifications of logins or changes to linked account information that you did not initiate, change your password through official channels or contact official Customer Service immediately for assistance. We are committed to keeping Travelers' accounts secure. We sincerely hope to work together with all Travelers to build and maintain a fair and welcoming gaming environment.",
+     "game_uid": "0",
+     "game_region": "",
+     "channel_id": "0"
+    },
+    "forum": {
+     "id": 0,
+     "name": "",
+     "icon": "",
+     "game_id": 0
+    },
+    "topics": [],
+    "user": {
+     "uid": "1015537",
+     "nickname": "Genshin Impact Official",
+     "introduce": "Grand Master of Genshin Impact Forum",
+     "avatar": "100236",
+     "gender": 0,
+     "certification": {
+      "type": 1,
+      "icon_url": "https://hyl-static-res-prod.hoyolab.com/upload/static-resource/2022/02/23/f5a37763f0f2080c0c43cca8638af024_5295925290813405198.webp",
+      "desc": "Official Big Boss"
+     },
+     "level_exp": {
+      "level": 0,
+      "exp": 0
+     },
+     "is_following": false,
+     "is_followed": false,
+     "avatar_url": "https://fastcdn.hoyoverse.com/static-resource-v2/2024/04/10/71a62b9a993534f3db7896fc6f725ff8_4436020059642725994.webp",
+     "auth": null,
+     "is_logoff": false,
+     "pendant": "",
+     "was_following": false,
+     "post_num": 0,
+     "suid": "0",
+     "black_relation": {
+      "is_blacking": false,
+      "is_blacked": false
+     },
+     "badge": null,
+     "lantern": null,
+     "otaku_devotion_title": {
+      "icon": "",
+      "name": "",
+      "desc": "",
+      "otaku_identity": "OtakuIdentityNone",
+      "accompany_title": "AccompanyTitleUnknown",
+      "role_id": "0"
+     },
+     "allow_community": true,
+     "content_cannot_be_upvoted": false,
+     "content_cannot_be_replied": false,
+     "post_cannot_be_shared": false,
+     "post_cannot_be_collected": false,
+     "cannot_be_followed": false
+    },
+    "self_operation": {
+     "attitude": 0,
+     "is_collected": false
+    },
+    "stat": {
+     "view_num": 21334,
+     "reply_num": 99,
+     "like_num": 1981,
+     "bookmark_num": 69,
+     "share_num": 8,
+     "view_num_unit": "",
+     "reply_num_unit": "",
+     "like_num_unit": "",
+     "bookmark_num_unit": "",
+     "share_num_unit": "",
+     "true_view_num": 0,
+     "click_view_num": 0,
+     "summary_for_creator": null,
+     "multi_upvote_stats": [
+      {
+       "upvote_id": "1",
+       "upvote_num": 1899
+      },
+      {
+       "upvote_id": "9",
+       "upvote_num": 41
+      },
+      {
+       "upvote_id": "7",
+       "upvote_num": 12
+      },
+      {
+       "upvote_id": "5",
+       "upvote_num": 9
+      },
+      {
+       "upvote_id": "2",
+       "upvote_num": 6
+      },
+      {
+       "upvote_id": "3",
+       "upvote_num": 6
+      },
+      {
+       "upvote_id": "4",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "6",
+       "upvote_num": 3
+      },
+      {
+       "upvote_id": "8",
+       "upvote_num": 2
+      }
+     ],
+     "self_operation": null,
+     "expose_view_num": 0
+    },
+    "help_sys": {
+     "top_up": null
+    },
+    "cover": {
+     "url": "",
+     "height": 0,
+     "width": 0,
+     "format": "",
+     "size": "0",
+     "spoiler": false,
+     "cuts": [],
+     "tag_info": null,
+     "template_info": null,
+     "image_id": "0"
+    },
+    "image_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/29/0/75c578dfa23cdaaca34d423a13972be5_1989870331311821863.png",
+      "height": 620,
+      "width": 1200,
+      "format": "JPEG",
+      "size": "74757",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 306,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 926,
+         "y": 619
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 282,
+         "y": 17
+        },
+        "rb_point": {
+         "x": 950,
+         "y": 392
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 384,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 848,
+         "y": 619
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 282,
+         "y": 17
+        },
+        "rb_point": {
+         "x": 950,
+         "y": 518
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145846540"
+     }
+    ],
+    "is_official_master": false,
+    "is_user_master": false,
+    "hot_reply_exist": false,
+    "vote_count": 0,
+    "last_modify_time": 0,
+    "contribution": null,
+    "classification": null,
+    "video": null,
+    "game": null,
+    "data_box": "",
+    "is_top_icon": false,
+    "tags": {
+     "is_user_top": false,
+     "is_qualified_post": false,
+     "is_hot_entry_post": false,
+     "hot_topic_idx": 0,
+     "is_doujin_force_post": false,
+     "is_exclusive": false,
+     "is_show_official_channel_jump": false
+    },
+    "hot_reply": null,
+    "collection": null,
+    "is_rich_text": false,
+    "catalog_style_hint": 0,
+    "cover_list": [
+     {
+      "url": "https://upload-os-bbs.hoyolab.com/upload/2026/10/29/0/75c578dfa23cdaaca34d423a13972be5_1989870331311821863.png",
+      "height": 620,
+      "width": 1200,
+      "format": "JPEG",
+      "size": "74757",
+      "spoiler": false,
+      "cuts": [
+       {
+        "ratio": 3,
+        "lt_point": {
+         "x": 306,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 926,
+         "y": 619
+        }
+       },
+       {
+        "ratio": 4,
+        "lt_point": {
+         "x": 282,
+         "y": 17
+        },
+        "rb_point": {
+         "x": 950,
+         "y": 392
+        }
+       },
+       {
+        "ratio": 1,
+        "lt_point": {
+         "x": 384,
+         "y": 0
+        },
+        "rb_point": {
+         "x": 848,
+         "y": 619
+        }
+       },
+       {
+        "ratio": 2,
+        "lt_point": {
+         "x": 282,
+         "y": 17
+        },
+        "rb_point": {
+         "x": 950,
+         "y": 518
+        }
+       }
+      ],
+      "tag_info": {
+       "is_long_picture": false
+      },
+      "template_info": null,
+      "image_id": "145846540"
+     }
+    ],
+    "cut_type": 1,
+    "shows_game_classification": false,
+    "vote": null,
+    "hot_reply_v2": null,
+    "feedback": null,
+    "reply_quick_source": [],
+    "trans_source": "UnknownTranslate",
+    "ugc_module": null,
+    "channel": null
+   }
+  ],
+  "last_id": 10,
+  "is_last": false
+ }
+}

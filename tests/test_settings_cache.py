@@ -674,9 +674,10 @@ class RowEditorReportsCleanTests(unittest.TestCase):
         spec = spec[:spec.index("\n};")]
         # One per shape that has one: the role a menu grants, the role a level
         # grants, the role that leads a faction, the weight a wheel segment
-        # carries. A game row's channel and role are required only together
-        # with LFG, which its `incomplete` rule says instead.
-        self.assertEqual(4, spec.count("required: true"))
+        # carries, and the target roles a role rule acts on (2026-11-06). A
+        # game row's channel and role are required only together with LFG,
+        # which its `incomplete` rule says instead.
+        self.assertEqual(5, spec.count("required: true"))
         self.assertIn("incomplete: (columns) =>", spec)
 
 

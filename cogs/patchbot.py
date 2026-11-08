@@ -14,11 +14,13 @@ fact for every guild, so this cog fetches each source once per tick and
 fans out to guilds only at the posting step.
 """
 
+import html
 import json
 import logging
 import os
 import re
 import sys
+from typing import NamedTuple
 
 import aiohttp
 import discord
@@ -82,9 +84,63 @@ async def _fetch_text(session, url, **kwargs):
 
 # --- Adapters --------------------------------------------------------------
 # Each adapter takes the cog's aiohttp session and returns
-# (version, url, title), or raises PatchSourceError. `version` only needs to
-# be stable and unique per release -- it is compared byte-for-byte against
-# the stored game_patch_state row, never parsed as a real semantic version.
+# a PatchRelease, or raises PatchSourceError. `version` only needs to be stable
+# and unique per release -- it is compared byte-for-byte against the stored
+# game_patch_state row, never parsed as a real semantic version.
+
+
+class PatchRelease(NamedTuple):
+    """What a source says about its newest release.
+
+    `excerpt` and `image_url` are optional and never stored: a source that
+    stops sending one costs the announcement its preview, never the check, so
+    only the fields that identify a release (`version`, `url`, `title`) may
+    raise when they are missing.
+    """
+    version: str
+    url: str
+    title: str
+    excerpt: str | None = None
+    image_url: str | None = None
+
+
+# The longest excerpt an announcement carries: a teaser, not the notes.
+EXCERPT_LIMIT = 300
+_BBCODE_IMG_RE = re.compile(r"\[img[^\]]*\].*?\[/img\]", re.S | re.I)
+_BBCODE_TAG_RE = re.compile(r"\[/?[a-z0-9*]+(?:[ =][^\]]*)?\]", re.I)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_STEAM_IMAGE_RE = re.compile(
+    r"\[img[^\]]*src=\"\{STEAM_CLAN_IMAGE\}/([^\"]+)\"", re.I)
+# What `{STEAM_CLAN_IMAGE}` stands for; probed 2026-11-06.
+STEAM_CLAN_IMAGE_BASE = "https://clan.akamai.steamstatic.com/images/"
+
+
+def excerpt_from(text: str | None) -> str | None:
+    """Plain text, whitespace collapsed, cut at a word under EXCERPT_LIMIT.
+
+    Steam sends BBCode (and escapes a literal bracket as a backslash and the
+    bracket), Riot HTML, HoYoLAB plain text with section markers; all three
+    come through here.
+    """
+    if not text:
+        return None
+    text = text.replace("\\[", "\x00").replace("\\]", "\x01")
+    text = _BBCODE_IMG_RE.sub(" ", text)
+    text = _BBCODE_TAG_RE.sub(" ", text)
+    text = _HTML_TAG_RE.sub(" ", text)
+    text = html.unescape(text).replace("\x00", "[").replace("\x01", "]")
+    text = " ".join(text.replace("〓", " ").split())
+    if not text:
+        return None
+    if len(text) > EXCERPT_LIMIT:
+        cut = text[:EXCERPT_LIMIT].rsplit(" ", 1)[0].rstrip(",.;:-")
+        text = cut + "…"
+    return text
+
+
+def https_url(value) -> str | None:
+    """A third-party image address, or None: only `https://` reaches an embed."""
+    return value if isinstance(value, str) and value.startswith("https://") else None
 
 STEAM_NEWS_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
 STEAM_OFFICIAL_FEED = "steam_community_announcements"
@@ -101,7 +157,9 @@ def make_steam_news_adapter(appid):
     async def adapter(session):
         data = await _fetch_json(
             session, STEAM_NEWS_URL,
-            params={"appid": appid, "count": 15, "maxlength": 200, "format": "json"},
+            # maxlength 0 is the whole post: the excerpt is cut here, and the
+            # picture is usually below the first 200 characters.
+            params={"appid": appid, "count": 15, "maxlength": 0, "format": "json"},
         )
         try:
             items = data["appnews"]["newsitems"]
@@ -111,7 +169,13 @@ def make_steam_news_adapter(appid):
             ) from exc
         for item in items:
             if item.get("feedname") == STEAM_OFFICIAL_FEED:
-                return str(item["gid"]), item["url"], item["title"]
+                contents = item.get("contents") or ""
+                image = _STEAM_IMAGE_RE.search(contents)
+                return PatchRelease(
+                    str(item["gid"]), item["url"], item["title"],
+                    excerpt=excerpt_from(contents),
+                    image_url=https_url(STEAM_CLAN_IMAGE_BASE + image.group(1)) if image else None,
+                )
         raise PatchSourceError(f"No official Steam news item found for appid {appid}")
     return adapter
 
@@ -156,12 +220,27 @@ def make_riot_news_adapter(base_url, tag_path):
                     raise PatchSourceError(
                         f"Article card missing title/url at {base_url}{tag_path}"
                     )
-                return title, base_url + url, title
+                description = newest.get("description") or {}
+                media = newest.get("media") or {}
+                return PatchRelease(
+                    title, base_url + url, title,
+                    excerpt=excerpt_from(description.get("body")
+                                         if isinstance(description, dict) else None),
+                    image_url=https_url(media.get("url"))
+                    if isinstance(media, dict) and media.get("type") == "image" else None,
+                )
         raise PatchSourceError(f"No article grid blade found at {base_url}{tag_path}")
     return adapter
 
 
 HOYOLAB_NEWS_URL = "https://bbs-api-os.hoyolab.com/community/post/wapi/getNewsList"
+# Titles that pass "version" + "update" but are not the patch notes, found by
+# the 2026-11-06 probe: HSR's "Version 4.7 Store Update" (a shop notice) and
+# Genshin's "Version 7.2 Update Maintenance Preview", which precedes every
+# notes post and would announce each version twice. Shop and event words were
+# the maintainer's choice (2026-11-06); maintenance and preview follow from the
+# same probe.
+HOYOLAB_EXCLUDED_WORDS = ("store", "shop", "event", "warp", "maintenance", "preview")
 _HOYOLAB_HEADERS = {
     "User-Agent": "Mozilla/5.0",
     "Origin": "https://www.hoyolab.com",
@@ -195,17 +274,25 @@ def make_hoyolab_adapter(game_id):
             headers=_HOYOLAB_HEADERS,
         )
         try:
-            posts = [entry["post"] for entry in data["data"]["list"]]
+            entries = [(entry, entry["post"]) for entry in data["data"]["list"]]
         except (KeyError, TypeError) as exc:
             raise PatchSourceError(
                 f"Unexpected HoYoLAB response shape for gids={game_id}"
             ) from exc
-        for post in posts:
+        for entry, post in entries:
             subject = post.get("subject") or ""
             lowered = subject.lower()
+            if any(word in lowered for word in HOYOLAB_EXCLUDED_WORDS):
+                continue
             if "version" in lowered and ("update" in lowered or "what's new" in lowered):
                 post_id = post["post_id"]
-                return post_id, f"https://www.hoyolab.com/article/{post_id}", subject
+                covers = entry.get("cover_list") or entry.get("image_list") or []
+                cover = covers[0].get("url") if covers and isinstance(covers[0], dict) else None
+                return PatchRelease(
+                    post_id, f"https://www.hoyolab.com/article/{post_id}", subject,
+                    excerpt=excerpt_from(post.get("content")),
+                    image_url=https_url(cover),
+                )
         raise PatchSourceError(f"No version-update post found for gids={game_id}")
     return adapter
 
@@ -257,7 +344,10 @@ async def minecraft_adapter(session):
     )
     url = (article_url if await _minecraft_article_exists(session, article_url)
            else MINECRAFT_UPDATES_HUB_URL)
-    return latest_id, url, f"Minecraft {latest_id}"
+    # No excerpt (the article's description only repeats the title) and no
+    # picture: minecraft.net does not answer Discord's image fetcher (probed
+    # 2026-11-06, docs/patchbot_data_sources.md).
+    return PatchRelease(latest_id, url, f"Minecraft {latest_id}")
 
 
 # --- Supported games ---------------------------------------------------
@@ -284,6 +374,23 @@ SUPPORTED_GAMES = {
 }
 
 GAME_FEATURE_KEYS = {game_key: f"patchbot_{game_key}" for game_key in SUPPORTED_GAMES}
+
+
+def build_announcement(game_key: str, release: PatchRelease) -> discord.Embed:
+    """The announcement embed. Third-party text is plain-texted and markdown
+    escaped, and an embed never pings, so an excerpt cannot mention anyone."""
+    description = t("patchbot.new_patch_desc", title=plain_markdown(release.title))
+    if release.excerpt:
+        description += "\n\n" + plain_markdown(release.excerpt)
+    embed = discord.Embed(
+        title=t("patchbot.new_patch_title", game=t(f"dashboard.game_names.{game_key}")),
+        description=description,
+        url=release.url,
+        color=0x2ECC71,
+    )
+    if release.image_url:
+        embed.set_image(url=release.image_url)
+    return embed
 
 
 class Patchbot(commands.Cog):
@@ -313,7 +420,7 @@ class Patchbot(commands.Cog):
         changed_games = {}
         for game_key, adapter in SUPPORTED_GAMES.items():
             try:
-                version, url, title = await adapter(self.session)
+                release = await adapter(self.session)
             except PatchSourceError as exc:
                 # One broken source must not stop the other ten from being
                 # checked this tick, mirroring the per-item isolation
@@ -330,10 +437,11 @@ class Patchbot(commands.Cog):
 
             previous = await database.run_read(database.get_game_patch_state, game_key)
             await database.run_write(
-                database.set_game_patch_state, game_key, version, url, title,
+                database.set_game_patch_state, game_key,
+                release.version, release.url, release.title,
             )
-            if previous is not None and previous["latest_version"] != version:
-                changed_games[game_key] = (version, url, title)
+            if previous is not None and previous["latest_version"] != release.version:
+                changed_games[game_key] = release
             # previous is None: first sight of this game's state, ever (a
             # fresh install or right after this migration). Baseline it
             # silently rather than announcing whatever happened to be
@@ -344,10 +452,10 @@ class Patchbot(commands.Cog):
             return
 
         for guild in self.bot.guilds:
-            for game_key, (version, url, title) in changed_games.items():
-                await self._announce_to_guild(guild, game_key, version, url, title)
+            for game_key, release in changed_games.items():
+                await self._announce_to_guild(guild, game_key, release)
 
-    async def _announce_to_guild(self, guild, game_key, version, url, title):
+    async def _announce_to_guild(self, guild, game_key, release):
         # A guild that enables a game's feature between two patches gets no
         # backlog: this method only ever runs for a game already found
         # "changed" this tick, so there is nothing to baseline per guild --
@@ -363,15 +471,10 @@ class Patchbot(commands.Cog):
         already_announced = await database.run_read(
             database.get_guild_patch_announcement, guild.id, game_key,
         )
-        if already_announced == version:
+        if already_announced == release.version:
             return
 
-        embed = discord.Embed(
-            title=t("patchbot.new_patch_title", game=t(f"dashboard.game_names.{game_key}")),
-            description=t("patchbot.new_patch_desc", title=plain_markdown(title)),
-            url=url,
-            color=0x2ECC71,
-        )
+        embed = build_announcement(game_key, release)
         ping_msg = f"<@&{role_id}>" if role_id else ""
         try:
             await channel.send(
@@ -391,7 +494,7 @@ class Patchbot(commands.Cog):
         # this version "announced" and silently swallow it forever, exactly
         # the ordering cogs/socials.py already learned the hard way.
         await database.run_write(
-            database.set_guild_patch_announcement, guild.id, game_key, version,
+            database.set_guild_patch_announcement, guild.id, game_key, release.version,
         )
 
     @patch_check_loop.before_loop

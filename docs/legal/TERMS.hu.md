@@ -1,8 +1,8 @@
 # PotatoBot Felhasználási feltételek
 
-**Hatálybalépés:** 2026-10-31
-**Utolsó frissítés:** 2026-10-31
-**Verzió:** 1.0
+**Hatálybalépés:** 2026-11-08
+**Utolsó frissítés:** 2026-11-08
+**Verzió:** 1.1
 
 Ez a dokumentum angol és magyar nyelven készült. Az angol szöveg (`TERMS.md`)
 az irányadó; a magyar fordítás a könnyebb megértést szolgálja. Eltérés esetén
@@ -66,7 +66,8 @@ rendelkezned.
 A bot többek között virtuális gazdaságot kínál érmékkel és tapasztalati
 ponttal, kaszinó jellegű játékokat, gachát, boltot, napi fejtörőket, számláló
 és szólánc csatornákat, csapatkeresést, ideiglenes hangszobákat, jegyeket,
-moderációs eszközöket, bejelentéseket, zenelejátszást, stream- és
+moderációs eszközöket, bejelentéseket, rangszabályokat, eseménynaplót,
+stream- és
 frissítésiértesítőket, valamint egy irányítópultot, ahol az adminisztrátorok
 mindezt beállítják. Minden funkciót szerverenként kapcsolhatnak be vagy ki az
 adott szerver adminisztrátorai, így az, amit látsz, attól függ, hol vagy.
@@ -153,29 +154,13 @@ A bot használata során nem szabad:
   jogosultságodon túl hozzáférni;
 - a botot, az irányítópultot vagy a futtató szervert szondázni, túlterhelni,
   letapogatni vagy megtámadni, vagy a működésüket zavarni;
-- a zenefunkcióval olyan tartalmat lejátszani, amelyhez nincs jogod (6.1
-  pont);
 - időkorlátokat, sebességkorlátokat vagy funkciókorlátozásokat megkerülni;
 - az üzemeltetőnek, a botnak vagy a Discordnak kiadni magad.
 
-### 6.1 Zene
-
-A zenefunkció az általad megadott YouTube-linkről vagy keresésből játszik le
-hangot egy hangcsatornában a jelen lévő tagoknak. **Te felelsz azért, amit
-kérsz.** Csak olyan tartalmat kérj, amelyet jogod van az adott csatornában
-lévőkkel együtt meghallgatni, és ne használd a funkciót tartalom
-továbbterjesztésére, rögzítésére vagy nyilvános előadására azon túl, amit a
-jogtulajdonos és a YouTube Felhasználási feltételei megengednek. A funkció
-egy általunk nem ellenőrzött harmadik fél platformjától függ, és **bármikor
-leállhat vagy visszavonásra kerülhet** értesítés nélkül. Azok a
-jogtulajdonosok, akik úgy vélik, hogy a funkciót jogaik megsértésére
-használják, a kapcsolati címen írhatnak nekünk, és érvényes értesítés alapján
-intézkedünk.
-
-### 6.2 Az általad megadott tartalom
+### 6.1 Az általad megadott tartalom
 
 A botba beírt szövegnek (játéknév csapatkereső hirdetéshez, hangszoba neve,
-jegyüzenet, zenekeresés) meg kell felelnie a jognak, a Discord szabályainak és
+jegyüzenet) meg kell felelnie a jognak, a Discord szabályainak és
 a szerver szabályainak. Ahol visszakerül a Discordra, a szerver
 adminisztrátorai eltávolíthatják. Minden jogodat megtartod rajta, és csak a
 funkció működtetéséhez szükséges mértékben adsz nekünk felhasználási jogot.
@@ -289,7 +274,7 @@ szolgáltatásra; a kódra a licenc saját szavatosság-kizárása vonatkozik.
   időt a javításra a nyilvánosságra hozatal előtt. Ne tesztelj az éles
   telepítésen mások adataival.
 - **Jogaidat sértő tartalom** (6.1 pont): írj a kapcsolati címre a szerver, az
-  időpont, a lejátszott tartalom és az igényed megjelölésével.
+  időpont, a tartalom és az igényed megjelölésével.
 - **A Discord szabályainak megsértését** a Discord saját eszközein keresztül is
   jelentheted.
 

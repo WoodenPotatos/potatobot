@@ -126,6 +126,9 @@ window.fetch = async (url) => {
                    csrf_token: 'csrf-token', is_host: true,
                    idle_timeout_seconds: 600, version: '0.0.0-test',
                    asset_version: 'test-token',
+                   invite_url: INVITE_URL,
+                   legal: {privacy: 'https://example.test/privacy',
+                           terms: 'https://example.test/terms'},
                    guilds: [{id: GUILD, name: 'Test Guild'}]});
     }
     if (u.includes('/settings/registry')) {
@@ -177,9 +180,17 @@ window.fetch = async (url) => {
     return ok({status: 'success', data: []});
 };
 
+// The host's add-the-bot link: one guild, and the menu must still open for it.
+const INVITE_URL = 'https://discord.com/oauth2/authorize?client_id=test';
+const opened = [];
+
 const uncaught = [];
 window.addEventListener('error', (event) => uncaught.push(event.error || event.message));
 
+window.open = (url) => { opened.push(url); return null; };
+// The shell loads theme.js before script.js; without it the account menu threw
+// on `window.potatoTheme` and had never once been opened under this harness.
+window.eval(fs.readFileSync(path.join(repo, 'dashboard/theme.js'), 'utf8'));
 window.eval(script);
 
 (async () => {
@@ -275,5 +286,29 @@ window.eval(script);
           'privacy lists its records from its own route');
     check(!doc.getElementById('erasure-form').classList.contains('hidden'),
           'the host sees the erasure form');
+
+    // The account menu links both documents; the guild menu offers the host
+    // the invite even with one guild. Opened as a person would, by clicking.
+    const menuLabels = () => [...doc.querySelectorAll('.menu-item')];
+    doc.getElementById('account-trigger').click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const legalItems = menuLabels().filter((item) =>
+        [locale.dashboard.login_privacy, locale.dashboard.login_terms]
+            .includes(item.textContent.trim()));
+    check(legalItems.length === 2, 'the account menu links the Privacy Policy and the Terms');
+    legalItems.forEach((item) => item.click());
+    check(opened.includes('https://example.test/privacy')
+          && opened.includes('https://example.test/terms'),
+          'the policy links open the addresses the server sent');
+    const guildTrigger = doc.getElementById('guild-trigger');
+    check(!guildTrigger.disabled && !guildTrigger.classList.contains('hidden'),
+          'the guild menu opens for one guild when it can offer the invite');
+    guildTrigger.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const invite = menuLabels().find((item) =>
+        item.textContent.trim() === locale.dashboard.guild_invite);
+    check(Boolean(invite), 'the guild menu offers the host the invite');
+    invite?.click();
+    check(opened.includes(INVITE_URL), 'the invite opens Discord\'s authorize link');
     process.exit(failed ? 1 : 0);
 })();
